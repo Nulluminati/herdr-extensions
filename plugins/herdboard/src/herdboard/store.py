@@ -53,6 +53,8 @@ class CardView:
     state: str | None = None
     team: str | None = None
     pr: bool = False
+    # Linear's manual order inside a column (lowest first); None for todos.
+    sort_order: float | None = None
     read_only: bool = False
     fetched_at: str | None = None
     stale: bool = False

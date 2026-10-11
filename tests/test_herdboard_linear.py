@@ -35,7 +35,7 @@ def issue(i):
     return {"id": f"i{i}", "identifier": f"T0-{i}", "title": f"Issue {i}",
             "description": "Details" if i else None, "dueDate": "2026-10-20" if i else None,
             "url": f"https://linear.app/workspace/issue/T0-{i}", "branchName": f"nate/t0-{i}",
-            "priority": i, "updatedAt": "2026-07-01T00:00:00Z",
+            "sortOrder": float(i), "priority": i, "updatedAt": "2026-07-01T00:00:00Z",
             "state": {"id": "s1", "name": "Active", "type": "started"},
             "team": {"id": "t0", "key": "T0"},
             "labels": {"nodes": [{"id": f"l{i % 2}", "name": "repo:api"}]},
@@ -95,6 +95,15 @@ class LinearTests(unittest.TestCase):
 
     def test_project(self):
         self.assertEqual(self.client.project("p0"), {"id": "p0", "name": "PLATFORM"})
+
+    def test_project_for_write_by_id_has_current_name_and_paginated_teams(self):
+        self.fixtures["projects"][0]["name"] = "Renamed"
+        found = self.client.project_for_write("p0")
+        self.assertEqual(found, {**PROJECTS[0], "name": "Renamed"})
+        request = next(r for r in self.fake.requests if r["operationName"] == "ProjectForWrite")
+        self.assertEqual(request["variables"]["filter"], {"id": {"eq": "p0"}})
+        self.assertEqual(len([r for r in self.fake.requests if r["operationName"] == "ProjectTeams"]), 2)
+        self.assertIsNone(self.client.project_for_write("missing"))
 
     def test_project_not_found_or_inaccessible(self):
         self.assertIsNone(self.client.project("missing"))
@@ -477,6 +486,177 @@ class LinearTests(unittest.TestCase):
             "nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": None}}}}, {})]
         with self.assertRaisesRegex(LinearError, "[Pp]agination|cursor"):
             self.client.find_labels("repo:api")
+
+
+class LinearWriteTests(unittest.TestCase):
+    assert_pages = LinearTests.assert_pages
+    # Reuse fixtures without running the read tests a second time.
+    def setUp(self):
+        LinearTests.setUp(self)
+        self.client.timeout = 0.2
+        self.client.sleep = lambda seconds: None
+
+    def test_team_states(self):
+        self.assertEqual(self.client.team_states("t0"), STATES)
+        self.assert_pages("TeamStates")
+        self.assertEqual(self.client.team_states("missing"), [])
+
+    def test_team_by_key(self):
+        self.assertEqual(self.client.team_by_key("t0"),
+                         {"id": "t0", "key": "T0", "name": "Team 0"})
+        self.assertIsNone(self.client.team_by_key("missing"))
+
+    def test_my_teams(self):
+        self.fixtures["my_team_ids"] = ["t0", "t2", "t4"]
+        self.assertEqual(self.client.my_teams(),
+                         [{k: t[k] for k in ("id", "key", "name")} for t in TEAMS[::2]])
+        self.assertEqual(len(self.fake.requests), 2)
+        self.assertIn("viewer", self.fake.requests[0]["query"])
+
+    def test_issue_for_write(self):
+        from uuid import uuid4
+        current = self.fixtures["issues"][0]
+        current["id"] = str(uuid4())
+        expected = {k: current[k] for k in
+                    ("id", "identifier", "title", "sortOrder", "state", "team", "project")}
+        self.assertEqual(self.client.issue_for_write("T0-0"), expected)
+        self.assertEqual(self.client.issue_for_write(current["id"]), expected)
+        self.assertIsNone(self.client.issue_for_write("missing"))
+
+    def test_state_sort_orders(self):
+        self.assertEqual(self.client.state_sort_orders("t0", "s1", None),
+                         [0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assert_pages("StateSortOrders")
+        self.assertNotIn("title", self.fake.requests[0]["query"])
+        self.assertNotIn("or", self.fake.requests[0]["variables"]["filter"])
+        self.fixtures["issues"][0]["completedAt"] = (
+            datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+        self.fixtures["issues"][1]["team"] = {"id": "other", "key": "OTHER"}
+        self.fixtures["issues"][2]["state"]["id"] = "other"
+        self.assertEqual(self.client.state_sort_orders("t0", "s1", 14), [3.0, 4.0])
+        self.assertEqual(self.fake.requests[-1]["variables"]["filter"]["or"], RECENT_OR)
+
+    def test_update_only_given_fields(self):
+        result = self.client.update_issue("i0", state_id="s2", sort_order=0.0)
+        self.assertEqual(result["state"], {k: STATES[2][k] for k in ("id", "name", "type")})
+        self.assertEqual(result["sortOrder"], 0.0)
+        self.assertEqual(set(result), {"id", "identifier", "sortOrder", "state", "team"})
+        self.assertEqual(self.fake.requests[-1]["variables"],
+                         {"id": "i0", "input": {"stateId": "s2", "sortOrder": 0.0}})
+        self.client.update_issue("i0", sort_order=5)
+        self.assertEqual(self.fake.requests[-1]["variables"]["input"], {"sortOrder": 5})
+        self.client.update_issue("i0", state_id="s1")
+        self.assertEqual(self.fake.requests[-1]["variables"]["input"], {"stateId": "s1"})
+
+    def test_create_given_id_and_optional_fields(self):
+        from uuid import uuid4
+        issue_id = str(uuid4())
+        result = self.client.create_issue(issue_id=issue_id, team_id="t0", title="Create",
+                                          state_id="s2", project_id="p1", label_ids=["l1"],
+                                          assignee_id="u1", sort_order=-10.5)
+        self.assertEqual(result["id"], issue_id)
+        self.assertEqual(result["sortOrder"], -10.5)
+        self.assertIn("url", result)
+        self.assertEqual(self.fake.requests[-1]["variables"]["input"],
+                         {"id": issue_id, "teamId": "t0", "title": "Create", "stateId": "s2",
+                          "projectId": "p1", "labelIds": ["l1"], "assigneeId": "u1",
+                          "sortOrder": -10.5})
+        found = self.client.issue(issue_id)
+        self.assertEqual(found["project"], {"id": "p1", "name": "Platform"})
+        self.assertEqual(found["labels"], [{"id": "l1", "name": LABELS[1]["name"]}])
+        self.assertEqual(found["assignee"]["id"], "u1")
+
+    def test_create_omits_unspecified_fields(self):
+        self.client.create_issue(issue_id="given", team_id="t0", title="Minimal")
+        self.assertEqual(self.fake.requests[-1]["variables"]["input"],
+                         {"id": "given", "teamId": "t0", "title": "Minimal"})
+
+    def test_rejected_mutations(self):
+        from herdboard.linear import LinearWriteRejectedError
+        for failure in ("success_false", "graphql_error"):
+            with self.subTest(failure=failure):
+                self.fake.mutation_failure = failure
+                with self.assertRaises(LinearWriteRejectedError) as caught:
+                    self.client.update_issue("i0", sort_order=99)
+                self.assertEqual((caught.exception.code, caught.exception.exit_code),
+                                 ("linear_rejected", 3))
+                self.assertEqual(self.fixtures["issues"][0]["sortOrder"], 0.0)
+
+    def test_unknown_state_and_team_rejected(self):
+        from herdboard.linear import LinearWriteRejectedError
+        with self.assertRaises(LinearWriteRejectedError):
+            self.client.update_issue("i0", state_id="missing")
+        with self.assertRaises(LinearWriteRejectedError):
+            self.client.create_issue(issue_id="id", team_id="missing", title="x")
+
+    def test_mutation_http_500(self):
+        from herdboard.linear import LinearWriteUnknownError
+        self.fake.mutation_failure = "http_500"
+        with self.assertRaises(LinearWriteUnknownError) as caught:
+            self.client.update_issue("i0", sort_order=99)
+        self.assertEqual((caught.exception.code, caught.exception.exit_code), ("linear_unknown", 3))
+        self.assertEqual(len(self.fake.requests), 1)
+
+    def test_mutation_timeout_before_and_after_apply(self):
+        from herdboard.linear import LinearWriteUnknownError
+        for failure, expected in (("timeout_before", 0.0), ("timeout_after", 99)):
+            with self.subTest(failure=failure):
+                self.fake.requests.clear()
+                self.fake.mutation_failure = failure
+                with self.assertRaises(LinearWriteUnknownError):
+                    self.client.update_issue("i0", sort_order=99)
+                self.assertEqual(len(self.fake.requests), 1)
+                self.assertEqual(self.fixtures["issues"][0]["sortOrder"], expected)
+
+    def test_create_timeout_after_apply_lookup(self):
+        from herdboard.linear import LinearWriteUnknownError
+        self.fake.mutation_failure = "timeout_after"
+        with self.assertRaises(LinearWriteUnknownError):
+            self.client.create_issue(issue_id="given", team_id="t0", title="Created")
+        self.assertEqual(len(self.fake.requests), 1)
+        self.fake.mutation_failure = None
+        self.assertEqual(self.client.issue_for_write("given")["title"], "Created")
+
+    def test_mutation_rate_limit_not_retried(self):
+        self.fake.mutation_failure = "http_429"
+        with self.assertRaisesRegex(LinearError, "write.*rate limited.*not applied"):
+            self.client.update_issue("i0", sort_order=99)
+        self.assertEqual(len(self.fake.requests), 1)
+        self.assertEqual(self.fixtures["issues"][0]["sortOrder"], 0.0)
+
+    def test_mutation_graphql_rate_limit_with_reset(self):
+        body = {"errors": [{"message": "Limit", "extensions": {"code": "RATELIMITED"}}]}
+        self.fake.responses = [(400, body, {"X-RateLimit-Requests-Reset": "2000000007000"})]
+        with mock.patch("herdboard.linear.time.time", return_value=2000000000):
+            with self.assertRaisesRegex(LinearError, "not applied.*2033-05-18T03:33:27Z"):
+                self.client.update_issue("i0", sort_order=99)
+        self.assertEqual(len(self.fake.requests), 1)
+
+    def test_mutation_authentication(self):
+        for status, body in ((401, {}), (403, {}),
+                             (200, {"errors": [{"message": "Auth", "extensions": {
+                                 "code": "AUTHENTICATION_ERROR"}}]})):
+            self.fake.responses = [(status, body, {})]
+            with self.assertRaises(LinearAuthError):
+                self.client.update_issue("i0", sort_order=99)
+
+    def test_mutation_malformed_or_missing_response(self):
+        from herdboard.linear import LinearWriteUnknownError
+        for body in (b"invalid", [], {}, {"data": None}, {"errors": "invalid"},
+                     {"data": {}}, {"data": {"issueUpdate": {"success": True, "issue": None}}},
+                     {"data": {"issueUpdate": {"issue": {}}}}):
+            with self.subTest(body=body):
+                self.fake.requests.clear()
+                self.fake.responses = [(200, body, {})]
+                with self.assertRaises(LinearWriteUnknownError):
+                    self.client.update_issue("i0", sort_order=99)
+                self.assertEqual(len(self.fake.requests), 1)
+
+    def test_mutation_network_error(self):
+        from herdboard.linear import LinearWriteUnknownError
+        with mock.patch.object(self.client._opener, "open", side_effect=URLError("reset")):
+            with self.assertRaises(LinearWriteUnknownError):
+                self.client.update_issue("i0", sort_order=99)
 
 
 if __name__ == "__main__":

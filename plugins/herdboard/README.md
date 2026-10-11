@@ -148,8 +148,12 @@ Linear is optional. It turns on when `LINEAR_API_KEY` is set, or from config. Th
 
 - Workflow states belong to a team. The tool resolves a column to a state in the team of each issue.
 - Default mapping by state type: backlog and triage go to Backlog, unstarted to Todo, started to In progress, completed to Done, canceled to Done (hidden by default). A state name can override its type: `"In Review" = "Review"`.
+- A move to a column resolves the column to the states of the issue's team that map to it. A canceled state is a candidate only when no other state matches. A triage state is a candidate only when no backlog state matches. So `done` picks the completed state, not the canceled one.
 - When several states of one team match a column (for example, two started states), the tool asks which one to use, then stores the choice by state ID for that team.
 - When a stored state ID no longer exists, the tool asks again.
+- The CLI asks with a numbered list in a terminal. Without a terminal, or with `--json`, it fails with the code `ambiguous_state` and lists the candidates. `--state <name>` on `move`, `done` and `add --linear` answers the question, and the tool stores that answer too. The board asks in a dialog.
+- Choices live in `~/.local/state/herdboard/<workspace-id>/<user-id>/state-choices.json`, keyed by team ID and column.
+- When no state of the team matches a column, the move fails and names the team and the column.
 
 ### Repositories and Linear projects
 
@@ -174,6 +178,17 @@ Linear is optional. It turns on when `LINEAR_API_KEY` is set, or from config. Th
 - The board shows the time of the last fetch. When Linear is not reachable, the board shows the cache and marks it stale.
 - Writes to Linear need a connection. Offline, Linear cards are read only.
 - Before a write, the tool fetches the issue again. If a write times out, the tool fetches the issue to learn the result before it reports success or failure. It never repeats a write blindly.
+- A new issue gets a client-generated ID (`IssueCreateInput.id`), so after a timeout the tool can look up that ID to learn whether Linear created it.
+- After a write timeout, the tool checks the issue up to three times. It waits 0.5 seconds and 1 second between checks. If no check confirms the write, it reports `linear_unknown`. An old state or missing issue does not prove rejection.
+- For an unknown create result, the message and `--json` error contain the generated ID (`issue_id`). Check that ID in Linear before another create.
+- Successful and unknown writes invalidate the account cache. Cache filesystem failures do not change the write result. If the tool cannot record invalidation, it reports a warning on stderr.
+- A move to the state that the issue already has changes nothing and succeeds.
+- After a write, the tool drops the cached queries that the write affects, so the next list shows the change.
+
+### Card order
+
+- Linear cards in a column follow Linear's manual order (`sortOrder`, lowest first), after the local cards of the column.
+- `--position top|bottom` on a Linear issue sets `sortOrder` below the lowest or above the highest value among the issues of the same team and target state. For completed and canceled states, only issues inside the `done_days` window count.
 
 ## Views
 
@@ -194,9 +209,9 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard board [--view]` | Open the kanban (Textual) |
 | `herdboard list [--view] [--source] [--column] [--json]` | List cards |
 | `herdboard add "text" [--board] [--column]` | Add a todo. Default board: the current repository's board, else `inbox.md`. Default column: the first column |
-| `herdboard add --linear --team ENG [--project] "title"` | Create a Linear issue |
+| `herdboard add --linear [--team ENG] [--project NAME] [--label NAME] [--column] [--state] "title"` | Create a Linear issue, assigned to you. `--team` is optional when you belong to one team, or when the project has one team. Inside a repository board with exactly one linked project, that project and its link labels are the default, so the issue shows in the repository view. Default column: the first column |
 | `herdboard show <id>` | Show a card and its detail |
-| `herdboard move <id> <column> [--position top\|bottom]` | Move a card. Default position: bottom |
+| `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card. Default position for a todo: bottom. A Linear issue without `--position` keeps its place in Linear's order |
 | `herdboard done <id>` | Move a card to its board's done column |
 | `herdboard start <id> [--agent claude\|pi] [--repo]` | Start work on a card (see below) |
 | `herdboard promote <id> --team ENG [--project]` | Turn a todo into a Linear issue (see below) |

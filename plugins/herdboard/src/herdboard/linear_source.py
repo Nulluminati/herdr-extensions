@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import threading
 from typing import Any, Callable
@@ -22,16 +25,18 @@ class LinearDisabledError(HerdboardError):
     code = "linear_disabled"
 
 
-class LinearWriteError(HerdboardError):
-    code = "not_implemented"
-
-
 class ProjectNotFound(LinearError):
     """A linked project no longer exists or is not accessible."""
 
 
 class CacheMiss(LinearError):
     """The cache has no data for a query."""
+
+
+# Stored answers to "which state?" questions. They live beside the cached queries but are
+# not a cache: dropping the cache keeps them.
+STATE_CHOICES_FILE = "state-choices.json"
+INVALIDATION_FILE = "cache-invalidated"
 
 
 @dataclass
@@ -55,7 +60,7 @@ def _safe(part: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", part) or "_"
 
 
-def _write_json(path: Path, data: dict) -> None:
+def _write_json(path: Path, data: dict) -> bool:
     """Write a cache file. The cache is best effort, so a failure is ignored."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,12 +69,13 @@ def _write_json(path: Path, data: dict) -> None:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(data, handle)
             os.replace(temp, path)
+            return True
         except BaseException:
             if os.path.exists(temp):
                 os.unlink(temp)
             raise
     except OSError:
-        pass
+        return False
 
 
 # Cache files are read, compared and replaced under this lock, so that two fetches in one
@@ -84,12 +90,33 @@ def _cached_time(path: Path) -> datetime | None:
         return None
 
 
-def write_cache(path: Path, fetched_at: datetime, data: Any) -> None:
-    """Write a cache entry unless the file already holds a newer one."""
+@contextmanager
+def _account_cache_lock(folder: Path):
+    """Serialize cache replacement and invalidation across threads and processes."""
     with _CACHE_LOCK:
-        current = _cached_time(path)
-        if current is None or current <= fetched_at:
-            _write_json(path, {"fetched_at": fetched_at.isoformat(), "data": data})
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / ".cache.lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _invalidated(path: Path, fetched_at: datetime) -> bool:
+    latest = _cached_time(path.parent / INVALIDATION_FILE)
+    return latest is not None and fetched_at < latest
+
+
+def write_cache(path: Path, fetched_at: datetime, data: Any) -> None:
+    """Write a cache entry unless it predates invalidation or a newer entry."""
+    try:
+        with _account_cache_lock(path.parent):
+            current = _cached_time(path)
+            if not _invalidated(path, fetched_at) and (current is None or current <= fetched_at):
+                _write_json(path, {"fetched_at": fetched_at.isoformat(), "data": data})
+    except OSError:
+        pass
 
 
 def _issues_of(data: Any) -> list[dict]:
@@ -164,6 +191,31 @@ class LinearSource:
             raise CacheMiss("No cached Linear data for this API key") from None
         return self._account
 
+    def account(self) -> tuple[str, str]:
+        """The workspace ID and the user ID of the API key."""
+        return self._account_ids()
+
+    def account_dir(self) -> Path:
+        org, user = self._account_ids()
+        return state_dir() / _safe(org) / _safe(user)
+
+    def drop_cache(self) -> None:
+        """Delete every cached query of this account, so the next read asks Linear."""
+        try:
+            folder = self.account_dir()
+            with _account_cache_lock(folder):
+                stamp = {"fetched_at": datetime.now(timezone.utc).isoformat()}
+                if not _write_json(folder / INVALIDATION_FILE, stamp):
+                    print("herdboard: warning: cannot record Linear cache invalidation", file=sys.stderr)
+                for path in folder.glob("*.json"):
+                    if path.name != STATE_CHOICES_FILE:
+                        try:
+                            path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+        except OSError:
+            print("herdboard: warning: cannot record Linear cache invalidation", file=sys.stderr)
+
     def _cache_file(self, query: str) -> Path:
         org, user = self._account_ids()
         return state_dir() / _safe(org) / _safe(user) / f"{_safe(query)}.json"
@@ -183,7 +235,10 @@ class LinearSource:
                 return Fetched(data, started)
         try:
             cached = json.loads(path.read_text(encoding="utf-8"))
-            return Fetched(cached["data"], datetime.fromisoformat(cached["fetched_at"]), True)
+            fetched_at = datetime.fromisoformat(cached["fetched_at"])
+            if _invalidated(path, fetched_at):
+                raise CacheMiss(f"No cached Linear data for {query}")
+            return Fetched(cached["data"], fetched_at, True)
         except (OSError, ValueError, KeyError, TypeError):
             raise CacheMiss(f"No cached Linear data for {query}") from None
 
@@ -236,6 +291,8 @@ class LinearSource:
             try:
                 cached = json.loads(path.read_text(encoding="utf-8"))
                 fetched_at = datetime.fromisoformat(cached["fetched_at"])
+                if _invalidated(path, fetched_at):
+                    continue
                 issues = _issues_of(cached["data"])
                 match = next((i for i in issues if i["identifier"].casefold() == wanted), None)
             except (OSError, ValueError, KeyError, TypeError):

@@ -356,16 +356,6 @@ class TextTests(LinearCliCase):
         self.assertEqual(self.run_json("show", "ENG-1", directory=self.repo, expect=1)["error"]["code"],
                          "linear_disabled")
 
-    def test_move_and_done_on_linear_refs_are_refused(self):
-        count = len(self.fake.requests)
-        for args in (["move", "ENG-1", "Done"], ["done", "ENG-1"]):
-            data = self.run_json(*args, directory=self.repo, expect=1)
-            self.assertEqual(data["error"], {"code": "not_implemented",
-                                             "message": "Linear writes arrive in a later step"})
-            _, err = self.run_cli(*args, directory=self.repo, expect=1)
-            self.assertEqual(err, "herdboard: Linear writes arrive in a later step\n")
-        self.assertEqual(len(self.fake.requests), count)
-
     def test_move_of_todo_still_works(self):
         card = self.run_json("add", "todo", directory=self.repo)["card"]
         self.assertEqual(self.run_json("move", card["ref"], "Todo", directory=self.repo)["card"]["column"], "Todo")

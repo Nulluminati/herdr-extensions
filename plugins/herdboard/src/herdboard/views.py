@@ -218,4 +218,6 @@ class Views:
                 card = issue_card(self.config, issue, identities, fetched.fetched_at, fetched.stale)
                 if card is not None:
                     result.cards.append(card)
+        # Linear's manual order. The sort is stable, so equal or missing keys keep fetch order.
+        result.cards.sort(key=lambda c: (c.sort_order is None, c.sort_order or 0.0))
         return result

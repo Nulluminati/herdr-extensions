@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from herdboard.board import DetailScreen, HerdboardApp  # noqa: E402
 from herdboard.linear_links import ProjectLink  # noqa: E402
 from herdboard.linear_source import LinearSource  # noqa: E402
+from herdboard.linear_writes import LinearWriter  # noqa: E402
 from herdboard.views import Views  # noqa: E402
 from test_herdboard_board import SIZE, BoardTestCase, fill, settle  # noqa: E402
 from test_herdboard_linear_source import DEAD, LinearEnvTestCase  # noqa: E402
@@ -46,7 +47,8 @@ class LinearBoardCase(BoardTestCase, LinearEnvTestCase):
         app = HerdboardApp(
             self.store, view, paths_for=views.paths, repo_board=self.repo_path,
             reload_interval=60.0, linear_for=fetch, linear_active=active,
-            available=views.available, linear_interval=linear_interval, **kwargs,
+            available=views.available, linear_interval=linear_interval,
+            linear_writer=LinearWriter(self.config, source), **kwargs,
         )
         app.animation_level = "none"
         return app
@@ -141,22 +143,6 @@ class LinearBoardTests(LinearBoardCase):
             await settle(pilot)
             self.assertEqual(app.view, "global")
             self.assertFalse(any("◆" in c for c in self.cards(app)))
-
-    async def test_write_keys_are_blocked_on_linear_cards(self):
-        app = self.make_linear_app()
-        before = self.repo_path.read_text()
-        async with app.run_test(size=SIZE) as pilot:
-            await settle(pilot)
-            requests = len(self.fake.requests)
-            for key in ("H", "L", "d"):
-                self.select(app, "ENG-1")
-                await pilot.press(key)
-                await settle(pilot)
-                self.assertIn(("Linear writes arrive in a later step", "warning"), self.notifications(app))
-                app._notifications.clear()
-            self.assertEqual(self.repo_path.read_text(), before)
-            self.assertEqual(len(self.fake.requests), requests)
-            self.assertEqual(app.current_card().ref, "ENG-1")
 
     async def test_write_keys_still_work_on_todos(self):
         app = self.make_linear_app()

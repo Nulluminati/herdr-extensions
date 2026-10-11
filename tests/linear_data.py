@@ -31,7 +31,7 @@ def make_issue(number, project="p-plat", state=("Todo", "unstarted"), labels=(),
         "id": f"i{number}", "identifier": f"ENG-{number}", "title": title or f"Issue {number}",
         "description": description, "dueDate": due,
         "url": f"https://linear.app/workspace/issue/ENG-{number}", "branchName": f"nate/eng-{number}",
-        "priority": 0, "updatedAt": "2026-07-01T00:00:00Z",
+        "sortOrder": float(number), "priority": 0, "updatedAt": "2026-07-01T00:00:00Z",
         "state": {"id": f"st-{state[0]}", "name": state[0], "type": state[1]},
         "team": ENG,
         "labels": {"nodes": [{"id": label["id"], "name": label["name"]}
@@ -57,3 +57,36 @@ def default_issues():
 def fixtures():
     return copy.deepcopy({"viewer": VIEWER, "teams": TEAMS, "projects": PROJECTS,
                           "labels": LABELS, "issues": default_issues()})
+
+
+WORKFLOW = [("Backlog", "backlog"), ("Triage", "triage"), ("Todo", "unstarted"),
+            ("Doing", "started"), ("In Review", "started"), ("Done", "completed"),
+            ("Cancelled", "canceled")]
+# Fixture issues whose state name the workflow does not have.
+RENAMED_STATES = {"Shipped": "Done", "Dropped": "Cancelled"}
+
+
+def add_state(data, team_key, name, state_type):
+    """Add a workflow state to a team and return it."""
+    team = next(t for t in data["teams"] if t["key"] == team_key)
+    state = {"id": f"ws-{team_key}-{name}", "name": name, "type": state_type,
+             "position": float(len(team["states"]))}
+    team["states"].append(state)
+    return state
+
+
+def with_workflow(data):
+    """Give the fixture teams a full workflow and point every issue at one of its states.
+
+    Only the Doing state is started and mapped to "In progress", so no column is ambiguous.
+    """
+    for team in data["teams"]:
+        team["states"] = []
+        for name, state_type in WORKFLOW:
+            add_state(data, team["key"], name, state_type)
+    for issue in data["issues"]:
+        name = RENAMED_STATES.get(issue["state"]["name"], issue["state"]["name"])
+        team = next(t for t in data["teams"] if t["id"] == issue["team"]["id"])
+        state = next(s for s in team["states"] if s["name"] == name)
+        issue["state"] = {k: state[k] for k in ("id", "name", "type")}
+    return data

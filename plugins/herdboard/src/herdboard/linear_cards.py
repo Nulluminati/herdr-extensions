@@ -31,11 +31,16 @@ def has_pull_request(urls: list[str], identities: set[str]) -> bool:
 
 
 def issue_card(
-    config: Config, issue: dict, identities: set[str], fetched_at: datetime, stale: bool
+    config: Config,
+    issue: dict,
+    identities: set[str],
+    fetched_at: datetime,
+    stale: bool,
+    show_canceled: bool = False,
 ) -> CardView | None:
-    """The card for an issue; None for a canceled issue."""
+    """The card for an issue; None for a canceled issue unless `show_canceled`."""
     state = issue["state"]
-    if state["type"] == "canceled":
+    if state["type"] == "canceled" and not show_canceled:
         return None
     project = issue.get("project")
     return CardView(
@@ -53,6 +58,7 @@ def issue_card(
         state=state["name"],
         team=issue["team"]["key"] if issue.get("team") else None,
         pr=has_pull_request(issue.get("attachments", []), identities),
+        sort_order=issue.get("sortOrder"),
         read_only=True,
         fetched_at=fetched_at.isoformat(),
         stale=stale,

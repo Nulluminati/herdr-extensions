@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -12,12 +13,12 @@ from .config import load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_links import LabelLink, ProjectLink
-from .linear_source import LinearSource, LinearWriteError
+from .linear_source import LinearSource
+from .linear_states import refuse
+from .linear_writes import LinearWriter
 from .model import HerdboardError, NotFoundError
 from .store import CardView, Store
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
-
-LINEAR_WRITE_MESSAGE = "Linear writes arrive in a later step"
 
 INIT_HINT = "Run `herdboard init` to create a board for this repository."
 
@@ -64,11 +65,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--board", help="board name: inbox or a project name")
     sub.add_argument("--source", choices=["todo", "linear"])
 
-    sub = command("add", "add a card")
+    def write_options(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument("--state", help="Linear workflow state, when several match the column")
+        sub.add_argument("--offline", action="store_true",
+                         help="Linear writes need a connection: this makes them fail")
+
+    sub = command("add", "add a card, or with --linear a Linear issue assigned to you")
     sub.add_argument("text")
     sub.add_argument("--column")
     sub.add_argument("--position", choices=["top", "bottom"], default="bottom")
     sub.add_argument("--board", help="board name: inbox or a project name")
+    sub.add_argument("--linear", action="store_true", help="create a Linear issue")
+    sub.add_argument("--team", help="Linear team key (with --linear)")
+    sub.add_argument("--project", help="Linear project name (with --linear)")
+    sub.add_argument("--label", action="append", default=[],
+                     help="Linear label name or TEAM/label (with --linear)")
+    write_options(sub)
 
     sub = command("show", "show one card")
     sub.add_argument("ref")
@@ -77,10 +89,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("move", "move a card to a column")
     sub.add_argument("ref")
     sub.add_argument("column")
-    sub.add_argument("--position", choices=["top", "bottom"], default="bottom")
+    sub.add_argument(
+        "--position", choices=["top", "bottom"],
+        help="place the card at the top or bottom of the column (todos default to the bottom; "
+        "a Linear issue keeps Linear's order unless you ask)",
+    )
+    write_options(sub)
 
     sub = command("done", "move a card to the done column")
     sub.add_argument("ref")
+    write_options(sub)
 
     command("init", "create the board for this repository")
     sub = command("link", "link this repository's board to a Linear project")
@@ -94,6 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _card_dict(card: CardView) -> dict:
     data = asdict(card)
+    # The list order already carries the sort order, and JSON consumers keep their schema.
+    del data["sort_order"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -170,6 +190,25 @@ def _show_text(card: CardView, notes: list[dict] | None = None) -> str:
     return "\n".join(lines)
 
 
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def _prompt_state(team_key: str, column: str, found: list[dict]) -> dict | None:
+    """Ask on the terminal which of several states to use; None when input ends."""
+    print(f"Which state of team {team_key} for column {column!r}?", file=sys.stderr)
+    for number, state in enumerate(found, start=1):
+        print(f"  {number}) {state['name']}", file=sys.stderr)
+    while True:
+        sys.stderr.write(f"Choose 1-{len(found)}: ")
+        sys.stderr.flush()
+        answer = sys.stdin.readline()
+        if not answer:
+            return None
+        if answer.strip().isdigit() and 1 <= int(answer) <= len(found):
+            return found[int(answer) - 1]
+
+
 class _Context:
     def __init__(self, args: argparse.Namespace):
         self.args = args
@@ -195,6 +234,25 @@ class _Context:
             source = LinearSource(self.config, offline=getattr(self.args, "offline", False))
             self._views = Views(self.store, self.config, source, self.identity, project)
         return self._views
+
+    @property
+    def writer(self) -> LinearWriter:
+        return LinearWriter(self.config, self.views.source)
+
+    def ask(self):
+        """The question handler for an ambiguous state: a prompt on a terminal, else an error."""
+        return _prompt_state if not self.args.json and _interactive() else refuse
+
+    def linear_card(self, issue: dict) -> CardView:
+        identities = {self.identity.identity} if self.identity else set()
+        now = datetime.now(timezone.utc)
+        return issue_card(self.config, issue, identities, now, False, show_canceled=True)
+
+    def default_link(self) -> ProjectLink | None:
+        """The only Linear project linked to this repository's board, if there is one."""
+        board = self.repo_board()
+        links = self.store.board_meta(board).links if board else []
+        return links[0] if len(links) == 1 else None
 
     def chosen_view(self) -> str:
         """The `--view` option, or the default for the current directory."""
@@ -233,6 +291,10 @@ def _cmd_list(ctx: _Context) -> dict:
 
 def _cmd_add(ctx: _Context) -> dict:
     args, store = ctx.args, ctx.store
+    if args.linear:
+        return _cmd_add_linear(ctx)
+    if args.team or args.project or args.label or args.state:
+        raise UsageError("--team, --project, --label and --state work only with --linear")
     hint = None
     if args.board == "inbox":
         path = store.ensure_inbox()
@@ -270,20 +332,26 @@ def _cmd_show(ctx: _Context) -> dict:
     return {"card": card, "notes": ctx.store.notes_for(card)}
 
 
-def _refuse_linear_write(ref: str) -> None:
-    if LINEAR_REF.match(ref):
-        raise LinearWriteError(LINEAR_WRITE_MESSAGE)
+def _require_todo_options(args: argparse.Namespace) -> None:
+    if args.state:
+        raise UsageError("--state works only with Linear issues")
 
 
 def _cmd_move(ctx: _Context) -> dict:
     args = ctx.args
-    _refuse_linear_write(args.ref)
-    return {"card": ctx.store.move(args.ref, args.column, args.position)}
+    if LINEAR_REF.match(args.ref):
+        issue = ctx.writer.move(args.ref, args.column, args.position, ctx.ask(), args.state)
+        return {"card": ctx.linear_card(issue)}
+    _require_todo_options(args)
+    return {"card": ctx.store.move(args.ref, args.column, args.position or "bottom")}
 
 
 def _cmd_done(ctx: _Context) -> dict:
-    _refuse_linear_write(ctx.args.ref)
-    return {"card": ctx.store.done(ctx.args.ref)}
+    args = ctx.args
+    if LINEAR_REF.match(args.ref):
+        return {"card": ctx.linear_card(ctx.writer.done(args.ref, ctx.ask(), args.state))}
+    _require_todo_options(args)
+    return {"card": ctx.store.done(args.ref)}
 
 
 def _cmd_init(ctx: _Context) -> dict:
@@ -329,6 +397,36 @@ def _resolve_label(client, spec: str) -> LabelLink:
             f"{len(matches)} labels are named {spec!r}: {options}. Use TEAM/label to pick one"
         )
     return LabelLink(matches[0]["id"], matches[0]["name"])
+
+
+def _linked_project(client, link: ProjectLink) -> dict:
+    project = client.project_for_write(link.id)
+    if project is not None:
+        return project
+    raise HerdboardError(
+        f"Linear project {link.name!r}, linked to this repository, was not found "
+        "or is not accessible"
+    )
+
+
+def _cmd_add_linear(ctx: _Context) -> dict:
+    args = ctx.args
+    if args.board:
+        raise UsageError("--linear and --board cannot be used together")
+    writer = ctx.writer
+    with writer.online() as client:
+        project = _resolve_project(client, args.project) if args.project else None
+        label_ids = [_resolve_label(client, spec).id for spec in args.label]
+        link = None if args.project else ctx.default_link()
+        if link is not None:
+            project = _linked_project(client, link)
+            link_ids = [label.id for label in link.labels]
+            label_ids = link_ids + [i for i in label_ids if i not in link_ids]
+    issue = writer.create(
+        args.text, team=args.team, project=project, label_ids=label_ids,
+        column=args.column, ask=ctx.ask(), state_name=args.state,
+    )
+    return {"card": ctx.linear_card(issue), "hint": None}
 
 
 def _cmd_link(ctx: _Context) -> dict:
@@ -378,6 +476,7 @@ def _cmd_board(ctx: _Context) -> dict:
         linear_for=views.linear,
         linear_active=views.source.active,
         available=views.available,
+        linear_writer=ctx.writer,
     ).run()
     return {}
 
@@ -461,7 +560,12 @@ def main(argv: list[str] | None = None) -> int:
         _render(args.command, result, as_json)
     except HerdboardError as error:
         if as_json:
-            _emit_json({"error": {"code": error.code, "message": str(error)}})
+            details = {"code": error.code, "message": str(error)}
+            if getattr(error, "issue_id", None):
+                details["issue_id"] = error.issue_id
+            if getattr(error, "candidates", None):
+                details["candidates"] = error.candidates
+            _emit_json({"error": details})
         else:
             print(f"herdboard: {error}", file=sys.stderr)
         return error.exit_code

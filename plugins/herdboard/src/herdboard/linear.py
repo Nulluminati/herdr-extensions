@@ -1,4 +1,4 @@
-"""Read-only Linear GraphQL client using personal API key authentication."""
+"""Linear GraphQL client using personal API key authentication."""
 
 from __future__ import annotations
 
@@ -29,6 +29,22 @@ class LinearNetworkError(LinearError):
     """The request failed before Linear answered, or timed out."""
 
 
+class LinearWriteUnknownError(LinearError):
+    """Linear may or may not have applied the write; do not repeat it blindly."""
+
+    code = "linear_unknown"
+
+
+class LinearWriteRejectedError(LinearError):
+    """Linear answered and rejected the write."""
+
+    code = "linear_rejected"
+
+
+class _LinearWriteRateLimitError(LinearError):
+    """A rate-limited write was not applied and must not be retried."""
+
+
 class LinearNotFoundError(LinearError):
     """Linear reported that a requested entity does not exist."""
 
@@ -44,7 +60,7 @@ PAGE_INFO = "pageInfo { hasNextPage endCursor }"
 # Nested connections are bounded to keep query complexity below Linear's
 # per-query limit. The first page comes inline; a follow-up query pages the rest.
 ISSUE_FIELDS = f"""
-    id identifier title description dueDate url branchName priority updatedAt
+    id identifier title description dueDate url branchName priority updatedAt sortOrder
     state {{ id name type }} team {{ id key }}
     labels(first: 100) {{ nodes {{ id name }} {PAGE_INFO} }}
     project {{ id name }} parent {{ id identifier }}
@@ -80,6 +96,8 @@ TEAMS_QUERY = list_query("Teams", "teams", "TeamFilter",
 PROJECTS_QUERY = list_query("Projects", "projects", "ProjectFilter",
                             f"id name teams(first: 50) {{ nodes {{ id key }} {PAGE_INFO} }}")
 PROJECT_QUERY = list_query("Project", "projects", "ProjectFilter", "id name")
+PROJECT_FOR_WRITE_QUERY = list_query("ProjectForWrite", "projects", "ProjectFilter",
+                                     f"id name teams(first: 50) {{ nodes {{ id key }} {PAGE_INFO} }}")
 LABEL_FIELDS = "id name team { id key }"
 LABELS_QUERY = list_query("Labels", "issueLabels", "IssueLabelFilter", LABEL_FIELDS)
 LABELS_BY_ID_QUERY = list_query("LabelsById", "issueLabels", "IssueLabelFilter", LABEL_FIELDS)
@@ -97,7 +115,24 @@ MY_ISSUES_QUERY = f"""query MyIssues($first: Int!, $after: String, $filter: Issu
         nodes {{ {ISSUE_FIELDS} }} {PAGE_INFO}
     }} }}
 }}"""
-# Every query string above, for the schema validation test.
+TEAM_BY_KEY_QUERY = list_query("TeamByKey", "teams", "TeamFilter", "id key name")
+MY_TEAMS_QUERY = f"""query MyTeams($first: Int!, $after: String) {{
+    viewer {{ teams(first: $first, after: $after) {{
+        nodes {{ id key name }} {PAGE_INFO}
+    }} }}
+}}"""
+WRITE_ISSUE_FIELDS = "id identifier sortOrder state { id name type } team { id key }"
+ISSUE_FOR_WRITE_QUERY = f"""query IssueForWrite($id: String!) {{
+    issue(id: $id) {{ {WRITE_ISSUE_FIELDS} title project {{ id name }} }}
+}}"""
+STATE_SORT_ORDERS_QUERY = list_query("StateSortOrders", "issues", "IssueFilter", "id sortOrder")
+ISSUE_UPDATE_QUERY = f"""mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {{
+    issueUpdate(id: $id, input: $input) {{ success issue {{ {WRITE_ISSUE_FIELDS} }} }}
+}}"""
+ISSUE_CREATE_QUERY = f"""mutation IssueCreate($input: IssueCreateInput!) {{
+    issueCreate(input: $input) {{ success issue {{ {WRITE_ISSUE_FIELDS} url }} }}
+}}"""
+# Every query and mutation string above, for the schema validation test.
 QUERIES = {name: value for name, value in globals().items()
            if name.endswith("_QUERY") and isinstance(value, str)}
 
@@ -218,11 +253,26 @@ class LinearClient:
         except (URLError, TimeoutError, OSError, http.client.HTTPException) as error:
             raise LinearNetworkError(f"Linear network error or timeout: {error}") from error
 
-    def _request(self, operation, query, variables=None):
+    def _request(self, operation, query, variables=None, *, mutation=False):
+        try:
+            return self._request_response(operation, query, variables, mutation=mutation)
+        except (LinearAuthError, LinearWriteRejectedError, LinearWriteUnknownError,
+                _LinearWriteRateLimitError):
+            raise
+        except LinearError as error:
+            if mutation:
+                raise LinearWriteUnknownError(
+                    f"Linear write result is unknown; check the issue in Linear: {error}") from error
+            raise
+
+    def _request_response(self, operation, query, variables=None, *, mutation=False):
         body = json.dumps({"operationName": operation, "query": query,
                            "variables": variables or {}}).encode("utf-8")
-        for attempt in range(self.max_retries + 1):
+        for attempt in range(1 if mutation else self.max_retries + 1):
             status, headers, raw = self._send(body)
+            if mutation and 500 <= status < 600:
+                raise LinearWriteUnknownError(
+                    f"Linear write result is unknown (HTTP {status}); check the issue in Linear")
             if status in (401, 403):
                 raise LinearAuthError(f"Linear authentication failed (HTTP {status}); check the API key and access")
             if status == 429:
@@ -242,6 +292,15 @@ class LinearClient:
                     raise LinearError("Linear returned an invalid GraphQL errors response")
                 codes = error_codes(errors)
             if "RATELIMITED" in codes:
+                if mutation:
+                    message = "Linear write was rate limited and not applied"
+                    if any(headers.get(name) is not None for name in (
+                            "X-RateLimit-Requests-Reset", "X-RateLimit-Complexity-Reset", "Retry-After")):
+                        allowed = datetime.fromtimestamp(
+                            time.time() + rate_limit_wait(headers, attempt), timezone.utc)
+                        message += "; requests are allowed again at " + allowed.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    # This is a known non-write, not an unknown transport result.
+                    raise _LinearWriteRateLimitError(message)
                 if attempt >= self.max_retries:
                     raise LinearError(f"Linear rate limit exceeded after {attempt} retries")
                 delay = rate_limit_wait(headers, attempt)
@@ -256,6 +315,8 @@ class LinearClient:
             if errors:
                 messages = "; ".join(str(e.get("message", e)) if isinstance(e, dict) else str(e)
                                      for e in errors)
+                if mutation:
+                    raise LinearWriteRejectedError(f"Linear rejected the write: {messages}")
                 if "not found" in messages.casefold():
                     raise LinearNotFoundError(f"Linear GraphQL error: {messages}")
                 raise LinearError(f"Linear GraphQL error: {messages}")
@@ -302,6 +363,72 @@ class LinearClient:
             team["states"] = self._rest(team, "states", "TeamStates", STATES_QUERY, "teams")
         return teams
 
+    def team_states(self, team_id) -> list[dict]:
+        return self._pages("TeamStates", STATES_QUERY, ("teams", "nodes", 0, "states"),
+                           {"id": team_id}, page_size=NESTED_PAGE_SIZE)
+
+    def team_by_key(self, key) -> dict | None:
+        teams = self._pages("TeamByKey", TEAM_BY_KEY_QUERY, ("teams",),
+                            {"filter": {"key": {"eqIgnoreCase": key}}})
+        return teams[0] if teams else None
+
+    def my_teams(self) -> list[dict]:
+        return self._pages("MyTeams", MY_TEAMS_QUERY, ("viewer", "teams"))
+
+    def issue_for_write(self, identifier) -> dict | None:
+        try:
+            data = self._request("IssueForWrite", ISSUE_FOR_WRITE_QUERY, {"id": identifier})
+        except LinearNotFoundError:
+            return None
+        return response_field(data, ("issue",))
+
+    def state_sort_orders(self, team_id, state_id, done_days) -> list[float]:
+        filters = {"team": {"id": {"eq": team_id}}, "state": {"id": {"eq": state_id}}}
+        filters.update(recent_filter(done_days))
+        issues = self._pages("StateSortOrders", STATE_SORT_ORDERS_QUERY, ("issues",),
+                             {"filter": filters})
+        return [float(issue["sortOrder"]) for issue in issues]
+
+    def _mutate(self, operation, query, field, variables):
+        data = self._request(operation, query, variables, mutation=True)
+        try:
+            payload = response_field(data, (field,))
+            success = response_field(payload, ("success",))
+            if success is False:
+                raise LinearWriteRejectedError("Linear rejected the write (success: false)")
+            if success is not True:
+                raise LinearError("Linear mutation is missing a valid success flag")
+            issue = response_field(payload, ("issue",))
+            if not isinstance(issue, dict):
+                raise LinearError("Linear mutation is missing its issue")
+            for path in (("id",), ("identifier",), ("sortOrder",),
+                         ("state", "id"), ("state", "name"), ("state", "type"),
+                         ("team", "id"), ("team", "key")):
+                if response_field(issue, path) is None:
+                    raise LinearError("Linear mutation is missing issue fields")
+            if field == "issueCreate" and not isinstance(issue.get("url"), str):
+                raise LinearError("Linear mutation is missing its issue URL")
+            return issue
+        except LinearWriteRejectedError:
+            raise
+        except LinearError as error:
+            raise LinearWriteUnknownError(
+                f"Linear write result is unknown; check the issue in Linear: {error}") from error
+
+    def update_issue(self, issue_id, *, state_id=None, sort_order=None) -> dict:
+        fields = {"stateId": state_id, "sortOrder": sort_order}
+        inputs = {key: value for key, value in fields.items() if value is not None}
+        return self._mutate("IssueUpdate", ISSUE_UPDATE_QUERY, "issueUpdate",
+                            {"id": issue_id, "input": inputs})
+
+    def create_issue(self, *, issue_id, team_id, title, state_id=None, project_id=None,
+                     label_ids=None, assignee_id=None, sort_order=None) -> dict:
+        fields = {"id": issue_id, "teamId": team_id, "title": title, "stateId": state_id,
+                  "projectId": project_id, "labelIds": label_ids, "assigneeId": assignee_id,
+                  "sortOrder": sort_order}
+        inputs = {key: value for key, value in fields.items() if value is not None}
+        return self._mutate("IssueCreate", ISSUE_CREATE_QUERY, "issueCreate", {"input": inputs})
+
     def find_projects(self, name) -> list[dict]:
         projects = self._pages("Projects", PROJECTS_QUERY, ("projects",),
                                {"filter": {"name": {"eqIgnoreCase": name}}})
@@ -316,6 +443,17 @@ class LinearClient:
         projects = self._pages("Project", PROJECT_QUERY, ("projects",),
                                {"filter": {"id": {"eq": project_id}}})
         return projects[0] if projects else None
+
+    def project_for_write(self, project_id) -> dict | None:
+        """Find a project by stable ID, including all its teams."""
+        projects = self._pages("ProjectForWrite", PROJECT_FOR_WRITE_QUERY, ("projects",),
+                               {"filter": {"id": {"eq": project_id}}})
+        if not projects:
+            return None
+        project = projects[0]
+        project["teams"] = self._rest(project, "teams", "ProjectTeams",
+                                      PROJECT_TEAMS_QUERY, "projects")
+        return project
 
     def find_labels(self, name) -> list[dict]:
         return self._pages("Labels", LABELS_QUERY, ("issueLabels",),

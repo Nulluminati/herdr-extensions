@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import threading
 from typing import Callable
 
 from rich.text import Text
@@ -11,10 +12,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import HorizontalScroll, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, Label, Static
+from textual.widgets import Footer, Input, Label, OptionList, Static
 from textual.worker import Worker, WorkerState
 
 from .linear import LinearAuthError
+from .linear_writes import LinearWriter
 from .model import HerdboardError
 from .store import TEMP_REF, CardView, Store
 from .views import LinearResult
@@ -24,7 +26,8 @@ RELOAD_SECONDS = 2.0
 LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
-LINEAR_WRITE_MESSAGE = "Linear writes arrive in a later step"
+LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
+LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
 
 HELP_KEYS = [
@@ -32,11 +35,11 @@ HELP_KEYS = [
     ("right, l", "next column"),
     ("up, k", "previous card"),
     ("down, j", "next card"),
-    ("shift+left, H", "move card to previous column"),
-    ("shift+right, L", "move card to next column"),
+    ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
+    ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
     ("enter", "card detail"),
     ("a", "add a card to the selected column"),
-    ("d", "mark the card done"),
+    ("d", "mark the card done (a Linear card moves to its completed state)"),
     ("v", "cycle view: repo, global, all, mine"),
     ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
@@ -163,6 +166,29 @@ class AddScreen(ModalBase):
         self.app.submit_add(self, event.value)
 
 
+class StateScreen(ModalBase):
+    """Choose one of several workflow states of a team that match a column."""
+
+    def __init__(self, team_key: str, column: str, found: list[dict]):
+        super().__init__()
+        self.team_key = team_key
+        self.column = column
+        self.found = found
+
+    def compose(self) -> ComposeResult:
+        text = f"Which state of team {self.team_key} for column {self.column!r}?"
+        prompt = Static(Text(text), id="state-prompt")
+        prompt.plain = text
+        with Vertical(classes="dialog"):
+            yield prompt
+            yield OptionList(*[state["name"] for state in self.found], id="state-options")
+            yield Label("enter: choose, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.found[event.option_index])
+
+
 class HerdboardApp(App):
     TITLE = "herdboard"
     CSS = """
@@ -209,6 +235,7 @@ class HerdboardApp(App):
         linear_active: bool = False,
         available: Callable[[str], bool] | None = None,
         linear_interval: float = LINEAR_SECONDS,
+        linear_writer: LinearWriter | None = None,
     ):
         super().__init__()
         self.store = store
@@ -222,6 +249,7 @@ class HerdboardApp(App):
             lambda view: view != "mine" and (view != "repo" or repo_board is not None)
         )
         self.linear_interval = linear_interval
+        self.linear_writer = linear_writer
         self.linear_results: dict[str, LinearResult] = {}
         self.linear_state = "loading" if self.linear_active else "off"
         # One Linear fetch runs at a time. A refresh asked meanwhile waits as one queued fetch.
@@ -236,6 +264,8 @@ class HerdboardApp(App):
         self.signature: tuple = ()
         self.writing = False
         self.add_screen: AddScreen | None = None
+        # True while a Linear write runs: Linear is fetched again when it ends.
+        self.refetch = False
 
     # Layout
 
@@ -425,8 +455,13 @@ class HerdboardApp(App):
             self.row = max(0, min(self.row + step, max(count - 1, 0)))
             self._show_selection()
 
-    def _start_write(self, change: Callable[[], CardView | None], add: AddScreen | None = None) -> bool:
-        """Run a store change in a thread worker, one at a time. False when busy."""
+    def _start_write(
+        self,
+        change: Callable[[], CardView | None],
+        add: AddScreen | None = None,
+        refetch: bool = False,
+    ) -> bool:
+        """Run a store or Linear change in a thread worker, one at a time. False when busy."""
         if self.writing:
             self.notify("Busy: a change is still being written", severity="warning")
             return False
@@ -439,6 +474,7 @@ class HerdboardApp(App):
 
         self.writing = True
         self.add_screen = add
+        self.refetch = refetch
         self.run_worker(guarded, thread=True, group=WRITE_GROUP, exclusive=True, exit_on_error=False)
         return True
 
@@ -456,6 +492,7 @@ class HerdboardApp(App):
             return
         self.writing = False
         screen, self.add_screen = self.add_screen, None
+        refetch, self.refetch = self.refetch, False
         card, error = None, None
         if event.state == WorkerState.SUCCESS:
             card, error = worker.result
@@ -468,6 +505,8 @@ class HerdboardApp(App):
         elif screen is not None and screen in self.screen_stack:
             screen.dismiss(None)
         await self.reload(card.ref if card else None)
+        if refetch:
+            self.fetch_linear()
 
     # Linear
 
@@ -529,28 +568,56 @@ class HerdboardApp(App):
             self.notify(message, severity="warning")
         await self.reload()
 
-    def _refuse_linear_write(self, card: CardView | None) -> bool:
-        if card is None or card.source != "linear":
-            return False
-        self.notify(LINEAR_WRITE_MESSAGE, severity="warning")
-        return True
+    def ask_state(self, team_key: str, column: str, found: list[dict]) -> dict | None:
+        """Ask in a dialog which state to use. Runs in the write worker; None when cancelled."""
+        answered = threading.Event()
+        answer: list[dict | None] = []
+
+        def done(choice: dict | None) -> None:
+            answer.append(choice)
+            answered.set()
+
+        self.call_from_thread(self.push_screen, StateScreen(team_key, column, found), done)
+        while not answered.wait(0.2):
+            if not self.is_running:
+                return None
+        return answer[0]
+
+    def _linear_write(self, card: CardView, change: Callable[[LinearWriter], object]) -> None:
+        """Write to Linear in the write worker, then fetch Linear again."""
+        if self.linear_writer is None:
+            self.notify(LINEAR_WRITER_MESSAGE, severity="warning")
+            return
+        if card.stale:
+            self.notify(LINEAR_OFFLINE_MESSAGE, severity="warning")
+            return
+        writer = self.linear_writer
+
+        def write() -> CardView:
+            change(writer)
+            return card
+
+        self._start_write(write, refetch=True)
 
     def action_move(self, step: int) -> None:
         card = self.current_card()
         target = self.col + step
-        if self._refuse_linear_write(card):
-            return
         if card is None or not 0 <= target < len(self.columns):
             return
         name = self.columns[target].name
+        if card.source == "linear":
+            self._linear_write(card, lambda writer: writer.move(card.ref, name, None, self.ask_state))
+            return
         self._start_write(lambda: self.store.move(card.ref, name))
 
     def action_done(self) -> None:
         card = self.current_card()
-        if self._refuse_linear_write(card):
+        if card is None:
             return
-        if card is not None:
-            self._start_write(lambda: self.store.done(card.ref))
+        if card.source == "linear":
+            self._linear_write(card, lambda writer: writer.done(card.ref, self.ask_state))
+            return
+        self._start_write(lambda: self.store.done(card.ref))
 
     def action_detail(self) -> None:
         card = self.current_card()

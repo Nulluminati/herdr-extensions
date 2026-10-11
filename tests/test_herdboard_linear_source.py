@@ -50,6 +50,45 @@ class LinearEnvTestCase(unittest.TestCase):
 
 
 class SourceTests(LinearEnvTestCase):
+    def test_paused_fetch_cannot_restore_cache_after_concurrent_write(self):
+        import threading
+        from herdboard.linear_writes import LinearWriter
+        linear_data.with_workflow(self.fixtures)
+        source = self.source()
+        source.account()
+        snapshot_ready, resume = threading.Event(), threading.Event()
+        results = []
+
+        def load(client):
+            snapshot = client.my_issues(source.settings.done_days)
+            snapshot_ready.set()
+            self.assertTrue(resume.wait(5))
+            return snapshot
+
+        thread = threading.Thread(target=lambda: results.append(source._fetch("mine", load)))
+        thread.start()
+        try:
+            self.assertTrue(snapshot_ready.wait(5))
+            LinearWriter(Config(), self.source()).move("ENG-1", "In progress")
+        finally:
+            resume.set()
+            thread.join(5)
+        self.assertEqual(len(results), 1)
+        self.assertFalse((source.account_dir() / "mine.json").exists())
+        with self.assertRaises(CacheMiss):
+            self.source(offline=True).my_issues()
+
+    def test_invalidation_ignores_undeleted_cache_in_views_and_issue_search(self):
+        source = self.source()
+        source.my_issues()
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError("denied")):
+            source.drop_cache()
+        offline = self.source(offline=True)
+        with self.assertRaises(CacheMiss):
+            offline.my_issues()
+        with self.assertRaises(CacheMiss):
+            offline.issue("ENG-1")
+
     def test_disabled_without_key(self):
         del os.environ["LINEAR_API_KEY"]
         source = self.source()
