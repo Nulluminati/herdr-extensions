@@ -217,8 +217,8 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
 | `herdboard init` | Create the board for the current repository |
-| `herdboard migrate <TODO.md>` | Convert an existing `TODO.md` (see below) |
-| `herdboard doctor [--fix-ids]` | Check every board for format errors and duplicate IDs |
+| `herdboard migrate <TODO.md> [--board] [--yes]` | Convert an existing `TODO.md` (see below) |
+| `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear links and the state files (see below) |
 
 - `<id>` is a todo ID (`t7k2`), a temporary reference (`homelab:12`) or a Linear identifier (`ENG-123`).
 - With `--json`, every command writes JSON to standard output, and errors have the form `{"error": {"code": "…", "message": "…"}}`.
@@ -264,10 +264,50 @@ When the board refreshes, it checks each stored worktree. If the path no longer 
 
 ### migrate
 
-1. Read the `TODO.md` file.
-2. Convert it: headings become tags on their items (`## Follow Ups` becomes `#follow-ups`), all items go into Backlog, and nested items stay indented under their parent card.
-3. Show the converted board.
-4. Write it to `~/todos/projects/<name>.md` only after you confirm. The original file is not changed.
+`herdboard migrate <TODO.md> [--board NAME] [--yes]` converts a free-form todo file. The existing `TODO.md` files use several styles, and the tool reads all of them:
+
+- Section headings: Markdown headings (`# Testing`), underlined headings (`Dots Todo:` with `=====` or `-----` below), and a plain line that ends with `:` and has list items below it (`Follow Ups:`). The trailing `:` is not part of the name.
+- List items: `-`, `*`, `+` and `1.` bullets, with or without a checkbox (`- [ ]`, `- [x]`).
+- Indentation in tabs or spaces. The tool finds the indent unit of the file (a tab, or the smallest step in spaces) and writes one tab for each level.
+
+Conversion:
+
+1. A top-level item of a section becomes a card. Deeper items stay indented under their card, with their nesting.
+2. The section name becomes a tag on each of its cards: `Follow Ups` becomes `#follow-ups` (lowercase, other characters become `-`). Items before the first heading get no tag.
+3. Open items go into the first column (Backlog). Checked items go into the done column, checked.
+4. A text line that is not a list item becomes an indented line of the card above it. Without a card above it in its section, it becomes a card. The preview lists these lines, so you can check them.
+5. Blank lines and heading underlines are dropped.
+
+Target and writes:
+
+1. The target is the board of the repository that contains the file, or `--board`. When that board does not exist, the tool creates it like `init`. When it exists, the tool adds the cards at the bottom of their columns and changes nothing else.
+2. The tool shows the result first: the cards for each column, with their tags and indented lines. In a terminal it asks for confirmation. Without a terminal, or with `--json`, it writes nothing unless `--yes` is given. `--json` returns the preview and `"written": true|false`.
+3. The write uses the normal write rules: one lock, new IDs, atomic replace.
+4. The original file is not changed. The tool prints its path, so you can delete it yourself.
+
+### doctor
+
+`herdboard doctor [--fix-ids] [--offline]` checks the store and reports each finding with a level (error, warning, info), a code, the file and line when there is one, and a fix when one exists. Exit code 0 when there is no error, 1 when there is an error.
+
+| Check | Level |
+|---|---|
+| A board does not parse, its frontmatter is not closed, or it has no `kanban-plugin: board` | error |
+| Two cards share an ID, in one board or across boards, archive included | error |
+| Two boards claim the same `repo:` identity | error |
+| `linear-projects` frontmatter is not valid | error |
+| The config file does not parse or has an invalid value | error |
+| A board has no done column | warning |
+| A card has no ID (it gets one on the next write) | info |
+| Linear is enabled, but `LINEAR_API_KEY` is not set or is refused | error |
+| A linked Linear project or label does not exist or is not accessible | warning |
+| An unfinished promotion record exists. The fix names the `promote` command that finishes it | warning |
+| A `start` record points to a worktree that no longer exists | info |
+| The checkout registry has a path that no longer exists or is no longer that repository | info |
+| No `herdr` binary is found (only `start` needs it) | info |
+
+- `--offline` skips the Linear checks.
+- `--fix-ids` gives a new ID to every duplicate except the first, in this order: board path, then file order, with archive cards last. It uses the normal write rules and reports each change. No other check changes a file.
+- `doctor` never changes Linear.
 
 ## Configuration
 
