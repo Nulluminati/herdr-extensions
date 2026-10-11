@@ -1,0 +1,415 @@
+"""Read and write boards: card references, IDs, and locked atomic writes."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import dataclass
+import fcntl
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import tempfile
+import time
+from typing import Callable, Iterator
+
+from . import kanban_md
+from .config import Config
+from .identity import RepoIdentity, find_board, new_board_path
+from .model import (
+    Board,
+    Card,
+    Column,
+    ConflictError,
+    DuplicateIdError,
+    FormatError,
+    HerdboardError,
+    IoError,
+    NotFoundError,
+)
+
+ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+TEMP_REF = re.compile(r"^(?P<board>.+):(?P<number>\d+)$")
+NOTE_LINK = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
+
+
+@dataclass
+class CardView:
+    ref: str
+    board: str
+    path: Path
+    column: str
+    title: str
+    checked: bool
+    due: str | None
+    tags: list[str]
+    body: list[str]
+    column_limit: int | None = None
+
+
+@dataclass
+class _Located:
+    """A card found without the lock. `number` is set for a temporary ref."""
+
+    path: Path
+    block_id: str | None
+    number: int | None
+    column: str
+    lines: list[str]
+
+
+def _all_ids(board: Board) -> set[str]:
+    cards = [card for _, card in board.all_cards()]
+    if board.archive is not None:
+        cards.extend(board.archive.cards)
+    return {card.block_id for card in cards if card.block_id}
+
+
+class Store:
+    def __init__(self, config: Config, lock_timeout: float = 5.0):
+        self.config = config
+        self.lock_timeout = lock_timeout
+        self.lock_path = config.todos_dir / ".herdboard.lock"
+        self.inbox_path = config.todos_dir / "inbox.md"
+        self.projects_dir = config.todos_dir / "projects"
+
+    # Files
+
+    def _read(self, path: Path) -> Board:
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise IoError(f"{path}: cannot read board: {error}") from error
+        return kanban_md.parse(text, tuple(self.config.archive_titles))
+
+    def _write_file(self, path: Path, data: bytes, mode: int) -> None:
+        """Write to a temporary file beside `path`, then rename it over `path`."""
+        try:
+            fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temp, mode)
+                os.replace(temp, path)
+            except BaseException:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+                raise
+        except OSError as error:
+            raise IoError(f"{path}: cannot write board: {error}") from error
+
+    def _write(self, path: Path, board: Board) -> None:
+        data = kanban_md.serialize(board).encode("utf-8")
+        try:
+            mode = path.stat().st_mode & 0o7777
+        except OSError as error:
+            raise IoError(f"{path}: cannot write board: {error}") from error
+        self._write_file(path, data, mode)
+
+    def _create(self, path: Path, text: str) -> None:
+        """Create a new board. The caller holds the lock and checked that it is absent."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise IoError(f"{path}: cannot create board: {error}") from error
+        umask = os.umask(0)
+        os.umask(umask)
+        self._write_file(path, text.encode("utf-8"), 0o666 & ~umask)
+
+    # Boards
+
+    def board_paths(self) -> list[Path]:
+        paths = [self.inbox_path] if self.inbox_path.is_file() else []
+        if self.projects_dir.is_dir():
+            paths.extend(sorted(self.projects_dir.glob("*.md")))
+        return paths
+
+    def board_name(self, path: Path) -> str:
+        if path.parent == self.inbox_path.parent and path.name == self.inbox_path.name:
+            return "inbox"
+        return path.stem
+
+    def resolve_board(self, name: str) -> Path:
+        if name == "inbox":
+            path = self.inbox_path
+        elif "/" in name or name in ("", ".", ".."):
+            raise NotFoundError(f"No board named {name!r}")
+        else:
+            path = self.projects_dir / f"{name}.md"
+        if not path.is_file():
+            raise NotFoundError(f"No board named {name!r}")
+        return path
+
+    def _new_board_text(self, frontmatter: list[tuple[str, str]] = ()) -> str:
+        columns = self.config.columns
+        done = next((title for title in columns if title.casefold() == "done"), None)
+        return kanban_md.new_board(columns, done, list(frontmatter))
+
+    def ensure_inbox(self) -> Path:
+        with self._lock():
+            if not self.inbox_path.exists():
+                self._create(self.inbox_path, self._new_board_text())
+        return self.inbox_path
+
+    def init_board(self, identity: RepoIdentity) -> Path:
+        with self._lock():
+            existing = find_board(self.projects_dir, identity)
+            if existing is not None:
+                raise HerdboardError(f"{identity.identity} already has a board: {existing}")
+            path = new_board_path(self.projects_dir, identity)
+            self._create(path, self._new_board_text([("repo", identity.identity)]))
+        return path
+
+    def board_for_repo(self, identity: RepoIdentity) -> Path | None:
+        return find_board(self.projects_dir, identity)
+
+    # Reading
+
+    def _view(self, path: Path, column: Column, card: Card, ref: str) -> CardView:
+        return CardView(
+            ref=ref,
+            board=self.board_name(path),
+            path=path,
+            column=column.title,
+            title=card.title,
+            checked=card.checked,
+            due=card.due,
+            tags=card.tags,
+            body=list(card.body),
+            column_limit=column.limit,
+        )
+
+    def list_cards(self, paths: list[Path] | None = None) -> list[CardView]:
+        views = []
+        for path in self.board_paths() if paths is None else paths:
+            name = self.board_name(path)
+            for number, (column, card) in enumerate(self._read(path).all_cards(), start=1):
+                views.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
+        return views
+
+    def _check_unique(self, block_id: str) -> None:
+        """Raise when a block ID is on more than one card, archive cards included."""
+        places = []
+        for path in self.board_paths():
+            board = self._read(path)
+            pairs = board.all_cards()
+            if board.archive is not None:
+                pairs += [(board.archive, card) for card in board.archive.cards]
+            places.extend(
+                f"{path} ({column.title})" for column, card in pairs if card.block_id == block_id
+            )
+        if len(places) > 1:
+            raise DuplicateIdError(f"ID {block_id} is on two cards: {' and '.join(places)}")
+
+    def _resolve(self, ref: str) -> _Located:
+        temp = TEMP_REF.match(ref)
+        if temp:
+            path = self.resolve_board(temp.group("board"))
+            number = int(temp.group("number"))
+            cards = self._read(path).all_cards()
+            if not 1 <= number <= len(cards):
+                raise NotFoundError(f"No card {ref}")
+            column, card = cards[number - 1]
+            if card.block_id:
+                self._check_unique(card.block_id)
+            return _Located(path, None, number, column.title, list(card.lines))
+        found = []
+        for path in self.board_paths():
+            for column, card in self._read(path).all_cards():
+                if card.block_id == ref:
+                    found.append((path, column, card))
+        if not found:
+            raise NotFoundError(f"No card {ref}")
+        self._check_unique(ref)
+        path, column, card = found[0]
+        return _Located(path, ref, None, column.title, list(card.lines))
+
+    def notes_for(self, card: CardView) -> list[dict] | None:
+        """Notes that `[[name]]` links in a card point to; None without `vault_root`."""
+        vault = self.config.vault_root
+        if vault is None:
+            return None
+        text = "\n".join([card.title, *card.body])
+        names = list(dict.fromkeys(m.group(1).strip() for m in NOTE_LINK.finditer(text)))
+        root = vault.resolve()
+        notes = []
+        for name in names:
+            path = vault / f"{name}.md"
+            if not path.is_file():
+                matches = sorted(vault.rglob(f"{Path(name).name}.md")) if name else []
+                path = matches[0] if matches else path
+            content = None
+            if path.is_file() and path.resolve().is_relative_to(root):
+                try:
+                    content = path.read_bytes().decode("utf-8")
+                except (OSError, UnicodeDecodeError) as error:
+                    raise IoError(f"{path}: cannot read note: {error}") from error
+            notes.append({"name": name, "path": str(path), "content": content})
+        return notes
+
+    def show(self, ref: str) -> CardView:
+        located = self._resolve(ref)
+        column, card = self._find(self._read(located.path), located)
+        return self._view(located.path, column, card, card.block_id or ref)
+
+    # Writing
+
+    @contextmanager
+    def _lock(self) -> Iterator[None]:
+        """Hold the store-wide lock. Every write takes it for its whole read-check-write."""
+        try:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(self.lock_path, "a")
+        except OSError as error:
+            raise IoError(f"{self.lock_path}: cannot open lock: {error}") from error
+        deadline = time.monotonic() + self.lock_timeout
+        try:
+            while True:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise ConflictError(
+                            f"{self.config.todos_dir}: boards are locked by another writer"
+                        ) from None
+                    time.sleep(0.01)
+            yield
+        finally:
+            handle.close()
+
+    def _require_writable(self, path: Path, board: Board) -> None:
+        frontmatter = board.frontmatter
+        closed = len(frontmatter) >= 2
+        if not closed or board.frontmatter_value("kanban-plugin") != "board":
+            raise FormatError(
+                f"{path}: not a valid board: frontmatter must be closed and contain "
+                "'kanban-plugin: board'. The board is read only"
+            )
+
+    def _find(self, board: Board, located: _Located) -> tuple[Column, Card]:
+        """Find the card again in a fresh parse; its lines must be unchanged."""
+        cards = board.all_cards()
+        if located.number is not None:
+            match = cards[located.number - 1] if located.number <= len(cards) else None
+        else:
+            matches = [pair for pair in cards if pair[1].block_id == located.block_id]
+            if len(matches) > 1:
+                raise DuplicateIdError(f"ID {located.block_id} is on two cards in {located.path}")
+            match = matches[0] if matches else None
+        if match is None or match[1].lines != located.lines or match[0].title != located.column:
+            raise ConflictError(f"{located.path}: card changed on disk; retry")
+        return match
+
+    def _new_id(self, taken: set[str]) -> str:
+        while True:
+            candidate = "t" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
+            if candidate not in taken:
+                taken.add(candidate)
+                return candidate
+
+    def _assign_ids(self, path: Path, board: Board) -> None:
+        taken = _all_ids(board)
+        for other in self.board_paths():
+            if other != path:
+                taken |= _all_ids(self._read(other))
+        for _, card in board.all_cards():
+            if card.block_id is None:
+                card.set_block_id(self._new_id(taken))
+
+    def _modify(
+        self,
+        ref: str,
+        change: Callable[[Board, Path, Column, Card], Column],
+    ) -> CardView:
+        located = self._resolve(ref)
+        path = located.path
+        with self._lock():
+            board = self._read(path)
+            self._require_writable(path, board)
+            column, card = self._find(board, located)
+            if card.block_id:
+                self._check_unique(card.block_id)
+            self._assign_ids(path, board)
+            column = change(board, path, column, card)
+            self._write(path, board)
+        return self._view(path, column, card, card.block_id)
+
+    def _is_completed(self, column: Column) -> bool:
+        """True when a `**<marker>**` line marks the column complete."""
+        return column.has_marker(["Complete", *self.config.complete_markers])
+
+    def _done_column(self, board: Board, path: Path) -> Column:
+        column = next((c for c in board.columns if self._is_completed(c)), None)
+        if column is None:
+            column = next((c for c in board.columns if c.title.casefold() == "done"), None)
+        if column is None:
+            raise HerdboardError(
+                f"Board {self.board_name(path)} has no done column: "
+                "add a complete marker or a column named Done"
+            )
+        return column
+
+    def _move_card(
+        self,
+        column: Column,
+        card: Card,
+        target: Column,
+        position: str,
+        check: bool = False,
+    ) -> Column:
+        kanban_md.remove_card(column, card)
+        if check or self._is_completed(target):
+            if not card.checked:
+                card.set_checked(True)
+        elif self._is_completed(column):
+            card.set_checked(False)
+        kanban_md.insert_card(target, card, position)
+        return target
+
+    def move(self, ref: str, column: str, position: str = "bottom") -> CardView:
+        def change(board, path, source, card):
+            return self._move_card(source, card, board.column(column), position)
+
+        return self._modify(ref, change)
+
+    def done(self, ref: str) -> CardView:
+        def change(board, path, source, card):
+            target = self._done_column(board, path)
+            return self._move_card(source, card, target, "bottom", check=True)
+
+        return self._modify(ref, change)
+
+    def add(
+        self, path: Path, text: str, column: str | None = None, position: str = "bottom"
+    ) -> CardView:
+        if not text.strip() or "\n" in text or "\r" in text:
+            raise HerdboardError("Card text must be one non-empty line")
+        if not path.is_file():
+            raise NotFoundError(f"No board file: {path}")
+        with self._lock():
+            board = self._read(path)
+            self._require_writable(path, board)
+            if column is None:
+                if not board.columns:
+                    raise HerdboardError(f"{path}: board has no columns")
+                target = board.columns[0]
+            else:
+                target = board.column(column)
+            self._assign_ids(path, board)
+            mark = "x" if self._is_completed(target) else " "
+            card = Card([f"- [{mark}] {text}"])
+            card.set_block_id(self._new_id(self._taken_ids(path, board)))
+            kanban_md.insert_card(target, card, position)
+            self._write(path, board)
+        return self._view(path, target, card, card.block_id)
+
+    def _taken_ids(self, path: Path, board: Board) -> set[str]:
+        taken = _all_ids(board)
+        for other in self.board_paths():
+            if other != path:
+                taken |= _all_ids(self._read(other))
+        return taken
