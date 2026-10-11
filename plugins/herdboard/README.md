@@ -268,7 +268,7 @@ When the board refreshes, it checks each stored worktree. If the path no longer 
 
 - Section headings: Markdown headings (`# Testing`), underlined headings (`Dots Todo:` with `=====` or `-----` below), and a plain line that ends with `:` and has list items below it (`Follow Ups:`). The trailing `:` is not part of the name.
 - List items: `-`, `*`, `+` and `1.` bullets, with or without a checkbox (`- [ ]`, `- [x]`).
-- Indentation in tabs or spaces. The tool finds the indent unit of the file (a tab, or the smallest step in spaces) and writes one tab for each level.
+- Indentation in tabs or spaces. The tool finds the indent unit of the file (a tab, or the smallest step in spaces) and writes one tab for each level. A single one-space indent is ignored for the unit when the other indents are multiples of a larger step, or when the file is indented with tabs. Mixed tab and space prefixes are read in order, a tab advancing to the next multiple of the unit. A line whose level is not a whole number of units is listed in the preview as ambiguous, with the parent it got.
 
 Conversion:
 

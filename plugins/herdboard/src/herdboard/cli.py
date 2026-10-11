@@ -16,7 +16,9 @@ from .linear_links import LabelLink, ProjectLink
 from .linear_source import LinearSource
 from .linear_states import refuse
 from .linear_writes import LinearWriter
-from .model import HerdboardError, NotFoundError
+from .migrate import build_preview, preview_text
+from .migrate_convert import convert
+from .model import HerdboardError, IoError, NotFoundError
 from .promote import Promoter
 from .store import CardView, Store
 from .start import Starter, register_checkout
@@ -115,7 +117,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--checkout", type=Path)
 
+    sub = command("doctor", "check boards, configuration, Linear links and state")
+    sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
+    sub.add_argument("--offline", action="store_true", help="skip Linear checks")
+
     command("init", "create the board for this repository")
+    sub = command("migrate", "convert a free-form TODO.md into cards")
+    sub.add_argument("file", type=Path)
+    sub.add_argument("--board", help="board name: inbox or a project name")
+    sub.add_argument("--yes", action="store_true", help="write without asking")
     sub = command("link", "link this repository's board to a Linear project")
     sub.add_argument("project")
     sub.add_argument("--label", action="append", default=[], help="label name or TEAM/label")
@@ -401,6 +411,47 @@ def _cmd_init(ctx: _Context) -> dict:
     return {"board": ctx.store.init_board(ctx.identity)}
 
 
+def _read_todo_file(path: Path) -> str:
+    if not path.is_file():
+        raise NotFoundError(f"No file: {path}")
+    try:
+        return path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise IoError(f"{path}: cannot read file: {error}") from error
+
+
+def _confirm(prompt: str) -> bool:
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    return sys.stdin.readline().strip().lower() in ("y", "yes")
+
+
+def _cmd_migrate(ctx: _Context) -> dict:
+    args, store = ctx.args, ctx.store
+    path = args.file if args.file.is_absolute() else ctx.directory / args.file
+    conversion = convert(_read_todo_file(path))
+    items = conversion.items
+    if not items:
+        raise HerdboardError(f"Nothing to migrate: {path} has no list items or text")
+    # The repository is the one that contains the file, not the working directory.
+    identity = None if args.board else repo_identity(path.parent)
+    target = store.import_target(identity, args.board)
+    if target.done_column is None and any(item.checked for item in items):
+        raise HerdboardError(target.done_error)
+    preview = build_preview(conversion, target)
+    if not args.json:
+        print(preview_text(target, preview, len(items)))
+    asked = not args.yes and not args.json and _interactive()
+    write = args.yes or (
+        asked and _confirm(f"Write {len(items)} cards to {target.path}? [y/N] ")
+    )
+    if write:
+        keep_path = target.exists or target.identity is None
+        store.import_cards(items, target.path if keep_path else None, target.identity)
+    return {"board": target.path, "preview": preview, "cards": len(items),
+            "written": bool(write), "file": path, "asked": asked}
+
+
 def _describe(label: dict) -> str:
     team = label.get("team")
     return f"{label['name']} ({team['key'] if team else 'workspace'})"
@@ -563,6 +614,7 @@ COMMANDS = {
     "promote": _cmd_promote,
     "start": _cmd_start,
     "init": _cmd_init,
+    "migrate": _cmd_migrate,
     "link": _cmd_link,
     "board": _cmd_board,
 }
@@ -596,6 +648,17 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
+        return
+    if command == "migrate":
+        if as_json:
+            _emit_json({"board": str(result["board"]), "preview": result["preview"],
+                        "cards": result["cards"], "written": result["written"]})
+        elif result["written"]:
+            print(f"Wrote {result['cards']} cards to {result['board']}")
+            print(f"Original file left unchanged: {result['file']}")
+            print("Delete it yourself when you no longer need it.")
+        else:
+            print("Nothing written." + ("" if result["asked"] else " Run again with --yes to write."))
         return
     linear = result.get("linear")
     if as_json:
@@ -648,6 +711,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
         as_json = args.json
+        if args.command == "doctor":
+            from .doctor import diagnose, render
+            result = diagnose(args.config, repair_ids=args.fix_ids, offline=args.offline)
+            if as_json:
+                _emit_json(result)
+            else:
+                print(render(result))
+            return 1 if result["summary"]["error"] else 0
         result = COMMANDS[args.command](_Context(args))
         _render(args.command, result, as_json)
     except HerdboardError as error:

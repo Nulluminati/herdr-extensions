@@ -15,9 +15,10 @@ import time
 from typing import Callable, Iterator
 
 from . import kanban_md
+from .migrate_convert import Item
 from .linear_links import ProjectLink, parse_links, replace_links
 from .config import Config
-from .identity import RepoIdentity, find_board, new_board_path
+from .identity import RepoIdentity, find_board, new_board_path, same_repo
 from .model import (
     BLOCK_ID,
     Board,
@@ -86,6 +87,18 @@ class BoardSnapshot:
     name: str
     path: Path
     columns: list[ColumnSnapshot]
+
+
+@dataclass
+class ImportTarget:
+    """Where `migrate` writes. `done_column` is None (with `done_error`) when the board has none."""
+
+    path: Path
+    identity: RepoIdentity | None
+    exists: bool
+    open_column: str
+    done_column: str | None
+    done_error: str | None = None
 
 
 @dataclass
@@ -235,6 +248,67 @@ class Store:
             links = change(parse_links(board.frontmatter))
             self._write_file(path, replace_links(text, links).encode("utf-8"), mode)
         return links
+
+    def import_target(
+        self, identity: RepoIdentity | None = None, board: str | None = None
+    ) -> ImportTarget:
+        """The board that `migrate` writes to: `board`, else the one of `identity`, else the inbox."""
+        if board is not None and board != "inbox":
+            path, found = self.resolve_board(board), True
+        elif board is None and identity is not None:
+            path = find_board(self.projects_dir, identity)
+            found = path is not None
+            path = path or new_board_path(self.projects_dir, identity)
+        else:
+            path = self.inbox_path
+            found = path.is_file()
+        if not found:
+            columns = self.config.columns
+            done = next((t for t in columns if t.casefold() == "done"), None)
+            return ImportTarget(path, identity if board is None else None, False,
+                                columns[0], done)
+        parsed = self._read(path)
+        if not parsed.columns:
+            raise HerdboardError(f"{path}: board has no columns")
+        try:
+            done_title, error = self._done_column(parsed, path).title, None
+        except HerdboardError as problem:
+            done_title, error = None, str(problem)
+        return ImportTarget(path, identity if board is None else None, True,
+                            parsed.columns[0].title, done_title, error)
+
+    def import_cards(
+        self, items: list[Item], path: Path | None = None, identity: RepoIdentity | None = None
+    ) -> Path:
+        """Append converted cards at the bottom of their columns, in one locked write.
+
+        With `path`, the board must exist (the inbox is created). With `identity`, the board
+        of that repository is created like `init` when it is absent. With both, the board at
+        `path` must still belong to that repository, else the write is a conflict.
+        """
+        with self._lock():
+            if path is None:
+                path = find_board(self.projects_dir, identity)
+                if path is None:
+                    path = new_board_path(self.projects_dir, identity)
+                    self._create(path, self._new_board_text([("repo", identity.identity)]))
+            elif not path.exists() and path == self.inbox_path:
+                self._create(path, self._new_board_text())
+            elif not path.is_file():
+                raise NotFoundError(f"No board file: {path}")
+            board = self._read(path)
+            self._require_writable(path, board)
+            if identity is not None and not same_repo(board.frontmatter_value("repo"), identity):
+                raise ConflictError(f"{path}: board no longer belongs to {identity.identity}; retry")
+            if not board.columns:
+                raise HerdboardError(f"{path}: board has no columns")
+            done = self._done_column(board, path) if any(i.checked for i in items) else None
+            for item in items:
+                column = done if item.checked else board.columns[0]
+                kanban_md.insert_card(column, Card(item.card_lines()), "bottom")
+            self._assign_ids(path, board)
+            self._write(path, board)
+        return path
 
     def board_for_repo(self, identity: RepoIdentity) -> Path | None:
         return find_board(self.projects_dir, identity)

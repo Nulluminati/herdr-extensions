@@ -65,7 +65,7 @@ def _frontmatter_data(yaml, lines: list[str]) -> dict:
         return {}
     try:
         data = yaml.safe_load("\n".join(lines[1:-1]))
-    except yaml.YAMLError as error:
+    except (yaml.YAMLError, ValueError) as error:
         raise FormatError(f"invalid YAML in frontmatter: {error}") from error
     if data is None:
         return {}

@@ -13,3 +13,20 @@ They were written from that source, not saved by Obsidian.
   checked items, deeper items, plain nested lines, note links, a done card.
 
 Add boards saved by Obsidian next to these when they are available.
+
+## migrate/
+
+Neutral `TODO.md` files for `herdboard migrate`. Each one reproduces a style
+of real todo file with made-up text.
+
+- `atx.md`: `# Heading` sections, tab indents three levels deep, blank lines
+  between items, punctuation in a heading (`Pantry & Misc.`).
+- `setext-colon.md`: `Heading:` lines underlined with `=====` and `-----`,
+  8-space indents.
+- `colon-tabs.md`: plain `Heading:` lines with list items below, tab indents.
+- `bullets.md`: `-`, `*`, `+`, `1.` and `1)` bullets, with and without
+  checkboxes, at top level and nested.
+- `indents.md`: 2-space, 4-space, tab and 8-space indents, and an item before
+  the first heading.
+- `loose-text.md`: text lines that are not list items, before and after
+  items, after an ATX heading, and a bare `----` line.

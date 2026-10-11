@@ -145,7 +145,10 @@ def load_config(path: Path | None = None) -> Config:
 
     todos_dir = _string(path, data, "todos_dir")
     if todos_dir is not None:
-        config.todos_dir = Path(todos_dir).expanduser()
+        try:
+            config.todos_dir = Path(todos_dir).expanduser()
+        except RuntimeError as error:
+            raise HerdboardError(f"{path}: invalid todos_dir: {error}") from error
     columns = _string_list(path, data, "columns")
     if columns is not None:
         if not columns:

@@ -52,6 +52,11 @@ def _canonical_identity(identity: str) -> str:
     return identity
 
 
+def same_repo(repo: str | None, identity: RepoIdentity) -> bool:
+    """True when a board's `repo:` value names the repository of `identity`."""
+    return repo is not None and _canonical_identity(repo) == _canonical_identity(identity.identity)
+
+
 def normalize_remote(url: str) -> tuple[str, tuple[str, ...]]:
     host, segments = _split_remote(url)
     return host, _canonical_host_path(host, segments)
