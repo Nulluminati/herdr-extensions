@@ -213,8 +213,8 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard show <id>` | Show a card and its detail |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card. Default position for a todo: bottom. A Linear issue without `--position` keeps its place in Linear's order |
 | `herdboard done <id>` | Move a card to its board's done column |
-| `herdboard start <id> [--agent claude\|pi] [--repo]` | Start work on a card (see below) |
-| `herdboard promote <id> --team ENG [--project]` | Turn a todo into a Linear issue (see below) |
+| `herdboard start <id> [--agent claude\|pi] [--no-agent] [--repo] [--checkout PATH]` | Start work on a card (see below) |
+| `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
 | `herdboard init` | Create the board for the current repository |
 | `herdboard migrate <TODO.md>` | Convert an existing `TODO.md` (see below) |
@@ -226,23 +226,40 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 
 ### start
 
-1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For a global todo, `--repo` is required. The tool never picks the first of several linked repositories.
-2. Find the local checkout from a registry of checkouts in `~/.local/state/herdboard/checkouts.json`. The tool adds a checkout each time it runs inside a repository. If none is known, `start` asks for a path.
-3. Choose the branch. For a Linear issue, the issue's `branchName`. For a todo, a name from the card text. The tool validates the name with `git check-ref-format`.
-4. If the card already has a worktree in the state file, reuse it and its workspace. Otherwise create it with `herdr worktree create` and open it as a workspace.
-5. Move the card to In progress. For Linear, the issue moves to the mapped started state.
-6. Start the agent with the card as its first command-line message. A startup timeout from Herdr does not mean the agent failed (see peer-review).
-7. Each step records its progress in the state file. A failed `start` reports which steps succeeded. Running `start` again continues from the first step that did not finish.
+1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For a global todo, `--repo` is required. `--repo` takes a board name or a path inside a checkout. The tool never picks the first of several linked repositories.
+2. Find the local checkout from a registry of checkouts in `~/.local/state/herdboard/checkouts.json`. The registry maps a repository identity to the paths of its main checkouts. The tool adds the main checkout each time it runs inside a repository. If none is known, `start` asks for a path in a terminal. Without a terminal, or with `--json`, it fails with the code `checkout_unknown`. `--checkout PATH` answers, and the tool stores the answer. When several checkouts are known, the tool uses the most recently seen one that still exists.
+3. Choose the branch. For a Linear issue, the issue's `branchName`. For a todo, the card ID plus a short name from the card text, for example `t7k2-fix-login-timeout`: lowercase, words joined by `-`, without tags, dates and links, at most 50 characters. The tool validates the name with `git check-ref-format --branch`. A todo without an ID gets one first, with the usual write rules.
+4. Open the worktree:
+   - If the state file has a worktree for the card and the path still exists, reuse it. If Herdr has it open as a workspace, focus that workspace. Otherwise open it with `herdr worktree open --path`.
+   - If Git already has a worktree for the branch, open that worktree.
+   - Otherwise create it with `herdr worktree create --cwd <checkout> --branch <branch> --focus`. Herdr creates the branch from the checkout's current branch when the branch does not exist, and checks it out when it exists. Herdr chooses the worktree path (`~/.herdr/worktrees/<repo>/<branch>`).
+   - Herdr also opens a workspace for the main checkout when none is open. The tool leaves it open.
+5. Move the card to the column that `start_column` names (default: the column that `linear.columns.started` names, "In progress"). For Linear, the issue moves to the mapped started state. A card that is already in that column does not move.
+6. Start the agent in the root pane of the worktree workspace: `herdr agent start hb-<id> --kind <agent> --pane <pane> -- <message>`. The message has the card ID, title, body, URL for Linear, and this instruction: use the `herdboard` CLI to update the card. The agent comes from `--agent`, else `start_agent` in config (default `claude`). `--no-agent` skips this step. A startup timeout or `agent_not_ready` from Herdr does not mean the agent failed (see peer-review). The tool does not start a second agent for a card whose stored agent pane still runs an agent.
+7. Each step records its progress in `~/.local/state/herdboard/starts.json`, keyed by the card ID or the Linear issue ID. A failed `start` reports which steps succeeded. Running `start` again continues from the first step that did not finish.
+8. `start` needs Herdr: a `herdr` binary (`HERDR_BIN_PATH`, else `herdr` on the path) and a reachable Herdr server. Without them it fails with the code `herdr_unavailable`.
 
-When the board refreshes, it checks each stored worktree. If Herdr removed one, the board shows this on the card. The card does not move by itself.
+On the board, `s` starts the selected card with the default agent. `S` asks for the agent first.
+
+When the board refreshes, it checks each stored worktree. If the path no longer exists, the card shows `worktree removed`. The card does not move by itself, and the state entry stays until the next `start` of that card replaces it.
 
 ### promote
 
-1. Read the todo, including its indented lines, tags and due date.
-2. Create the Linear issue: the first line becomes the title, the indented sub-items become sub-issues, tags become labels when a label with that name exists, the due date becomes the due date, and a linked note becomes the description when `vault_root` is set. Anything that cannot be converted goes into the description as text.
-3. Record the operation and the new issue ID in the state file before and after the call.
-4. Only after Linear confirms the issue, move the todo to Done and add `→ ENG-123` to its first line. The todo is not deleted.
-5. If the call times out, the tool searches Linear for the recorded operation before it creates anything again.
+`herdboard promote <id> [--team ENG] [--project NAME] [--state]` turns a todo into a Linear issue. Team and project follow the rules of `add --linear`, including the repository default.
+
+1. Read the todo, including its indented lines, tags and due date. The todo needs an ID; a todo without one gets one first.
+2. Create the Linear issue, assigned to you:
+   - The first line, without tags, the due date and the block ID, becomes the title.
+   - Indented checklist items (`- [ ] …` one level below the card) become sub-issues, in order. A checked item becomes a sub-issue in the completed state.
+   - A tag becomes a label when a label with that name exists in the issue's team or in the workspace. A team label wins over a workspace label.
+   - The `📅` date becomes the due date.
+   - A linked note becomes the description when `vault_root` is set and the note exists.
+   - Anything that cannot be converted goes into the description as text: other indented lines, deeper sub-items, tags without a label, and links without a note.
+   - The issue starts in the state of the todo's current column. A todo in Done becomes an issue in the completed state.
+3. Record the operation in `~/.local/state/herdboard/promotions.json` before the first call: the todo ID, and a client-generated ID for the issue and for each sub-issue. Update the record after each confirmed issue.
+4. Only after Linear confirms the issue and every sub-issue, move the todo to its board's done column and add `→ ENG-123` to its first line, before the block ID. The todo is not deleted. Then remove the record.
+5. If a call times out, the tool looks up the recorded ID before it creates anything again (see "Cache and offline use"). Running `promote` again on a todo with a record looks up every recorded ID and creates only what Linear does not have.
+6. A todo whose first line already has `→ <identifier>` is promoted. `promote` refuses it with the code `already_promoted`.
 
 ### migrate
 
@@ -261,6 +278,8 @@ columns = ["Backlog", "Todo", "In progress", "Review", "Done"]
 complete_markers = []      # added to the English "Complete"
 archive_titles = []        # added to the English "Archive"
 # vault_root = "~/Notes"     # set to resolve [[note]] links
+start_agent = "claude"     # or "pi"
+# start_column = "In progress"   # default: linear.columns.started
 
 [linear]
 enabled = true            # default: true when LINEAR_API_KEY is set
