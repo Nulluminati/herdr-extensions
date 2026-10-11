@@ -7,5 +7,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "graphql-core>=3.3.0",
+    "pyyaml>=6.0.3",
     "textual>=8.2.8",
 ]

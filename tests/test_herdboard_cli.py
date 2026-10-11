@@ -97,9 +97,12 @@ class CommandTests(CliTestCase):
             set(data["cards"][0]),
             {
                 "ref", "board", "path", "column", "title", "checked", "due", "tags", "body",
-                "column_limit",
+                "column_limit", "source", "url", "state", "team", "pr", "read_only", "fetched_at",
+                "stale",
             },
         )
+        self.assertEqual(data["cards"][0]["source"], "todo")
+        self.assertNotIn("linear", data)
 
     def test_show_text_and_json(self):
         card = self.run_json("add", "buy #errand 📅 2026-01-02", directory=self.plain)["card"]

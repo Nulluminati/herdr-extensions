@@ -14,12 +14,18 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, Static
 from textual.worker import Worker, WorkerState
 
+from .linear import LinearAuthError
 from .model import HerdboardError
 from .store import TEMP_REF, CardView, Store
+from .views import LinearResult
 
-VIEWS = ["repo", "global", "all"]
+VIEWS = ["repo", "global", "all", "mine"]
 RELOAD_SECONDS = 2.0
+LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
+LINEAR_GROUP = "linear-fetch"
+LINEAR_WRITE_MESSAGE = "Linear writes arrive in a later step"
+LINEAR_MARK = "◆"
 
 HELP_KEYS = [
     ("left, h", "previous column"),
@@ -31,8 +37,8 @@ HELP_KEYS = [
     ("enter", "card detail"),
     ("a", "add a card to the selected column"),
     ("d", "mark the card done"),
-    ("v", "cycle view: repo, global, all"),
-    ("r", "reload"),
+    ("v", "cycle view: repo, global, all, mine"),
+    ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
     ("q", "quit"),
@@ -57,6 +63,10 @@ class CardWidget(Static):
         self.card = card
         text = Text(card.title)
         meta = Text(card.ref, style="dim")
+        if card.source == "linear":
+            meta = Text(f"{LINEAR_MARK} {card.ref}", style="dim")
+            if card.pr:
+                meta.append(" · PR", style="bold")
         if show_board:
             meta.append(f" · {card.board}", style="dim")
         if card.body:
@@ -84,10 +94,18 @@ class DetailScreen(ModalBase):
     def __init__(self, card: CardView, notes: list[dict] | None):
         super().__init__()
         lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
+        if card.source == "linear":
+            lines.append(f"state: {card.state}")
+            if card.team:
+                lines.append(f"team: {card.team}")
+            if card.url:
+                lines.append(f"url: {card.url}")
+            if card.pr:
+                lines.append("pull request: yes")
         if card.due:
             lines.append(f"due: {card.due}")
         if card.tags:
-            lines.append("tags: " + ", ".join(card.tags))
+            lines.append(("labels: " if card.source == "linear" else "tags: ") + ", ".join(card.tags))
         lines.extend(card.body)
         for note in notes or []:
             lines.append(f"--- {note['name']} ---")
@@ -187,6 +205,10 @@ class HerdboardApp(App):
         paths_for: Callable[[str], list[Path]],
         repo_board: Path | None = None,
         reload_interval: float = RELOAD_SECONDS,
+        linear_for: Callable[[str], LinearResult] | None = None,
+        linear_active: bool = False,
+        available: Callable[[str], bool] | None = None,
+        linear_interval: float = LINEAR_SECONDS,
     ):
         super().__init__()
         self.store = store
@@ -194,6 +216,19 @@ class HerdboardApp(App):
         self.paths_for = paths_for
         self.repo_board = repo_board
         self.reload_interval = reload_interval
+        self.linear_for = linear_for
+        self.linear_active = linear_active and linear_for is not None
+        self.available = available or (
+            lambda view: view != "mine" and (view != "repo" or repo_board is not None)
+        )
+        self.linear_interval = linear_interval
+        self.linear_results: dict[str, LinearResult] = {}
+        self.linear_state = "loading" if self.linear_active else "off"
+        # One Linear fetch runs at a time. A refresh asked meanwhile waits as one queued fetch.
+        self.linear_fetching = False
+        self.linear_queued = False
+        self.linear_sequence = 0
+        self.linear_applied: dict[str, int] = {}
         self.columns: list[ColumnData] = []
         self.paths: list[Path] = []
         self.col = 0
@@ -214,6 +249,9 @@ class HerdboardApp(App):
     async def on_mount(self) -> None:
         await self.reload()
         self.set_interval(self.reload_interval, self.check_files)
+        if self.linear_active:
+            self.fetch_linear()
+            self.set_interval(self.linear_interval, self.fetch_linear)
 
     # Loading
 
@@ -236,7 +274,11 @@ class HerdboardApp(App):
                     data.limit = column.limit
                 data.completed = data.completed or column.completed
                 data.cards.extend(column.cards)
-        if len(paths) <= 1:
+        linear = self.linear_results.get(self.view)
+        for card in linear.cards if linear else []:
+            data = by_key.setdefault(card.column.casefold(), ColumnData(card.column))
+            data.cards.append(card)
+        if len(paths) == 1 and not linear:
             return list(by_key.values())
         wanted = [name.casefold() for name in self.store.config.columns]
         ordered = [by_key[key] for key in wanted if key in by_key]
@@ -305,10 +347,24 @@ class HerdboardApp(App):
         self._select(identity, column)
         await self._rebuild()
 
+    def linear_label(self) -> str:
+        """The Linear part of the title bar."""
+        if not self.linear_active:
+            return "Linear: off"
+        if self.linear_state == "auth":
+            return "Linear: authentication failed"
+        result = self.linear_results.get(self.view)
+        if result is None:
+            return "Linear: error" if self.linear_state == "error" else "Linear: loading"
+        if result.fetched_at is None:
+            return "Linear: no links"
+        stamp = result.fetched_at.astimezone().strftime("%H:%M")
+        return f"Linear: stale since {stamp}" if result.stale else f"Linear: {stamp}"
+
     async def _rebuild(self) -> None:
         names = ", ".join(self.store.board_name(path) for path in self.paths) or "no boards"
         title = self.base.query_one("#title-bar", Static)
-        title.plain = f"herdboard · view: {self.view} · {names}"
+        title.plain = f"herdboard · view: {self.view} · {names} · {self.linear_label()}"
         title.update(Text(title.plain))
         show_board = len(self.paths) > 1
         container = self.base.query_one("#columns", HorizontalScroll)
@@ -389,6 +445,9 @@ class HerdboardApp(App):
     async def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Apply the result of a store change on the event loop."""
         worker = event.worker
+        if worker.group == LINEAR_GROUP:
+            await self._linear_done(event)
+            return
         if worker.group != WRITE_GROUP or event.state not in (
             WorkerState.SUCCESS,
             WorkerState.ERROR,
@@ -410,9 +469,77 @@ class HerdboardApp(App):
             screen.dismiss(None)
         await self.reload(card.ref if card else None)
 
+    # Linear
+
+    def fetch_linear(self) -> None:
+        """Fetch the Linear cards of the current view in a thread, one fetch at a time."""
+        if not self.linear_active:
+            return
+        if self.linear_fetching:
+            self.linear_queued = True
+            return
+        self.linear_fetching = True
+        self.linear_sequence += 1
+        view, fetch, sequence = self.view, self.linear_for, self.linear_sequence
+
+        def guarded() -> tuple[str, int, LinearResult | None, HerdboardError | None]:
+            try:
+                return view, sequence, fetch(view), None
+            except HerdboardError as error:
+                return view, sequence, None, error
+
+        self.run_worker(guarded, thread=True, group=LINEAR_GROUP, exit_on_error=False)
+
+    async def _linear_done(self, event: Worker.StateChanged) -> None:
+        if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+            return
+        self.linear_fetching = False
+        try:
+            await self._apply_linear(event)
+        finally:
+            if self.linear_queued:
+                self.linear_queued = False
+                self.fetch_linear()
+
+    async def _apply_linear(self, event: Worker.StateChanged) -> None:
+        if event.state == WorkerState.ERROR:
+            self.notify(str(event.worker.error), severity="error")
+            return
+        if event.state != WorkerState.SUCCESS:
+            return
+        view, sequence, result, error = event.worker.result
+        if view != self.view or sequence < self.linear_applied.get(view, 0):
+            return
+        self.linear_applied[view] = sequence
+        if isinstance(error, LinearAuthError):
+            # Cached cards would look current although the key no longer works.
+            self.linear_state = "auth"
+            self.linear_results.clear()
+            self.notify(str(error), severity="error")
+            await self.reload()
+            return
+        if error is not None:
+            self.linear_state = "error"
+            self.notify(str(error), severity="error")
+            await self.reload()
+            return
+        self.linear_state = "ok"
+        self.linear_results[view] = result
+        for message in result.errors:
+            self.notify(message, severity="warning")
+        await self.reload()
+
+    def _refuse_linear_write(self, card: CardView | None) -> bool:
+        if card is None or card.source != "linear":
+            return False
+        self.notify(LINEAR_WRITE_MESSAGE, severity="warning")
+        return True
+
     def action_move(self, step: int) -> None:
         card = self.current_card()
         target = self.col + step
+        if self._refuse_linear_write(card):
+            return
         if card is None or not 0 <= target < len(self.columns):
             return
         name = self.columns[target].name
@@ -420,6 +547,8 @@ class HerdboardApp(App):
 
     def action_done(self) -> None:
         card = self.current_card()
+        if self._refuse_linear_write(card):
+            return
         if card is not None:
             self._start_write(lambda: self.store.done(card.ref))
 
@@ -427,11 +556,12 @@ class HerdboardApp(App):
         card = self.current_card()
         if card is None:
             return
-        try:
-            notes = self.store.notes_for(card)
-        except HerdboardError as error:
-            self.notify(str(error), severity="error")
-            notes = None
+        notes = None
+        if card.source != "linear":
+            try:
+                notes = self.store.notes_for(card)
+            except HerdboardError as error:
+                self.notify(str(error), severity="error")
         self.push_screen(DetailScreen(card, notes))
 
     def _add_path(self) -> Path:
@@ -439,7 +569,7 @@ class HerdboardApp(App):
             return self.repo_board
         if self.view == "all":
             card = self.current_card()
-            if card is not None:
+            if card is not None and card.path is not None:
                 return card.path
         return self.store.inbox_path
 
@@ -456,16 +586,19 @@ class HerdboardApp(App):
         self._start_write(lambda: self.store.add(screen.path, text, screen.column), add=screen)
 
     async def action_cycle_view(self) -> None:
-        views = [v for v in VIEWS if v != "repo" or self.repo_board is not None]
+        views = [v for v in VIEWS if self.available(v) and (v != "mine" or self.linear_active)]
         if self.view in views:
             self.view = views[(views.index(self.view) + 1) % len(views)]
         else:
             self.view = views[0]
         self.col = self.row = 0
+        self.linear_state = "loading"
         await self.reload(select="")
+        self.fetch_linear()
 
     async def action_reload(self) -> None:
         await self.reload()
+        self.fetch_linear()
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

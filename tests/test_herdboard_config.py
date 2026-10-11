@@ -126,5 +126,91 @@ class ConfigTest(unittest.TestCase):
             self.assertIn(str(path), str(caught.exception))
 
 
+class LinearConfigTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        env = {"HOME": str(self.dir / "home"), "XDG_CONFIG_HOME": "", "HERDBOARD_CONFIG": ""}
+        patcher = mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("LINEAR_API_KEY", None)
+        os.environ.pop("OTHER_KEY", None)
+
+    def write(self, path, text):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def test_defaults(self):
+        linear = load_config().linear
+        self.assertIsNone(linear.enabled)
+        self.assertEqual(linear.api_key_env, "LINEAR_API_KEY")
+        self.assertEqual(linear.columns, {
+            "backlog": "Backlog", "triage": "Backlog", "unstarted": "Todo",
+            "started": "In progress", "completed": "Done", "canceled": "Done",
+        })
+        self.assertEqual(linear.state_names, {"In Review": "Review"})
+
+    def test_active_follows_key_by_default(self):
+        linear = load_config().linear
+        self.assertFalse(linear.active)
+        os.environ["LINEAR_API_KEY"] = "k"
+        self.assertTrue(linear.active)
+
+    def test_enabled_false_wins_and_true_needs_key(self):
+        os.environ["LINEAR_API_KEY"] = "k"
+        off = self.write(self.dir / "off.toml", "[linear]\nenabled = false\n")
+        self.assertFalse(load_config(off).linear.active)
+        on = self.write(self.dir / "on.toml", "[linear]\nenabled = true\n")
+        self.assertTrue(load_config(on).linear.active)
+        del os.environ["LINEAR_API_KEY"]
+        self.assertFalse(load_config(on).linear.active)
+
+    def test_custom_key_variable_and_overrides(self):
+        path = self.write(self.dir / "a.toml", """
+[linear]
+api_key_env = "OTHER_KEY"
+
+[linear.columns]
+started = "Doing"
+
+[linear.state_names]
+"Ready" = "Todo"
+""")
+        os.environ["OTHER_KEY"] = "k"
+        linear = load_config(path).linear
+        self.assertTrue(linear.active)
+        self.assertEqual(linear.columns["started"], "Doing")
+        self.assertEqual(linear.columns["unstarted"], "Todo")
+        self.assertEqual(linear.state_names, {"In Review": "Review", "Ready": "Todo"})
+
+    def test_api_key_in_file_is_rejected(self):
+        path = self.write(self.dir / "a.toml", '[linear]\napi_key = "lin_api_secret"\n')
+        with self.assertRaisesRegex(HerdboardError, "api_key"):
+            load_config(path)
+
+    def test_invalid_values(self):
+        for text in ('linear = 1', '[linear]\nenabled = "yes"', '[linear.columns]\nstarted = 1',
+                     '[linear.columns]\nunknown = "X"', '[linear]\nstate_names = 1'):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "a.toml", text)
+                with self.assertRaises(HerdboardError):
+                    load_config(path)
+
+    def test_done_days(self):
+        self.assertEqual(load_config().linear.done_days, 14)
+        for text, expected in (("", 14), ("done_days = 0", 14), ("done_days = 30", 30)):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "d.toml", f"[linear]\n{text}\n")
+                self.assertEqual(load_config(path).linear.done_days, expected)
+        for text in ("done_days = -1", 'done_days = "7"', "done_days = true", "done_days = 1.5"):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "d.toml", f"[linear]\n{text}\n")
+                with self.assertRaisesRegex(HerdboardError, "done_days"):
+                    load_config(path)
+
+
 if __name__ == "__main__":
     unittest.main()

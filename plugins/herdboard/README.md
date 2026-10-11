@@ -154,7 +154,7 @@ Linear is optional. It turns on when `LINEAR_API_KEY` is set, or from config. Th
 ### Repositories and Linear projects
 
 - The link is many-to-many. Each repository board lists its Linear projects in `linear-projects` frontmatter. A project that serves several repositories appears in each of those lists. The tool computes the reverse direction.
-- `herdboard link <project> [--label <label>]` writes the link with stable IDs and display names. Names update when they change in Linear.
+- `herdboard link <project> [--label <label>]` writes the link with stable IDs and display names. Names update when they change in Linear. It replaces only the `linear-projects` entry in the frontmatter; other keys, their order and comments stay unchanged.
 - A repository view shows every issue of each linked project, for every assignee. A link with labels shows only issues that have at least one of those labels.
 - When a linked project or label no longer exists or is not accessible, the board shows an error for that link. It does not show an empty board.
 - When Linear's GitHub integration attaches a pull request from this repository to an issue, the card shows a marker. The tool matches the pull request URL against the board's `repo:` identity. The marker does not filter.
@@ -166,6 +166,7 @@ Linear is optional. It turns on when `LINEAR_API_KEY` is set, or from config. Th
 - A rate-limited read waits and retries, with a limit. A rate-limited write fails and says so.
 - An issue that two linked projects return shows once (by issue ID).
 - Archived projects and issues are hidden. `--archived` shows them.
+- Completed issues show only when they were completed in the last `done_days` days (default 14). Linear filters them on the server with a duration such as `-P14D`. Open issues always show.
 
 ### Cache and offline use
 
@@ -212,7 +213,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 
 1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For a global todo, `--repo` is required. The tool never picks the first of several linked repositories.
 2. Find the local checkout from a registry of checkouts in `~/.local/state/herdboard/checkouts.json`. The tool adds a checkout each time it runs inside a repository. If none is known, `start` asks for a path.
-3. Choose the branch. For a Linear issue, the issue's `gitBranchName`. For a todo, a name from the card text. The tool validates the name with `git check-ref-format`.
+3. Choose the branch. For a Linear issue, the issue's `branchName`. For a todo, a name from the card text. The tool validates the name with `git check-ref-format`.
 4. If the card already has a worktree in the state file, reuse it and its workspace. Otherwise create it with `herdr worktree create` and open it as a workspace.
 5. Move the card to In progress. For Linear, the issue moves to the mapped started state.
 6. Start the agent with the card as its first command-line message. A startup timeout from Herdr does not mean the agent failed (see peer-review).
@@ -248,6 +249,7 @@ archive_titles = []        # added to the English "Archive"
 
 [linear]
 enabled = true            # default: true when LINEAR_API_KEY is set
+done_days = 14            # completed issues older than this are hidden
 
 [linear.columns]
 backlog = "Backlog"

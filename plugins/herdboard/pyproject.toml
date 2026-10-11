@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Kanban board for Obsidian Markdown todos and Linear issues, inside Herdr"
 requires-python = ">=3.11"
 dependencies = [
+    "pyyaml>=6.0.3",
     "textual>=8.2.8",
 ]
 

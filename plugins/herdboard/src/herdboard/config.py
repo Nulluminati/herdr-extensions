@@ -10,6 +10,40 @@ import tomllib
 from .model import HerdboardError, IoError
 
 DEFAULT_COLUMNS = ["Backlog", "Todo", "In progress", "Review", "Done"]
+DEFAULT_LINEAR_COLUMNS = {
+    "backlog": "Backlog",
+    "triage": "Backlog",
+    "unstarted": "Todo",
+    "started": "In progress",
+    "completed": "Done",
+    "canceled": "Done",
+}
+
+
+DEFAULT_DONE_DAYS = 14
+
+
+@dataclass
+class LinearConfig:
+    """`[linear]` settings. The API key comes from the environment, never from the file."""
+
+    enabled: bool | None = None  # None: on when the API key variable is set
+    api_key_env: str = "LINEAR_API_KEY"
+    columns: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LINEAR_COLUMNS))
+    state_names: dict[str, str] = field(default_factory=lambda: {"In Review": "Review"})
+    # Days a completed issue stays visible. The client also accepts None (show every
+    # completed issue), but TOML has no null, so a config file cannot set it.
+    done_days: int = DEFAULT_DONE_DAYS
+
+    @property
+    def api_key(self) -> str | None:
+        return os.environ.get(self.api_key_env) or None
+
+    @property
+    def active(self) -> bool:
+        """True when Linear is on and a key is available."""
+        wanted = self.api_key is not None if self.enabled is None else self.enabled
+        return wanted and self.api_key is not None
 
 
 @dataclass
@@ -19,6 +53,7 @@ class Config:
     complete_markers: list[str] = field(default_factory=lambda: ["Complete"])
     vault_root: Path | None = None
     archive_titles: list[str] = field(default_factory=lambda: ["Archive"])
+    linear: LinearConfig = field(default_factory=LinearConfig)
 
 
 def config_path(path: Path | None = None) -> Path:
@@ -50,6 +85,46 @@ def _string_list(path: Path, data: dict, key: str) -> list[str] | None:
     return list(value)
 
 
+def _string_map(path: Path, data: dict, key: str, label: str) -> dict[str, str]:
+    value = data.get(key, {})
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and v for k, v in value.items()
+    ):
+        raise HerdboardError(f"{path}: {label} must be a table of non-empty strings")
+    return dict(value)
+
+
+def _load_linear(path: Path, data: dict) -> LinearConfig:
+    table = data.get("linear", {})
+    if not isinstance(table, dict):
+        raise HerdboardError(f"{path}: linear must be a table")
+    if "api_key" in table:
+        raise HerdboardError(
+            f"{path}: linear.api_key is not read from the config file; "
+            "set the environment variable named by linear.api_key_env"
+        )
+    linear = LinearConfig()
+    if "enabled" in table:
+        if not isinstance(table["enabled"], bool):
+            raise HerdboardError(f"{path}: linear.enabled must be true or false")
+        linear.enabled = table["enabled"]
+    api_key_env = _string(path, table, "api_key_env")
+    if api_key_env is not None:
+        linear.api_key_env = api_key_env
+    columns = _string_map(path, table, "columns", "linear.columns")
+    unknown = sorted(set(columns) - set(DEFAULT_LINEAR_COLUMNS))
+    if unknown:
+        raise HerdboardError(f"{path}: unknown state type in linear.columns: {', '.join(unknown)}")
+    linear.columns.update(columns)
+    linear.state_names.update(_string_map(path, table, "state_names", "linear.state_names"))
+    done_days = table.get("done_days", 0)
+    if isinstance(done_days, bool) or not isinstance(done_days, int) or done_days < 0:
+        raise HerdboardError(f"{path}: linear.done_days must be an integer of 0 or more")
+    # 0 means the default.
+    linear.done_days = done_days or DEFAULT_DONE_DAYS
+    return linear
+
+
 def load_config(path: Path | None = None) -> Config:
     path = config_path(path)
     config = Config()
@@ -79,4 +154,5 @@ def load_config(path: Path | None = None) -> Config:
     vault_root = _string(path, data, "vault_root")
     if vault_root is not None:
         config.vault_root = Path(vault_root).expanduser()
+    config.linear = _load_linear(path, data)
     return config

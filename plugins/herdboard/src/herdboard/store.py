@@ -15,6 +15,7 @@ import time
 from typing import Callable, Iterator
 
 from . import kanban_md
+from .linear_links import ProjectLink, parse_links, replace_links
 from .config import Config
 from .identity import RepoIdentity, find_board, new_board_path
 from .model import (
@@ -38,7 +39,7 @@ NOTE_LINK = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 class CardView:
     ref: str
     board: str
-    path: Path
+    path: Path | None
     column: str
     title: str
     checked: bool
@@ -46,6 +47,24 @@ class CardView:
     tags: list[str]
     body: list[str]
     column_limit: int | None = None
+    # Linear cards fill the fields below; todos keep the defaults.
+    source: str = "todo"
+    url: str | None = None
+    state: str | None = None
+    team: str | None = None
+    pr: bool = False
+    read_only: bool = False
+    fetched_at: str | None = None
+    stale: bool = False
+
+
+@dataclass
+class BoardMeta:
+    """What Linear views need from a board: its repository and its project links."""
+
+    repo: str | None
+    links: list[ProjectLink]
+    error: str | None = None
 
 
 @dataclass
@@ -179,6 +198,29 @@ class Store:
             path = new_board_path(self.projects_dir, identity)
             self._create(path, self._new_board_text([("repo", identity.identity)]))
         return path
+
+    def board_meta(self, path: Path) -> BoardMeta:
+        board = self._read(path)
+        try:
+            return BoardMeta(board.frontmatter_value("repo"), parse_links(board.frontmatter))
+        except FormatError as error:
+            return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: {error}")
+
+    def update_links(
+        self, path: Path, change: Callable[[list[ProjectLink]], list[ProjectLink]]
+    ) -> list[ProjectLink]:
+        """Rewrite the `linear-projects` frontmatter of a board with `change(links)`."""
+        with self._lock():
+            try:
+                text = path.read_bytes().decode("utf-8")
+                mode = path.stat().st_mode & 0o7777
+            except (OSError, UnicodeDecodeError) as error:
+                raise IoError(f"{path}: cannot read board: {error}") from error
+            board = kanban_md.parse(text, tuple(self.config.archive_titles))
+            self._require_writable(path, board)
+            links = change(parse_links(board.frontmatter))
+            self._write_file(path, replace_links(text, links).encode("utf-8"), mode)
+        return links
 
     def board_for_repo(self, identity: RepoIdentity) -> Path | None:
         return find_board(self.projects_dir, identity)
@@ -321,6 +363,10 @@ class Store:
                 f"{path}: not a valid board: frontmatter must be closed and contain "
                 "'kanban-plugin: board'. The board is read only"
             )
+        try:
+            parse_links(frontmatter)
+        except FormatError as error:
+            raise FormatError(f"{path}: {error}. The board is read only") from error
 
     def _find(self, board: Board, located: _Located) -> tuple[Column, Card]:
         """Find the card again in a fresh parse; its lines must be unchanged."""
