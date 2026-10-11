@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 import threading
@@ -19,6 +20,7 @@ from .linear import LinearAuthError
 from .linear_writes import LinearWriter
 from .model import HerdboardError
 from .store import TEMP_REF, CardView, Store
+from .start import Starter, mark_removed
 from .views import LinearResult
 
 VIEWS = ["repo", "global", "all", "mine"]
@@ -26,6 +28,7 @@ RELOAD_SECONDS = 2.0
 LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
+START_GROUP = "card-start"
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
 LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
@@ -40,6 +43,8 @@ HELP_KEYS = [
     ("enter", "card detail"),
     ("a", "add a card to the selected column"),
     ("d", "mark the card done (a Linear card moves to its completed state)"),
+    ("s", "start work with the default agent"),
+    ("S", "choose claude or pi and start work"),
     ("v", "cycle view: repo, global, all, mine"),
     ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
@@ -74,6 +79,8 @@ class CardWidget(Static):
             meta.append(f" · {card.board}", style="dim")
         if card.body:
             meta.append(f" +{len(card.body)}", style="dim")
+        if card.worktree_removed:
+            meta.append(" · worktree removed", style="bold yellow")
         text.append("\n")
         text.append_text(meta)
         self.plain = text.plain
@@ -189,6 +196,20 @@ class StateScreen(ModalBase):
         self.dismiss(self.found[event.option_index])
 
 
+class AgentScreen(ModalBase):
+    """Select the agent before starting a card."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Choose an agent")
+            yield OptionList("claude", "pi")
+            yield Label("enter: choose, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(("claude", "pi")[event.option_index])
+
+
 class HerdboardApp(App):
     TITLE = "herdboard"
     CSS = """
@@ -218,6 +239,8 @@ class HerdboardApp(App):
         Binding("enter", "detail", "Detail"),
         Binding("a", "add", "Add"),
         Binding("d", "done", "Done"),
+        Binding("s", "start", "Start"),
+        Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("v", "cycle_view", "View"),
         Binding("r", "reload", "Reload"),
         Binding("question_mark", "help", "Help"),
@@ -236,6 +259,8 @@ class HerdboardApp(App):
         available: Callable[[str], bool] | None = None,
         linear_interval: float = LINEAR_SECONDS,
         linear_writer: LinearWriter | None = None,
+        start_card: Callable[[str, str | None], dict] | None = None,
+        directory: Path | None = None,
     ):
         super().__init__()
         self.store = store
@@ -250,6 +275,9 @@ class HerdboardApp(App):
         )
         self.linear_interval = linear_interval
         self.linear_writer = linear_writer
+        self.start_card = start_card
+        self.directory = directory or Path.cwd()
+        self.starting = False
         self.linear_results: dict[str, LinearResult] = {}
         self.linear_state = "loading" if self.linear_active else "off"
         # One Linear fetch runs at a time. A refresh asked meanwhile waits as one queued fetch.
@@ -308,6 +336,7 @@ class HerdboardApp(App):
         for card in linear.cards if linear else []:
             data = by_key.setdefault(card.column.casefold(), ColumnData(card.column))
             data.cards.append(card)
+        mark_removed([card for data in by_key.values() for card in data.cards])
         if len(paths) == 1 and not linear:
             return list(by_key.values())
         wanted = [name.casefold() for name in self.store.config.columns]
@@ -369,7 +398,7 @@ class HerdboardApp(App):
             self._ensure_inbox()
             paths = self.paths_for(self.view)
             signature = self._signature(paths)
-            columns = self._load(paths)
+            columns = await asyncio.to_thread(self._load, paths)
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return
@@ -425,7 +454,14 @@ class HerdboardApp(App):
             columns[self.col].scroll_visible(animate=False)
 
     async def check_files(self) -> None:
-        if self._signature(self.paths_for_safe()) != self.signature:
+        cards = [card for column in self.columns for card in column.cards]
+        old = [card.worktree_removed for card in cards]
+        try:
+            await asyncio.to_thread(mark_removed, cards)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        if self._signature(self.paths_for_safe()) != self.signature or old != [card.worktree_removed for card in cards]:
             await self.reload()
 
     def paths_for_safe(self) -> list[Path]:
@@ -462,7 +498,7 @@ class HerdboardApp(App):
         refetch: bool = False,
     ) -> bool:
         """Run a store or Linear change in a thread worker, one at a time. False when busy."""
-        if self.writing:
+        if self.writing or self.starting:
             self.notify("Busy: a change is still being written", severity="warning")
             return False
 
@@ -481,6 +517,22 @@ class HerdboardApp(App):
     async def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Apply the result of a store change on the event loop."""
         worker = event.worker
+        if worker.group == START_GROUP:
+            if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+                return
+            self.starting = False
+            result, error = (None, None)
+            if event.state == WorkerState.SUCCESS:
+                result, error = worker.result
+            elif event.state == WorkerState.ERROR:
+                error = worker.error
+            if error:
+                self.notify(str(error), severity="error")
+            elif result:
+                self.notify(f"Started {result['ref']} in {result['workspace_id']} ({result['worktree_path']})")
+            await self.reload(result["ref"] if result else None)
+            self.fetch_linear()
+            return
         if worker.group == LINEAR_GROUP:
             await self._linear_done(event)
             return
@@ -618,6 +670,36 @@ class HerdboardApp(App):
             self._linear_write(card, lambda writer: writer.done(card.ref, self.ask_state))
             return
         self._start_write(lambda: self.store.done(card.ref))
+
+    def _start_card(self, ref: str, agent: str | None) -> None:
+        if self.starting or self.writing:
+            self.notify("Busy: a card change is in progress", severity="warning")
+            return
+
+        def guarded():
+            try:
+                if self.start_card:
+                    return self.start_card(ref, agent), None
+                starter = Starter(self.store, self.directory, writer=self.linear_writer,
+                                  ask_state=self.ask_state, repository_view=self.view == "repo")
+                repo = self.repo_board if self.view == "repo" else None
+                return starter.start(ref, agent=agent, repo=repo), None
+            except HerdboardError as error:
+                return None, error
+
+        self.starting = True
+        self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+
+    def action_start(self) -> None:
+        card = self.current_card()
+        if card:
+            self._start_card(card.ref, None)
+
+    def action_choose_agent(self) -> None:
+        card = self.current_card()
+        if card:
+            ref = card.ref
+            self.push_screen(AgentScreen(), lambda agent: self._start_card(ref, agent) if agent else None)
 
     def action_detail(self) -> None:
         card = self.current_card()

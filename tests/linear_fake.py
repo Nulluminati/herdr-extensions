@@ -64,6 +64,9 @@ class FakeLinear:
         self.retry_after = "2"
         self.delay = 0
         self.mutation_failure = None
+        # One failure per mutation, taken in order (None: no failure). When the list is
+        # empty, `mutation_failure` applies to every mutation.
+        self.mutation_failures = []
         self.mutation_delay = 0.3
 
     def __enter__(self):
@@ -90,8 +93,8 @@ class FakeLinear:
                         headers["Retry-After"] = fake.retry_after
                 elif fake.responses:
                     status, body, headers = fake.responses.pop(0)
-                elif request["operationName"] in ("IssueUpdate", "IssueCreate") and fake.mutation_failure:
-                    failure = fake.mutation_failure
+                elif request["operationName"] in ("IssueUpdate", "IssueCreate") and fake.next_failure():
+                    failure = fake.failure
                     field = "issueUpdate" if request["operationName"] == "IssueUpdate" else "issueCreate"
                     if failure == "success_false":
                         body = {"data": {field: {"success": False, "issue": None}}}
@@ -140,6 +143,11 @@ class FakeLinear:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+
+    def next_failure(self):
+        """The failure for the next mutation; it stays in `failure` for the handler."""
+        self.failure = self.mutation_failures.pop(0) if self.mutation_failures else self.mutation_failure
+        return self.failure
 
     def respond(self, request):
         try:
@@ -245,6 +253,8 @@ class FakeLinear:
             else:
                 team_id = inputs["teamId"]
                 issue = None
+                if any(i["id"] == inputs["id"] for i in fixtures["issues"]):
+                    raise ValueError("Duplicate issue id")
             team = next((t for t in fixtures["teams"] if t["id"] == team_id), None)
             if team is None:
                 raise ValueError("Unknown team id")
@@ -277,6 +287,15 @@ class FakeLinear:
                                              if label["id"] in inputs["labelIds"]]}
             if "assigneeId" in inputs:
                 issue["assignee"] = {"id": inputs["assigneeId"], "name": "x"}
+            for key in ("description", "dueDate"):
+                if key in inputs:
+                    issue[key] = inputs[key]
+            if "parentId" in inputs:
+                parent = next((i for i in fixtures["issues"] if i["id"] == inputs["parentId"]), None)
+                if parent is None:
+                    raise ValueError("Unknown parent id")
+                issue["parent"] = {"id": parent["id"], "identifier": parent["identifier"]}
+                parent["children"]["nodes"].append({"identifier": issue["identifier"]})
             field = "issueUpdate" if op == "IssueUpdate" else "issueCreate"
             return {field: {"success": True, "issue": copy.deepcopy(issue)}}
         raise AssertionError(f"Unknown operation: {op}")

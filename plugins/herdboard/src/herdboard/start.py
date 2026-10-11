@@ -1,0 +1,435 @@
+"""Resume card starts through Herdr without importing the board UI."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+import time
+
+from .identity import _git, repo_identity
+from .linear_cards import LINEAR_REF, issue_card
+from .linear_source import state_dir
+from .linear_states import StateChoices, refuse, resolve_state
+from .model import ConflictError, HerdboardError, IoError, NotFoundError
+from .store import TEMP_REF
+
+
+class StartError(HerdboardError):
+    def __init__(self, message, code="start_failed"):
+        super().__init__(message)
+        self.code = code
+        self.steps_done = []
+
+
+def command(argv: list[str], timeout: int = 120):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+
+
+def herdr(*args, tolerated=()):
+    try:
+        result = command([os.environ.get("HERDR_BIN_PATH") or "herdr", *args])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise StartError(f"Herdr is not reachable: {error}", "herdr_unavailable") from error
+    output = result.stdout if result.stdout.strip() else result.stderr
+    try:
+        data = json.loads(output)
+    except (ValueError, TypeError) as error:
+        raise StartError(f"Herdr returned no valid JSON: {output}", "herdr_error") from error
+    if not isinstance(data, dict):
+        raise StartError(f"Unexpected Herdr response: {output}", "herdr_error")
+    if result.returncode or "error" in data:
+        details = data.get("error", {})
+        if not isinstance(details, dict):
+            raise StartError(f"Unexpected Herdr error: {output}", "herdr_error")
+        code = details.get("code", "herdr_error")
+        if code in tolerated:
+            return None
+        if code in ("server_unavailable", "server_not_running"):
+            code = "herdr_unavailable"
+        raise StartError(details.get("message", f"Herdr: {code}: {output}"), code)
+    found = data.get("result")
+    if not isinstance(found, dict):
+        raise StartError(f"Unexpected Herdr result: {output}", "herdr_error")
+    operation = tuple(args[:2])
+    lists = {("workspace", "list"): ("workspaces", "workspace_id"),
+             ("worktree", "list"): ("worktrees", "path"),
+             ("pane", "list"): ("panes", "pane_id")}
+    if operation in lists:
+        field, key = lists[operation]
+        entries = found.get(field)
+        if not isinstance(entries, list) or any(not isinstance(e, dict) or not isinstance(e.get(key), str)
+                                               or not e[key] for e in entries):
+            raise StartError(f"Unexpected Herdr {field}: {output}", "herdr_error")
+    if operation == ("worktree", "list") and any(
+            e.get("open_workspace_id") is not None and not isinstance(e["open_workspace_id"], str)
+            for e in found["worktrees"]):
+        raise StartError(f"Unexpected Herdr workspace ID: {output}", "herdr_error")
+    if operation == ("workspace", "get"):
+        root = found.get("root_pane")
+        if root is not None and (not isinstance(root, dict) or not isinstance(root.get("pane_id"), str)):
+            raise StartError(f"Unexpected Herdr root pane: {output}", "herdr_error")
+    if operation == ("agent", "get") and not isinstance(found.get("agent"), (dict, type(None))):
+        raise StartError(f"Unexpected Herdr agent: {output}", "herdr_error")
+    return found
+
+
+def _read(path):
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("expected an object")
+        return data
+    except (OSError, ValueError) as error:
+        raise IoError(f"{path}: cannot read start state: {error}") from error
+
+
+def _write(path, data):
+    temp = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    except OSError as error:
+        raise IoError(f"{path}: cannot write start state: {error}") from error
+    finally:
+        if temp is not None and os.path.exists(temp):
+            os.unlink(temp)
+
+
+@contextmanager
+def _lock(name=".starts.lock", wait=0):
+    folder = state_dir()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        handle = (folder / name).open("a")
+    except OSError as error:
+        raise IoError(f"{folder}: cannot open start lock: {error}") from error
+    try:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ConflictError("Another start or checkout update is in progress; retry") from None
+                time.sleep(0.01)
+        yield
+    finally:
+        handle.close()
+
+
+def _main_checkout(directory):
+    common = _git(Path(directory), "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common is None:
+        return None
+    path = Path(common)
+    main = path.parent if path.name == ".git" else path
+    top = _git(main, "rev-parse", "--show-toplevel")
+    if top and Path(top).resolve() == main.resolve():
+        return main
+    current = _git(Path(directory), "rev-parse", "--show-toplevel")
+    return Path(current) if current else None
+
+
+def _remember(directory, expected=None):
+    identity = repo_identity(Path(directory))
+    if identity is None or (expected is not None and identity.identity != expected):
+        raise StartError(f"{directory}: checkout does not match repository {expected}", "checkout_unknown")
+    main = _main_checkout(directory)
+    if main is None:
+        raise StartError(f"{directory}: not a working checkout", "checkout_unknown")
+    path = state_dir() / "checkouts.json"
+    with _lock(wait=0.2):
+        data = _read(path)
+        entries = [e for e in _entries(data.get(identity.identity)) if Path(e["path"]).resolve() != main.resolve()]
+        entries.append({"path": str(main), "last_seen": time.time()})
+        data[identity.identity] = entries
+        _write(path, data)
+    return main
+
+
+def _entries(entries):
+    return [e for e in entries if isinstance(e, dict)
+            and isinstance(e.get("path"), str) and e["path"]
+            and isinstance(e.get("last_seen"), (int, float))] if isinstance(entries, list) else []
+
+
+def register_checkout(directory):
+    try:
+        if repo_identity(Path(directory)) is not None:
+            _remember(directory)
+    except (HerdboardError, OSError, ValueError, TypeError):
+        # Registration must not prevent read-only commands or agent updates.
+        pass
+
+
+def todo_branch(card):
+    text = re.sub(r"\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|https?://\S+", "", card.title)
+    text = re.sub(r"#[\w/-]+|📅\s*\d{4}-\d{2}-\d{2}|\^\w+", "", text)
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return (card.ref + ("-" + slug if slug else ""))[:50].rstrip("-")
+
+
+def validate_branch(branch):
+    if not isinstance(branch, str) or not branch or branch.startswith("-"):
+        raise StartError(f"Invalid branch: {branch!r}", "invalid_branch")
+    result = subprocess.run(["git", "check-ref-format", "--branch", branch], capture_output=True, text=True)
+    # @{-1} is accepted by Git in a checkout, but is not a literal branch name.
+    if result.returncode or branch.startswith("@{"):
+        raise StartError(f"Invalid branch: {branch!r}", "invalid_branch")
+
+
+def mark_removed(cards):
+    records = _read(state_dir() / "starts.json")
+    for card in cards:
+        record = records.get(card.ref)
+        if not isinstance(record, dict):
+            record = next((r for r in records.values() if isinstance(r, dict) and r.get("ref") == card.ref), {})
+        path = record.get("worktree_path")
+        card.worktree_removed = bool(path and not Path(path).exists())
+
+
+class Starter:
+    def __init__(self, store, directory, writer=None, ask_state=refuse,
+                 prompt_checkout=None, repository_view=True):
+        self.store = store
+        self.config = store.config
+        self.directory = Path(directory)
+        self.writer = writer
+        self.ask_state = ask_state
+        self.prompt_checkout = prompt_checkout
+        self.repository_view = repository_view
+
+    def _repository(self, card, repo, issue=None):
+        if card.path is not None:
+            own = self.store.board_meta(card.path).repo
+            if own:
+                return own
+        if repo:
+            value = str(repo)
+            if "/" not in value and not value.startswith(("~", ".")):
+                try:
+                    meta = self.store.board_meta(self.store.resolve_board(value))
+                except NotFoundError:
+                    pass
+                else:
+                    if meta.repo:
+                        return meta.repo
+                    raise StartError(f"Board {value} has no repository", "repo_required")
+            path = Path(repo).expanduser()
+            if path.is_file():
+                meta = self.store.board_meta(path)
+                if meta.repo:
+                    return meta.repo
+            if path.exists():
+                identity = repo_identity(path)
+                if identity:
+                    _remember(path)
+                    return identity.identity
+                raise StartError(f"{path}: not a checkout", "checkout_unknown")
+            if any(self.store.board_meta(p).repo == value for p in self.store.board_paths()):
+                return value
+        matches = []
+        if card.source == "linear":
+            for path in self.store.board_paths():
+                meta = self.store.board_meta(path)
+                project = (issue or {}).get("project") or {}
+                labels = {label["id"] for label in (issue or {}).get("labels", [])}
+                if meta.repo and any(link.id == project.get("id") and
+                                     (not link.labels or any(label.id in labels for label in link.labels))
+                                     for link in meta.links):
+                    matches.append(meta.repo)
+            if not repo and self.repository_view:
+                identity = repo_identity(self.directory)
+                if identity and identity.identity in matches:
+                    return identity.identity
+        listing = f" Linked repositories: {', '.join(sorted(set(matches)))}." if matches else ""
+        raise StartError("Choose a repository with --repo BOARD_OR_PATH." + listing, "repo_required")
+
+    def _checkout(self, identity, explicit, record=None):
+        if explicit:
+            return _remember(Path(explicit).expanduser(), identity)
+        stored = (record or {}).get("checkout")
+        if stored:
+            path = Path(stored)
+            found = repo_identity(path) if path.exists() else None
+            if found and found.identity == identity:
+                return path
+        entries = _entries(_read(state_dir() / "checkouts.json").get(identity))
+        for entry in sorted(entries, key=lambda e: e["last_seen"], reverse=True):
+            path = Path(entry["path"])
+            found = repo_identity(path) if path.exists() else None
+            if found and found.identity == identity:
+                return path
+        if self.prompt_checkout:
+            answer = self.prompt_checkout(identity)
+            if answer:
+                return _remember(Path(answer).expanduser(), identity)
+        raise StartError(f"No local checkout for {identity}; use --checkout PATH", "checkout_unknown")
+
+    def _workspace(self, checkout, branch, record):
+        listed = herdr("worktree", "list", "--cwd", str(checkout), "--trust-repository")
+        worktrees = listed.get("worktrees", [])
+        stored = record.get("worktree_path")
+        path = stored if stored and Path(stored).exists() else None
+        if path is None:
+            output = _git(checkout, "worktree", "list", "--porcelain") or ""
+            for block in output.split("\n\n"):
+                lines = block.splitlines()
+                if f"branch refs/heads/{branch}" in lines and not any(l.startswith("prunable") for l in lines):
+                    candidate = next((l.removeprefix("worktree ") for l in lines if l.startswith("worktree ")), None)
+                    if candidate and Path(candidate).exists():
+                        path = candidate
+                        break
+        if path:
+            entry = next((w for w in worktrees if Path(w["path"]).resolve() == Path(path).resolve()), None)
+            workspace = entry.get("open_workspace_id") if entry else None
+            if workspace:
+                herdr("workspace", "focus", workspace)
+                info = herdr("workspace", "get", workspace)
+                root = (info.get("root_pane") or {}).get("pane_id")
+                if root is None:
+                    panes = herdr("pane", "list", "--workspace", workspace).get("panes", [])
+                    root = record.get("pane_id")
+                    if not any(p["pane_id"] == root for p in panes):
+                        root = panes[0]["pane_id"] if panes else None
+                if not root:
+                    raise StartError(f"Workspace {workspace} has no root pane")
+                return {"workspace_id": workspace, "pane_id": root, "worktree_path": str(path)}
+            result = herdr("worktree", "open", "--cwd", str(checkout), "--path", str(path), "--focus", "--trust-repository")
+        else:
+            if _git(checkout, "worktree", "prune") is None:
+                raise StartError(f"{checkout}: cannot prune worktrees")
+            result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch, "--focus", "--trust-repository")
+        try:
+            workspace = result["workspace"]["workspace_id"]
+            pane = result["root_pane"]["pane_id"]
+            worktree = result.get("worktree", {}).get("path", path)
+            if not all(isinstance(v, str) and v for v in (workspace, pane, worktree)):
+                raise ValueError("missing workspace, root pane or worktree path")
+        except (KeyError, TypeError, AttributeError, ValueError) as error:
+            raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
+        return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
+
+    def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None):
+        agent = agent or self.config.start_agent
+        if agent not in ("claude", "pi"):
+            raise StartError("Agent must be claude or pi", "usage")
+        state_path = state_dir() / "starts.json"
+        issue = None
+        if LINEAR_REF.match(ref):
+            if self.writer is None:
+                raise StartError("Linear writes are unavailable", "linear_disabled")
+            with self.writer.online() as client:
+                issue = client.issue(ref.upper())
+            if issue is None:
+                raise NotFoundError(f"No card {ref}")
+            card = issue_card(self.config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True)
+            key = issue["id"]
+        else:
+            card = self.store.show(ref)
+            if TEMP_REF.match(card.ref):
+                card = self.store.ensure_id(card.ref)
+            key = card.ref
+        lock_key = key if re.fullmatch(r"[a-zA-Z0-9_-]+", key) else hashlib.sha256(key.encode()).hexdigest()
+        with _lock(".start-" + lock_key + ".lock"):
+            record = {"steps_done": []}
+            try:
+                herdr("workspace", "list")
+                with _lock(wait=2):
+                    record = _read(state_path).get(key, {"steps_done": []})
+                if not isinstance(record, dict) or not isinstance(record.get("steps_done"), list):
+                    record = {"steps_done": []}
+                    raise IoError(f"{state_path}: invalid start record")
+                if record.get("worktree_path") and not Path(record["worktree_path"]).exists():
+                    # The worktree is gone; keep where the card's repository lives.
+                    record = {"steps_done": [], **{k: record[k] for k in ("repository", "checkout") if k in record}}
+                record["ref"] = card.ref
+
+                def save(step):
+                    if step not in record["steps_done"]:
+                        record["steps_done"].append(step)
+                    persist()
+
+                def persist():
+                    with _lock(wait=2):
+                        records = _read(state_path)
+                        records[key] = record
+                        _write(state_path, records)
+
+                identity = self._repository(card, repo, issue)
+                if record.get("repository") not in (None, identity):
+                    record = {"steps_done": [], "ref": card.ref}
+                record["repository"] = identity
+                save("repository")
+                local = self._checkout(identity, checkout, record)
+                record["checkout"] = str(local)
+                save("checkout")
+                branch = record.get("branch") or (issue.get("branchName") if issue else todo_branch(card))
+                validate_branch(branch)
+                record["branch"] = branch
+                save("branch")
+                column = self.config.start_column
+                state = None
+                if issue:
+                    with self.writer.online() as client:
+                        team = issue["team"]
+                        state = resolve_state(self.config, StateChoices(self.writer.source.account_dir()),
+                                              team, client.team_states(team["id"]), column, self.ask_state)
+                elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
+                    raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
+                record.update(self._workspace(local, branch, record))
+                save("worktree")
+                if "move" not in record["steps_done"] and card.column.casefold() != column.casefold():
+                    if issue:
+                        self.writer.move(card.ref, column, ask=self.ask_state, state_name=state["name"])
+                    else:
+                        card = self.store.move(card.ref, column)
+                save("move")
+                if not no_agent:
+                    live = None
+                    if record.get("agent_name"):
+                        pane_live = herdr("agent", "get", record["pane_id"], tolerated=("agent_not_found", "pane_not_found"))
+                        named_live = herdr("agent", "get", record["agent_name"], tolerated=("agent_not_found", "pane_not_found"))
+                        live = named_live or pane_live
+                    if not live or not live.get("agent"):
+                        name = "hb-" + card.ref.lower()
+                        # Herdr rejects literal control characters in shell arguments.
+                        # JSON preserves body text while encoding its newlines safely.
+                        body = card.body
+                        text = "\n".join(body)
+                        if len(text) > 4000:
+                            body = text[:4000].split("\n") + ["(truncated)"]
+                        message = json.dumps({
+                            "id": card.ref, "title": card.title, "body": body,
+                            "url": card.url,
+                            "instruction": "Use the herdboard CLI to update the card.",
+                        }, ensure_ascii=False).replace("\x7f", "\\u007f")
+                        record["agent_name"] = name
+                        # Record intent before Herdr can return an unknown startup result.
+                        persist()
+                        args = ["--", message] if agent == "pi" else [message]
+                        herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
+                              tolerated=("timeout", "agent_not_ready"))
+                    save("agent")
+                result = {k: record.get(k) for k in ("ref", "steps_done", "workspace_id", "pane_id", "worktree_path", "branch", "agent_name")}
+                record["steps_done"] = []
+                persist()
+                return result
+            except HerdboardError as error:
+                error.steps_done = list(record.get("steps_done", []))
+                raise

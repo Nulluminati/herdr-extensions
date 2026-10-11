@@ -27,6 +27,7 @@ class CliTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
+        self.enterContext(mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state")}))
         self.todos = root / "todos"
         self.config = root / "config.toml"
         self.config.write_text(f'todos_dir = "{self.todos}"\n')
@@ -39,8 +40,7 @@ class CliTestCase(unittest.TestCase):
 
     def run_cli(self, *args, directory=None, expect=0):
         argv = ["--config", str(self.config)]
-        if directory is not None:
-            argv += ["-C", str(directory)]
+        argv += ["-C", str(directory if directory is not None else self.plain)]
         argv += list(args)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

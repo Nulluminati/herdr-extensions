@@ -115,29 +115,22 @@ class LinearWriter:
     ) -> dict:
         """Create an issue assigned to you. `project` is a Linear project with its `teams`."""
         with self.online() as client:
-            found = self._team(client, team, project)
+            found = self.resolve_team(client, team, project)
             states = client.team_states(found["id"])
             choices = StateChoices(self.source.account_dir())
             column = column or self.config.columns[0]
             state = resolve_state(self.config, choices, found, states, column, ask, state_name)
             issue_id = str(uuid.uuid4())
-            try:
-                result = client.create_issue(
-                    issue_id=issue_id,
-                    team_id=found["id"],
-                    title=title,
-                    state_id=state["id"],
-                    project_id=project["id"] if project else None,
-                    label_ids=list(label_ids) or None,
-                    assignee_id=self.source.account()[1],
-                )
-            except LinearWriteUnknownError as error:
-                try:
-                    result = self._reconcile_create(client, issue_id, title, error)
-                finally:
-                    self.source.drop_cache()
-            else:
-                self.source.drop_cache()
+            result = self.send_create(
+                client,
+                issue_id,
+                team_id=found["id"],
+                title=title,
+                state_id=state["id"],
+                project_id=project["id"] if project else None,
+                label_ids=list(label_ids) or None,
+                assignee_id=self.source.account()[1],
+            )
             known = {
                 "title": title,
                 "labels": [],
@@ -145,9 +138,25 @@ class LinearWriter:
             }
             return self._full(client, result["identifier"], {**known, **result})
 
+    def send_create(self, client: LinearClient, issue_id: str, **fields) -> dict:
+        """Create an issue with a client-generated ID, sent once.
+
+        When the result is unknown, look the ID up. Raises `LinearWriteUnknownError` when
+        Linear does not show the issue. `fields` are the arguments of `create_issue`.
+        """
+        try:
+            result = client.create_issue(issue_id=issue_id, **fields)
+        except LinearWriteUnknownError as error:
+            try:
+                return self._reconcile_create(client, issue_id, fields["title"], error)
+            finally:
+                self.source.drop_cache()
+        self.source.drop_cache()
+        return result
+
     # Helpers
 
-    def _team(self, client: LinearClient, key: str | None, project: dict | None) -> dict:
+    def resolve_team(self, client: LinearClient, key: str | None, project: dict | None) -> dict:
         """The team of a new issue: the key, the project's only team, or your only team."""
         if key:
             found = client.team_by_key(key)

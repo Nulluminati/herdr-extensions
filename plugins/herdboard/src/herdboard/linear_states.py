@@ -35,14 +35,18 @@ class StateCancelledError(HerdboardError):
     code = "cancelled"
 
 
-def candidates(config: Config, states: list[dict], column: str) -> list[dict]:
+def candidates(
+    config: Config, states: list[dict], column: str, only_type: str | None = None
+) -> list[dict]:
     """The states of one team that a move to `column` may use, in workflow order.
 
     A canceled state counts only when no other state matches, and a triage state only
-    when no backlog state matches.
+    when no backlog state matches. With `only_type`, states of other types never count.
     """
     wanted = column.casefold()
     found = [s for s in states if column_for(config, s).casefold() == wanted]
+    if only_type is not None:
+        found = [s for s in found if s["type"] == only_type]
     if any(s["type"] != "canceled" for s in found):
         found = [s for s in found if s["type"] != "canceled"]
     if any(s["type"] == "backlog" for s in found):
@@ -106,13 +110,14 @@ def resolve_state(
     column: str,
     ask: Ask,
     state_name: str | None = None,
+    only_type: str | None = None,
 ) -> dict:
     """The state of `team` for `column`.
 
     One candidate is used. With several, `state_name` answers, else the stored choice if
     its state is still a candidate, else `ask` does. An answer is stored.
     """
-    found = candidates(config, states, column)
+    found = candidates(config, states, column, only_type)
     if not found:
         raise NoStateError(f"Team {team['key']} has no workflow state for column {column!r}")
     names = [s["name"] for s in found]

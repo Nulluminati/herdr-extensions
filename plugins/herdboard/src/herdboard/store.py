@@ -19,6 +19,7 @@ from .linear_links import ProjectLink, parse_links, replace_links
 from .config import Config
 from .identity import RepoIdentity, find_board, new_board_path
 from .model import (
+    BLOCK_ID,
     Board,
     Card,
     Column,
@@ -58,6 +59,7 @@ class CardView:
     read_only: bool = False
     fetched_at: str | None = None
     stale: bool = False
+    worktree_removed: bool = False
 
 
 @dataclass
@@ -95,6 +97,16 @@ class _Located:
     number: int | None
     column: str
     lines: list[str]
+
+
+@dataclass
+class TodoSnapshot:
+    """A todo as `promote` read it. The final update checks that it is still the same."""
+
+    located: _Located
+    view: CardView
+    # True when the todo is in its board's done column.
+    done: bool
 
 
 def _all_ids(board: Board) -> set[str]:
@@ -404,8 +416,9 @@ class Store:
         self,
         ref: str,
         change: Callable[[Board, Path, Column, Card], Column],
+        located: _Located | None = None,
     ) -> CardView:
-        located = self._resolve(ref)
+        located = located or self._resolve(ref)
         path = located.path
         with self._lock():
             board = self._read(path)
@@ -462,6 +475,41 @@ class Store:
             return self._move_card(source, card, target, "bottom", check=True)
 
         return self._modify(ref, change)
+
+    def ensure_id(self, ref: str) -> CardView:
+        """The card, with a block ID: a card without one gets IDs by the usual write rule."""
+        view = self.show(ref)
+        if TEMP_REF.match(view.ref):
+            view = self._modify(ref, lambda board, path, column, card: column)
+        return view
+
+    def todo_snapshot(self, ref: str) -> TodoSnapshot:
+        """Read a todo for `promote`. Fails when its board has no done column."""
+        located = self._resolve(ref)
+        board = self._read(located.path)
+        column, card = self._find(board, located)
+        done = self._done_column(board, located.path)
+        return TodoSnapshot(
+            located, self._view(located.path, column, card, card.block_id or ref), column is done
+        )
+
+    def finish_promotion(self, snapshot: TodoSnapshot, identifier: str) -> CardView:
+        """Add `→ identifier` before the block ID and move the todo to the done column.
+
+        Fails with a conflict when the todo changed since `snapshot`.
+        """
+
+        def change(board, path, source, card):
+            card.lines[0] = BLOCK_ID.sub(
+                lambda match: f" → {identifier}{match.group(0)}", card.first_line
+            )
+            target = self._done_column(board, path)
+            if target is source:
+                card.set_checked(True)
+                return source
+            return self._move_card(source, card, target, "bottom", check=True)
+
+        return self._modify(snapshot.located.block_id, change, snapshot.located)
 
     def add(
         self, path: Path, text: str, column: str | None = None, position: str = "bottom"

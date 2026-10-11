@@ -54,6 +54,12 @@ class Config:
     vault_root: Path | None = None
     archive_titles: list[str] = field(default_factory=lambda: ["Archive"])
     linear: LinearConfig = field(default_factory=LinearConfig)
+    start_agent: str = "claude"
+    start_column: str | None = None
+
+    def __post_init__(self):
+        if self.start_column is None:
+            self.start_column = self.linear.columns["started"]
 
 
 def config_path(path: Path | None = None) -> Path:
@@ -155,4 +161,10 @@ def load_config(path: Path | None = None) -> Config:
     if vault_root is not None:
         config.vault_root = Path(vault_root).expanduser()
     config.linear = _load_linear(path, data)
+    start_agent = _string(path, data, "start_agent")
+    if start_agent is not None:
+        if start_agent not in ("claude", "pi"):
+            raise HerdboardError(f"{path}: start_agent must be claude or pi")
+        config.start_agent = start_agent
+    config.start_column = _string(path, data, "start_column") or config.linear.columns["started"]
     return config

@@ -37,6 +37,8 @@ class CacheMiss(LinearError):
 # not a cache: dropping the cache keeps them.
 STATE_CHOICES_FILE = "state-choices.json"
 INVALIDATION_FILE = "cache-invalidated"
+# Records of promotions in progress (see promotions.py). They are not a cache either.
+PROMOTIONS_FILE = "promotions.json"
 
 
 @dataclass
@@ -208,7 +210,7 @@ class LinearSource:
                 if not _write_json(folder / INVALIDATION_FILE, stamp):
                     print("herdboard: warning: cannot record Linear cache invalidation", file=sys.stderr)
                 for path in folder.glob("*.json"):
-                    if path.name != STATE_CHOICES_FILE:
+                    if path.name not in (STATE_CHOICES_FILE, PROMOTIONS_FILE):
                         try:
                             path.unlink(missing_ok=True)
                         except OSError:

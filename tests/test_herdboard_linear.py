@@ -566,6 +566,34 @@ class LinearWriteTests(unittest.TestCase):
         self.assertEqual(found["labels"], [{"id": "l1", "name": LABELS[1]["name"]}])
         self.assertEqual(found["assignee"]["id"], "u1")
 
+    def test_create_sends_description_due_date_and_parent(self):
+        from uuid import uuid4
+        parent_id = self.fixtures["issues"][0]["id"]
+        issue_id = str(uuid4())
+        result = self.client.create_issue(issue_id=issue_id, team_id="t0", title="Child",
+                                          description="Some text", due_date="2026-10-20",
+                                          parent_id=parent_id)
+        self.assertEqual(self.fake.requests[-1]["variables"]["input"],
+                         {"id": issue_id, "teamId": "t0", "title": "Child",
+                          "description": "Some text", "dueDate": "2026-10-20",
+                          "parentId": parent_id})
+        found = self.client.issue(result["identifier"])
+        self.assertEqual((found["description"], found["dueDate"]), ("Some text", "2026-10-20"))
+        self.assertEqual(found["parent"]["id"], parent_id)
+        parent = self.client.issue(self.fixtures["issues"][0]["identifier"])
+        self.assertEqual(parent["children"], [result["identifier"]])
+
+    def test_create_with_an_unknown_parent_is_rejected(self):
+        from herdboard.linear import LinearWriteRejectedError
+        with self.assertRaises(LinearWriteRejectedError):
+            self.client.create_issue(issue_id="id", team_id="t0", title="x", parent_id="missing")
+
+    def test_create_with_a_used_id_is_rejected(self):
+        from herdboard.linear import LinearWriteRejectedError
+        self.client.create_issue(issue_id="given", team_id="t0", title="One")
+        with self.assertRaises(LinearWriteRejectedError):
+            self.client.create_issue(issue_id="given", team_id="t0", title="Two")
+
     def test_create_omits_unspecified_fields(self):
         self.client.create_issue(issue_id="given", team_id="t0", title="Minimal")
         self.assertEqual(self.fake.requests[-1]["variables"]["input"],

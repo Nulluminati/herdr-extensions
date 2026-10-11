@@ -17,7 +17,9 @@ from .linear_source import LinearSource
 from .linear_states import refuse
 from .linear_writes import LinearWriter
 from .model import HerdboardError, NotFoundError
+from .promote import Promoter
 from .store import CardView, Store
+from .start import Starter, register_checkout
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
 
 INIT_HINT = "Run `herdboard init` to create a board for this repository."
@@ -100,6 +102,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     write_options(sub)
 
+    sub = command("promote", "turn a todo into a Linear issue, its checklist into sub-issues")
+    sub.add_argument("ref")
+    sub.add_argument("--team", help="Linear team key")
+    sub.add_argument("--project", help="Linear project name")
+    write_options(sub)
+
+    sub = command("start", "start work on a card in Herdr")
+    sub.add_argument("ref")
+    sub.add_argument("--agent", choices=["claude", "pi"])
+    sub.add_argument("--no-agent", action="store_true")
+    sub.add_argument("--repo", help="repository board name or checkout path")
+    sub.add_argument("--checkout", type=Path)
+
     command("init", "create the board for this repository")
     sub = command("link", "link this repository's board to a Linear project")
     sub.add_argument("project")
@@ -114,6 +129,7 @@ def _card_dict(card: CardView) -> dict:
     data = asdict(card)
     # The list order already carries the sort order, and JSON consumers keep their schema.
     del data["sort_order"]
+    del data["worktree_removed"]  # Board-only status; preserve the CLI card schema.
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -215,6 +231,7 @@ class _Context:
         self.config = load_config(args.config)
         self.store = Store(self.config)
         self.directory = args.directory or Path.cwd()
+        register_checkout(self.directory)
         self._identity = False
         self._views: Views | None = None
 
@@ -252,6 +269,13 @@ class _Context:
         """The only Linear project linked to this repository's board, if there is one."""
         board = self.repo_board()
         links = self.store.board_meta(board).links if board else []
+        return links[0] if len(links) == 1 else None
+
+    def todo_link(self, view) -> ProjectLink | None:
+        """The only Linear project linked to the board of a todo; an inbox todo has none."""
+        if view.path is None or view.path == self.store.inbox_path:
+            return None
+        links = self.store.board_meta(view.path).links
         return links[0] if len(links) == 1 else None
 
     def chosen_view(self) -> str:
@@ -354,6 +378,23 @@ def _cmd_done(ctx: _Context) -> dict:
     return {"card": ctx.store.done(args.ref)}
 
 
+def _prompt_checkout(identity: str) -> str | None:
+    print(f"Local checkout path for {identity}: ", end="", file=sys.stderr, flush=True)
+    return sys.stdin.readline().strip() or None
+
+
+def _cmd_start(ctx: _Context) -> dict:
+    args = ctx.args
+    starter = Starter(
+        ctx.store, ctx.directory,
+        writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
+        ask_state=ctx.ask(),
+        prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
+    )
+    return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
+                         repo=args.repo, checkout=args.checkout)
+
+
 def _cmd_init(ctx: _Context) -> dict:
     if ctx.identity is None:
         raise HerdboardError("Not in a Git repository.")
@@ -409,24 +450,55 @@ def _linked_project(client, link: ProjectLink) -> dict:
     )
 
 
+def _linear_target(
+    client, project_name: str | None, label_specs: list[str], default: ProjectLink | None
+):
+    """The project and label IDs of a new issue: the options, else the `default` link."""
+    project = _resolve_project(client, project_name) if project_name else None
+    label_ids = [_resolve_label(client, spec).id for spec in label_specs]
+    link = None if project_name else default
+    if link is not None:
+        project = _linked_project(client, link)
+        link_ids = [label.id for label in link.labels]
+        label_ids = link_ids + [i for i in label_ids if i not in link_ids]
+    return project, label_ids
+
+
 def _cmd_add_linear(ctx: _Context) -> dict:
     args = ctx.args
     if args.board:
         raise UsageError("--linear and --board cannot be used together")
     writer = ctx.writer
     with writer.online() as client:
-        project = _resolve_project(client, args.project) if args.project else None
-        label_ids = [_resolve_label(client, spec).id for spec in args.label]
-        link = None if args.project else ctx.default_link()
-        if link is not None:
-            project = _linked_project(client, link)
-            link_ids = [label.id for label in link.labels]
-            label_ids = link_ids + [i for i in label_ids if i not in link_ids]
+        project, label_ids = _linear_target(client, args.project, args.label, ctx.default_link())
     issue = writer.create(
         args.text, team=args.team, project=project, label_ids=label_ids,
         column=args.column, ask=ctx.ask(), state_name=args.state,
     )
     return {"card": ctx.linear_card(issue), "hint": None}
+
+
+def _cmd_promote(ctx: _Context) -> dict:
+    args = ctx.args
+    promoter = Promoter(ctx.config, ctx.store, ctx.writer)
+    promotion = promoter.promote(
+        args.ref,
+        team=args.team,
+        target=lambda client, view: _linear_target(
+            client, args.project, [], ctx.todo_link(view)
+        ),
+        ask=ctx.ask(),
+        state_name=args.state,
+        project=args.project,
+    )
+    for warning in promotion.warnings:
+        print(f"herdboard: warning: {warning}", file=sys.stderr)
+    return {
+        "card": ctx.linear_card(promotion.issue),
+        "sub_issues": [sub["identifier"] for sub in promotion.sub_issues],
+        "todo": promotion.todo,
+        "warnings": promotion.warnings,
+    }
 
 
 def _cmd_link(ctx: _Context) -> dict:
@@ -477,6 +549,7 @@ def _cmd_board(ctx: _Context) -> dict:
         linear_active=views.source.active,
         available=views.available,
         linear_writer=ctx.writer,
+        directory=ctx.directory,
     ).run()
     return {}
 
@@ -487,6 +560,8 @@ COMMANDS = {
     "show": _cmd_show,
     "move": _cmd_move,
     "done": _cmd_done,
+    "promote": _cmd_promote,
+    "start": _cmd_start,
     "init": _cmd_init,
     "link": _cmd_link,
     "board": _cmd_board,
@@ -513,11 +588,23 @@ def _linear_warnings(result: LinearResult) -> None:
 def _render(command: str, result: dict, as_json: bool) -> None:
     if command == "board":
         return
+    if command == "start":
+        if as_json:
+            _emit_json(result)
+        else:
+            print(f"{result['ref']}: {result['branch']} in {result['worktree_path']}")
+            print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
+                  f"agent: {result['agent_name'] or 'none'}")
+            print("Steps done: " + ", ".join(result["steps_done"]))
+        return
     linear = result.get("linear")
     if as_json:
         if command == "list":
             _emit_json({"cards": [_card_dict(card) for card in result["cards"]],
                         **_linear_json(linear)})
+        elif command == "promote":
+            _emit_json({"card": _card_dict(result["card"]), "sub_issues": result["sub_issues"],
+                        "todo": _card_dict(result["todo"]), "warnings": result["warnings"]})
         elif command == "init":
             _emit_json({"board": str(result["board"])})
         elif command == "link":
@@ -537,6 +624,11 @@ def _render(command: str, result: dict, as_json: bool) -> None:
         print(_list_text(result["cards"]))
     elif command == "show":
         print(_show_text(result["card"], result.get("notes")))
+    elif command == "promote":
+        print(_card_line(result["card"]))
+        if result["sub_issues"]:
+            print("sub-issues: " + ", ".join(result["sub_issues"]))
+        print(f"todo {_card_line(result['todo'])}")
     elif command == "init":
         print(result["board"])
     elif command == "link":
@@ -565,8 +657,12 @@ def main(argv: list[str] | None = None) -> int:
                 details["issue_id"] = error.issue_id
             if getattr(error, "candidates", None):
                 details["candidates"] = error.candidates
+            if hasattr(error, "steps_done"):
+                details["steps_done"] = error.steps_done
             _emit_json({"error": details})
         else:
             print(f"herdboard: {error}", file=sys.stderr)
+            if hasattr(error, "steps_done"):
+                print("Steps done: " + (", ".join(error.steps_done) or "none"), file=sys.stderr)
         return error.exit_code
     return 0

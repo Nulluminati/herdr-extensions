@@ -422,10 +422,12 @@ class LinearClient:
                             {"id": issue_id, "input": inputs})
 
     def create_issue(self, *, issue_id, team_id, title, state_id=None, project_id=None,
-                     label_ids=None, assignee_id=None, sort_order=None) -> dict:
+                     label_ids=None, assignee_id=None, sort_order=None, description=None,
+                     due_date=None, parent_id=None) -> dict:
         fields = {"id": issue_id, "teamId": team_id, "title": title, "stateId": state_id,
                   "projectId": project_id, "labelIds": label_ids, "assigneeId": assignee_id,
-                  "sortOrder": sort_order}
+                  "sortOrder": sort_order, "description": description, "dueDate": due_date,
+                  "parentId": parent_id}
         inputs = {key: value for key, value in fields.items() if value is not None}
         return self._mutate("IssueCreate", ISSUE_CREATE_QUERY, "issueCreate", {"input": inputs})
 
