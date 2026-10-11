@@ -20,7 +20,7 @@ Non-goals: sync between machines, phone access, goals or OKRs, a personal/work s
 
 ```
 ~/todos/                          # todos_dir
-  inbox.md                        # global board
+  inbox.md                        # todos that belong to no repository
   projects/
     nulluminati-homelab.md        # one board per repository
     acme-api.md
@@ -197,7 +197,7 @@ Linear is optional. It turns on when `LINEAR_API_KEY` is set, or from config. Th
 | Repository (default inside a repository) | That repository's todos and every issue of its linked Linear projects |
 | Linear project | That project's issues and the todos of every repository linked to it |
 | My issues | Linear issues assigned to you, from every team |
-| Global (default outside a repository) | `inbox.md` |
+| Inbox (default outside a repository) | `inbox.md`: todos that belong to no repository |
 | All | Every board and your Linear issues |
 
 Outside Git, or before a repository board exists, `add` goes to `inbox.md` unless `--board` names a board. `herdboard init` creates the board for the current repository. A board with invalid frontmatter is shown read only, with the error.
@@ -212,7 +212,10 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard add --linear [--team ENG] [--project NAME] [--label NAME] [--column] [--state] "title"` | Create a Linear issue, assigned to you. `--team` is optional when you belong to one team, or when the project has one team. Inside a repository board with exactly one linked project, that project and its link labels are the default, so the issue shows in the repository view. Default column: the first column |
 | `herdboard show <id>` | Show a card and its detail |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card. Default position for a todo: bottom. A Linear issue without `--position` keeps its place in Linear's order |
+| `herdboard move <id> [column] --board NAME` | Move a todo, with its details and its ID, to another board (`inbox` or a project name). Without a column, it keeps its column name when the board has it, else it goes to the first column. Linear issues stay in Linear |
 | `herdboard done <id>` | Move a card to its board's done column |
+| `herdboard edit <id> [--title TEXT] [--body TEXT \| --body-file PATH]` | Change a todo's first line, its indented lines, or both. The checkbox and the ID stay. `--body ""` removes the indented lines. Linear issues are not edited |
+| `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--no-agent] [--repo] [--checkout PATH]` | Start work on a card (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
@@ -227,7 +230,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 
 ### start
 
-1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For a global todo, `--repo` is required. `--repo` takes a board name or a path inside a checkout. The tool never picks the first of several linked repositories.
+1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For an inbox todo, `--repo` is required. `--repo` takes a board name or a path inside a checkout. The tool never picks the first of several linked repositories.
 2. Find the local checkout from a registry of checkouts in `~/.local/state/herdboard/checkouts.json`. The registry maps a repository identity to the paths of its main checkouts. The tool adds the main checkout each time it runs inside a repository. If none is known, `start` asks for a path in a terminal. Without a terminal, or with `--json`, it fails with the code `checkout_unknown`. `--checkout PATH` answers, and the tool stores the answer. When several checkouts are known, the tool uses the most recently seen one that still exists.
 3. Choose the branch. For a Linear issue, the issue's `branchName`. For a todo, the card ID plus a short name from the card text, for example `t7k2-fix-login-timeout`: lowercase, words joined by `-`, without tags, dates and links, at most 50 characters. The tool validates the name with `git check-ref-format --branch`. A todo without an ID gets one first, with the usual write rules.
 4. Open the worktree:
@@ -321,6 +324,8 @@ complete_markers = []      # added to the English "Complete"
 archive_titles = []        # added to the English "Archive"
 # vault_root = "~/Notes"     # set to resolve [[note]] links
 start_agent = "claude"     # or "pi"
+theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
+tag_style = "round"        # tag blocks with Nerd Font round ends; "block" for other fonts
 # start_column = "In progress"   # default: linear.columns.started
 
 [linear]

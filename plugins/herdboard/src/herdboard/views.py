@@ -15,7 +15,7 @@ from .linear_source import CacheMiss, Fetched, LinearSource, ProjectNotFound
 from .model import HerdboardError
 from .store import CardView, Store
 
-VIEW_NAMES = ["repo", "global", "all", "mine", "project"]
+VIEW_NAMES = ["repo", "inbox", "all", "mine", "project"]
 INIT_MESSAGE = "No board for this repository. Run `herdboard init` to create one."
 
 
@@ -75,7 +75,7 @@ class Views:
             if board is None:
                 raise HerdboardError(INIT_MESSAGE)
             return [board]
-        if view == "global":
+        if view == "inbox":
             inbox = self.store.inbox_path
             return [inbox] if inbox.is_file() else []
         if view == "all":
@@ -191,7 +191,7 @@ class Views:
         """Linear cards of a view. Without a usable Linear the result is empty."""
         source = self.source
         result = LinearResult()
-        if view == "global" or not source.active:
+        if view == "inbox" or not source.active:
             if view in ("mine", "project"):
                 self.source.require_active()
             return result

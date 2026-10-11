@@ -95,6 +95,49 @@ class LinearBoardTests(LinearBoardCase):
             self.assertTrue(any("◆ ENG-2" in c and "PR" not in c for c in cards))
             self.assertFalse(any("◆" in c for c in cards if "local todo" in c))
 
+    async def test_t_hides_and_shows_linear_cards(self):
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.assertTrue(any("◆" in c for c in self.cards(app)))
+            await pilot.press("t")
+            await settle(pilot)
+            self.assertFalse(any("◆" in c for c in self.cards(app)))
+            self.assertTrue(any("local todo" in c for c in self.cards(app)))
+            self.assertIn("Linear: hidden", self.title(app))
+            await pilot.press("t")
+            await settle(pilot)
+            self.assertTrue(any("◆" in c for c in self.cards(app)))
+            self.assertNotIn("hidden", self.title(app))
+
+    async def test_e_on_a_linear_card_says_to_use_linear(self):
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-1")
+            await pilot.press("e")
+            await pilot.pause()
+            self.assertIn(("Edit Linear issues in Linear.", "warning"), self.notifications(app))
+
+    async def test_b_on_a_linear_card_says_it_stays_in_linear(self):
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-1")
+            await pilot.press("b")
+            await pilot.pause()
+            self.assertIn(("Linear issues stay in Linear; only todos change board.", "warning"),
+                          self.notifications(app))
+
+    async def test_x_on_a_linear_card_says_to_use_linear(self):
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-1")
+            await pilot.press("x")
+            await pilot.pause()
+            self.assertIn(("Delete Linear issues in Linear.", "warning"), self.notifications(app))
+
     async def test_title_shows_stale_since_when_offline(self):
         await self.prime()
         self.endpoint = DEAD
@@ -128,20 +171,20 @@ class LinearBoardTests(LinearBoardCase):
                 await pilot.press("v")
                 await settle(pilot)
                 seen.append(app.view)
-            self.assertEqual(seen, ["global", "all", "mine", "repo", "global"])
+            self.assertEqual(seen, ["inbox", "all", "mine", "repo", "inbox"])
             await pilot.press("v", "v")
             await settle(pilot)
             self.assertEqual(app.view, "mine")
             self.assertTrue(any("Issue 5" in c for c in self.cards(app)))
             self.assertFalse(any("local todo" in c for c in self.cards(app)))
 
-    async def test_global_view_has_no_linear_cards(self):
+    async def test_inbox_view_has_no_linear_cards(self):
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await settle(pilot)
             await pilot.press("v")
             await settle(pilot)
-            self.assertEqual(app.view, "global")
+            self.assertEqual(app.view, "inbox")
             self.assertFalse(any("◆" in c for c in self.cards(app)))
 
     async def test_write_keys_still_work_on_todos(self):

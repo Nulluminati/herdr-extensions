@@ -132,6 +132,82 @@ class CommandTests(CliTestCase):
         data = self.run_json("list", "--source", "linear", directory=self.plain)
         self.assertEqual(data["boards"], [])
 
+    def test_edit_title_and_body(self):
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], "--title", "buy oat milk #errand",
+                             "--body", "two litres\nfrom the market", directory=self.plain)
+        self.assertEqual(data["card"]["title"], "buy oat milk #errand")
+        self.assertEqual(data["card"]["body"], ["\ttwo litres", "\tfrom the market"])
+        out, _ = self.run_cli("edit", card["ref"], "--body", "", directory=self.plain)
+        self.assertEqual(out, f"{card['ref']} edited (inbox / Backlog)\n")
+        self.assertEqual(self.run_json("show", card["ref"], directory=self.plain)["card"]["body"], [])
+
+    def test_edit_body_from_a_file(self):
+        card = self.run_json("add", "notes", directory=self.plain)["card"]
+        body = self.plain / "body.txt"
+        body.write_text("line one\nline two\n")
+        data = self.run_json("edit", card["ref"], "--body-file", str(body), directory=self.plain)
+        self.assertEqual(data["card"]["body"], ["\tline one", "\tline two"])
+
+    def test_edit_needs_a_change(self):
+        card = self.run_json("add", "notes", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+
+    def test_edit_refuses_a_linear_issue(self):
+        data = self.run_json("edit", "ENG-12", "--title", "x", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "linear_edit")
+
+    def test_move_to_another_board(self):
+        board = self.init_repo_board()
+        card = self.run_json("add", "buy milk", "--column", "Todo", directory=self.plain)["card"]
+        data = self.run_json("move", card["ref"], "--board", Path(board).stem, directory=self.plain)
+        self.assertEqual((data["card"]["board"], data["card"]["column"]), (Path(board).stem, "Todo"))
+        self.assertEqual(data["card"]["ref"], card["ref"])
+        data = self.run_json("move", card["ref"], "Review", "--board", "inbox", directory=self.plain)
+        self.assertEqual((data["card"]["board"], data["card"]["column"]), ("inbox", "Review"))
+
+    def test_move_needs_a_column_or_a_board(self):
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        data = self.run_json("move", card["ref"], directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+
+    def test_a_linear_issue_cannot_change_board(self):
+        data = self.run_json("move", "ENG-1", "Todo", "--board", "inbox", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+
+    def test_delete_with_yes(self):
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        data = self.run_json("delete", card["ref"], "--yes", directory=self.plain)
+        self.assertEqual(data["deleted"]["title"], "buy milk")
+        self.assertEqual(self.run_json("list", directory=self.plain)["cards"], [])
+        out, _ = self.run_cli("add", "eggs", directory=self.plain)
+        ref = out.split()[0]
+        out, _ = self.run_cli("delete", ref, "--yes", directory=self.plain)
+        self.assertEqual(out, f"Deleted {ref}: eggs (inbox / Backlog)\n")
+
+    def test_delete_without_a_terminal_needs_yes(self):
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        data = self.run_json("delete", card["ref"], directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "confirmation_required")
+        self.assertEqual(len(self.run_json("list", directory=self.plain)["cards"]), 1)
+
+    def test_delete_asks_in_a_terminal(self):
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        with mock.patch.object(cli, "_interactive", return_value=True), \
+                mock.patch.object(cli, "_confirm", return_value=False):
+            out, _ = self.run_cli("delete", card["ref"], directory=self.plain)
+        self.assertEqual(out, "Nothing deleted.\n")
+        self.assertEqual(len(self.run_json("list", directory=self.plain)["cards"]), 1)
+        with mock.patch.object(cli, "_interactive", return_value=True), \
+                mock.patch.object(cli, "_confirm", return_value=True):
+            self.run_cli("delete", card["ref"], directory=self.plain)
+        self.assertEqual(self.run_json("list", directory=self.plain)["cards"], [])
+
+    def test_delete_refuses_a_linear_issue(self):
+        data = self.run_json("delete", "ENG-12", "--yes", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "linear_delete")
+
     def test_show_text_and_json(self):
         card = self.run_json("add", "buy #errand 📅 2026-01-02", directory=self.plain)["card"]
         out, _ = self.run_cli("show", card["ref"], directory=self.plain)
@@ -205,12 +281,12 @@ class RepositoryTests(CliTestCase):
         titles = [c["title"] for c in self.run_json("list", directory=self.repo)["cards"]]
         self.assertEqual(titles, ["repo card"])
 
-    def test_default_view_in_repo_without_board_is_global(self):
+    def test_default_view_in_repo_without_board_is_inbox(self):
         self.run_cli("add", "inbox card", directory=self.repo)
         titles = [c["title"] for c in self.run_json("list", directory=self.repo)["cards"]]
         self.assertEqual(titles, ["inbox card"])
 
-    def test_default_view_outside_git_is_global(self):
+    def test_default_view_outside_git_is_inbox(self):
         self.init_repo_board()
         self.run_cli("add", "repo card", directory=self.repo)
         self.run_cli("add", "inbox card", directory=self.plain)
@@ -231,8 +307,8 @@ class RepositoryTests(CliTestCase):
         data = self.run_json("list", "--view", "all", directory=self.plain)
         self.assertEqual(len(data["cards"]), 2)
 
-    def test_view_global_before_inbox_exists_is_empty(self):
-        data = self.run_json("list", "--view", "global", directory=self.plain)
+    def test_view_inbox_before_inbox_exists_is_empty(self):
+        data = self.run_json("list", "--view", "inbox", directory=self.plain)
         self.assertEqual(data, {"cards": [], "boards": []})
 
 

@@ -28,7 +28,7 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 
 ```bash
 herdboard --json list                      # this repository: todos and linked Linear issues
-herdboard --json list --view global        # the inbox
+herdboard --json list --view inbox         # todos that belong to no repository
 herdboard --json list --view all           # every board and your Linear issues
 herdboard --json list --view mine          # Linear issues assigned to the user
 herdboard --json list --column "In progress"
@@ -45,12 +45,16 @@ herdboard --json add "Buy milk" --board inbox
 herdboard --json move tep3 "In progress"
 herdboard --json move ENG-123 Review
 herdboard --json done tep3
+herdboard --json move tep3 --board inbox             # to another board; the ID stays
+herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
+herdboard --json edit tep3 --body "first detail line\nsecond detail line"
 ```
 
 Ask the user first before these. They change shared Linear data, open workspaces, or rewrite many cards:
 
 - `add --linear` (creates a Linear issue), `promote` (turns a todo into a Linear issue), and `move` or `done` on a Linear issue.
 - `start` (creates a worktree and starts an agent).
+- `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `link`, `init`, `migrate --yes`, `doctor --fix-ids`.
 
 ```bash
@@ -79,6 +83,9 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | Code | Do this |
 |---|---|
 | `no_state` | No workflow state of the issue's team maps to that column. Ask the user for another column. |
+| `linear_edit` | herdboard does not edit Linear issues. Tell the user to edit it in Linear. |
+| `confirmation_required` | `delete` needs `--yes`. Ask the user first, then run it with `--yes`. |
+| `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |
 | `conflict` | The card changed, or another write holds the lock. Run `show` again, then retry once. |

@@ -235,6 +235,125 @@ class AddMoveDoneTest(StoreTestCase):
         with self.assertRaises(NotFoundError):
             self.store.add(path, "x", column="Nope")
 
+    def test_add_with_details(self):
+        path = self.put("p", BASIC)
+        card = self.store.add(path, "new card #tag", "Doing", body=["first", "", "  second", ""])
+        self.assertEqual(card.body, ["\tfirst", "\t", "\t  second"])
+        self.assertEqual(self.store.show(card.ref).body, card.body)
+
+    def test_edit_title_keeps_the_box_and_the_id(self):
+        path = self.put("p", BASIC)
+        card = self.store.edit("tabc", title="three, renamed #tag")
+        self.assertEqual(card.title, "three, renamed #tag")
+        self.assertEqual(card.tags, ["tag"])
+        self.assertIn("- [ ] three, renamed #tag ^tabc\n", path.read_text())
+
+    def test_edit_body_replaces_the_indented_lines(self):
+        path = self.put("p", BASIC)
+        card = self.store.edit("p:2", body=["first", "  nested", "", "last"])
+        self.assertEqual(card.body, ["\tfirst", "\t  nested", "\t", "\tlast"])
+        text = path.read_text()
+        self.assertNotIn("body line", text)
+        self.assertIn("two #tag 📅 2026-01-02", text)
+        self.assertEqual(self.store.show(card.ref).body, card.body)
+
+    def test_edit_body_drops_trailing_blank_lines_and_can_clear(self):
+        self.put("p", BASIC)
+        card = self.store.edit("p:2", body=["only", "", ""])
+        self.assertEqual(card.body, ["\tonly"])
+        card = self.store.edit(card.ref, body=[])
+        self.assertEqual(card.body, [])
+
+    def test_edit_rejects_a_bad_title(self):
+        self.put("p", BASIC)
+        for title in ("", "   ", "two\nlines", "sneaky ^tzzz"):
+            with self.subTest(title=title), self.assertRaises(HerdboardError):
+                self.store.edit("tabc", title=title)
+
+    def test_edit_fails_when_the_card_changed_since_it_was_read(self):
+        path = self.put("p", BASIC)
+        before = self.store.show("tabc")
+        path.write_text(path.read_text().replace("three ^tabc", "three changed ^tabc"))
+        with self.assertRaises(ConflictError):
+            self.store.edit("tabc", title="mine", expected=before)
+        self.assertIn("three changed", path.read_text())
+
+    def test_move_to_another_board_keeps_the_card(self):
+        source = self.put("p", BASIC)
+        target = self.put("q", board_text(col("Todo"), col("Doing"), col("Done", "**Complete**")))
+        moved = self.store.move_to_board("p:2", target)
+        self.assertEqual((moved.board, moved.column), ("q", "Todo"))
+        self.assertEqual(moved.body, ["\tbody line"])
+        self.assertNotIn("two #tag", source.read_text())
+        self.assertIn("two #tag", target.read_text())
+        self.assertEqual(self.store.show(moved.ref).board, "q")
+
+    def test_move_to_another_board_keeps_the_id(self):
+        self.put("p", BASIC)
+        target = self.put("q", board_text(col("Todo"), col("Doing")))
+        moved = self.store.move_to_board("tabc", target)
+        self.assertEqual(moved.ref, "tabc")
+        self.assertEqual(moved.column, "Doing")
+
+    def test_move_to_another_board_without_that_column_uses_the_first(self):
+        self.put("p", BASIC)
+        target = self.put("q", board_text(col("Later"), col("Done", "**Complete**")))
+        self.assertEqual(self.store.move_to_board("tabc", target).column, "Later")
+
+    def test_move_to_another_board_and_column(self):
+        self.put("p", BASIC)
+        target = self.put("q", board_text(col("Todo"), col("Done", "**Complete**")))
+        moved = self.store.move_to_board("tabc", target, "Done")
+        self.assertEqual(moved.column, "Done")
+        self.assertTrue(moved.checked)
+
+    def test_move_to_another_board_never_reuses_a_new_id(self):
+        self.put("p", board_text(col("Todo", "- [ ] a", "- [ ] b")))
+        target = self.put("q", board_text(col("Todo", "- [ ] c", "- [ ] d")))
+        # The source takes t001 and t002. The target is then offered t001 again.
+        chars = iter("001" "001" "002" "001" "003" "004")
+        with mock.patch("herdboard.store.secrets.choice", side_effect=lambda alphabet: next(chars)):
+            self.store.move_to_board("p:1", target)
+        ids = [c.ref for c in self.store.list_cards()]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+
+    def test_move_to_the_same_board_is_refused(self):
+        source = self.put("p", BASIC)
+        with self.assertRaises(HerdboardError):
+            self.store.move_to_board("tabc", source)
+
+    def test_move_to_an_unknown_column_changes_nothing(self):
+        source = self.put("p", BASIC)
+        target = self.put("q", board_text(col("Todo")))
+        before = (source.read_text(), target.read_text())
+        with self.assertRaises(NotFoundError):
+            self.store.move_to_board("tabc", target, "Nope")
+        self.assertEqual((source.read_text(), target.read_text()), before)
+
+    def test_delete_removes_the_card_and_its_body(self):
+        path = self.put("p", BASIC)
+        deleted = self.store.delete("p:2")
+        self.assertEqual(deleted.title, "two #tag 📅 2026-01-02")
+        self.assertEqual(deleted.column, "Todo")
+        text = path.read_text()
+        self.assertNotIn("two #tag", text)
+        self.assertNotIn("body line", text)
+        self.assertIn("- [ ] three ^tabc", text)
+        self.assertIn("- [x] old", text)
+        self.assertEqual([c.title for c in self.store.list_cards()], ["one", "three", "four"])
+
+    def test_delete_by_id_keeps_every_other_line(self):
+        path = self.put("p", BASIC)
+        self.store.delete("tabc")
+        self.assertNotIn("three", path.read_text())
+        with self.assertRaises(NotFoundError):
+            self.store.show("tabc")
+
+    def test_delete_unknown_card(self):
+        self.put("p", BASIC)
+        with self.assertRaises(NotFoundError):
+            self.store.delete("tzzz")
+
     def test_move_top_and_bottom(self):
         self.put("p", BASIC)
         self.store.move("tabc", "Todo", position="top")

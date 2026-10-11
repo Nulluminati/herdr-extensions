@@ -28,7 +28,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.card = self.store.add(self.path, "Start test")
         self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
     def app(self):
-        app = HerdboardApp(self.store, "global", lambda _: [self.path], reload_interval=60, start_card=self.callback)
+        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -60,8 +60,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any("worktree removed" in w.plain for w in app.query(".card")))
             self.assertEqual(self.store.show(self.card.ref).column, "Backlog")
 
-    async def test_real_starter_runs_in_thread_for_global_view(self):
-        await self._real_starter("global")
+    async def test_real_starter_runs_in_thread_for_inbox_view(self):
+        await self._real_starter("inbox")
 
     async def test_real_starter_runs_in_thread_for_repository_view(self):
         await self._real_starter("repo")

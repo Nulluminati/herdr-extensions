@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
+from typing import Callable
 
 from .config import load_config
 from .identity import repo_identity
@@ -90,9 +91,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("--offline", action="store_true", help="read Linear from the cache only")
 
-    sub = command("move", "move a card to a column")
+    sub = command("move", "move a card to a column, or a todo to another board")
     sub.add_argument("ref")
-    sub.add_argument("column")
+    sub.add_argument("column", nargs="?", help="optional with --board: the card keeps its column name")
+    sub.add_argument("--board", help="move a todo to this board: inbox or a project name")
     sub.add_argument(
         "--position", choices=["top", "bottom"],
         help="place the card at the top or bottom of the column (todos default to the bottom; "
@@ -103,6 +105,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("done", "move a card to the done column")
     sub.add_argument("ref")
     write_options(sub)
+
+    sub = command("edit", "change a todo's text, its indented lines, or both")
+    sub.add_argument("ref")
+    sub.add_argument("--title", help="the card's new first line, with #tags and 📅 date")
+    sub.add_argument("--body", help="the card's new indented lines, one per line; empty clears them")
+    sub.add_argument("--body-file", type=Path, help="read the new indented lines from a file")
+
+    sub = command("delete", "remove a todo and its indented lines")
+    sub.add_argument("ref")
+    sub.add_argument("--yes", action="store_true", help="delete without asking")
 
     sub = command("promote", "turn a todo into a Linear issue, its checklist into sub-issues")
     sub.add_argument("ref")
@@ -299,7 +311,7 @@ class _Context:
             return args.view
         if args.project:
             return "project"
-        return "repo" if self.repo_board() else "global"
+        return "repo" if self.repo_board() else "inbox"
 
 
 def _cmd_list(ctx: _Context) -> dict:
@@ -377,6 +389,15 @@ def _require_todo_options(args: argparse.Namespace) -> None:
 
 def _cmd_move(ctx: _Context) -> dict:
     args = ctx.args
+    if args.board is not None:
+        if LINEAR_REF.match(args.ref):
+            raise UsageError("Linear issues stay in Linear; --board moves only todos")
+        if args.position or args.state:
+            raise UsageError("--position and --state do not work with --board")
+        target = ctx.store.ensure_inbox() if args.board == "inbox" else ctx.store.resolve_board(args.board)
+        return {"card": ctx.store.move_to_board(args.ref, target, args.column)}
+    if args.column is None:
+        raise UsageError("Give a column, or --board to move the todo to another board")
     if LINEAR_REF.match(args.ref):
         issue = ctx.writer.move(args.ref, args.column, args.position, ctx.ask(), args.state)
         return {"card": ctx.linear_card(issue)}
@@ -390,6 +411,48 @@ def _cmd_done(ctx: _Context) -> dict:
         return {"card": ctx.linear_card(ctx.writer.done(args.ref, ctx.ask(), args.state))}
     _require_todo_options(args)
     return {"card": ctx.store.done(args.ref)}
+
+
+class LinearEditError(HerdboardError):
+    code = "linear_edit"
+
+
+def _cmd_edit(ctx: _Context) -> dict:
+    args = ctx.args
+    if LINEAR_REF.match(args.ref):
+        raise LinearEditError("Edit Linear issues in Linear; herdboard edits only todos.")
+    if args.body is not None and args.body_file is not None:
+        raise UsageError("Use --body or --body-file, not both")
+    body = args.body
+    if args.body_file is not None:
+        path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
+        body = _read_todo_file(path)
+    if args.title is None and body is None:
+        raise UsageError("Nothing to change: give --title, --body or --body-file")
+    lines = body.splitlines() if body is not None else None
+    return {"card": ctx.store.edit(args.ref, title=args.title, body=lines), "edited": True}
+
+
+class ConfirmationRequired(HerdboardError):
+    code = "confirmation_required"
+
+
+class LinearDeleteError(HerdboardError):
+    code = "linear_delete"
+
+
+def _cmd_delete(ctx: _Context) -> dict:
+    args = ctx.args
+    if LINEAR_REF.match(args.ref):
+        raise LinearDeleteError("Delete Linear issues in Linear; herdboard deletes only todos.")
+    card = ctx.store.show(args.ref)
+    if args.yes:
+        return {"deleted": ctx.store.delete(args.ref)}
+    if args.json or not _interactive():
+        raise ConfirmationRequired(f"Deleting {card.ref} needs --yes without a terminal.")
+    if not _confirm(f"Delete {card.ref}: {card.title} ({card.board} / {card.column})? [y/N] "):
+        return {"deleted": None}
+    return {"deleted": ctx.store.delete(args.ref)}
 
 
 def _prompt_checkout(identity: str) -> str | None:
@@ -587,6 +650,14 @@ def _cmd_link(ctx: _Context) -> dict:
     return {"board": board, "links": ctx.store.update_links(board, add)}
 
 
+def _init_for_board(ctx: _Context) -> Callable[[], Path] | None:
+    """What the board's `i` key runs: create this repository's board, when it has none."""
+    if ctx.identity is None or ctx.repo_board() is not None:
+        return None
+    identity = ctx.identity
+    return lambda: ctx.store.init_board(identity)
+
+
 def _cmd_board(ctx: _Context) -> dict:
     view = ctx.chosen_view()
     views = ctx.views
@@ -605,6 +676,7 @@ def _cmd_board(ctx: _Context) -> dict:
         available=views.available,
         linear_writer=ctx.writer,
         directory=ctx.directory,
+        init_board=_init_for_board(ctx),
     ).run()
     return {}
 
@@ -615,6 +687,8 @@ COMMANDS = {
     "show": _cmd_show,
     "move": _cmd_move,
     "done": _cmd_done,
+    "delete": _cmd_delete,
+    "edit": _cmd_edit,
     "promote": _cmd_promote,
     "start": _cmd_start,
     "init": _cmd_init,
@@ -677,7 +751,10 @@ def _render(command: str, result: dict, as_json: bool) -> None:
         return
     linear = result.get("linear")
     if as_json:
-        if command == "list":
+        if command == "delete":
+            deleted = result["deleted"]
+            _emit_json({"deleted": _card_dict(deleted) if deleted else None})
+        elif command == "list":
             _emit_json({"cards": [_card_dict(card) for card in result["cards"]],
                         "boards": [_board_dict(board) for board in result["boards"]],
                         **_linear_json(linear)})
@@ -699,7 +776,11 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                 data.update(_linear_json(linear))
             _emit_json(data)
         return
-    if command == "list":
+    if command == "delete":
+        deleted = result["deleted"]
+        print(f"Deleted {deleted.ref}: {deleted.title} ({deleted.board} / {deleted.column})"
+              if deleted else "Nothing deleted.")
+    elif command == "list":
         print(_list_text(result["cards"]))
     elif command == "show":
         print(_show_text(result["card"], result.get("notes")))
@@ -713,6 +794,9 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     elif command == "link":
         names = ", ".join(link.name for link in result["links"]) or "none"
         print(f"{result['board']}: linked projects: {names}")
+    elif command == "edit":
+        card = result["card"]
+        print(f"{card.ref} edited ({card.board} / {card.column})")
     else:
         print(_card_line(result["card"]))
         if result.get("hint"):

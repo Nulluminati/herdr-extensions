@@ -51,6 +51,7 @@ class SkillTests(unittest.TestCase):
             LinearWriteRejectedError, LinearDisabledError, TeamRequiredError,
             AlreadyPromotedError, NotATodoError)}
         known.add(cli.UsageError.code)
+        known |= {cli.ConfirmationRequired.code, cli.LinearDeleteError.code, cli.LinearEditError.code}
         known |= {"ambiguous_state", "no_state", "checkout_unknown", "repo_required", "herdr_unavailable", "herdr_error"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")

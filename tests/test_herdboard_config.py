@@ -34,6 +34,32 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.complete_markers, ["Complete"])
         self.assertIsNone(config.vault_root)
 
+    def test_theme_defaults_to_the_terminal_palette(self):
+        self.assertEqual(load_config().theme, "ansi-dark")
+
+    def test_theme_from_file(self):
+        path = self.write(self.dir / "a.toml", 'theme = "nord"\n')
+        self.assertEqual(load_config(path).theme, "nord")
+
+    def test_theme_must_be_a_name(self):
+        for text in ("theme = 3", 'theme = ""'):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "a.toml", text + "\n")
+                with self.assertRaises(HerdboardError):
+                    load_config(path)
+
+    def test_tag_style_defaults_to_round(self):
+        self.assertEqual(load_config().tag_style, "round")
+
+    def test_tag_style_block(self):
+        path = self.write(self.dir / "a.toml", 'tag_style = "block"\n')
+        self.assertEqual(load_config(path).tag_style, "block")
+
+    def test_tag_style_must_be_known(self):
+        path = self.write(self.dir / "a.toml", 'tag_style = "square"\n')
+        with self.assertRaises(HerdboardError):
+            load_config(path)
+
     def test_argument_path(self):
         path = self.write(self.dir / "a.toml", 'columns = ["A", "B"]\n')
         self.assertEqual(load_config(path).columns, ["A", "B"])

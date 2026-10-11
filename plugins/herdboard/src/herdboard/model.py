@@ -8,6 +8,7 @@ only the elements they touch.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 import re
 
 
@@ -181,3 +182,39 @@ def frontmatter_scalars(lines: list[str]) -> dict[str, str]:
         if match:
             values[match.group(1)] = match.group(2).strip("'\"")
     return values
+
+
+def split_title(title: str) -> tuple[str, list[str], str | None]:
+    """A card's first-line text as (text, tags, due date). Tags and the date leave the text."""
+    tags = [match.group("tag") for match in TAG.finditer(title)]
+    due_match = DUE_DATE.search(title)
+    text = DUE_DATE.sub("", TAG.sub("", title))
+    return " ".join(text.split()), tags, due_match.group("date") if due_match else None
+
+
+def join_title(text: str, tags: list[str], due: str | None) -> str:
+    """The first-line text of a card: text, then `#tags`, then `📅 date`."""
+    text = " ".join(text.split())
+    if not text:
+        raise HerdboardError("A card needs a title")
+    parts = [text, *(f"#{tag}" for tag in tags)]
+    if due:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due):
+            raise HerdboardError(f"Due date {due!r} is not YYYY-MM-DD")
+        try:
+            date.fromisoformat(due)
+        except ValueError as error:
+            raise HerdboardError(f"Due date {due!r} is not a real date") from error
+        parts.append(f"📅 {due}")
+    return " ".join(parts)
+
+
+def parse_tags(text: str) -> list[str]:
+    """Tags typed in a form: separated by spaces or commas, with or without `#`. Duplicates drop."""
+    tags: list[str] = []
+    for part in re.split(r"[\s,]+", text):
+        tag = part.strip().lstrip("#")
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+

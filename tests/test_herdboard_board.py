@@ -1,5 +1,6 @@
 import asyncio
 import fcntl
+import os
 import sys
 import tempfile
 import unittest
@@ -11,10 +12,10 @@ SRC = ROOT / "plugins/herdboard/src"
 sys.path.insert(0, str(SRC))
 
 from herdboard import cli  # noqa: E402
-from herdboard.board import AddScreen, DetailScreen, HelpScreen, HerdboardApp  # noqa: E402
+from herdboard.board import AddScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
-from herdboard.model import ConflictError, IoError, NotFoundError  # noqa: E402
+from herdboard.model import ConflictError, HerdboardError, IoError, NotFoundError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
 FIXTURE = ROOT / "tests/fixtures/herdboard/kanban-2.0.51-full.md"
@@ -31,7 +32,7 @@ async def settle(pilot):
 
 async def fill(pilot, text, submit=True):
     """Set the Add dialog text directly; typing is covered by one test."""
-    pilot.app.screen.query_one("#add-input").value = text
+    pilot.app.screen.query_one("#card-title").value = text
     if submit:
         await pilot.press("enter")
         await settle(pilot)
@@ -57,7 +58,7 @@ class BoardTestCase(unittest.IsolatedAsyncioTestCase):
     def make_app(self, view="repo", interval=60.0, repo=True):
         paths = {
             "repo": [self.repo_path],
-            "global": [self.inbox_path],
+            "inbox": [self.inbox_path],
             "all": self.store.board_paths(),
         }
         app = HerdboardApp(
@@ -95,12 +96,11 @@ class RenderTests(BoardTestCase):
                 ["Backlog 2", "Todo 2/5", "In progress 0", "Review 1", "Done 1"],
             )
             plain = self.cards(app)
-            self.assertTrue(any("Compare tile suppliers #research" in c and "+0" not in c for c in plain))
+            self.assertTrue(any(c.startswith("Compare tile suppliers\n\ue0b6research\ue0b4") and "+0" not in c for c in plain))
             multi = [c for c in plain if "Plan the lighting" in c]
             self.assertEqual(len(multi), 1)
             self.assertIn("+3", multi[0])
-            self.assertNotIn("^t3m9", " ".join(plain))
-            self.assertIn("t3m9", " ".join(plain))
+            self.assertNotIn("t3m9", " ".join(plain), "local card IDs stay off the board")
             self.assertFalse(any("Old card" in c for c in plain))
             self.assertEqual(len(list(app.query(".column.completed"))), 1)
 
@@ -134,13 +134,69 @@ class RenderTests(BoardTestCase):
             )
 
     async def test_view_cycle_skips_repo_without_repository_board(self):
-        app = self.make_app("global", repo=False)
+        app = self.make_app("inbox", repo=False)
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             await pilot.press("v")
             self.assertEqual(app.view, "all")
             await pilot.press("v")
-            self.assertEqual(app.view, "global")
+            self.assertEqual(app.view, "inbox")
+
+
+class CardLookTests(BoardTestCase):
+    async def test_cards_do_not_show_local_ids(self):
+        card = self.store.add(self.repo_path, "Write release notes", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            text = [c for c in self.cards(app) if "Write release notes" in c][0]
+            self.assertNotIn(card.ref, text)
+
+    async def test_tags_are_colored_chips_and_leave_the_title(self):
+        self.store.add(self.repo_path, "Fix login #auth #web 📅 2026-11-01", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            widget = app.query_one(".card")
+            first_line = widget.plain.splitlines()[0]
+            self.assertEqual(first_line, "Fix login")
+            chips = [widget.rich_text.plain[span.start:span.end] for span in widget.rich_text.spans
+                     if " on " in str(span.style)]
+            self.assertEqual(chips, ["auth", "web"])
+            self.assertIn("\ue0b6auth\ue0b4 \ue0b6web\ue0b4", widget.plain)
+            self.assertIn("📅 Nov 1", widget.plain)
+
+    async def test_block_tags_for_fonts_without_round_ends(self):
+        self.config.tag_style = "block"
+        self.store.add(self.repo_path, "Fix login #auth", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            widget = app.query_one(".card")
+            self.assertEqual(widget.plain.splitlines()[1], " auth ")
+            self.assertNotIn("\ue0b6", widget.plain)
+
+    async def test_columns_fill_the_screen(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            widths = [w.outer_size.width for w in app.query(".column")]
+            self.assertEqual(len(widths), 5)
+            self.assertGreaterEqual(sum(widths), 145)
+            self.assertLessEqual(max(widths) - min(widths), 1)
+
+    async def test_narrow_screens_scroll_instead_of_squeezing(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 30)) as pilot:
+            await pilot.pause()
+            self.assertGreaterEqual(min(w.outer_size.width for w in app.query(".column")), 24)
+
+    async def test_scroll_bars_are_thin(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.query_one(".cards").styles.scrollbar_size_vertical, 1)
+            self.assertEqual(app.query_one("#columns").styles.scrollbar_size_horizontal, 1)
 
 
 class NavigationTests(BoardTestCase):
@@ -188,6 +244,182 @@ class NavigationTests(BoardTestCase):
             self.assertEqual(self.refs(self.repo_path)["a1"][1], "Backlog")
             self.assertIn("a1", self.selected(app)[0])
 
+    async def test_a_move_keeps_the_column_widgets(self):
+        """Rebuilding every column on each move made the screen flash."""
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            columns = list(app.query(".column"))
+            untouched = list(columns[3].query(".card")) + list(columns[2].query(".card"))
+            await pilot.press("L")
+            await settle(pilot)
+            self.assertEqual(self.refs(self.repo_path)["a1"][1], "Todo")
+            self.assertEqual(list(app.query(".column")), columns)
+            self.assertEqual(list(columns[3].query(".card")) + list(columns[2].query(".card")), untouched)
+            self.assertEqual(self.headers(app)[:2], ["Backlog 1", "Todo 2"])
+
+    async def test_e_edits_title_and_body(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            title = app.screen.query_one("#card-title")
+            body = app.screen.query_one("#card-body")
+            self.assertEqual(title.value, "a1")
+            self.assertEqual(body.text, "")
+            await pilot.press("x")
+            self.assertEqual(title.value, "a1x", "typing must not replace the whole title")
+            title.value = "a1 renamed"
+            app.screen.query_one("#card-tags").value = "#tag, web"
+            app.screen.query_one("#card-due").value = "2026-11-01"
+            body.text = "detail one\n  nested"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            card = self.store.show(self.refs(self.repo_path)["a1 renamed #tag #web 📅 2026-11-01"][0])
+            self.assertEqual(card.body, ["\tdetail one", "\t  nested"])
+            self.assertIn("a1 renamed", self.selected(app)[0])
+            self.assertNotIsInstance(app.screen, EditScreen)
+
+    async def test_tab_moves_between_title_and_details(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            order = []
+            for _ in range(3):
+                await pilot.press("tab")
+                order.append(app.focused.id)
+            self.assertEqual(order, ["card-tags", "card-due", "card-body"])
+            await pilot.press(*"bat", "enter", *"fish")
+            await pilot.press("shift+tab", "shift+tab", "shift+tab")
+            self.assertEqual(app.focused.id, "card-title")
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            ref = self.refs(self.repo_path)["a1"][0]
+            self.assertEqual(self.store.show(ref).body, ["\tbat", "\tfish"])
+
+    async def test_board_keys_do_nothing_behind_a_dialog(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            await pilot.press("tab", "l", "x")
+            self.assertIsInstance(app.screen, EditScreen)
+            self.assertEqual(app.col, 0)
+
+    async def test_edit_splits_the_title_into_fields(self):
+        ref = self.refs(self.repo_path)["a1"][0]
+        self.store.edit(ref, title="Fix the #auth login 📅 2026-11-01")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#card-title").value, "Fix the login")
+            self.assertEqual(app.screen.query_one("#card-tags").value, "auth")
+            self.assertEqual(app.screen.query_one("#card-due").value, "2026-11-01")
+
+    async def test_a_bad_due_date_stays_in_the_dialog(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            app.screen.query_one("#card-due").value = "2026-13-40"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertIsInstance(app.screen, EditScreen)
+            self.assertIn("2026-13-40", app.screen.query_one("#card-error").plain)
+            self.assertIn("a1", self.refs(self.repo_path))
+
+    async def test_e_shows_the_body_without_its_indent(self):
+        ref = self.refs(self.repo_path)["a1"][0]
+        self.store.edit(ref, body=["one", "\ttwo"])
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#card-body").text, "one\n\ttwo")
+
+    async def test_escape_cancels_an_edit(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            app.screen.query_one("#card-title").value = "changed"
+            await pilot.press("escape")
+            await settle(pilot)
+            self.assertIn("a1", self.refs(self.repo_path))
+
+    async def test_an_edit_of_a_changed_card_shows_the_conflict(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            text = self.repo_path.read_text().replace("a1", "a1 from obsidian", 1)
+            self.repo_path.write_text(text)
+            app.screen.query_one("#card-title").value = "mine"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertIsInstance(app.screen, EditScreen)
+            self.assertIn("changed on disk", app.screen.query_one("#card-error").plain)
+            self.assertIn("a1 from obsidian", self.refs(self.repo_path))
+
+    async def test_b_moves_the_card_to_another_board(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            ref = self.refs(self.repo_path)["a1"][0]
+            await pilot.press("b")
+            await pilot.pause()
+            self.assertEqual(app.screen.board_labels, ["Inbox"])
+            await pilot.press("enter")
+            await settle(pilot)
+            moved = self.store.show(ref)
+            self.assertEqual((moved.board, moved.column), ("inbox", "Backlog"))
+            self.assertNotIn("a1", self.refs(self.repo_path))
+            self.assertIn("a2", self.selected(app)[0])
+
+    async def test_b_then_escape_keeps_the_card(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("b")
+            await pilot.pause()
+            await pilot.press("escape")
+            await settle(pilot)
+            self.assertIn("a1", self.refs(self.repo_path))
+
+    async def test_x_deletes_after_y(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            self.assertIn("a1", app.screen.query_one("#delete-prompt").plain)
+            await pilot.press("y")
+            await settle(pilot)
+            self.assertNotIn("a1", self.refs(self.repo_path))
+            self.assertIn("a2", self.selected(app)[0])
+
+    async def test_x_then_n_or_escape_keeps_the_card(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            for key in ("n", "escape"):
+                await pilot.press("x")
+                await pilot.pause()
+                await pilot.press(key)
+                await settle(pilot)
+                self.assertIn("a1", self.refs(self.repo_path))
+                self.assertIn("a1", self.selected(app)[0])
+
     async def test_move_in_completed_column_checks_card(self):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
@@ -213,8 +445,8 @@ class ActionTests(BoardTestCase):
             self.assertEqual(self.refs(self.repo_path)["new card"][1], "Todo")
             self.assertTrue(any("new card" in c for c in self.cards(app)))
 
-    async def test_add_escape_cancels_then_global_add_goes_to_inbox(self):
-        app = self.make_app("global")
+    async def test_add_escape_cancels_then_inbox_add_goes_to_inbox(self):
+        app = self.make_app("inbox")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             await pilot.press("a")
@@ -329,7 +561,7 @@ class ReloadTests(BoardTestCase):
             await pilot.pause()
             self.assertTrue(any("external" in c for c in self.cards(app)))
             self.assertEqual(self.headers(app)[1], "Todo 1")
-            self.assertIn(b.ref, self.selected(app)[0])
+            self.assertEqual(app.current_card().ref, b.ref)
 
     def write_idless(self, *titles):
         text = self.inbox_path.read_text().replace(
@@ -339,7 +571,7 @@ class ReloadTests(BoardTestCase):
 
     async def test_idless_card_keeps_identity_when_earlier_card_is_removed(self):
         self.write_idless("a", "b", "c")
-        app = self.make_app("global")
+        app = self.make_app("inbox")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             await pilot.press("down")
@@ -355,7 +587,7 @@ class ReloadTests(BoardTestCase):
 
     async def test_idless_card_changed_externally_clears_selection(self):
         self.write_idless("a", "b", "c")
-        app = self.make_app("global")
+        app = self.make_app("inbox")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             await pilot.press("down")
@@ -397,6 +629,46 @@ class ColumnOrderTests(BoardTestCase):
 
 
 class AddDialogTests(BoardTestCase):
+    async def test_add_with_tags_date_and_details(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#card-title").value = "Write release notes"
+            screen.query_one("#card-tags").value = "docs, release"
+            screen.query_one("#card-due").value = "2026-11-01"
+            screen.query_one("#card-body").text = "draft\nreview"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            card = self.store.list_cards([self.repo_path])[0]
+            self.assertEqual(card.title, "Write release notes #docs #release 📅 2026-11-01")
+            self.assertEqual(card.body, ["\tdraft", "\treview"])
+
+    async def test_add_offers_this_repository_and_the_inbox(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            choice = app.screen.query_one("#card-board")
+            labels = [str(label) for label, _ in app.screen.board_options]
+            self.assertEqual(labels, ["This repository (acme-api)", "Inbox"])
+            self.assertEqual(choice.value, str(self.repo_path))
+            choice.value = str(self.inbox_path)
+            await fill(pilot, "for later")
+            self.assertEqual([c.title for c in self.store.list_cards([self.inbox_path])], ["for later"])
+            self.assertEqual(self.store.list_cards([self.repo_path]), [])
+
+    async def test_add_in_the_inbox_view_defaults_to_the_inbox(self):
+        app = self.make_app("inbox")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#card-board").value, str(self.inbox_path))
+
     async def test_destination_captured_when_dialog_opens(self):
         self.store.add(self.repo_path, "r", "Todo")
         self.store.add(self.inbox_path, "i", "Backlog")
@@ -405,7 +677,7 @@ class AddDialogTests(BoardTestCase):
             await pilot.pause()
             await pilot.press("right", "a")
             self.assertIsInstance(app.screen, AddScreen)
-            self.assertIn("acme-api / Todo", app.screen.query_one("#add-target").plain)
+            self.assertIn("acme-api / Todo", app.screen.query_one("#card-target").plain)
             # Delete the repository card, then reload under the open dialog.
             lines = [l for l in self.repo_path.read_text().splitlines() if "] r " not in l + " "]
             self.repo_path.write_text("\n".join(lines) + "\n")
@@ -424,8 +696,8 @@ class AddDialogTests(BoardTestCase):
             with mock.patch.object(self.store, "add", side_effect=ConflictError("locked")):
                 await fill(pilot, "long title")
             self.assertIsInstance(app.screen, AddScreen)
-            self.assertEqual(app.screen.query_one("#add-input").value, "long title")
-            self.assertIn("locked", app.screen.query_one("#add-error").plain)
+            self.assertEqual(app.screen.query_one("#card-title").value, "long title")
+            self.assertIn("locked", app.screen.query_one("#card-error").plain)
             await fill(pilot, "long title")
             self.assertNotIsInstance(app.screen, AddScreen)
             self.assertEqual(self.store.list_cards([self.repo_path])[0].title, "long title")
@@ -439,7 +711,7 @@ class AddDialogTests(BoardTestCase):
             with self.held_lock():
                 await fill(pilot, "kept")
             self.assertIsInstance(app.screen, AddScreen)
-            self.assertEqual(app.screen.query_one("#add-input").value, "kept")
+            self.assertEqual(app.screen.query_one("#card-title").value, "kept")
             self.assertEqual(self.store.list_cards([self.repo_path]), [])
 
     def held_lock(self):
@@ -450,7 +722,7 @@ class AddDialogTests(BoardTestCase):
         store = Store(config)
         app = HerdboardApp(
             store,
-            "global",
+            "inbox",
             paths_for=lambda name: [store.inbox_path] if store.inbox_path.is_file() else [],
         )
         app.animation_level = "none"
@@ -558,7 +830,7 @@ class CliBoardTests(unittest.TestCase):
             self.assertEqual(code, 0)
             run.assert_called_once_with()
 
-    def test_board_command_default_view_is_global_outside_git(self):
+    def test_board_command_default_view_is_inbox_outside_git(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = root / "config.toml"
@@ -568,7 +840,182 @@ class CliBoardTests(unittest.TestCase):
                 HerdboardApp, "__init__", lambda self, store, view, **kw: seen.append(view)
             ), mock.patch.object(HerdboardApp, "run"):
                 cli.main(["--config", str(config), "-C", str(root), "board"])
-            self.assertEqual(seen, ["global"])
+            self.assertEqual(seen, ["inbox"])
+
+
+
+class InitAssistTests(BoardTestCase):
+    def make_unboarded_app(self):
+        identity = RepoIdentity("github.com/acme/web", "github.com", ("acme", "web"))
+        self.web = identity
+
+        def paths_for(name):
+            if name == "repo":
+                board = self.store.board_for_repo(identity)
+                return [board] if board else []
+            return [self.inbox_path] if name == "inbox" else self.store.board_paths()
+
+        app = HerdboardApp(
+            self.store, "inbox", paths_for=paths_for, repo_board=None, reload_interval=60.0,
+            available=lambda name: name != "repo" or self.store.board_for_repo(identity) is not None,
+            init_board=lambda: self.store.init_board(identity),
+        )
+        app.animation_level = "none"
+        return app
+
+    def title(self, app):
+        return app.query_one("#title-bar").plain
+
+    async def test_title_says_how_to_create_the_board(self):
+        app = self.make_unboarded_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            self.assertIn("no board for this repository: press i to create it", self.title(app))
+
+    async def test_i_creates_the_board_and_shows_it(self):
+        app = self.make_unboarded_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("i")
+            for _ in range(20):
+                await pilot.pause(0.05)
+                if app.view == "repo":
+                    break
+            self.assertEqual(app.view, "repo")
+            board = self.store.board_for_repo(self.web)
+            self.assertIsNotNone(board)
+            self.assertEqual(app.repo_board, board)
+            self.assertNotIn("press i", self.title(app))
+            self.assertIn("view: repo", self.title(app))
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("v")
+            await pilot.pause()
+            await pilot.press("v")
+            await pilot.pause()
+            self.assertEqual(app.view, "repo")
+
+    async def test_i_with_a_board_says_so(self):
+        app = self.make_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("i")
+            await pilot.pause()
+            messages = [n.message for n in app._notifications]
+            self.assertIn("This repository already has a board.", messages)
+
+    async def test_t_without_linear_says_linear_is_off(self):
+        app = self.make_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            messages = [n.message for n in app._notifications]
+            self.assertIn("Linear is off, so there are no Linear cards to hide.", messages)
+
+    def test_board_command_offers_init_in_a_repository_without_a_board(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # The CLI records checkouts in the state folder; keep that inside the test.
+            self.enterContext(mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state")}))
+            config = root / "config.toml"
+            config.write_text(f'todos_dir = "{root / "todos"}"\n')
+            repo = root / "web"
+            repo.mkdir()
+            import subprocess
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            seen = {}
+            with mock.patch.object(
+                HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)
+            ), mock.patch.object(HerdboardApp, "run"):
+                cli.main(["--config", str(config), "-C", str(repo), "board"])
+            board = seen["init_board"]()
+            self.assertTrue(board.exists())
+            self.assertIn("repo:", board.read_text())
+
+    def test_board_command_has_no_init_outside_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # The CLI records checkouts in the state folder; keep that inside the test.
+            self.enterContext(mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state")}))
+            config = root / "config.toml"
+            config.write_text(f'todos_dir = "{root / "todos"}"\n')
+            seen = {}
+            with mock.patch.object(
+                HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)
+            ), mock.patch.object(HerdboardApp, "run"):
+                cli.main(["--config", str(config), "-C", str(root), "board"])
+            self.assertIsNone(seen["init_board"])
+
+
+class TerminalModeTests(unittest.TestCase):
+    """Herdr reads mouse positions as cells; pixel reports (mode 1016) break its own tabs and sidebar."""
+
+    def driver(self):
+        from herdboard.board import CellMouseDriver
+
+        driver = CellMouseDriver.__new__(CellMouseDriver)
+        driver._mouse = True
+        driver._mouse_pixels = False
+        driver.written = []
+        driver.write = driver.written.append
+        driver.flush = lambda: None
+        return driver
+
+    def test_the_app_uses_the_cell_mouse_driver(self):
+        from herdboard.board import CellMouseDriver
+
+        from textual.app import App
+        from textual.drivers.linux_driver import LinuxDriver
+
+        app = HerdboardApp.__new__(HerdboardApp)
+        with mock.patch.object(App, "get_driver_class", return_value=LinuxDriver):
+            self.assertIs(app.get_driver_class(), CellMouseDriver)
+        with mock.patch.object(App, "get_driver_class", return_value=object):
+            self.assertIs(app.get_driver_class(), object)
+
+    def test_pixel_mouse_reports_stay_off(self):
+        driver = self.driver()
+        driver._enable_mouse_pixels()
+        self.assertNotIn("\x1b[?1016h", "".join(driver.written))
+        self.assertFalse(driver._mouse_pixels)
+
+    def test_cell_mouse_reports_stay_on(self):
+        driver = self.driver()
+        driver._enable_mouse_support()
+        self.assertIn("\x1b[?1000h", "".join(driver.written))
+        self.assertIn("\x1b[?1006h", "".join(driver.written))
+
+
+class ThemeTests(BoardTestCase):
+    async def test_the_board_uses_the_terminal_palette_by_default(self):
+        app = self.make_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.theme, "ansi-dark")
+            self.assertTrue(app.native_ansi_color)
+
+    async def test_the_board_uses_the_configured_theme(self):
+        self.config.theme = "nord"
+        app = self.make_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.theme, "nord")
+
+    def test_an_unknown_theme_is_a_config_error(self):
+        self.config.theme = "no-such-theme"
+        with self.assertRaises(HerdboardError) as caught:
+            self.make_app()
+        self.assertIn("no-such-theme", str(caught.exception))
+        self.assertIn("ansi-dark", str(caught.exception))
+
+    async def test_cards_have_a_border_in_the_terminal_palette(self):
+        self.store.add(self.repo_path, "first")
+        app = self.make_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            card = app.query_one(".card")
+            self.assertEqual(card.styles.border_top[0], "round")
 
 
 if __name__ == "__main__":

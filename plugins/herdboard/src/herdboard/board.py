@@ -4,26 +4,30 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 import threading
+import zlib
 from typing import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import HorizontalScroll, Vertical, VerticalScroll
+from textual.containers import Horizontal, HorizontalScroll, Vertical, VerticalScroll
+from textual.driver import Driver
+from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, Label, OptionList, Static
+from textual.widgets import Footer, Input, Label, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from .linear import LinearAuthError
 from .linear_writes import LinearWriter
-from .model import HerdboardError
+from .model import HerdboardError, join_title, parse_tags, split_title
 from .store import TEMP_REF, CardView, Store
 from .start import Starter, mark_removed
 from .views import LinearResult
 
-VIEWS = ["repo", "global", "all", "mine"]
+VIEWS = ["repo", "inbox", "all", "mine"]
 RELOAD_SECONDS = 2.0
 LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
@@ -41,11 +45,16 @@ HELP_KEYS = [
     ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
     ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
     ("enter", "card detail"),
-    ("a", "add a card to the selected column"),
+    ("a", "add a card to the selected column: title, tags, due date, details, and the board"),
     ("d", "mark the card done (a Linear card moves to its completed state)"),
+    ("e", "edit the todo: title, tags, due date and details (ctrl+s saves)"),
+    ("b", "move the todo to another board, for example from the inbox to this repository"),
+    ("x", "delete the todo, after you confirm"),
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi and start work"),
-    ("v", "cycle view: repo, global, all, mine"),
+    ("v", "cycle view: repo, inbox, all, mine"),
+    ("t", "hide or show Linear cards"),
+    ("i", "create the board for this repository"),
     ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
@@ -66,25 +75,90 @@ class ColumnData:
         return f"{self.name} {count}" if self.limit is None else f"{self.name} {count}/{self.limit}"
 
 
-class CardWidget(Static):
-    def __init__(self, card: CardView, show_board: bool):
-        self.card = card
-        text = Text(card.title)
-        meta = Text(card.ref, style="dim")
-        if card.source == "linear":
-            meta = Text(f"{LINEAR_MARK} {card.ref}", style="dim")
-            if card.pr:
-                meta.append(" · PR", style="bold")
-        if show_board:
-            meta.append(f" · {card.board}", style="dim")
-        if card.body:
-            meta.append(f" +{len(card.body)}", style="dim")
-        if card.worktree_removed:
-            meta.append(" · worktree removed", style="bold yellow")
+# Tag chip colors: terminal palette names, so ANSI themes use the terminal's own colors.
+CHIP_COLORS = ["blue", "magenta", "cyan", "green", "yellow", "bright_blue", "bright_magenta", "bright_cyan"]
+
+
+def chip_color(tag: str) -> str:
+    """The same tag always gets the same color."""
+    return CHIP_COLORS[zlib.crc32(tag.casefold().encode()) % len(CHIP_COLORS)]
+
+
+def due_label(due: str, today: date | None = None) -> Text:
+    """`📅 Nov 1`, red when past, yellow within two days."""
+    today = today or date.today()
+    try:
+        day = date.fromisoformat(due)
+    except ValueError:
+        return Text(f"📅 {due}", style="dim")
+    shown = f"{day:%b} {day.day}" + ("" if day.year == today.year else f" {day.year}")
+    if day < today:
+        style = "bold red"
+    elif (day - today).days <= 2:
+        style = "yellow"
+    else:
+        style = "dim"
+    return Text(f"📅 {shown}", style=style)
+
+
+# Nerd Font half circles that round off a tag block.
+ROUND_LEFT, ROUND_RIGHT = "\ue0b6", "\ue0b4"
+
+
+def tag_chip(tag: str, style: str) -> Text:
+    """A tag as a colored block, with round ends when `style` is "round"."""
+    color = chip_color(tag)
+    if style == "round":
+        chip = Text(ROUND_LEFT, style=color)
+        chip.append(tag, style=f"black on {color}")
+        chip.append(ROUND_RIGHT, style=color)
+        return chip
+    return Text(f" {tag} ", style=f"black on {color}")
+
+
+def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Text:
+    """A card as the board shows it: the title, then tag chips, the due date and notes."""
+    if card.source == "linear":
+        title, tags, due = card.title, card.tags, card.due
+    else:
+        title, tags, due = split_title(card.title)
+    text = Text(title or card.title)
+    line = Text()
+    for tag in tags:
+        if line:
+            line.append(" ")
+        line.append_text(tag_chip(tag, tag_style))
+    if due:
+        if line:
+            line.append(" ")
+        line.append_text(due_label(due))
+    info = []
+    if card.source == "linear":
+        info.append(Text(f"{LINEAR_MARK} {card.ref}", style="dim"))
+        if card.pr:
+            info.append(Text("PR", style="bold"))
+    if show_board:
+        info.append(Text(card.board, style="dim"))
+    if card.body:
+        info.append(Text(f"+{len(card.body)}", style="dim"))
+    if card.worktree_removed:
+        info.append(Text("worktree removed", style="bold yellow"))
+    if info:
+        if line:
+            line.append("  ")
+        line.append_text(Text(" · ", style="dim").join(info))
+    if line:
         text.append("\n")
-        text.append_text(meta)
-        self.plain = text.plain
-        super().__init__(text, classes="card")
+        text.append_text(line)
+    return text
+
+
+class CardWidget(Static):
+    def __init__(self, card: CardView, show_board: bool, tag_style: str = "round"):
+        self.card = card
+        self.rich_text = card_text(card, show_board, tag_style)
+        self.plain = self.rich_text.plain
+        super().__init__(self.rich_text, classes="card")
 
 
 class ColumnHeader(Static):
@@ -141,36 +215,136 @@ class HelpScreen(ModalBase):
             yield Label("escape: close", classes="dim")
 
 
-class AddScreen(ModalBase):
-    """Add dialog. The destination is fixed when the dialog opens."""
+class CardFormScreen(ModalBase):
+    """The fields of a todo: title, tags, due date and details. ctrl+s or enter saves."""
 
-    def __init__(self, path: Path, board: str, column: str):
+    BINDINGS = [Binding("ctrl+s", "save", "Save")]
+    AUTO_FOCUS = "#card-title"
+    heading = ""
+
+    def __init__(self, title: str = "", tags: list[str] = (), due: str | None = None, body: list[str] = ()):
         super().__init__()
-        self.path = path
-        self.board = board
-        self.column = column
+        self.initial = (title, " ".join(tags), due or "", "\n".join(body))
+
+    def destination(self) -> ComposeResult:
+        return iter(())
 
     def compose(self) -> ComposeResult:
-        target = Static(Text(f"Add to {self.board} / {self.column}"), id="add-target")
-        target.plain = f"Add to {self.board} / {self.column}"
-        error = Static("", id="add-error", classes="error")
+        title, tags, due, body = self.initial
+        target = Static(Text(self.heading), id="card-target")
+        target.plain = self.heading
+        error = Static("", id="card-error", classes="error")
         error.plain = ""
-        with Vertical(classes="dialog"):
+        with Vertical(classes="dialog card-form"):
             yield target
-            yield Input(placeholder="Card text", id="add-input")
+            yield from self.destination()
+            yield self._titled(Input(value=title, placeholder="What needs doing", id="card-title",
+                                     select_on_focus=False), "Title")
+            with Horizontal(classes="form-row"):
+                yield self._titled(Input(value=tags, placeholder="auth, web", id="card-tags",
+                                         select_on_focus=False), "Tags")
+                yield self._titled(Input(value=due, placeholder="YYYY-MM-DD", id="card-due",
+                                         select_on_focus=False), "Due date")
+            yield self._titled(
+                TextArea(body, id="card-body", placeholder="Notes, links or a checklist such as - [ ] step one"),
+                "Details",
+            )
             yield error
+            yield Label("ctrl+s or enter: save · tab: next field · escape: cancel", classes="dim")
+
+    @staticmethod
+    def _titled(widget, title: str):
+        widget.border_title = title
+        return widget
+
+    def set_heading(self, text: str) -> None:
+        target = self.query_one("#card-target", Static)
+        target.plain = text
+        target.update(Text(text))
 
     def show_error(self, message: str) -> None:
-        error = self.query_one("#add-error", Static)
+        error = self.query_one("#card-error", Static)
         error.plain = message
         error.update(Text(message))
 
+    def values(self) -> tuple[str, list[str]]:
+        """The first-line text and the detail lines. Raises HerdboardError for bad input."""
+        line = join_title(
+            self.query_one("#card-title", Input).value,
+            parse_tags(self.query_one("#card-tags", Input).value),
+            self.query_one("#card-due", Input).value.strip() or None,
+        )
+        return line, self.query_one("#card-body", TextArea).text.split("\n")
+
+    def is_empty(self) -> bool:
+        fields = [self.query_one(f"#card-{name}", Input).value for name in ("title", "tags", "due")]
+        return not any(f.strip() for f in fields) and not self.query_one("#card-body", TextArea).text.strip()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
-        if not event.value.strip():
+        if self.is_empty():
             self.dismiss(None)
             return
-        self.app.submit_add(self, event.value)
+        self.action_save()
+
+    def action_save(self) -> None:
+        try:
+            line, body = self.values()
+        except HerdboardError as error:
+            self.show_error(str(error))
+            return
+        self.submit(line, body)
+
+    def submit(self, line: str, body: list[str]) -> None:
+        raise NotImplementedError
+
+
+class AddScreen(CardFormScreen):
+    """Add dialog. The column is fixed when the dialog opens; the board is a choice."""
+
+    def __init__(self, options: list[tuple[str, Path]], path: Path, column: str):
+        super().__init__()
+        self.board_options = [(label, str(option)) for label, option in options]
+        self.path = path
+        self.column = column
+        self.heading = self._heading()
+
+    def _heading(self) -> str:
+        return f"Add to {self.path.stem} / {self.column}"
+
+    def destination(self) -> ComposeResult:
+        if len(self.board_options) > 1:
+            yield Select(self.board_options, value=str(self.path), allow_blank=False, id="card-board")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        event.stop()
+        self.path = Path(str(event.value))
+        self.set_heading(self._heading())
+
+    def submit(self, line: str, body: list[str]) -> None:
+        self.app.submit_add(self, line, body)
+
+
+def _unindent(line: str) -> str:
+    """A body line as the edit dialog shows it: one indent level less than in the file."""
+    if line.startswith("\t"):
+        return line[1:]
+    if line.startswith("    "):
+        return line[4:]
+    return line.lstrip(" ")
+
+
+class EditScreen(CardFormScreen):
+    """Edit a todo's fields. The checkbox and the ID stay."""
+
+    def __init__(self, card: CardView):
+        title, tags, due = split_title(card.title)
+        super().__init__(title, tags, due, [_unindent(line) for line in card.body])
+        self.card = card
+        self.heading = f"Edit {card.ref} ({card.board} / {card.column})"
+
+    def submit(self, line: str, body: list[str]) -> None:
+        self.app.submit_edit(self, line, body)
 
 
 class StateScreen(ModalBase):
@@ -210,16 +384,73 @@ class AgentScreen(ModalBase):
         self.dismiss(("claude", "pi")[event.option_index])
 
 
+class BoardChoiceScreen(ModalBase):
+    """Choose the board that a todo moves to."""
+
+    def __init__(self, card: CardView, options: list[tuple[str, Path]]):
+        super().__init__()
+        self.card = card
+        self.options = options
+        self.board_labels = [label for label, _ in options]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"Move {split_title(self.card.title)[0]} to")
+            yield OptionList(*self.board_labels, id="board-choice")
+            yield Label("enter: move, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.options[event.option_index][1])
+
+
+class DeleteScreen(ModalBase):
+    """Ask before a todo is deleted."""
+
+    BINDINGS = [
+        Binding("y", "answer(True)", "Delete"),
+        Binding("n", "answer(False)", "Keep"),
+    ]
+
+    def __init__(self, card: CardView):
+        super().__init__()
+        self.card = card
+
+    def compose(self) -> ComposeResult:
+        text = f"Delete {self.card.ref}: {self.card.title}?"
+        prompt = Static(Text(text), id="delete-prompt")
+        prompt.plain = text
+        with Vertical(classes="dialog"):
+            yield prompt
+            yield Label("y: delete, n or escape: keep", classes="dim")
+
+    def action_answer(self, delete: bool) -> None:
+        self.dismiss(delete)
+
+
+class CellMouseDriver(LinuxDriver):
+    """Textual's terminal driver without pixel mouse reports (mode 1016).
+
+    Textual turns pixel reports on when the terminal supports in-band resize.
+    Herdr reads mouse positions as cells, so pixel reports stop clicks on its
+    own tabs and sidebar while the board is in view.
+    """
+
+    def _enable_mouse_pixels(self) -> None:
+        return
+
+
 class HerdboardApp(App):
     TITLE = "herdboard"
     CSS = """
     #title-bar { height: 1; padding: 0 1; background: $primary; color: $text; }
     #columns { height: 1fr; overflow-x: auto; overflow-y: hidden; }
-    .column { width: 28; height: 100%; border: round $surface-lighten-2; }
+    #columns { scrollbar-size-horizontal: 1; }
+    .column { width: 1fr; min-width: 24; height: 100%; border: round $surface-lighten-2; }
     .column.completed { border: round $success; }
     .column-header { text-style: bold; padding: 0 1; background: $surface; }
     .column.completed .column-header { color: $success; }
-    .cards { height: 1fr; }
+    .cards { height: 1fr; scrollbar-size-vertical: 1; }
     .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
     .card.selected { background: $accent; color: $text; }
     .column.current { border: round $accent; }
@@ -228,6 +459,22 @@ class HerdboardApp(App):
     .dim { color: $text-muted; }
     .error { color: $error; }
     ModalBase { align: center middle; }
+    #card-body { height: 7; }
+    .card-form { max-height: 95%; }
+    .card-form Input, .card-form TextArea { border: round $surface-lighten-2; }
+    .card-form Input:focus, .card-form TextArea:focus { border: round $primary; }
+    .form-row { height: auto; }
+    #card-tags { width: 2fr; }
+    #card-due { width: 1fr; }
+    /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
+    App:ansi .card { border: round ansi_bright_black; margin: 0; }
+    /* In the ANSI themes the accent and the done color are both green; selection uses blue. */
+    App:ansi .card.selected { background: ansi_default; border: round $primary; text-style: bold; }
+    App:ansi .column.current { border: round $primary; }
+    App:ansi #title-bar { color: ansi_black; }
+    App:ansi .dialog { border: round $primary; }
+    App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
+    App:ansi .card-form Input:focus, App:ansi .card-form TextArea:focus { border: round $primary; }
     """
     BINDINGS = [
         Binding("left,h", "column(-1)", "Column", show=False),
@@ -239,13 +486,22 @@ class HerdboardApp(App):
         Binding("enter", "detail", "Detail"),
         Binding("a", "add", "Add"),
         Binding("d", "done", "Done"),
+        Binding("e", "edit", "Edit"),
+        Binding("b", "move_board", "Board"),
+        Binding("x", "delete", "Delete"),
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("v", "cycle_view", "View"),
+        Binding("t", "toggle_linear", "Linear", show=False),
+        Binding("i", "init", "Init", show=False),
         Binding("r", "reload", "Reload"),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
+
+    def get_driver_class(self) -> type[Driver]:
+        driver_class = super().get_driver_class()
+        return CellMouseDriver if driver_class is LinuxDriver else driver_class
 
     def __init__(
         self,
@@ -261,12 +517,20 @@ class HerdboardApp(App):
         linear_writer: LinearWriter | None = None,
         start_card: Callable[[str, str | None], dict] | None = None,
         directory: Path | None = None,
+        init_board: Callable[[], Path] | None = None,
     ):
         super().__init__()
+        theme = store.config.theme
+        if theme not in self.available_themes:
+            names = ", ".join(sorted(self.available_themes))
+            raise HerdboardError(f"Unknown theme {theme!r} in the config. Choose one of: {names}")
+        self.theme = theme
         self.store = store
         self.view = view
         self.paths_for = paths_for
         self.repo_board = repo_board
+        self.init_board = init_board
+        self.hide_linear = False
         self.reload_interval = reload_interval
         self.linear_for = linear_for
         self.linear_active = linear_active and linear_for is not None
@@ -332,7 +596,7 @@ class HerdboardApp(App):
                     data.limit = column.limit
                 data.completed = data.completed or column.completed
                 data.cards.extend(column.cards)
-        linear = self.linear_results.get(self.view)
+        linear = None if self.hide_linear else self.linear_results.get(self.view)
         for card in linear.cards if linear else []:
             data = by_key.setdefault(card.column.casefold(), ColumnData(card.column))
             data.cards.append(card)
@@ -410,6 +674,8 @@ class HerdboardApp(App):
         """The Linear part of the title bar."""
         if not self.linear_active:
             return "Linear: off"
+        if self.hide_linear:
+            return "Linear: hidden"
         if self.linear_state == "auth":
             return "Linear: authentication failed"
         result = self.linear_results.get(self.view)
@@ -424,19 +690,48 @@ class HerdboardApp(App):
         names = ", ".join(self.store.board_name(path) for path in self.paths) or "no boards"
         title = self.base.query_one("#title-bar", Static)
         title.plain = f"herdboard · view: {self.view} · {names} · {self.linear_label()}"
+        if self.repo_board is None and self.init_board is not None:
+            title.plain += " · no board for this repository: press i to create it"
         title.update(Text(title.plain))
         show_board = len(self.paths) > 1
         container = self.base.query_one("#columns", HorizontalScroll)
-        await container.remove_children()
-        widgets = []
-        for column in self.columns:
-            classes = "column completed" if column.completed else "column"
-            cards = VerticalScroll(
-                *[CardWidget(card, show_board) for card in column.cards], classes="cards", can_focus=False
-            )
-            widgets.append(Vertical(ColumnHeader(column), cards, classes=classes))
-        await container.mount_all(widgets)
-        self._show_selection()
+        existing = list(container.query(".column"))
+        # Repainting every column on each change made the screen flash. Keep the
+        # column widgets when the columns are the same, and replace only the cards
+        # of columns whose cards changed, in one screen update.
+        with self.batch_update():
+            if [getattr(w, "column_name", None) for w in existing] == [c.name for c in self.columns]:
+                for widget, column in zip(existing, self.columns):
+                    await self._update_column(widget, column, show_board)
+            else:
+                await container.remove_children()
+                await container.mount_all([self._column_widget(c, show_board) for c in self.columns])
+            self._show_selection()
+
+    def _column_widget(self, column: ColumnData, show_board: bool) -> Vertical:
+        classes = "column completed" if column.completed else "column"
+        cards = VerticalScroll(
+            *[CardWidget(card, show_board, self.store.config.tag_style) for card in column.cards], classes="cards", can_focus=False
+        )
+        widget = Vertical(ColumnHeader(column), cards, classes=classes)
+        widget.column_name = column.name
+        return widget
+
+    async def _update_column(self, widget: Vertical, column: ColumnData, show_board: bool) -> None:
+        widget.set_class(column.completed, "completed")
+        header = widget.query_one(ColumnHeader)
+        if header.plain != column.header:
+            header.plain = column.header
+            header.update(Text(column.header))
+        holder = widget.query_one(".cards", VerticalScroll)
+        old = list(holder.query(CardWidget))
+        new = [CardWidget(card, show_board, self.store.config.tag_style) for card in column.cards]
+        if [w.plain for w in old] == [w.plain for w in new]:
+            for widget_, card in zip(old, column.cards):
+                widget_.card = card
+            return
+        await holder.remove_children()
+        await holder.mount_all(new)
 
     def _show_selection(self) -> None:
         for index, widget in enumerate(self.base.query(".column")):
@@ -473,8 +768,9 @@ class HerdboardApp(App):
     # Actions
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
-        # Modal screens handle their own keys.
-        if isinstance(self.screen, ModalScreen) and action != "quit":
+        # Modal screens handle their own keys: the board's own key actions stop
+        # behind a dialog. Textual's actions, such as tab to the next field, stay.
+        if isinstance(self.screen, ModalScreen) and action in BOARD_ACTIONS:
             return False
         return True
 
@@ -671,6 +967,69 @@ class HerdboardApp(App):
             return
         self._start_write(lambda: self.store.done(card.ref))
 
+    def action_edit(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("Edit Linear issues in Linear.", severity="warning")
+            return
+        self.push_screen(EditScreen(card))
+
+    def submit_edit(self, screen: EditScreen, title: str, body: list[str]) -> None:
+        """Save the dialog's text, if the card still matches what the dialog showed."""
+        ref, before = screen.card.ref, screen.card
+        self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen)
+
+    def action_move_board(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("Linear issues stay in Linear; only todos change board.", severity="warning")
+            return
+        options = [(label, path) for label, path in self._board_options() if path != card.path]
+        if not options:
+            self.notify("There is no other board.", severity="warning")
+            return
+        ref, inbox = card.ref, self.store.inbox_path
+
+        def move(path: Path | None) -> None:
+            if path is None:
+                return
+
+            def write() -> CardView:
+                if path == inbox:
+                    self.store.ensure_inbox()
+                return self.store.move_to_board(ref, path)
+
+            self._start_write(write)
+
+        self.push_screen(BoardChoiceScreen(card, options), move)
+
+    def _board_options(self) -> list[tuple[str, Path]]:
+        """Every board: this repository's first, then the inbox, then the others by name."""
+        options = []
+        if self.repo_board is not None:
+            options.append((f"This repository ({self.store.board_name(self.repo_board)})", self.repo_board))
+        options.append(("Inbox", self.store.inbox_path))
+        known = {path for _, path in options}
+        others = [path for path in self.store.board_paths() if path not in known]
+        options += [(self.store.board_name(path), path) for path in sorted(others, key=self.store.board_name)]
+        return options
+
+    def action_delete(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("Delete Linear issues in Linear.", severity="warning")
+            return
+        ref = card.ref
+        self.push_screen(
+            DeleteScreen(card), lambda delete: self._start_write(lambda: self.store.delete(ref)) if delete else None
+        )
+
     def _start_card(self, ref: str, agent: str | None) -> None:
         if self.starting or self.writing:
             self.notify("Busy: a card change is in progress", severity="warning")
@@ -728,11 +1087,28 @@ class HerdboardApp(App):
             return
         path = self._add_path()
         column = self.columns[self.col].name
-        self.push_screen(AddScreen(path, self.store.board_name(path), column))
+        self.push_screen(AddScreen(self._add_options(path), path, column))
 
-    def submit_add(self, screen: AddScreen, text: str) -> None:
-        """Add `text` to the destination the dialog captured when it opened."""
-        self._start_write(lambda: self.store.add(screen.path, text, screen.column), add=screen)
+    def _add_options(self, path: Path) -> list[tuple[str, Path]]:
+        """Boards the add dialog offers: this repository's board, the inbox, and `path`."""
+        options = []
+        if self.repo_board is not None:
+            options.append((f"This repository ({self.store.board_name(self.repo_board)})", self.repo_board))
+        options.append(("Inbox", self.store.inbox_path))
+        if all(option != path for _, option in options):
+            options.append((self.store.board_name(path), path))
+        return options
+
+    def submit_add(self, screen: AddScreen, text: str, body: list[str]) -> None:
+        """Add the card to the board the dialog shows and the column captured when it opened."""
+        path, column, inbox = screen.path, screen.column, self.store.inbox_path
+
+        def add() -> CardView:
+            if path == inbox:
+                self.store.ensure_inbox()
+            return self.store.add(path, text, column, body=body)
+
+        self._start_write(add, add=screen)
 
     async def action_cycle_view(self) -> None:
         views = [v for v in VIEWS if self.available(v) and (v != "mine" or self.linear_active)]
@@ -745,9 +1121,41 @@ class HerdboardApp(App):
         await self.reload(select="")
         self.fetch_linear()
 
+    async def action_toggle_linear(self) -> None:
+        if not self.linear_active:
+            self.notify("Linear is off, so there are no Linear cards to hide.")
+            return
+        self.hide_linear = not self.hide_linear
+        await self.reload()
+
+    async def action_init(self) -> None:
+        if self.repo_board is not None:
+            self.notify("This repository already has a board.")
+            return
+        if self.init_board is None:
+            self.notify("Not in a Git repository.")
+            return
+        try:
+            board = await asyncio.to_thread(self.init_board)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        self.repo_board = board
+        self.view = "repo"
+        self.col = self.row = 0
+        self.linear_state = "loading"
+        await self.reload(select="")
+        self.fetch_linear()
+
     async def action_reload(self) -> None:
         await self.reload()
         self.fetch_linear()
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
+
+
+# The board's own key actions, without parameters. Quit stays available in dialogs.
+BOARD_ACTIONS = {
+    binding.action.split("(")[0] for binding in HerdboardApp.BINDINGS if binding.action != "quit"
+}

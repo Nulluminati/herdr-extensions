@@ -477,8 +477,10 @@ class Store:
                 taken.add(candidate)
                 return candidate
 
-    def _assign_ids(self, path: Path, board: Board) -> None:
-        taken = _all_ids(board)
+    def _assign_ids(self, path: Path, board: Board, taken: set[str] | None = None) -> None:
+        """Give every column card without an ID a new one. `taken` collects the IDs in use."""
+        taken = set() if taken is None else taken
+        taken |= _all_ids(board)
         for other in self.board_paths():
             if other != path:
                 taken |= _all_ids(self._read(other))
@@ -550,6 +552,95 @@ class Store:
 
         return self._modify(ref, change)
 
+    def move_to_board(self, ref: str, target: Path, column: str | None = None) -> CardView:
+        """Move a todo, with its indented lines and its ID, to another board.
+
+        Without `column`, the card keeps its column name when the target board has
+        it, else it goes to the target's first column. The target file is written
+        before the source file, so a failure between the two leaves the card on
+        both boards (`doctor` reports the duplicate ID) instead of on neither.
+        """
+        located = self._resolve(ref)
+        source = located.path
+        if Path(target).resolve() == Path(source).resolve():
+            raise HerdboardError(f"The card is already on {self.board_name(source)}")
+        if not Path(target).is_file():
+            raise NotFoundError(f"No board file: {target}")
+        with self._lock():
+            board = self._read(source)
+            self._require_writable(source, board)
+            old_column, card = self._find(board, located)
+            if card.block_id:
+                self._check_unique(card.block_id)
+            destination = self._read(target)
+            self._require_writable(target, destination)
+            if column is not None:
+                new_column = destination.column(column)
+            else:
+                new_column = next(
+                    (c for c in destination.columns if c.title.casefold() == old_column.title.casefold()),
+                    destination.columns[0] if destination.columns else None,
+                )
+                if new_column is None:
+                    raise HerdboardError(f"{target}: board has no columns")
+            # One set of used IDs for both boards: neither file has the other's new IDs yet.
+            taken = _all_ids(destination)
+            self._assign_ids(source, board, taken)
+            self._assign_ids(target, destination, taken)
+            kanban_md.remove_card(old_column, card)
+            if self._is_completed(new_column):
+                if not card.checked:
+                    card.set_checked(True)
+            elif self._is_completed(old_column):
+                card.set_checked(False)
+            kanban_md.insert_card(new_column, card, "bottom")
+            self._write(target, destination)
+            self._write(source, board)
+        return self._view(target, new_column, card, card.block_id)
+
+    def edit(
+        self,
+        ref: str,
+        title: str | None = None,
+        body: list[str] | None = None,
+        expected: CardView | None = None,
+    ) -> CardView:
+        """Replace a card's first-line text, its indented lines, or both.
+
+        The checkbox and the block ID stay. `body` lines are written one level
+        deeper than the card. With `expected`, the card must still match it.
+        """
+        if title is not None:
+            title = title.strip()
+            if not title or "\n" in title or "\r" in title:
+                raise HerdboardError("A card title must be one line of text")
+            if BLOCK_ID.search(title):
+                raise HerdboardError("A card title must not end with a block ID such as ^t1a2")
+
+        def change(board, path, column, card):
+            if expected is not None and (
+                card.title != expected.title or card.body != expected.body
+                or card.checked != expected.checked or column.title != expected.column
+            ):
+                raise ConflictError(f"{path}: card changed on disk since you opened it; open it again")
+            if title is not None:
+                ending = f" ^{card.block_id}" if card.block_id else ""
+                card.lines[0] = f"- [{card.check_char}] {title}{ending}"
+            if body is not None:
+                card.lines[1:] = _body_lines(body)
+            return column
+
+        return self._modify(ref, change)
+
+    def delete(self, ref: str) -> CardView:
+        """Remove a card and its indented lines. Returns the card as it was."""
+
+        def change(board, path, column, card):
+            kanban_md.remove_card(column, card)
+            return column
+
+        return self._modify(ref, change)
+
     def ensure_id(self, ref: str) -> CardView:
         """The card, with a block ID: a card without one gets IDs by the usual write rule."""
         view = self.show(ref)
@@ -586,7 +677,12 @@ class Store:
         return self._modify(snapshot.located.block_id, change, snapshot.located)
 
     def add(
-        self, path: Path, text: str, column: str | None = None, position: str = "bottom"
+        self,
+        path: Path,
+        text: str,
+        column: str | None = None,
+        position: str = "bottom",
+        body: list[str] | None = None,
     ) -> CardView:
         if not text.strip() or "\n" in text or "\r" in text:
             raise HerdboardError("Card text must be one non-empty line")
@@ -603,7 +699,7 @@ class Store:
                 target = board.column(column)
             self._assign_ids(path, board)
             mark = "x" if self._is_completed(target) else " "
-            card = Card([f"- [{mark}] {text}"])
+            card = Card([f"- [{mark}] {text}", *_body_lines(body or [])])
             card.set_block_id(self._new_id(self._taken_ids(path, board)))
             kanban_md.insert_card(target, card, position)
             self._write(path, board)
@@ -615,3 +711,11 @@ class Store:
             if other != path:
                 taken |= _all_ids(self._read(other))
         return taken
+
+
+def _body_lines(body: list[str]) -> list[str]:
+    """Card lines for typed detail lines: one level deeper than the card, trailing blanks dropped."""
+    lines = list(body)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return [f"\t{line}" if line.strip() else "\t" for line in lines]

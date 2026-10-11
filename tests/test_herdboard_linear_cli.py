@@ -120,10 +120,10 @@ class ViewTests(LinearCliCase):
         self.assertEqual({c["title"] for c in data["cards"] if c["source"] == "todo"},
                          {"local todo", "in inbox"})
 
-    def test_global_view_has_no_linear(self):
+    def test_inbox_view_has_no_linear(self):
         self.run_cli("add", "in inbox", directory=self.plain)
         count = len(self.fake.requests)
-        data = self.listing("--view", "global")
+        data = self.listing("--view", "inbox")
         self.assertEqual(self.refs(data)[0][0], "t")
         self.assertEqual(len(data["cards"]), 1)
         self.assertNotIn("linear", data)

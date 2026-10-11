@@ -56,6 +56,10 @@ class Config:
     linear: LinearConfig = field(default_factory=LinearConfig)
     start_agent: str = "claude"
     start_column: str | None = None
+    # A Textual theme name. The ANSI themes use the terminal's own colors.
+    theme: str = "ansi-dark"
+    # "round" draws tag ends with Nerd Font half circles; "block" needs no special font.
+    tag_style: str = "round"
 
     def __post_init__(self):
         if self.start_column is None:
@@ -170,4 +174,10 @@ def load_config(path: Path | None = None) -> Config:
             raise HerdboardError(f"{path}: start_agent must be claude or pi")
         config.start_agent = start_agent
     config.start_column = _string(path, data, "start_column") or config.linear.columns["started"]
+    config.theme = _string(path, data, "theme") or config.theme
+    tag_style = _string(path, data, "tag_style")
+    if tag_style is not None:
+        if tag_style not in ("round", "block"):
+            raise HerdboardError(f"{path}: tag_style must be round or block")
+        config.tag_style = tag_style
     return config
