@@ -1,0 +1,284 @@
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "plugins/peer-review/bin/peer_review.py"
+spec = importlib.util.spec_from_file_location("peer_review", SCRIPT)
+if spec is None or spec.loader is None:
+    raise RuntimeError("Cannot load peer review script")
+peer_review = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(peer_review)
+
+
+def git(repository, *arguments):
+    subprocess.run(["git", "-C", str(repository), *arguments], check=True, capture_output=True)
+
+
+class PeerReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.repository = self.base / "repo with spaces"
+        self.repository.mkdir()
+        git(self.repository, "init", "--quiet")
+        git(self.repository, "config", "user.email", "test@example.com")
+        git(self.repository, "config", "user.name", "Test")
+        (self.repository / "app.py").write_text("print('one')\n")
+        git(self.repository, "add", "app.py")
+        git(self.repository, "commit", "--quiet", "-m", "initial")
+        self.state = self.base / "state"
+        self.environment = patch.dict(os.environ, {
+            "HERDR_BIN_PATH": "herdr",
+            "HERDR_PANE_ID": "w1:p1",
+            "XDG_STATE_HOME": str(self.state),
+        })
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        os.environ.pop("HERDR_PLUGIN_CONTEXT_JSON", None)
+        self.agents = {"w1:p1": {"agent": "claude", "cwd": str(self.repository), "pane_id": "w1:p1"}}
+        self.calls = []
+        self.workers = []
+        self.write_findings = True
+        self.start_error = None
+        self.reviewer_states = ["working", "idle"]
+        self.review = None
+
+    def fake_command(self, argv, timeout=120):
+        self.calls.append(argv)
+        if argv[:4] == ["herdr", "agent", "get", "w1:p9"]:
+            state = self.reviewer_states.pop(0)
+            if state is None:
+                raise peer_review.ReviewError('{"error":{"code":"agent_not_found"}}')
+            if state == "idle" and self.write_findings:
+                (self.review / "findings.md").write_text("No findings.\n")
+            agent = {"agent": "claude", "agent_status": state, "pane_id": "w1:p9"}
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"agent": agent}}), "")
+        if argv[:3] == ["herdr", "agent", "get"]:
+            agent = self.agents.get(argv[3])
+            if agent is None:
+                raise peer_review.ReviewError(f"no agent in pane {argv[3]}")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"agent": agent}}), "")
+        if argv[:3] == ["herdr", "pane", "split"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"pane": {"pane_id": "w1:p9"}}}), "")
+        if argv[:3] == ["herdr", "agent", "start"]:
+            if self.start_error:
+                raise peer_review.ReviewError(self.start_error)
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+        if argv[:3] == ["herdr", "agent", "prompt"]:
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+        if argv[:3] == ["herdr", "agent", "wait"]:
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+        if argv[0] == "git":
+            return subprocess.run(argv, check=True, capture_output=True, text=True)
+        self.fail(f"Unexpected command: {argv}")
+
+    def run_request(self, *arguments):
+        output = io.StringIO()
+        self.errors = io.StringIO()
+        with patch.object(peer_review, "command", self.fake_command), \
+                patch.object(peer_review, "start_worker", lambda arguments, log: self.workers.append((arguments, log))), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(self.errors):
+            status = peer_review.main(["request", *arguments])
+        return status, output.getvalue()
+
+    def run_deliver(self, review):
+        self.review = review
+        with patch.object(peer_review, "command", self.fake_command), \
+                patch.object(peer_review.time, "sleep", lambda seconds: None), \
+                contextlib.redirect_stderr(io.StringIO()):
+            return peer_review.main([
+                "deliver", "--review", str(review), "--requester", "w1:p1",
+                "--reviewer-pane", "w1:p9", "--reviewer", "pi",
+            ])
+
+    def only_review(self):
+        reviews = list((self.state / "peer-review").iterdir())
+        self.assertEqual(len(reviews), 1)
+        return reviews[0]
+
+    def test_claude_and_pi_review_each_other(self):
+        self.assertEqual(peer_review.reviewer_for("claude"), "pi")
+        self.assertEqual(peer_review.reviewer_for("pi"), "claude")
+
+    def test_other_agents_are_rejected(self):
+        with self.assertRaisesRegex(peer_review.ReviewError, "codex"):
+            peer_review.reviewer_for("codex")
+
+    def test_request_writes_diff_and_untracked_files(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+        (self.repository / "new.py").write_text("print('new')\n")
+
+        status, output = self.run_request()
+
+        self.assertEqual(status, 0)
+        review = self.only_review()
+        self.assertIn("+print('two')", (review / "diff.patch").read_text())
+        request = (review / "request.md").read_text()
+        self.assertIn(str(self.repository), request)
+        self.assertIn("new.py", request)
+        self.assertIn(str(review / "diff.patch"), request)
+        self.assertIn(str(review), output)
+
+    def test_request_starts_read_only_pi_next_to_claude(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+
+        self.run_request()
+
+        split = next(argv for argv in self.calls if argv[:3] == ["herdr", "pane", "split"])
+        self.assertEqual(split[3:], ["w1:p1", "--direction", "right", "--cwd", str(self.repository), "--no-focus"])
+        start = next(argv for argv in self.calls if argv[:3] == ["herdr", "agent", "start"])
+        self.assertIn("--kind", start)
+        self.assertEqual(start[start.index("--kind") + 1], "pi")
+        self.assertEqual(start[start.index("--pane") + 1], "w1:p9")
+        review = self.only_review()
+        prompt = start[-1]
+        self.assertEqual(start[start.index("--") + 1:], ["--tools", "read,grep,find,ls,write", "--", prompt])
+        self.assertIn(str(review / "request.md"), prompt)
+        self.assertIn(str(review / "findings.md"), prompt)
+
+    def test_claude_reviewer_may_only_write_inside_the_review(self):
+        self.agents["w1:p1"]["agent"] = "pi"
+        (self.repository / "app.py").write_text("print('two')\n")
+
+        self.run_request()
+
+        review = self.only_review()
+        start = next(argv for argv in self.calls if argv[:3] == ["herdr", "agent", "start"])
+        self.assertEqual(start[start.index("--kind") + 1], "claude")
+        prompt = start[start.index("--") + 1]
+        self.assertIn(str(review / "request.md"), prompt)
+        self.assertEqual(start[start.index("--") + 2:], [
+            "--permission-mode", "dontAsk",
+            "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{review}/**)",
+        ])
+
+    def test_request_hands_the_wait_to_a_background_worker(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+
+        self.run_request()
+
+        review = self.only_review()
+        self.assertEqual(self.workers, [([
+            "deliver", "--review", str(review), "--requester", "w1:p1",
+            "--reviewer-pane", "w1:p9", "--reviewer", "pi",
+        ], review / "worker.log")])
+        self.assertFalse(any(argv[:3] == ["herdr", "agent", "prompt"] for argv in self.calls))
+
+    def test_reviewer_waiting_for_input_still_gets_the_review(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+        self.start_error = '{"error":{"code":"agent_not_ready","message":"agent is blocked during startup"}}'
+
+        status, output = self.run_request()
+
+        self.assertEqual(status, 0)
+        self.assertIn("has not reported ready in pane w1:p9", output)
+        self.assertEqual(len(self.workers), 1)
+
+    def test_reviewer_busy_with_its_first_message_still_gets_the_review(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+        self.start_error = '{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}'
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0)
+        self.assertEqual(len(self.workers), 1)
+
+    def test_other_start_failures_stop_the_request(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+        self.start_error = "pane is not at a shell prompt"
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        self.assertIn("pane is not at a shell prompt", self.errors.getvalue())
+        self.assertEqual(self.workers, [])
+
+    def test_request_without_changes_does_not_open_a_pane(self):
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        self.assertIn("No uncommitted changes", self.errors.getvalue())
+        self.assertFalse(any(argv[:3] == ["herdr", "pane", "split"] for argv in self.calls))
+        self.assertEqual(self.workers, [])
+
+    def test_request_from_a_pane_without_an_agent_fails(self):
+        status, _ = self.run_request("--pane", "w1:p2")
+
+        self.assertEqual(status, 1)
+        self.assertIn("no agent in pane w1:p2", self.errors.getvalue())
+        self.assertEqual(self.workers, [])
+
+    def test_plugin_action_uses_the_focused_pane(self):
+        self.agents["w1:p3"] = {"agent": "pi", "cwd": str(self.repository), "pane_id": "w1:p3"}
+        (self.repository / "app.py").write_text("print('two')\n")
+        os.environ["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"focused_pane_id": "w1:p3"})
+
+        self.run_request()
+
+        self.assertIn(["herdr", "agent", "get", "w1:p3"], self.calls)
+
+    def make_review(self):
+        review = self.state / "peer-review/r1"
+        review.mkdir(parents=True)
+        return review
+
+    def test_deliver_waits_for_findings_then_tells_the_requester(self):
+        review = self.make_review()
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(self.reviewer_states, [])
+        self.assertFalse(any(argv[:4] == ["herdr", "agent", "prompt", "w1:p9"] for argv in self.calls))
+        self.assertEqual(self.calls[-2], ["herdr", "agent", "wait", "w1:p1", "--until", "idle"])
+        notify = self.calls[-1]
+        self.assertEqual(notify[:4], ["herdr", "agent", "prompt", "w1:p1"])
+        self.assertIn(str(review / "findings.md"), notify[4])
+        self.assertIn("Do not change any code", notify[4])
+        self.assertIn("Wait for the user", notify[4])
+
+    def test_deliver_reports_a_reviewer_that_stopped(self):
+        review = self.make_review()
+        self.write_findings = False
+        self.reviewer_states = ["working", None]
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        notify = self.calls[-1]
+        self.assertEqual(notify[:4], ["herdr", "agent", "prompt", "w1:p1"])
+        self.assertIn("stopped before it wrote", notify[4])
+        self.assertIn(str(review / "worker.log"), notify[4])
+
+    def test_deliver_waits_for_a_reviewer_that_is_not_detected_yet(self):
+        review = self.make_review()
+        self.reviewer_states = [None, "working", "idle"]
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertIn("is ready", self.calls[-1][4])
+
+    def test_deliver_reports_a_review_that_takes_too_long(self):
+        review = self.make_review()
+        self.reviewer_states = ["working"]
+
+        with patch.object(peer_review, "REVIEW_TIMEOUT_MS", 0):
+            status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        self.assertIn("did not finish", self.calls[-1][4])
+
+
+if __name__ == "__main__":
+    unittest.main()
