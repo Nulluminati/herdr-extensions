@@ -49,6 +49,23 @@ class CardView:
 
 
 @dataclass
+class ColumnSnapshot:
+    title: str
+    limit: int | None
+    completed: bool
+    cards: list[CardView]
+
+
+@dataclass
+class BoardSnapshot:
+    """One read of a board: its name, path and columns in file order."""
+
+    name: str
+    path: Path
+    columns: list[ColumnSnapshot]
+
+
+@dataclass
 class _Located:
     """A card found without the lock. `number` is set for a temporary ref."""
 
@@ -189,6 +206,21 @@ class Store:
             for number, (column, card) in enumerate(self._read(path).all_cards(), start=1):
                 views.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
         return views
+
+    def snapshot(self, path: Path) -> BoardSnapshot:
+        board = self._read(path)
+        name = self.board_name(path)
+        columns = []
+        number = 0
+        for column in board.columns:
+            cards = []
+            for card in column.cards:
+                number += 1
+                cards.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
+            columns.append(
+                ColumnSnapshot(column.title, column.limit, self._is_completed(column), cards)
+            )
+        return BoardSnapshot(name, path, columns)
 
     def _check_unique(self, block_id: str) -> None:
         """Raise when a block ID is on more than one card, archive cards included."""

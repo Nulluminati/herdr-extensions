@@ -22,7 +22,7 @@ from herdboard.model import (  # noqa: E402
     HerdboardError,
     NotFoundError,
 )
-from herdboard.store import Store  # noqa: E402
+from herdboard.store import BoardSnapshot, Store  # noqa: E402
 
 SETTINGS = '%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%'
 HEAD = "---\n\nkanban-plugin: board\n\n---\n\n"
@@ -680,6 +680,29 @@ class WriteTest(StoreTestCase):
                 self.store.add(path, "x")
         self.assertEqual(path.read_text(), before)
         self.assertTrue(self.store.done("tabc").checked)
+
+
+class SnapshotTests(StoreTestCase):
+    def test_snapshot_gives_columns_in_file_order_with_cards(self):
+        path = self.put("proj", BASIC)
+        with mock.patch.object(self.store, "_read", wraps=self.store._read) as read:
+            snap = self.store.snapshot(path)
+        self.assertEqual(read.call_count, 1)
+        self.assertIsInstance(snap, BoardSnapshot)
+        self.assertEqual((snap.name, snap.path), ("proj", path))
+        self.assertEqual([c.title for c in snap.columns], ["Todo", "Doing", "Done"])
+        self.assertEqual([c.completed for c in snap.columns], [False, False, True])
+        self.assertEqual([c.limit for c in snap.columns], [None, None, None])
+        self.assertEqual(
+            [[card.title for card in c.cards] for c in snap.columns],
+            [["one", "two #tag 📅 2026-01-02"], ["three"], ["four"]],
+        )
+        self.assertEqual(snap.columns[0].cards[0].ref, "proj:1")
+        self.assertEqual(snap.columns[1].cards[0].ref, "tabc")
+
+    def test_snapshot_reports_limit(self):
+        path = self.put("proj", board_text("## Todo (3)\n\n- [ ] one\n\n"))
+        self.assertEqual(self.store.snapshot(path).columns[0].limit, 3)
 
 
 if __name__ == "__main__":

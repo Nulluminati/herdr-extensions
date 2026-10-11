@@ -1,0 +1,21 @@
+id = "nulluminati.herdboard"
+name = "herdboard"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Kanban board for Obsidian Markdown todos and Linear issues."
+platforms = ["linux", "macos"]
+
+# The action opens the board pane in the focused pane's directory, so the
+# board shows that repository. The pane runs the CLI through uv, which
+# provides Textual from this plugin's pyproject.toml.
+[[actions]]
+id = "board"
+title = "herdboard: open the board"
+contexts = ["pane", "workspace"]
+command = ["python3", "bin/open_board.py"]
+
+[[panes]]
+id = "board"
+title = "herdboard"
+placement = "tab"
+command = ["sh", "-c", "exec uv run --quiet --project \"$HERDR_PLUGIN_ROOT\" herdboard board"]

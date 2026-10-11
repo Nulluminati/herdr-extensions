@@ -70,7 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
 
     command("init", "create the board for this repository")
-    command("board", "show the board view")
+    sub = command("board", "show the board view")
+    sub.add_argument("--view", choices=["repo", "global", "all"])
     return parser
 
 
@@ -140,25 +141,31 @@ class _Context:
         return self.store.board_for_repo(self.identity) if self.identity else None
 
 
+def _default_view(ctx: _Context) -> str:
+    return "repo" if ctx.repo_board() else "global"
+
+
+def _view_paths(ctx: _Context, view: str) -> list[Path]:
+    """Board files that a view shows."""
+    store = ctx.store
+    if view == "repo":
+        board = ctx.repo_board()
+        if board is None:
+            raise HerdboardError(
+                "No board for this repository. Run `herdboard init` to create one."
+            )
+        return [board]
+    if view == "global":
+        return [store.inbox_path] if store.inbox_path.is_file() else []
+    return store.board_paths()
+
+
 def _cmd_list(ctx: _Context) -> dict:
     args, store = ctx.args, ctx.store
     if args.board:
         paths = [store.resolve_board(args.board)]
     else:
-        view = args.view
-        if view is None:
-            view = "repo" if ctx.repo_board() else "global"
-        if view == "repo":
-            board = ctx.repo_board()
-            if board is None:
-                raise HerdboardError(
-                    "No board for this repository. Run `herdboard init` to create one."
-                )
-            paths = [board]
-        elif view == "global":
-            paths = [store.inbox_path] if store.inbox_path.is_file() else []
-        else:
-            paths = store.board_paths()
+        paths = _view_paths(ctx, args.view or _default_view(ctx))
     cards = store.list_cards(paths)
     if args.column:
         wanted = args.column.casefold()
@@ -204,11 +211,19 @@ def _cmd_init(ctx: _Context) -> dict:
 
 
 def _cmd_board(ctx: _Context) -> dict:
-    raise _NotImplemented("the board view arrives in a later step")
-
-
-class _NotImplemented(HerdboardError):
-    code = "not_implemented"
+    view = ctx.args.view or _default_view(ctx)
+    _view_paths(ctx, view)  # fails early when the view has no board
+    try:
+        from .board import HerdboardApp
+    except ImportError as error:
+        raise HerdboardError(f"The board needs Textual: {error}") from error
+    HerdboardApp(
+        ctx.store,
+        view,
+        paths_for=lambda name: _view_paths(ctx, name),
+        repo_board=ctx.repo_board(),
+    ).run()
+    return {}
 
 
 COMMANDS = {
@@ -223,6 +238,8 @@ COMMANDS = {
 
 
 def _render(command: str, result: dict, as_json: bool) -> None:
+    if command == "board":
+        return
     if as_json:
         if command == "list":
             _emit_json({"cards": [_card_dict(card) for card in result["cards"]]})

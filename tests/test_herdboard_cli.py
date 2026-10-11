@@ -129,13 +129,6 @@ class CommandTests(CliTestCase):
         data = self.run_json("done", card["ref"], directory=self.plain)
         self.assertTrue(data["card"]["checked"])
 
-    def test_board_not_implemented(self):
-        out, err = self.run_cli("board", directory=self.plain, expect=1)
-        self.assertEqual(out, "")
-        self.assertEqual(err, "herdboard: the board view arrives in a later step\n")
-        data = self.run_json("board", directory=self.plain, expect=1)
-        self.assertEqual(data["error"]["code"], "not_implemented")
-
 
 class RepositoryTests(CliTestCase):
     def test_init_text_and_json(self):

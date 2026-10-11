@@ -56,6 +56,16 @@ class NormalizeRemoteTest(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(normalize_remote(url), expected)
 
+    def test_github_names_are_lowercase(self):
+        for url in ["git@github.com:Acme/API.git", "https://github.com/ACME/Api"]:
+            with self.subTest(url=url):
+                self.assertEqual(normalize_remote(url), ("github.com", ("acme", "api")))
+
+    def test_other_hosts_keep_case(self):
+        self.assertEqual(
+            normalize_remote("https://gitlab.com/Group/Repo.git"), ("gitlab.com", ("Group", "Repo"))
+        )
+
     def test_invalid(self):
         for url in ["", "/srv/git/repo.git", "../repo", "file:///srv/repo", "https://github.com", "https://github.com/"]:
             with self.subTest(url=url):
@@ -145,6 +155,15 @@ class BoardLookupTest(unittest.TestCase):
         self.board("other.md", "github.com/acme/web")
         target = self.board("acme-api.md", "github.com/acme/api")
         self.assertEqual(find_board(self.dir, self.ident), target)
+
+    def test_github_match_ignores_case(self):
+        target = self.board("acme-api.md", "github.com/Acme/API")
+        self.assertEqual(find_board(self.dir, self.ident), target)
+
+    def test_other_host_match_keeps_case(self):
+        self.board("g.md", "gitlab.com/Group/Repo")
+        ident = RepoIdentity("gitlab.com/group/repo", "gitlab.com", ("group", "repo"))
+        self.assertIsNone(find_board(self.dir, ident))
 
     def test_no_match(self):
         self.board("other.md", "github.com/acme/web")

@@ -3,7 +3,9 @@ name = "herdboard"
 version = "0.1.0"
 description = "Kanban board for Obsidian Markdown todos and Linear issues, inside Herdr"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "textual>=8.2.8",
+]
 
 [project.scripts]
 herdboard = "herdboard.cli:main"

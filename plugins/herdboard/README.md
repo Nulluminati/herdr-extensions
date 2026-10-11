@@ -28,7 +28,7 @@ Non-goals: sync between machines, phone access, goals or OKRs, a personal/work s
 
 ### Repository identity
 
-- The tool reads the `origin` remote and normalizes it to `host/owner/repo`. SSH and HTTPS forms give the same result (`git@github.com:acme/api.git` and `https://github.com/acme/api` are both `github.com/acme/api`). Nested namespaces keep every segment (`gitlab.com/group/sub/repo`).
+- The tool reads the `origin` remote and normalizes it to `host/owner/repo`. SSH and HTTPS forms give the same result (`git@github.com:acme/api.git` and `https://github.com/acme/api` are both `github.com/acme/api`). GitHub names are not case-sensitive, so for `github.com` the path is lowercased. Other hosts keep their case. Nested namespaces keep every segment (`gitlab.com/group/sub/repo`).
 - The file name is the owner and repository, joined with `-` (`acme-api.md`). If that name is taken by another repository, the tool adds the host (`github.com-acme-api.md`).
 - Each board stores the full identity in `repo:` frontmatter. Before the tool uses a board, it checks that `repo:` matches. A mismatch is an error, not a silent reuse.
 - Without a remote, the identity is the absolute path of the main checkout, from `git rev-parse --git-common-dir`.
@@ -264,8 +264,16 @@ canceled = "Done"
 ## Herdr integration
 
 - Plugin ID `nulluminati.herdboard`. Minimum Herdr version: confirmed against the installed binary before release.
-- Action `board`: runs `herdboard board` in a split pane for the focused pane's repository.
-- Key binding: the user binds the action in `config.toml`.
+- Action `board`: opens `herdboard board` as a Herdr tab in the focused pane's directory, so the board shows that repository. A tab gives the columns the full width.
+- Key binding: the user binds the action in `~/.config/herdr/config.toml`, for example:
+
+  ```toml
+  [[keys.command]]
+  key = "prefix+shift+b"
+  type = "plugin_action"
+  command = "nulluminati.herdboard.board"
+  description = "herdboard: open the kanban board"
+  ```
 
 ## Agent skill
 

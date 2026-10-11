@@ -38,7 +38,26 @@ def _segments(path: str, url: str) -> tuple[str, ...]:
     return segments
 
 
+def _canonical_host_path(host: str, segments: tuple[str, ...]) -> tuple[str, ...]:
+    """GitHub names are case-insensitive; other hosts keep their case."""
+    if host == "github.com":
+        return tuple(part.lower() for part in segments)
+    return segments
+
+
+def _canonical_identity(identity: str) -> str:
+    host, _, rest = identity.partition("/")
+    if host.lower() == "github.com":
+        return f"{host.lower()}/{rest.lower()}"
+    return identity
+
+
 def normalize_remote(url: str) -> tuple[str, tuple[str, ...]]:
+    host, segments = _split_remote(url)
+    return host, _canonical_host_path(host, segments)
+
+
+def _split_remote(url: str) -> tuple[str, tuple[str, ...]]:
     text = url.strip()
     if "://" in text:
         parts = urlsplit(text)
@@ -110,7 +129,8 @@ def find_board(projects_dir: Path, identity: RepoIdentity) -> Path | None:
         lines = _frontmatter(path)
         if lines is None:
             continue
-        if frontmatter_scalars(lines).get("repo") == identity.identity:
+        repo = frontmatter_scalars(lines).get("repo")
+        if repo is not None and _canonical_identity(repo) == _canonical_identity(identity.identity):
             matches.append(path)
     if len(matches) > 1:
         names = " and ".join(str(path) for path in matches)
