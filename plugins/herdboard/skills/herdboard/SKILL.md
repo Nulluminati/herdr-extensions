@@ -21,7 +21,7 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 
 - A card reference is a todo ID (`tep3`), a temporary reference (`acme-api:12`, before the board has IDs) or a Linear identifier (`ENG-123`). Use the `ref` field from `list` output.
 - A card has `title`, `column`, `checked`, `due`, `tags`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `stale: true` means the Linear data comes from the cache.
-- Columns by default: Backlog, Todo, In progress, Review, Done. A board can have other columns. `list` shows only the columns that have cards. When a column name is not known, ask the user. A wrong name gives `not_found` with the message `No column named ...`.
+- Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
 - Tags and the due date are part of the card text: `#auth` adds a tag, `📅 2026-11-01` sets the due date.
 
 ## Read
@@ -78,6 +78,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 
 | Code | Do this |
 |---|---|
+| `no_state` | No workflow state of the issue's team maps to that column. Ask the user for another column. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |
 | `conflict` | The card changed, or another write holds the lock. Run `show` again, then retry once. |

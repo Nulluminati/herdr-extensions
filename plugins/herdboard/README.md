@@ -221,6 +221,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear links and the state files (see below) |
 
 - `<id>` is a todo ID (`t7k2`), a temporary reference (`homelab:12`) or a Linear identifier (`ENG-123`).
+- `list --json` also returns `boards`: each listed board's name, path and every column (title, card limit, done flag), including empty columns.
 - With `--json`, every command writes JSON to standard output, and errors have the form `{"error": {"code": "…", "message": "…"}}`.
 - Exit codes: 0 success, 1 user error (unknown ID, missing column), 2 conflict (the card changed, the lock is held), 3 Linear error.
 

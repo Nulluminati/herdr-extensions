@@ -104,6 +104,34 @@ class CommandTests(CliTestCase):
         self.assertEqual(data["cards"][0]["source"], "todo")
         self.assertNotIn("linear", data)
 
+    def test_list_json_names_every_column_of_each_board(self):
+        self.run_cli("add", "a", "--column", "Todo", directory=self.plain)
+        data = self.run_json("list", "--column", "review", directory=self.plain)
+        self.assertEqual(data["cards"], [])
+        self.assertEqual(len(data["boards"]), 1)
+        board = data["boards"][0]
+        self.assertEqual(board["name"], "inbox")
+        self.assertTrue(board["path"].endswith("inbox.md"))
+        self.assertEqual(
+            board["columns"],
+            [
+                {"title": "Backlog", "limit": None, "done": False},
+                {"title": "Todo", "limit": None, "done": False},
+                {"title": "In progress", "limit": None, "done": False},
+                {"title": "Review", "limit": None, "done": False},
+                {"title": "Done", "limit": None, "done": True},
+            ],
+        )
+
+    def test_list_json_without_a_board_has_no_boards(self):
+        data = self.run_json("list", directory=self.plain)
+        self.assertEqual(data["boards"], [])
+
+    def test_list_json_with_source_linear_has_no_todo_boards(self):
+        self.run_cli("add", "a", directory=self.plain)
+        data = self.run_json("list", "--source", "linear", directory=self.plain)
+        self.assertEqual(data["boards"], [])
+
     def test_show_text_and_json(self):
         card = self.run_json("add", "buy #errand 📅 2026-01-02", directory=self.plain)["card"]
         out, _ = self.run_cli("show", card["ref"], directory=self.plain)
@@ -205,7 +233,7 @@ class RepositoryTests(CliTestCase):
 
     def test_view_global_before_inbox_exists_is_empty(self):
         data = self.run_json("list", "--view", "global", directory=self.plain)
-        self.assertEqual(data, {"cards": []})
+        self.assertEqual(data, {"cards": [], "boards": []})
 
 
 class ErrorTests(CliTestCase):

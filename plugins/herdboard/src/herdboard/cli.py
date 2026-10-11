@@ -306,12 +306,14 @@ def _cmd_list(ctx: _Context) -> dict:
     args, store = ctx.args, ctx.store
     result = LinearResult()
     if args.board:
-        cards = store.list_cards([store.resolve_board(args.board)])
+        paths = [store.resolve_board(args.board)]
+        cards = store.list_cards(paths)
     else:
         view = ctx.chosen_view()
         if view == "project":
             ctx.views.resolve_project()
-        cards = store.list_cards(ctx.views.paths(view))
+        paths = ctx.views.paths(view)
+        cards = store.list_cards(paths)
         if args.source != "todo":
             result = ctx.views.linear(view)
             cards += result.cards
@@ -320,7 +322,9 @@ def _cmd_list(ctx: _Context) -> dict:
     if args.column:
         wanted = args.column.casefold()
         cards = [card for card in cards if card.column.casefold() == wanted]
-    return {"cards": cards, "linear": result}
+    # Every column of each listed board, including empty ones, so a caller can pick a move target.
+    boards = [] if args.source == "linear" else [store.snapshot(path) for path in paths]
+    return {"cards": cards, "linear": result, "boards": boards}
 
 
 def _cmd_add(ctx: _Context) -> dict:
@@ -620,6 +624,17 @@ COMMANDS = {
 }
 
 
+def _board_dict(board) -> dict:
+    return {
+        "name": board.name,
+        "path": str(board.path),
+        "columns": [
+            {"title": column.title, "limit": column.limit, "done": column.completed}
+            for column in board.columns
+        ],
+    }
+
+
 def _linear_json(result: LinearResult) -> dict:
     data = {}
     if result.info is not None:
@@ -664,6 +679,7 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     if as_json:
         if command == "list":
             _emit_json({"cards": [_card_dict(card) for card in result["cards"]],
+                        "boards": [_board_dict(board) for board in result["boards"]],
                         **_linear_json(linear)})
         elif command == "promote":
             _emit_json({"card": _card_dict(result["card"]), "sub_issues": result["sub_issues"],
