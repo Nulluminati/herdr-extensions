@@ -39,6 +39,30 @@ class StartCliTests(unittest.TestCase):
                 self.config.write_text(text)
                 with self.assertRaises(HerdboardError):
                     load_config(self.config)
+    def test_model_settings(self):
+        config = load_config(self.config)
+        self.assertEqual((config.start_model, config.start_thinking, config.pi_models), (None, None, None))
+        self.config.write_text('start_model = "zai/glm-5.3"\nstart_thinking = "low"\npi_models = ["a/b", "c/d:high"]\n')
+        config = load_config(self.config)
+        self.assertEqual((config.start_model, config.start_thinking, config.pi_models), ("zai/glm-5.3", "low", ["a/b", "c/d:high"]))
+
+    def test_model_setting_errors(self):
+        for text in ('start_thinking = "huge"', 'start_model = "two words"', 'start_model = ""', 'pi_models = "a/b"'):
+            with self.subTest(text=text):
+                self.config.write_text(text)
+                with self.assertRaises(HerdboardError):
+                    load_config(self.config)
+
+    def test_cli_passes_model_and_thinking(self):
+        out = io.StringIO()
+        result = {"steps_done": [], "workspace_id": "w1", "pane_id": "w1:p1", "branch": "b", "worktree_path": "/w", "agent_name": "a", "ref": "t123"}
+        with patch.object(cli, "Starter") as starter, patch.object(cli, "register_checkout"), contextlib.redirect_stdout(out):
+            starter.return_value.start.return_value = result
+            cli.main(["--config", str(self.config), "--json", "start", "t123", "--agent", "pi",
+                      "--model", "openai-codex/gpt-6.1-sol", "--thinking", "medium"])
+        kwargs = starter.return_value.start.call_args.kwargs
+        self.assertEqual((kwargs["model"], kwargs["thinking"]), ("openai-codex/gpt-6.1-sol", "medium"))
+
     def test_cli_start_json(self):
         result = {"steps_done": ["repository"], "workspace_id": "w1", "pane_id": "w1:p1", "branch": "t123-task", "worktree_path": "/tmp/work", "agent_name": None, "ref": "t123"}
         out = io.StringIO()

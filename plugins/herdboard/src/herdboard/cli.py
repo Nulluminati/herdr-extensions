@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from .config import load_config
+from .config import THINKING_LEVELS, load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_links import LabelLink, ProjectLink
@@ -129,6 +129,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("--agent", choices=["claude", "pi"])
     sub.add_argument("--no-agent", action="store_true")
+    sub.add_argument("--model", help="the agent's model, such as openai-codex/gpt-6.1-sol or opus")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--checkout", type=Path)
 
@@ -450,6 +452,16 @@ class LinearDeleteError(HerdboardError):
     code = "linear_delete"
 
 
+def _update_sidebar(command: str, result: dict) -> None:
+    """Show a started card's change in its agent's sidebar row."""
+    from .start import update_card_token
+
+    if command in ("move", "done", "edit") and result.get("card") is not None:
+        update_card_token(result["card"])
+    elif command == "delete" and result.get("deleted") is not None:
+        update_card_token(result["deleted"], removed=True)
+
+
 def _cmd_delete(ctx: _Context) -> dict:
     args = ctx.args
     if LINEAR_REF.match(args.ref):
@@ -478,7 +490,7 @@ def _cmd_start(ctx: _Context) -> dict:
         prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
     )
     return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
-                         repo=args.repo, checkout=args.checkout)
+                         repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking)
 
 
 def _cmd_init(ctx: _Context) -> dict:
@@ -829,6 +841,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(render(result))
             return 1 if result["summary"]["error"] else 0
         result = COMMANDS[args.command](_Context(args))
+        _update_sidebar(args.command, result)
         _render(args.command, result, as_json)
     except HerdboardError as error:
         if as_json:

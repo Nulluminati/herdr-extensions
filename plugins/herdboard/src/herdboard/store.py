@@ -552,6 +552,22 @@ class Store:
 
         return self._modify(ref, change)
 
+    def toggle_item(self, ref: str, index: int, expected: CardView | None = None) -> CardView:
+        """Check or clear the checklist item on detail line `index` (0 is the first detail line)."""
+
+        def change(board, path, column, card):
+            if expected is not None and (card.title != expected.title or card.body != expected.body):
+                raise ConflictError(f"{path}: card changed on disk since you opened it; open it again")
+            line = card.lines[index + 1] if 0 <= index < len(card.lines) - 1 else ""
+            match = CHECK_LINE.match(line)
+            if match is None:
+                raise HerdboardError(f"Detail line {index + 1} of {card.block_id or ref} is not a checklist item")
+            mark = " " if match.group("mark") != " " else "x"
+            card.lines[index + 1] = f"{match.group('start')}{mark}{line[match.end('mark'):]}"
+            return column
+
+        return self._modify(ref, change)
+
     def shift(self, ref: str, step: int) -> CardView:
         """Swap a card with the card above (step -1) or below (step 1) in its column.
 
@@ -729,6 +745,10 @@ class Store:
             if other != path:
                 taken |= _all_ids(self._read(other))
         return taken
+
+
+# A checklist item in a card's detail lines: `<indent>- [ ] text`.
+CHECK_LINE = re.compile(r"^(?P<start>\s+[-*+] \[)(?P<mark>.)\] ")
 
 
 def _body_lines(body: list[str]) -> list[str]:

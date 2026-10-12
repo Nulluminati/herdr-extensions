@@ -71,11 +71,15 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 
 ## When a card was handed to you
 
-`herdboard start` opens you in a new worktree. Your first message is a JSON object with `id`, `title`, `body`, `url` and `instruction`. Then:
+`herdboard start` opens you in a new worktree. Your first message names the card and a brief file. Then:
 
-1. Do the work that the card describes, in this worktree.
-2. When the work is ready for the user to check, run `herdboard --json move <id> Review`.
-3. Do not run `done`. The user moves the card to Done.
+1. Read the brief. It has the card's details, linked notes, the worktree and branch, and the exact herdboard command to use.
+2. Do the work that the card describes, in this worktree.
+3. Record progress or a blocker with `edit --body`, as the brief shows.
+4. When the work is ready for the user to check, run `herdboard --json move <id> Review`.
+5. Do not run `done`. The user moves the card to Done.
+
+The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
 
 ## Errors
 

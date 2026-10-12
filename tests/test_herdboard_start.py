@@ -260,8 +260,8 @@ class StartTests(unittest.TestCase):
         self.assertNotIn("\n", message)
         self.assertNotIn("\r", message)
         self.assertIn(self.card.ref, message)
-        self.assertIn(self.card.title, message)
-        self.assertIn("herdboard CLI", message)
+        self.assertIn("Fix login timeout", message)
+        self.assertIn("Read the brief at", message)
 
     def test_no_move_when_already_started(self):
         self.store.move(self.card.ref, "In progress")
@@ -375,25 +375,136 @@ class StartTests(unittest.TestCase):
         with self.assertRaises(start.IoError):
             self.starter.start(self.card.ref)
 
-    def test_body_shell_safety_pi_arguments_and_truncation(self):
-        body = ['$(touch x) `touch y` single\' double" \x7f']
+    def test_the_agent_gets_one_line_and_a_brief_file(self):
+        body = ['$(touch x) `touch y` single\' double" \x7f', "a" * 5000]
         self.store.move(self.card.ref, "In progress")
         card = self.store.show(self.card.ref)
-        card.body = body
+        card.body = ["\t" + line for line in body]
+        card.title = "Fix $(touch z) the build"
         with patch.object(self.store, "show", return_value=card):
             self.starter.start(self.card.ref, agent="pi")
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
         self.assertEqual(call[:-1], ["agent", "start", "hb-" + self.card.ref,
                                     "--kind", "pi", "--pane", "w9:p1", "--", "--"])
-        self.assertEqual(json.loads(call[-1])["body"], body)
-        self.assertNotIn("\x7f", call[-1])
-        card.body = ["a" * 5000]
-        self.fake.agent = False
-        with patch.object(self.store, "show", return_value=card):
-            self.starter.start(self.card.ref)
-        message = json.loads([c for c in self.fake.calls if c[:2] == ["agent", "start"]][-1][-1])
-        self.assertEqual(len("\n".join(message["body"])), 4000 + len("\n(truncated)"))
-        self.assertIn("(truncated)", message["body"][-1])
+        message = call[-1]
+        brief = start.state_dir() / "briefs" / f"{self.card.ref}.md"
+        self.assertIn(f"Start work on herdboard card {self.card.ref}: Fix $(touch z) the build.", message)
+        self.assertIn(str(brief), message)
+        self.assertNotIn("\n", message)
+        text = brief.read_text()
+        self.assertIn(body[0], text)
+        self.assertIn("a" * 5000, text, "the brief keeps long details whole")
+        self.assertIn(f"Branch: `{self.starter_branch()}`", text)
+        self.assertIn(f"--json move {self.card.ref} Review", text)
+
+    def starter_branch(self):
+        return start._read(start.state_dir() / "starts.json")[self.card.ref]["branch"]
+
+    def test_the_brief_command_works_outside_uv_run(self):
+        venv_script = str(Path(sys.prefix) / "bin" / "herdboard")
+        with patch.object(start.shutil, "which", return_value=venv_script):
+            self.assertEqual(start.herdboard_command(), f"{start.shlex.quote(sys.executable)} -m herdboard")
+        with patch.object(start.shutil, "which", return_value=None):
+            self.assertEqual(start.herdboard_command(), f"{start.shlex.quote(sys.executable)} -m herdboard")
+        with patch.object(start.shutil, "which", return_value="/home/n/.local/bin/herdboard"):
+            self.assertEqual(start.herdboard_command(), "herdboard")
+
+    def agent_args(self):
+        call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
+        return call[call.index("--pane") + 3:]
+
+    def test_pi_gets_the_model_and_thinking_level(self):
+        self.starter.start(self.card.ref, agent="pi", model="openai-codex/gpt-6.1-sol", thinking="medium")
+        args = self.agent_args()
+        self.assertEqual(args[:5], ["--model", "openai-codex/gpt-6.1-sol", "--thinking", "medium", "--"])
+        self.assertTrue(args[5].startswith("Start work on herdboard card"))
+
+    def test_claude_gets_the_model_after_its_prompt(self):
+        self.starter.start(self.card.ref, agent="claude", model="opus")
+        args = self.agent_args()
+        self.assertTrue(args[0].startswith("Start work on herdboard card"))
+        self.assertEqual(args[1:], ["--model", "opus"])
+
+    def test_thinking_is_only_for_pi(self):
+        with self.assertRaises(start.StartError) as caught:
+            self.starter.start(self.card.ref, agent="claude", thinking="high")
+        self.assertEqual(caught.exception.code, "usage")
+
+    def test_bad_thinking_level_or_model(self):
+        for kwargs in ({"thinking": "huge"}, {"model": "two words"}):
+            with self.subTest(**kwargs), self.assertRaises(start.StartError):
+                self.starter.start(self.card.ref, agent="pi", **kwargs)
+
+    def test_config_defaults_for_the_model(self):
+        self.store.config.start_model = "zai/glm-5.3"
+        self.store.config.start_thinking = "low"
+        self.starter.start(self.card.ref, agent="pi")
+        self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "low"])
+
+    def test_no_model_keeps_the_agents_own_default(self):
+        self.starter.start(self.card.ref, agent="pi")
+        self.assertEqual(self.agent_args()[0], "--")
+
+    def test_pi_model_choices_come_from_pi_settings(self):
+        home = Path(self.root) / "home"
+        (home / ".pi/agent").mkdir(parents=True)
+        (home / ".pi/agent/settings.json").write_text(json.dumps({
+            "enabledModels": ["zai/glm-5.3", "openai-codex/gpt-6.1-sol"],
+            "defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol", "defaultThinkingLevel": "high",
+        }))
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            default, models = start.pi_model_choices(self.store.config)
+        self.assertEqual(default, "openai-codex/gpt-6.1-sol, high")
+        self.assertEqual(models, ["zai/glm-5.3", "openai-codex/gpt-6.1-sol"])
+        self.store.config.pi_models = ["a/b"]
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            self.assertEqual(start.pi_model_choices(self.store.config)[1], ["a/b"])
+
+    def test_pi_model_choices_without_pi_settings(self):
+        with patch.dict(os.environ, {"HOME": str(Path(self.root) / "nohome")}):
+            self.assertEqual(start.pi_model_choices(self.store.config), (None, []))
+
+    def test_claude_gets_the_message_as_its_prompt(self):
+        self.starter.start(self.card.ref, agent="claude")
+        call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
+        self.assertEqual(call[-2], "--")
+        self.assertTrue(call[-1].startswith(f"Start work on herdboard card {self.card.ref}:"))
+
+    def test_the_agent_pane_shows_the_card_in_the_sidebar(self):
+        self.starter.start(self.card.ref)
+        call = next(c for c in self.fake.calls if c[:2] == ["pane", "report-metadata"])
+        self.assertEqual(call[2], "w9:p1")
+        self.assertEqual(call[call.index("--source") + 1], "user:herdboard")
+        token = call[call.index("--token") + 1]
+        self.assertTrue(token.startswith("herdboard_card=▶ "))
+        self.assertTrue(token.endswith(" · In progress"))
+
+    def test_no_sidebar_card_without_an_agent(self):
+        self.starter.start(self.card.ref, no_agent=True)
+        self.assertFalse(any(c[:2] == ["pane", "report-metadata"] for c in self.fake.calls))
+
+    def test_a_card_change_updates_the_sidebar(self):
+        self.starter.start(self.card.ref)
+        self.fake.calls.clear()
+        with patch.object(start, "command", self.fake):
+            start.update_card_token(self.store.move(self.card.ref, "Review"))
+        call = next(c for c in self.fake.calls if c[:2] == ["pane", "report-metadata"])
+        self.assertTrue(call[call.index("--token") + 1].endswith(" · Review"))
+
+    def test_a_deleted_card_clears_the_sidebar(self):
+        self.starter.start(self.card.ref)
+        self.fake.calls.clear()
+        with patch.object(start, "command", self.fake):
+            start.update_card_token(self.store.delete(self.card.ref), removed=True)
+        call = next(c for c in self.fake.calls if c[:2] == ["pane", "report-metadata"])
+        self.assertEqual(call[call.index("--clear-token") + 1], "herdboard_card")
+
+    def test_a_card_that_was_never_started_calls_no_herdr(self):
+        other = self.store.add(self.board, "Not started")
+        self.fake.calls.clear()
+        with patch.object(start, "command", self.fake):
+            start.update_card_token(other)
+        self.assertEqual(self.fake.calls, [])
 
     def test_agent_liveness_uses_current_pane_and_stored_name(self):
         self.starter.start(self.card.ref)

@@ -190,6 +190,24 @@ class CommandTests(CliTestCase):
         data = self.run_json("move", "ENG-1", "Todo", "--board", "inbox", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "usage")
 
+    def test_card_changes_update_the_sidebar_card(self):
+        from herdboard import start as start_module
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        with mock.patch.object(start_module, "update_card_token") as update:
+            self.run_json("move", card["ref"], "Todo", directory=self.plain)
+            self.run_json("edit", card["ref"], "--title", "buy oat milk", directory=self.plain)
+            self.run_json("done", card["ref"], directory=self.plain)
+            self.run_json("delete", card["ref"], "--yes", directory=self.plain)
+        columns = [(call.args[0].column, call.kwargs.get("removed", False)) for call in update.call_args_list]
+        self.assertEqual(columns, [("Todo", False), ("Todo", False), ("Done", False), ("Done", True)])
+
+    def test_list_does_not_touch_the_sidebar(self):
+        from herdboard import start as start_module
+        self.run_json("add", "buy milk", directory=self.plain)
+        with mock.patch.object(start_module, "update_card_token") as update:
+            self.run_json("list", directory=self.plain)
+        update.assert_not_called()
+
     def test_delete_with_yes(self):
         card = self.run_json("add", "buy milk", directory=self.plain)["card"]
         data = self.run_json("delete", card["ref"], "--yes", directory=self.plain)

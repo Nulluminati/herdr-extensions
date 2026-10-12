@@ -25,7 +25,9 @@ from .linear import LinearAuthError
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, split_title
 from .store import TEMP_REF, CardView, Store
-from .start import Starter, mark_removed
+from . import start as start_module
+from .config import THINKING_LEVELS
+from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
 
 VIEWS = ["repo", "inbox", "all", "mine"]
@@ -56,7 +58,7 @@ HELP_KEYS = [
     ("b", "move the todo to another board, for example from the inbox to this repository"),
     ("x", "delete the todo, after you confirm"),
     ("s", "start work with the default agent"),
-    ("S", "choose claude or pi and start work"),
+    ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
     ("v", "cycle view: repo, inbox, all, mine"),
     ("t", "hide or show Linear cards"),
     ("i", "create the board for this repository"),
@@ -190,8 +192,11 @@ def _hold_indent(line: str) -> str:
     return "\u00a0" * len(indent) + stripped
 
 
-def detail_lines(lines: list[str]) -> Text:
-    """Detail lines with checkboxes and bullets drawn as symbols. Done items are struck through."""
+def detail_lines(lines: list[str], selected: int | None = None) -> Text:
+    """Detail lines with checkboxes and bullets drawn as symbols. Done items are struck through.
+
+    `selected` is the index of the checklist line to highlight.
+    """
     text = Text()
     for number, line in enumerate(lines):
         if number:
@@ -202,8 +207,11 @@ def detail_lines(lines: list[str]) -> Text:
         if check:
             done = check.group("mark") != " "
             text.append(check.group("indent"))
+            start = len(text)
             text.append("☑ " if done else "☐ ", style="green" if done else "")
             text.append(check.group("text"), style="dim strike" if done else "")
+            if number == selected:
+                text.stylize("reverse", start, len(text))
         elif bullet:
             text.append(f"{bullet.group('indent')}• {bullet.group('text')}")
         else:
@@ -236,13 +244,61 @@ class RichStatic(Static):
 class DetailScreen(ModalBase):
     """A card in full: title, tags and date, where it lives, its details and linked notes."""
 
-    BINDINGS = [Binding("e", "edit", "Edit")]
+    BINDINGS = [
+        Binding("e", "edit", "Edit"),
+        Binding("space", "toggle", "Check"),
+        Binding("down,j", "item(1)", "Next item", show=False),
+        Binding("up,k", "item(-1)", "Previous item", show=False),
+    ]
 
     def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round"):
         super().__init__()
-        self.card = card
         self.notes = notes or []
         self.tag_style = tag_style
+        self.cursor = 0
+        self._set_card(card)
+
+    def _set_card(self, card: CardView) -> None:
+        """Keep the card and the indexes of its checklist lines. Linear descriptions stay read only."""
+        self.card = card
+        self.body = card.body if card.source == "linear" else [_unindent(line) for line in card.body]
+        self.items = [] if card.source == "linear" else [
+            index for index, line in enumerate(self.body) if CHECK_ITEM.match(_hold_indent(line))
+        ]
+        self.cursor = min(self.cursor, max(len(self.items) - 1, 0))
+
+    def _selected(self) -> int | None:
+        return self.items[self.cursor] if self.items else None
+
+    def _show_body(self) -> None:
+        block = self.query_one("#detail-body", RichStatic)
+        block.rich_text = detail_lines(self.body, self._selected())
+        block.plain = block.rich_text.plain
+        block.update(block.rich_text)
+
+    def action_item(self, step: int) -> None:
+        if self.items:
+            self.cursor = max(0, min(self.cursor + step, len(self.items) - 1))
+            self._show_body()
+        else:
+            self.query_one(".detail", VerticalScroll).scroll_relative(y=step, animate=False)
+
+    async def action_toggle(self) -> None:
+        index = self._selected()
+        if index is None:
+            return
+        app = self.app
+        if app.writing or app.starting:
+            self.notify("Busy: a change is still being written", severity="warning")
+            return
+        try:
+            card = await asyncio.to_thread(app.store.toggle_item, self.card.ref, index, self.card)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        self._set_card(card)
+        self._show_body()
+        await app.reload(card.ref)
 
     def _title_parts(self) -> tuple[str, list[str], str | None]:
         card = self.card
@@ -277,14 +333,14 @@ class DetailScreen(ModalBase):
             if chips:
                 chips.append("  ")
             chips.append_text(due_label(due))
-        body = self.card.body if self.card.source == "linear" else [_unindent(line) for line in self.card.body]
-        with VerticalScroll(classes="dialog detail"):
+        body = self.body
+        with VerticalScroll(classes="dialog detail", can_focus=False):
             yield RichStatic(Text(title or self.card.title, style="bold"), id="detail-title")
             if chips:
                 yield RichStatic(chips, id="detail-chips")
             yield RichStatic(self._meta(), id="detail-meta")
             if any(line.strip() for line in body):
-                block = RichStatic(detail_lines(body), id="detail-body", classes="detail-block")
+                block = RichStatic(detail_lines(body, self._selected()), id="detail-body", classes="detail-block")
                 block.border_title = "Details"
                 yield block
             for note in self.notes:
@@ -295,7 +351,8 @@ class DetailScreen(ModalBase):
                         yield Label("Note not found", classes="dim")
                     else:
                         yield Markdown(content)
-            yield Label("e: edit · escape: close", classes="dim")
+            hint = "j/k: select item · space: check · " if self.items else ""
+            yield Label(f"{hint}e: edit · escape: close", classes="dim")
 
     def action_edit(self) -> None:
         self.dismiss("edit")
@@ -522,6 +579,30 @@ class DeleteScreen(ModalBase):
 
     def action_answer(self, delete: bool) -> None:
         self.dismiss(delete)
+
+
+class ModelScreen(ModalBase):
+    """Choose pi's model and thinking level before a start. Enter on a model starts."""
+
+    def __init__(self, default: str | None, models: list[str]):
+        super().__init__()
+        self.models = [None, *models]
+        self.labels = [f"pi default ({default})" if default else "pi default", *models]
+
+    def compose(self) -> ComposeResult:
+        levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
+        with Vertical(classes="dialog"):
+            yield Label("Choose pi's model")
+            yield OptionList(*self.labels, id="models")
+            thinking = Select(levels, value="default", allow_blank=False, id="thinking")
+            thinking.border_title = "Thinking"
+            yield thinking
+            yield Label("enter: start · tab: thinking level · escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        thinking = self.query_one("#thinking", Select).value
+        self.dismiss((self.models[event.option_index], None if thinking == "default" else thinking))
 
 
 class CellMouseDriver(LinuxDriver):
@@ -958,6 +1039,7 @@ class HerdboardApp(App):
         change: Callable[[], CardView | None],
         add: AddScreen | None = None,
         refetch: bool = False,
+        removed: bool = False,
     ) -> bool:
         """Run a store or Linear change in a thread worker, one at a time. False when busy."""
         if self.writing or self.starting:
@@ -966,9 +1048,13 @@ class HerdboardApp(App):
 
         def guarded() -> tuple[CardView | None, HerdboardError | None]:
             try:
-                return change(), None
+                card = change()
             except HerdboardError as error:
                 return None, error
+            if card is not None:
+                # Still in the worker thread: the sidebar update may call Herdr.
+                start_module.update_card_token(card, removed=removed)
+            return card, None
 
         self.writing = True
         self.add_screen = add
@@ -1203,10 +1289,12 @@ class HerdboardApp(App):
             return
         ref = card.ref
         self.push_screen(
-            DeleteScreen(card), lambda delete: self._start_write(lambda: self.store.delete(ref)) if delete else None
+            DeleteScreen(card),
+            lambda delete: self._start_write(lambda: self.store.delete(ref), removed=True) if delete else None,
         )
 
-    def _start_card(self, ref: str, agent: str | None) -> None:
+    def _start_card(self, ref: str, agent: str | None, model: str | None = None,
+                    thinking: str | None = None) -> None:
         if self.starting or self.writing:
             self.notify("Busy: a card change is in progress", severity="warning")
             return
@@ -1214,11 +1302,13 @@ class HerdboardApp(App):
         def guarded():
             try:
                 if self.start_card:
+                    if model or thinking:
+                        return self.start_card(ref, agent, model=model, thinking=thinking), None
                     return self.start_card(ref, agent), None
                 starter = Starter(self.store, self.directory, writer=self.linear_writer,
                                   ask_state=self.ask_state, repository_view=self.view == "repo")
                 repo = self.repo_board if self.view == "repo" else None
-                return starter.start(ref, agent=agent, repo=repo), None
+                return starter.start(ref, agent=agent, repo=repo, model=model, thinking=thinking), None
             except HerdboardError as error:
                 return None, error
 
@@ -1234,7 +1324,20 @@ class HerdboardApp(App):
         card = self.current_card()
         if card:
             ref = card.ref
-            self.push_screen(AgentScreen(), lambda agent: self._start_card(ref, agent) if agent else None)
+            self.push_screen(AgentScreen(), lambda agent: self._chosen_agent(ref, agent))
+
+    def _chosen_agent(self, ref: str, agent: str | None) -> None:
+        if agent is None:
+            return
+        if agent != "pi":
+            self._start_card(ref, agent)
+            return
+
+        def chosen(choice: tuple[str | None, str | None] | None) -> None:
+            if choice is not None:
+                self._start_card(ref, "pi", *choice)
+
+        self.push_screen(ModelScreen(*pi_model_choices(self.store.config)), chosen)
 
     def action_detail(self) -> None:
         card = self.current_card()

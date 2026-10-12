@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
-from herdboard.board import HerdboardApp
+from herdboard.board import ModelScreen, HerdboardApp
 from herdboard.config import Config
 from herdboard.store import Store
 from herdboard.start import StartError
@@ -42,9 +42,39 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNot(app.screen, app.base)
             await pilot.press("down", "enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ModelScreen)
+            await pilot.press("enter")
             await app.workers.wait_for_complete()
             await pilot.pause()
             self.callback.assert_called_with(self.card.ref, "pi")
+
+    async def test_choose_a_pi_model_and_thinking_level(self):
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3", "openai-codex/gpt-6-sol"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, ModelScreen)
+                self.assertEqual(screen.labels, ["pi default (openai-codex/gpt-6.1-sol, high)", "zai/glm-5.3", "openai-codex/gpt-6-sol"])
+                screen.query_one("#thinking").value = "medium"
+                await pilot.press("down", "enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="medium")
+
+    async def test_claude_skips_the_model_dialog(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("S")
+            await pilot.pause()
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "claude")
     async def test_refresh_marks_removed_worktree_without_board_change(self):
         from herdboard import start
         path = self.path.parent / "worktree"

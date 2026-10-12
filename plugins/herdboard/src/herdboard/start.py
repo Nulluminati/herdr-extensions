@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -9,16 +10,25 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
+from .brief import agent_message, brief_text, card_token
+from .config import THINKING_LEVELS
 from .identity import _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_source import state_dir
 from .linear_states import StateChoices, refuse, resolve_state
 from .model import ConflictError, HerdboardError, IoError, NotFoundError
-from .store import TEMP_REF
+from .store import TEMP_REF, CardView
+
+# The pane token that shows a started card in the Herdr sidebar: `$herdboard_card`.
+CARD_TOKEN = "herdboard_card"
+TOKEN_SOURCE = "user:herdboard"
 
 
 class StartError(HerdboardError):
@@ -78,6 +88,94 @@ def herdr(*args, tolerated=()):
     if operation == ("agent", "get") and not isinstance(found.get("agent"), (dict, type(None))):
         raise StartError(f"Unexpected Herdr agent: {output}", "herdr_error")
     return found
+
+
+def herdboard_command() -> str:
+    """How an agent runs this herdboard: the installed command, else this Python with `-m`.
+
+    A `herdboard` inside this Python's own environment is on the path only while
+    `uv run` runs it, so the agent's shell would not find it.
+    """
+    found = shutil.which("herdboard")
+    if found and not Path(found).resolve().is_relative_to(Path(sys.prefix).resolve()):
+        return "herdboard"
+    return f"{shlex.quote(sys.executable)} -m herdboard"
+
+
+def pi_model_choices(config) -> tuple[str | None, list[str]]:
+    """pi's default model as `provider/model, thinking`, and the models to offer.
+
+    The models come from `pi_models` in the config, else from pi's `enabledModels`.
+    """
+    try:
+        settings = json.loads((Path.home() / ".pi" / "agent" / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
+    default = None
+    if isinstance(settings.get("defaultModel"), str):
+        default = settings["defaultModel"]
+        if isinstance(settings.get("defaultProvider"), str):
+            default = f"{settings['defaultProvider']}/{default}"
+        if isinstance(settings.get("defaultThinkingLevel"), str):
+            default += f", {settings['defaultThinkingLevel']}"
+    models = config.pi_models
+    if models is None:
+        found = settings.get("enabledModels")
+        models = [m for m in found if isinstance(m, str) and m] if isinstance(found, list) else []
+    return default, list(models)
+
+
+def agent_arguments(agent: str, message: str, model: str | None, thinking: str | None) -> list[str]:
+    """The agent's command-line arguments after Herdr's `--`."""
+    if agent == "pi":
+        options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
+        return [*options, "--", message]
+    # Claude takes its prompt first: options after it cannot swallow the prompt.
+    return [message, *(["--model", model] if model else [])]
+
+
+def write_brief(name: str, text: str) -> Path:
+    """Write an agent brief to the state folder and return its path."""
+    path = state_dir() / "briefs" / f"{name}.md"
+    temp = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temp, path)
+        temp = None
+    except OSError as error:
+        raise IoError(f"{path}: cannot write the agent brief: {error}") from error
+    finally:
+        if temp is not None:
+            Path(temp).unlink(missing_ok=True)
+    return path
+
+
+def report_card_token(pane_id: str, token: str | None) -> None:
+    """Set or clear the sidebar card on an agent's pane. Best effort: the sidebar is display only."""
+    change = ["--token", f"{CARD_TOKEN}={token}"] if token else ["--clear-token", CARD_TOKEN]
+    try:
+        command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "report-metadata", pane_id,
+                 "--source", TOKEN_SOURCE, "--seq", str(time.time_ns()), *change])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def update_card_token(card: CardView, removed: bool = False) -> None:
+    """Show a started card's current column in its agent's sidebar row, or clear it."""
+    try:
+        records = _read(state_dir() / "starts.json")
+    except HerdboardError:
+        return
+    for key, record in records.items():
+        if not isinstance(record, dict) or card.ref not in (key, record.get("ref")):
+            continue
+        if record.get("agent_name") and isinstance(record.get("pane_id"), str):
+            report_card_token(record["pane_id"], None if removed else card_token(card))
 
 
 def _read(path):
@@ -325,10 +423,19 @@ class Starter:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
 
-    def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None):
+    def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None):
         agent = agent or self.config.start_agent
         if agent not in ("claude", "pi"):
             raise StartError("Agent must be claude or pi", "usage")
+        if thinking and agent != "pi":
+            raise StartError("--thinking works only with pi", "usage")
+        if thinking and thinking not in THINKING_LEVELS:
+            raise StartError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
+        if model is not None and (not model or any(ch.isspace() for ch in model)):
+            raise StartError("The model must be one name, such as zai/glm-5.3", "usage")
+        model = model or self.config.start_model
+        if agent == "pi":
+            thinking = thinking or self.config.start_thinking
         state_path = state_dir() / "starts.json"
         issue = None
         if LINEAR_REF.match(ref):
@@ -408,24 +515,27 @@ class Starter:
                         live = named_live or pane_live
                     if not live or not live.get("agent"):
                         name = "hb-" + card.ref.lower()
-                        # Herdr rejects literal control characters in shell arguments.
-                        # JSON preserves body text while encoding its newlines safely.
-                        body = card.body
-                        text = "\n".join(body)
-                        if len(text) > 4000:
-                            body = text[:4000].split("\n") + ["(truncated)"]
-                        message = json.dumps({
-                            "id": card.ref, "title": card.title, "body": body,
-                            "url": card.url,
-                            "instruction": "Use the herdboard CLI to update the card.",
-                        }, ensure_ascii=False).replace("\x7f", "\\u007f")
+                        # Herdr rejects line breaks in agent arguments, so the details
+                        # go to a brief file and the message is one line that names it.
+                        notes = []
+                        if not issue:
+                            try:
+                                notes = self.store.notes_for(card)
+                            except HerdboardError:
+                                notes = []
+                        brief = write_brief(lock_key, brief_text(
+                            replace(card, column=column), notes=notes, repository=identity,
+                            worktree=record["worktree_path"], branch=branch, command=herdboard_command(),
+                        ))
+                        message = agent_message(card, brief)
                         record["agent_name"] = name
                         # Record intent before Herdr can return an unknown startup result.
                         persist()
-                        args = ["--", message] if agent == "pi" else [message]
+                        args = agent_arguments(agent, message, model, thinking)
                         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
                               tolerated=("timeout", "agent_not_ready"))
                     save("agent")
+                    report_card_token(record["pane_id"], card_token(replace(card, column=column)))
                 result = {k: record.get(k) for k in ("ref", "steps_done", "workspace_id", "pane_id", "worktree_path", "branch", "agent_name")}
                 record["steps_done"] = []
                 persist()

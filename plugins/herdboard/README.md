@@ -217,7 +217,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard done <id>` | Move a card to its board's done column |
 | `herdboard edit <id> [--title TEXT] [--body TEXT \| --body-file PATH]` | Change a todo's first line, its indented lines, or both. The checkbox and the ID stay. `--body ""` removes the indented lines. Linear issues are not edited |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
-| `herdboard start <id> [--agent claude\|pi] [--no-agent] [--repo] [--checkout PATH]` | Start work on a card (see below) |
+| `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
 | `herdboard init` | Create the board for the current repository |
@@ -325,6 +325,9 @@ complete_markers = []      # added to the English "Complete"
 archive_titles = []        # added to the English "Archive"
 # vault_root = "~/Notes"     # set to resolve [[note]] links
 start_agent = "claude"     # or "pi"
+# start_model = "openai-codex/gpt-6.1-sol"   # default: the agent's own default
+# start_thinking = "medium"                  # pi only: off, minimal, low, medium, high, xhigh, max
+# pi_models = ["zai/glm-5.3", "openai-codex/gpt-6.1-sol"]   # the board's pi model list; default: pi's enabledModels
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
 tag_style = "round"        # tag blocks with Nerd Font round ends; "block" for other fonts
 # start_column = "In progress"   # default: linear.columns.started

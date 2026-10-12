@@ -353,6 +353,29 @@ class AddMoveDoneTest(StoreTestCase):
         self.store.shift("t002", -1)
         self.assertIn("**Complete**\n- [x] two ^t002\n- [x] one ^t001", path.read_text())
 
+    def test_toggle_item_checks_and_clears_a_checklist_line(self):
+        path = self.put("p", board_text(col("Todo", "- [ ] ship ^t001", "\t- [ ] write notes", "\tplain", "\t\t- [x] nested")))
+        card = self.store.toggle_item("t001", 0)
+        self.assertEqual(card.body[0], "\t- [x] write notes")
+        self.assertIn("\t- [x] write notes\n", path.read_text())
+        card = self.store.toggle_item("t001", 2)
+        self.assertEqual(card.body[2], "\t\t- [ ] nested")
+        card = self.store.toggle_item("t001", 0)
+        self.assertEqual(card.body[0], "\t- [ ] write notes")
+
+    def test_toggle_item_refuses_a_line_that_is_not_a_checklist_item(self):
+        self.put("p", board_text(col("Todo", "- [ ] ship ^t001", "\tplain")))
+        for index in (0, 5):
+            with self.subTest(index=index), self.assertRaises(HerdboardError):
+                self.store.toggle_item("t001", index)
+
+    def test_toggle_item_fails_when_the_card_changed(self):
+        path = self.put("p", board_text(col("Todo", "- [ ] ship ^t001", "\t- [ ] write notes")))
+        before = self.store.show("t001")
+        path.write_text(path.read_text().replace("write notes", "write the notes"))
+        with self.assertRaises(ConflictError):
+            self.store.toggle_item("t001", 0, expected=before)
+
     def test_delete_removes_the_card_and_its_body(self):
         path = self.put("p", BASIC)
         deleted = self.store.delete("p:2")

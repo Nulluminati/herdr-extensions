@@ -49,6 +49,11 @@ class BoardTestCase(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        # Keys such as `s` reach the real start code: keep its state and Herdr calls inside the test.
+        env = {"HERDR_BIN_PATH": str(self.root / "no-herdr")}
+        if not os.environ.get("XDG_STATE_HOME", "").startswith(tempfile.gettempdir()):
+            env["XDG_STATE_HOME"] = str(self.root / "state")
+        self.enterContext(mock.patch.dict(os.environ, env))
         self.config = Config(todos_dir=self.root / "todos", vault_root=self.root / "vault")
         (self.root / "vault").mkdir()
         self.store = Store(self.config)
@@ -86,6 +91,11 @@ class BoardTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class RenderTests(BoardTestCase):
+    def test_board_tests_use_a_private_state_folder_and_no_real_herdr(self):
+        from herdboard import start as start_module
+        self.assertTrue(str(start_module.state_dir()).startswith(tempfile.gettempdir()))
+        self.assertEqual(os.environ["HERDR_BIN_PATH"], str(self.root / "no-herdr"))
+
     async def test_columns_counts_limits_and_cards(self):
         text = FIXTURE.read_text().replace("kanban-plugin: board\n", "kanban-plugin: board\nrepo: github.com/acme/api\n", 1)
         self.repo_path.write_text(text)
@@ -491,6 +501,22 @@ class NavigationTests(BoardTestCase):
             await settle(pilot)
             self.assertEqual([c.title for c in self.store.list_cards([self.repo_path])][:2], ["a1", "a2"])
 
+    async def test_board_changes_update_the_sidebar_card(self):
+        from herdboard import start as start_module
+        app = self.make_app()
+        with mock.patch.object(start_module, "update_card_token") as update:
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause()
+                await pilot.press("L")
+                await settle(pilot)
+                await pilot.press("x")
+                await pilot.pause()
+                await pilot.press("y")
+                await settle(pilot)
+        calls = [(call.args[0].title, call.args[0].column, call.kwargs.get("removed", False))
+                 for call in update.call_args_list]
+        self.assertEqual(calls, [("a1", "Todo", False), ("a1", "Todo", True)])
+
     async def test_x_deletes_after_y(self):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
@@ -623,6 +649,51 @@ class ActionTests(BoardTestCase):
                              ["☐ write notes", "☑ tag release", "plain line", "\u00a0\u00a0• nested"])
             done = [span for span in block.rich_text.spans if "strike" in str(span.style)]
             self.assertEqual([block.plain[s.start:s.end] for s in done], ["tag release"])
+
+    async def test_space_in_the_detail_toggles_a_checklist_item(self):
+        card = self.store.add(self.repo_path, "Ship it", "Todo",
+                              body=["notes first", "- [ ] write notes", "- [ ] tag release"])
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.col, app.row = 1, 0
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            self.assertEqual(screen.items, [1, 2])
+            await pilot.press("space")
+            await settle(pilot)
+            self.assertEqual(self.store.show(card.ref).body[1], "\t- [x] write notes")
+            self.assertIn("☑ write notes", screen.query_one("#detail-body").plain)
+            await pilot.press("j", "space")
+            await settle(pilot)
+            self.assertEqual(self.store.show(card.ref).body[2], "\t- [x] tag release")
+            await pilot.press("k", "space")
+            await settle(pilot)
+            self.assertEqual(self.store.show(card.ref).body[1], "\t- [ ] write notes")
+            self.assertIs(app.screen, screen, "the detail view stays open")
+
+    async def test_the_selected_checklist_item_is_highlighted(self):
+        self.store.add(self.repo_path, "Ship it", "Todo", body=["- [ ] one", "- [ ] two"])
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.col, app.row = 1, 0
+            await pilot.press("enter", "j")
+            await pilot.pause()
+            block = app.screen.query_one("#detail-body")
+            marked = [block.plain[s.start:s.end] for s in block.rich_text.spans if "reverse" in str(s.style)]
+            self.assertEqual(marked, ["☐ two"])
+
+    async def test_space_without_a_checklist_does_nothing(self):
+        card = self.store.add(self.repo_path, "Ship it", "Todo", body=["just text"])
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.col, app.row = 1, 0
+            await pilot.press("enter", "space")
+            await settle(pilot)
+            self.assertEqual(self.store.show(card.ref).body, ["\tjust text"])
 
     async def test_e_in_the_detail_opens_the_editor(self):
         self.store.add(self.repo_path, "Ship it", "Todo")

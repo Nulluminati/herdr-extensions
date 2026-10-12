@@ -21,6 +21,8 @@ DEFAULT_LINEAR_COLUMNS = {
 
 
 DEFAULT_DONE_DAYS = 14
+# pi's thinking levels (`pi --thinking`).
+THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 @dataclass
@@ -55,6 +57,11 @@ class Config:
     archive_titles: list[str] = field(default_factory=lambda: ["Archive"])
     linear: LinearConfig = field(default_factory=LinearConfig)
     start_agent: str = "claude"
+    # The model and thinking level `start` gives an agent; None keeps the agent's own default.
+    start_model: str | None = None
+    start_thinking: str | None = None
+    # Models the board offers for pi; None reads pi's own `enabledModels`.
+    pi_models: list[str] | None = None
     start_column: str | None = None
     # A Textual theme name. The ANSI themes use the terminal's own colors.
     theme: str = "ansi-dark"
@@ -173,6 +180,17 @@ def load_config(path: Path | None = None) -> Config:
         if start_agent not in ("claude", "pi"):
             raise HerdboardError(f"{path}: start_agent must be claude or pi")
         config.start_agent = start_agent
+    start_model = _string(path, data, "start_model")
+    if start_model is not None:
+        if any(ch.isspace() for ch in start_model):
+            raise HerdboardError(f"{path}: start_model must be one model name, such as zai/glm-5.3")
+        config.start_model = start_model
+    start_thinking = _string(path, data, "start_thinking")
+    if start_thinking is not None:
+        if start_thinking not in THINKING_LEVELS:
+            raise HerdboardError(f"{path}: start_thinking must be one of {', '.join(THINKING_LEVELS)}")
+        config.start_thinking = start_thinking
+    config.pi_models = _string_list(path, data, "pi_models")
     config.start_column = _string(path, data, "start_column") or config.linear.columns["started"]
     config.theme = _string(path, data, "theme") or config.theme
     tag_style = _string(path, data, "tag_style")
