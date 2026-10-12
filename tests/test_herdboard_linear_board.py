@@ -205,11 +205,18 @@ class LinearBoardTests(LinearBoardCase):
             await pilot.press("enter")
             await pilot.pause()
             self.assertIsInstance(app.screen, DetailScreen)
-            text = app.screen.query_one("#detail").plain
-            for part in ["Issue 2", "Platform / Review", "ENG-2", "state: In Review", "team: ENG",
-                         "https://linear.app/workspace/issue/ENG-2", "labels: repo:api, bug",
-                         "due: 2026-10-20", "Line one", "Line two"]:
-                self.assertIn(part, text)
+            screen = app.screen
+            self.assertEqual(screen.query_one("#detail-title").plain, "Issue 2")
+            meta = screen.query_one("#detail-meta").plain
+            for part in ["Platform", "Review", "ENG-2", "In Review", "ENG",
+                         "https://linear.app/workspace/issue/ENG-2"]:
+                self.assertIn(part, meta)
+            chips = screen.query_one("#detail-chips").plain
+            for part in ["repo:api", "bug", "📅 Oct 20"]:
+                self.assertIn(part, chips)
+            body = screen.query_one("#detail-body").plain
+            self.assertIn("Line one", body)
+            self.assertIn("Line two", body)
 
     async def test_add_always_adds_a_todo(self):
         app = self.make_linear_app("mine")

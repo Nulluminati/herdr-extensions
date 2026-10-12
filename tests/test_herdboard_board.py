@@ -13,6 +13,7 @@ sys.path.insert(0, str(SRC))
 
 from herdboard import cli  # noqa: E402
 from herdboard.board import AddScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp  # noqa: E402
+from textual.widgets import Markdown  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.model import ConflictError, HerdboardError, IoError, NotFoundError  # noqa: E402
@@ -496,12 +497,51 @@ class ActionTests(BoardTestCase):
             await pilot.press("right", "enter")
             await pilot.pause()
             self.assertIsInstance(app.screen, DetailScreen)
-            text = app.screen.query_one("#detail").plain
-            for part in ["acme-api / Todo", card.ref, "2026-10-20", "docs", "note body"]:
-                self.assertIn(part, text)
+            screen = app.screen
+            self.assertEqual(screen.query_one("#detail-title").plain, "Read [[Tile notes]]")
+            meta = screen.query_one("#detail-meta").plain
+            for part in ["acme-api", "Todo", card.ref]:
+                self.assertIn(part, meta)
+            chips = screen.query_one("#detail-chips")
+            self.assertIn("docs", chips.plain)
+            self.assertIn("📅 Oct 20", chips.plain)
+            self.assertTrue(any(" on " in str(span.style) for span in chips.rich_text.spans))
+            note = screen.query_one(".detail-note")
+            self.assertEqual(note.border_title, "Tile notes")
+            self.assertIn("note body", note.query_one(Markdown).source)
+            self.assertEqual(list(screen.query("#detail-body")), [])
             await pilot.press("escape")
             await pilot.pause()
             self.assertNotIsInstance(app.screen, DetailScreen)
+
+    async def test_detail_shows_details_in_their_own_block(self):
+        card = self.store.add(self.repo_path, "Ship it", "Todo",
+                              body=["- [ ] write notes", "- [x] tag release", "plain line", "  - nested"])
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.col, app.row = 1, 0
+            await pilot.press("enter")
+            await pilot.pause()
+            block = app.screen.query_one("#detail-body")
+            self.assertEqual(block.border_title, "Details")
+            self.assertEqual(block.plain.splitlines(),
+                             ["☐ write notes", "☑ tag release", "plain line", "\u00a0\u00a0• nested"])
+            done = [span for span in block.rich_text.spans if "strike" in str(span.style)]
+            self.assertEqual([block.plain[s.start:s.end] for s in done], ["tag release"])
+
+    async def test_e_in_the_detail_opens_the_editor(self):
+        self.store.add(self.repo_path, "Ship it", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.col, app.row = 1, 0
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, EditScreen)
+            self.assertEqual(app.screen.query_one("#card-title").value, "Ship it")
 
     async def test_help_lists_keys_and_q_quits(self):
         app = self.make_app()

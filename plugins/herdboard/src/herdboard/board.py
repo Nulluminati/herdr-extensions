@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -17,7 +18,7 @@ from textual.containers import Horizontal, HorizontalScroll, Vertical, VerticalS
 from textual.driver import Driver
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, Label, OptionList, Select, Static, TextArea
+from textual.widgets import Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from .linear import LinearAuthError
@@ -174,35 +175,113 @@ class ModalBase(ModalScreen):
         self.dismiss(None)
 
 
+CHECK_ITEM = re.compile(r"^(?P<indent>\u00a0*)[-*+] \[(?P<mark>.)\] (?P<text>.*)$")
+BULLET_ITEM = re.compile(r"^(?P<indent>\u00a0*)[-*+] (?P<text>.*)$")
+
+
+def _hold_indent(line: str) -> str:
+    """Leading spaces and tabs as non-breaking spaces: Textual drops plain leading spaces."""
+    stripped = line.lstrip(" \t")
+    indent = line[: len(line) - len(stripped)].replace("\t", "    ")
+    return "\u00a0" * len(indent) + stripped
+
+
+def detail_lines(lines: list[str]) -> Text:
+    """Detail lines with checkboxes and bullets drawn as symbols. Done items are struck through."""
+    text = Text()
+    for number, line in enumerate(lines):
+        if number:
+            text.append("\n")
+        line = _hold_indent(line)
+        check = CHECK_ITEM.match(line)
+        bullet = BULLET_ITEM.match(line)
+        if check:
+            done = check.group("mark") != " "
+            text.append(check.group("indent"))
+            text.append("☑ " if done else "☐ ", style="green" if done else "")
+            text.append(check.group("text"), style="dim strike" if done else "")
+        elif bullet:
+            text.append(f"{bullet.group('indent')}• {bullet.group('text')}")
+        else:
+            text.append(line)
+    return text
+
+
+class RichStatic(Static):
+    """A Static that keeps its Rich text, so tests and callers can read it."""
+
+    def __init__(self, text: Text, **kwargs):
+        self.rich_text = text
+        self.plain = text.plain
+        super().__init__(text, **kwargs)
+
+
 class DetailScreen(ModalBase):
-    def __init__(self, card: CardView, notes: list[dict] | None):
+    """A card in full: title, tags and date, where it lives, its details and linked notes."""
+
+    BINDINGS = [Binding("e", "edit", "Edit")]
+
+    def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round"):
         super().__init__()
-        lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
+        self.card = card
+        self.notes = notes or []
+        self.tag_style = tag_style
+
+    def _title_parts(self) -> tuple[str, list[str], str | None]:
+        card = self.card
         if card.source == "linear":
-            lines.append(f"state: {card.state}")
-            if card.team:
-                lines.append(f"team: {card.team}")
-            if card.url:
-                lines.append(f"url: {card.url}")
+            return card.title, card.tags, card.due
+        return split_title(card.title)
+
+    def _meta(self) -> Text:
+        card = self.card
+        rows = [("Board", card.board), ("Column", card.column), ("ID", card.ref)]
+        if card.source == "linear":
+            rows += [("State", card.state), ("Team", card.team), ("Link", card.url)]
             if card.pr:
-                lines.append("pull request: yes")
-        if card.due:
-            lines.append(f"due: {card.due}")
-        if card.tags:
-            lines.append(("labels: " if card.source == "linear" else "tags: ") + ", ".join(card.tags))
-        lines.extend(card.body)
-        for note in notes or []:
-            lines.append(f"--- {note['name']} ---")
-            content = note["content"]
-            lines.append("(note not found)" if content is None else content.rstrip("\n"))
-        self.lines = lines
+                rows.append(("Pull request", "yes"))
+        text = Text()
+        for label, value in rows:
+            if value:
+                if text:
+                    text.append("\n")
+                text.append(f"{label:<13}", style="dim")
+                text.append(str(value))
+        return text
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(classes="dialog"):
-            detail = Static(Text("\n".join(self.lines)), id="detail")
-            detail.plain = "\n".join(self.lines)
-            yield detail
-            yield Label("escape: close", classes="dim")
+        title, tags, due = self._title_parts()
+        chips = Text()
+        for tag in tags:
+            if chips:
+                chips.append(" ")
+            chips.append_text(tag_chip(tag, self.tag_style))
+        if due:
+            if chips:
+                chips.append("  ")
+            chips.append_text(due_label(due))
+        body = self.card.body if self.card.source == "linear" else [_unindent(line) for line in self.card.body]
+        with VerticalScroll(classes="dialog detail"):
+            yield RichStatic(Text(title or self.card.title, style="bold"), id="detail-title")
+            if chips:
+                yield RichStatic(chips, id="detail-chips")
+            yield RichStatic(self._meta(), id="detail-meta")
+            if any(line.strip() for line in body):
+                block = RichStatic(detail_lines(body), id="detail-body", classes="detail-block")
+                block.border_title = "Details"
+                yield block
+            for note in self.notes:
+                content = note["content"]
+                with Vertical(classes="detail-block detail-note") as box:
+                    box.border_title = note["name"]
+                    if content is None:
+                        yield Label("Note not found", classes="dim")
+                    else:
+                        yield Markdown(content)
+            yield Label("e: edit · escape: close", classes="dim")
+
+    def action_edit(self) -> None:
+        self.dismiss("edit")
 
 
 class HelpScreen(ModalBase):
@@ -460,6 +539,15 @@ class HerdboardApp(App):
     .error { color: $error; }
     ModalBase { align: center middle; }
     #card-body { height: 7; }
+    .detail { width: 90; scrollbar-size-vertical: 1; }
+    .detail-note MarkdownH1, .detail-note MarkdownH2, .detail-note MarkdownH3 {
+        margin: 0; padding: 0; content-align: left middle; text-align: left;
+    }
+    #detail-title { margin-bottom: 1; }
+    #detail-chips { margin-bottom: 1; }
+    #detail-meta { margin-bottom: 1; }
+    .detail-block { height: auto; border: round $surface-lighten-2; padding: 0 1; margin-bottom: 1; }
+    .detail-note Markdown { margin: 0; padding: 0; }
     .card-form { max-height: 95%; }
     .card-form Input, .card-form TextArea { border: round $surface-lighten-2; }
     .card-form Input:focus, .card-form TextArea:focus { border: round $primary; }
@@ -473,6 +561,7 @@ class HerdboardApp(App):
     App:ansi .column.current { border: round $primary; }
     App:ansi #title-bar { color: ansi_black; }
     App:ansi .dialog { border: round $primary; }
+    App:ansi .detail-block { border: round ansi_bright_black; }
     App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
     App:ansi .card-form Input:focus, App:ansi .card-form TextArea:focus { border: round $primary; }
     """
@@ -1070,7 +1159,10 @@ class HerdboardApp(App):
                 notes = self.store.notes_for(card)
             except HerdboardError as error:
                 self.notify(str(error), severity="error")
-        self.push_screen(DetailScreen(card, notes))
+        self.push_screen(
+            DetailScreen(card, notes, self.store.config.tag_style),
+            lambda result: self.action_edit() if result == "edit" else None,
+        )
 
     def _add_path(self) -> Path:
         if self.view == "repo" and self.repo_board is not None:
