@@ -200,6 +200,84 @@ class CardLookTests(BoardTestCase):
             self.assertEqual(app.query_one("#columns").styles.scrollbar_size_horizontal, 1)
 
 
+class FilterTests(BoardTestCase):
+    def setUp(self):
+        super().setUp()
+        self.store.add(self.repo_path, "Fix the login timeout #auth", "Todo")
+        self.store.add(self.repo_path, "Write release notes #docs", "Todo", body=["mention the login fix"])
+        self.store.add(self.repo_path, "Rotate keys #ops #auth", "Backlog")
+
+    def visible(self, app):
+        return sorted(card.title for column in app.columns for card in column.cards)
+
+    async def test_slash_filters_by_words(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *"timeout")
+            await pilot.pause()
+            self.assertEqual(self.visible(app), ["Fix the login timeout #auth"])
+            self.assertIn('filter: "timeout"', app.query_one("#title-bar").plain)
+
+    async def test_words_match_details_too(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *"login")
+            await pilot.pause()
+            self.assertEqual(self.visible(app), ["Fix the login timeout #auth", "Write release notes #docs"])
+
+    async def test_hash_filters_by_tag(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *"#auth")
+            await pilot.pause()
+            self.assertEqual(self.visible(app), ["Fix the login timeout #auth", "Rotate keys #ops #auth"])
+            await pilot.press("space", *"rotate")
+            await pilot.pause()
+            self.assertEqual(self.visible(app), ["Rotate keys #ops #auth"])
+
+    async def test_enter_keeps_the_filter_and_escape_clears_it(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *"#ops", "enter")
+            await pilot.pause()
+            self.assertFalse(app.query_one("#filter").display)
+            self.assertEqual(self.visible(app), ["Rotate keys #ops #auth"])
+            await pilot.press("l")
+            self.assertEqual(app.col, 1, "board keys work again after enter")
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertEqual(len(self.visible(app)), 3)
+            self.assertNotIn("filter:", app.query_one("#title-bar").plain)
+
+    async def test_escape_while_typing_clears_the_filter(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *"#ops")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertFalse(app.query_one("#filter").display)
+            self.assertEqual(len(self.visible(app)), 3)
+            await pilot.press("l")
+            self.assertEqual(app.col, 1)
+
+    async def test_the_filter_stays_after_a_reload(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *"#docs", "enter")
+            await pilot.pause()
+            self.store.add(self.repo_path, "Another doc #docs", "Todo")
+            await app.check_files()
+            await pilot.pause()
+            self.assertEqual(self.visible(app), ["Another doc #docs", "Write release notes #docs"])
+
+
 class NavigationTests(BoardTestCase):
     def setUp(self):
         super().setUp()
@@ -396,6 +474,22 @@ class NavigationTests(BoardTestCase):
             await pilot.press("escape")
             await settle(pilot)
             self.assertIn("a1", self.refs(self.repo_path))
+
+    async def test_shift_keys_reorder_the_card_in_its_column(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("J")
+            await settle(pilot)
+            self.assertEqual([c.title for c in app.columns[0].cards], ["a2", "a1"])
+            self.assertIn("a1", self.selected(app)[0])
+            await pilot.press("shift+up")
+            await settle(pilot)
+            self.assertEqual([c.title for c in app.columns[0].cards], ["a1", "a2"])
+            self.assertIn("a1", self.selected(app)[0])
+            await pilot.press("K")
+            await settle(pilot)
+            self.assertEqual([c.title for c in self.store.list_cards([self.repo_path])][:2], ["a1", "a2"])
 
     async def test_x_deletes_after_y(self):
         app = self.make_app()

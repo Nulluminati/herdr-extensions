@@ -46,6 +46,7 @@ herdboard --json move tep3 "In progress"
 herdboard --json move ENG-123 Review
 herdboard --json done tep3
 herdboard --json move tep3 --board inbox             # to another board; the ID stays
+herdboard --json move tep3 --up                      # one place higher in its column
 herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
 herdboard --json edit tep3 --body "first detail line\nsecond detail line"
 ```

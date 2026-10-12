@@ -212,6 +212,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard add --linear [--team ENG] [--project NAME] [--label NAME] [--column] [--state] "title"` | Create a Linear issue, assigned to you. `--team` is optional when you belong to one team, or when the project has one team. Inside a repository board with exactly one linked project, that project and its link labels are the default, so the issue shows in the repository view. Default column: the first column |
 | `herdboard show <id>` | Show a card and its detail |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card. Default position for a todo: bottom. A Linear issue without `--position` keeps its place in Linear's order |
+| `herdboard move <id> --up\|--down` | Swap a todo with the card above or below it in its column. Linear issues keep Linear's order |
 | `herdboard move <id> [column] --board NAME` | Move a todo, with its details and its ID, to another board (`inbox` or a project name). Without a column, it keeps its column name when the board has it, else it goes to the first column. Linear issues stay in Linear |
 | `herdboard done <id>` | Move a card to its board's done column |
 | `herdboard edit <id> [--title TEXT] [--body TEXT \| --body-file PATH]` | Change a todo's first line, its indented lines, or both. The checkbox and the ID stay. `--body ""` removes the indented lines. Linear issues are not edited |

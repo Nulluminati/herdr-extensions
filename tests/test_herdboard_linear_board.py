@@ -129,6 +129,15 @@ class LinearBoardTests(LinearBoardCase):
             self.assertIn(("Linear issues stay in Linear; only todos change board.", "warning"),
                           self.notifications(app))
 
+    async def test_reordering_a_linear_card_says_to_use_linear(self):
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-1")
+            await pilot.press("K")
+            await pilot.pause()
+            self.assertIn(("Change the order of Linear issues in Linear.", "warning"), self.notifications(app))
+
     async def test_x_on_a_linear_card_says_to_use_linear(self):
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:

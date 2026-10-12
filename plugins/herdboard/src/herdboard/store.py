@@ -552,6 +552,24 @@ class Store:
 
         return self._modify(ref, change)
 
+    def shift(self, ref: str, step: int) -> CardView:
+        """Swap a card with the card above (step -1) or below (step 1) in its column.
+
+        Other lines of the column, such as a complete marker, keep their place.
+        At the top or bottom of the column the card stays where it is.
+        """
+
+        def change(board, path, column, card):
+            places = [i for i, item in enumerate(column.items) if isinstance(item, Card)]
+            here = places.index(next(i for i in places if column.items[i] is card))
+            there = here + step
+            if 0 <= there < len(places):
+                a, b = places[here], places[there]
+                column.items[a], column.items[b] = column.items[b], column.items[a]
+            return column
+
+        return self._modify(ref, change)
+
     def move_to_board(self, ref: str, target: Path, column: str | None = None) -> CardView:
         """Move a todo, with its indented lines and its ID, to another board.
 

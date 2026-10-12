@@ -167,6 +167,20 @@ class CommandTests(CliTestCase):
         data = self.run_json("move", card["ref"], "Review", "--board", "inbox", directory=self.plain)
         self.assertEqual((data["card"]["board"], data["card"]["column"]), ("inbox", "Review"))
 
+    def test_move_up_and_down(self):
+        refs = [self.run_json("add", t, directory=self.plain)["card"]["ref"] for t in ("a", "b", "c")]
+        self.run_json("move", refs[2], "--up", directory=self.plain)
+        titles = [c["title"] for c in self.run_json("list", directory=self.plain)["cards"]]
+        self.assertEqual(titles, ["a", "c", "b"])
+        self.run_json("move", refs[0], "--down", directory=self.plain)
+        titles = [c["title"] for c in self.run_json("list", directory=self.plain)["cards"]]
+        self.assertEqual(titles, ["c", "a", "b"])
+
+    def test_up_does_not_mix_with_a_column(self):
+        ref = self.run_json("add", "a", directory=self.plain)["card"]["ref"]
+        data = self.run_json("move", ref, "Todo", "--up", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+
     def test_move_needs_a_column_or_a_board(self):
         card = self.run_json("add", "buy milk", directory=self.plain)["card"]
         data = self.run_json("move", card["ref"], directory=self.plain, expect=1)

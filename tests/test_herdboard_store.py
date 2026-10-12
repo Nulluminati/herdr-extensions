@@ -330,6 +330,29 @@ class AddMoveDoneTest(StoreTestCase):
             self.store.move_to_board("tabc", target, "Nope")
         self.assertEqual((source.read_text(), target.read_text()), before)
 
+    def test_shift_moves_a_card_up_and_down_in_its_column(self):
+        path = self.put("p", board_text(col("Todo", "- [ ] one", "- [ ] two", "\tbody of two", "- [ ] three")))
+        self.store.shift("p:2", -1)
+        self.assertEqual([c.title for c in self.store.list_cards()], ["two", "one", "three"])
+        self.assertIn("- [ ] two ^", path.read_text())
+        two = [c for c in self.store.list_cards() if c.title == "two"][0]
+        self.assertEqual(two.body, ["\tbody of two"])
+        self.store.shift(two.ref, 1)
+        self.store.shift(two.ref, 1)
+        self.assertEqual([c.title for c in self.store.list_cards()], ["one", "three", "two"])
+
+    def test_shift_at_the_edge_changes_nothing(self):
+        path = self.put("p", board_text(col("Todo", "- [ ] one ^t001", "- [ ] two ^t002")))
+        before = path.read_text()
+        self.assertEqual(self.store.shift("t001", -1).title, "one")
+        self.assertEqual(self.store.shift("t002", 1).title, "two")
+        self.assertEqual(path.read_text(), before)
+
+    def test_shift_keeps_other_lines_in_place(self):
+        path = self.put("p", board_text(col("Done", "**Complete**", "- [x] one ^t001", "- [x] two ^t002")))
+        self.store.shift("t002", -1)
+        self.assertIn("**Complete**\n- [x] two ^t002\n- [x] one ^t001", path.read_text())
+
     def test_delete_removes_the_card_and_its_body(self):
         path = self.put("p", BASIC)
         deleted = self.store.delete("p:2")

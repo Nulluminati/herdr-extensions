@@ -95,6 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("column", nargs="?", help="optional with --board: the card keeps its column name")
     sub.add_argument("--board", help="move a todo to this board: inbox or a project name")
+    order = sub.add_mutually_exclusive_group()
+    order.add_argument("--up", action="store_true", help="swap the todo with the card above it")
+    order.add_argument("--down", action="store_true", help="swap the todo with the card below it")
     sub.add_argument(
         "--position", choices=["top", "bottom"],
         help="place the card at the top or bottom of the column (todos default to the bottom; "
@@ -389,6 +392,12 @@ def _require_todo_options(args: argparse.Namespace) -> None:
 
 def _cmd_move(ctx: _Context) -> dict:
     args = ctx.args
+    if args.up or args.down:
+        if args.column or args.board or args.position or args.state:
+            raise UsageError("--up and --down take no column, --board, --position or --state")
+        if LINEAR_REF.match(args.ref):
+            raise UsageError("Change the order of Linear issues in Linear")
+        return {"card": ctx.store.shift(args.ref, -1 if args.up else 1)}
     if args.board is not None:
         if LINEAR_REF.match(args.ref):
             raise UsageError("Linear issues stay in Linear; --board moves only todos")

@@ -45,6 +45,10 @@ HELP_KEYS = [
     ("down, j", "next card"),
     ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
     ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
+    ("shift+up, K", "move the todo up in its column"),
+    ("shift+down, J", "move the todo down in its column"),
+    ("/", "filter: words match title, tags and details; #tag matches a tag; enter keeps it"),
+    ("escape", "clear the filter"),
     ("enter", "card detail"),
     ("a", "add a card to the selected column: title, tags, due date, details, and the board"),
     ("d", "mark the card done (a Linear card moves to its completed state)"),
@@ -205,6 +209,19 @@ def detail_lines(lines: list[str]) -> Text:
         else:
             text.append(line)
     return text
+
+
+def card_matches(card: CardView, terms: list[str]) -> bool:
+    """True when every term matches: `#tag` a tag by prefix, any other word the card's text."""
+    tags = [tag.casefold() for tag in card.tags]
+    text = " ".join([card.title, card.board or "", *card.tags, *card.body]).casefold()
+    for term in terms:
+        if term.startswith("#") and len(term) > 1:
+            if not any(tag.startswith(term[1:]) for tag in tags):
+                return False
+        elif term not in text:
+            return False
+    return True
 
 
 class RichStatic(Static):
@@ -530,6 +547,7 @@ class HerdboardApp(App):
     .column-header { text-style: bold; padding: 0 1; background: $surface; }
     .column.completed .column-header { color: $success; }
     .cards { height: 1fr; scrollbar-size-vertical: 1; }
+    #filter { dock: bottom; margin-bottom: 1; border: round $primary; }
     .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
     .card.selected { background: $accent; color: $text; }
     .column.current { border: round $accent; }
@@ -572,6 +590,10 @@ class HerdboardApp(App):
         Binding("down,j", "card(1)", "Card", show=False),
         Binding("shift+left,H", "move(-1)", "Move left"),
         Binding("shift+right,L", "move(1)", "Move right"),
+        Binding("shift+up,K", "shift(-1)", "Up", show=False),
+        Binding("shift+down,J", "shift(1)", "Down", show=False),
+        Binding("slash", "filter", "Filter"),
+        Binding("escape", "clear_filter", "Clear filter", show=False),
         Binding("enter", "detail", "Detail"),
         Binding("a", "add", "Add"),
         Binding("d", "done", "Done"),
@@ -639,6 +661,9 @@ class HerdboardApp(App):
         self.linear_sequence = 0
         self.linear_applied: dict[str, int] = {}
         self.columns: list[ColumnData] = []
+        # Columns as read, before the filter. `columns` is what the board shows.
+        self.loaded: list[ColumnData] = []
+        self.filter_text = ""
         self.paths: list[Path] = []
         self.col = 0
         self.row = 0
@@ -655,6 +680,10 @@ class HerdboardApp(App):
         title.plain = ""
         yield title
         yield HorizontalScroll(id="columns", can_focus=False)
+        search = Input(placeholder="Filter: words, or #tag · enter keeps it · escape clears it", id="filter")
+        search.display = False
+        search.disabled = True
+        yield search
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -755,9 +784,54 @@ class HerdboardApp(App):
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return
-        self.paths, self.signature, self.columns = paths, signature, columns
+        self.paths, self.signature, self.loaded = paths, signature, columns
+        self.columns = self._filtered(columns)
         self._select(identity, column)
         await self._rebuild()
+
+    def _filtered(self, columns: list[ColumnData]) -> list[ColumnData]:
+        """The columns with only the cards that match every filter term."""
+        terms = self.filter_text.casefold().split()
+        if not terms:
+            return columns
+        return [
+            ColumnData(c.name, c.limit, c.completed, [card for card in c.cards if card_matches(card, terms)])
+            for c in columns
+        ]
+
+    async def _apply_filter(self, text: str) -> None:
+        card = self.current_card()
+        identity = self._identity(card) if card else None
+        column = self.columns[self.col].name if self.columns else None
+        self.filter_text = text.strip()
+        self.columns = self._filtered(self.loaded)
+        self._select(identity, column)
+        await self._rebuild()
+
+    def action_filter(self) -> None:
+        search = self.base.query_one("#filter", Input)
+        search.disabled = False
+        search.display = True
+        search.focus()
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "filter":
+            await self._apply_filter(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "filter":
+            event.input.display = False
+            event.input.disabled = True
+            self.set_focus(None)
+
+    async def action_clear_filter(self) -> None:
+        search = self.base.query_one("#filter", Input)
+        search.display = False
+        search.disabled = True
+        self.set_focus(None)
+        if search.value or self.filter_text:
+            search.value = ""
+            await self._apply_filter("")
 
     def linear_label(self) -> str:
         """The Linear part of the title bar."""
@@ -779,6 +853,9 @@ class HerdboardApp(App):
         names = ", ".join(self.store.board_name(path) for path in self.paths) or "no boards"
         title = self.base.query_one("#title-bar", Static)
         title.plain = f"herdboard · view: {self.view} · {names} · {self.linear_label()}"
+        if self.filter_text:
+            shown = sum(len(c.cards) for c in self.columns)
+            title.plain += f' · filter: "{self.filter_text}" ({shown} of {sum(len(c.cards) for c in self.loaded)})'
         if self.repo_board is None and self.init_board is not None:
             title.plain += " · no board for this repository: press i to create it"
         title.update(Text(title.plain))
@@ -838,7 +915,7 @@ class HerdboardApp(App):
             columns[self.col].scroll_visible(animate=False)
 
     async def check_files(self) -> None:
-        cards = [card for column in self.columns for card in column.cards]
+        cards = [card for column in self.loaded for card in column.cards]
         old = [card.worktree_removed for card in cards]
         try:
             await asyncio.to_thread(mark_removed, cards)
@@ -1046,6 +1123,16 @@ class HerdboardApp(App):
             self._linear_write(card, lambda writer: writer.move(card.ref, name, None, self.ask_state))
             return
         self._start_write(lambda: self.store.move(card.ref, name))
+
+    def action_shift(self, step: int) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("Change the order of Linear issues in Linear.", severity="warning")
+            return
+        ref = card.ref
+        self._start_write(lambda: self.store.shift(ref, step))
 
     def action_done(self) -> None:
         card = self.current_card()
