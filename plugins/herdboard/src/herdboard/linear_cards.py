@@ -43,6 +43,7 @@ def issue_card(
     if state["type"] == "canceled" and not show_canceled:
         return None
     project = issue.get("project")
+    parent = issue.get("parent")
     return CardView(
         ref=issue["identifier"],
         board=project["name"] if project else DEFAULT_BOARD,
@@ -62,4 +63,5 @@ def issue_card(
         read_only=True,
         fetched_at=fetched_at.isoformat(),
         stale=stale,
+        parent=parent["identifier"] if parent else None,
     )

@@ -13,9 +13,10 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import merge, start  # noqa: E402
+from herdboard.board import card_matches, mark_family  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.model import HerdboardError, parent_of, split_title, with_parent  # noqa: E402
-from herdboard.store import Store  # noqa: E402
+from herdboard.store import CardView, Store  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_merge import MergeTestCase  # noqa: E402
 
@@ -33,6 +34,31 @@ class ParentLinkTests(unittest.TestCase):
 
     def test_the_link_is_not_part_of_the_display_title(self):
         self.assertEqual(split_title("Add table [[#^t5aa]] #api 📅 2026-11-01"), ("Add table", ["api"], "2026-11-01"))
+
+
+def linear_card(ref, title, parent=None, checked=False):
+    return CardView(ref=ref, board="Platform", path=None, column="Todo", title=title, checked=checked,
+                    due=None, tags=[], body=[], source="linear", read_only=True, parent=parent)
+
+
+class LinearFamilyTests(unittest.TestCase):
+    def test_sub_issues_show_like_sub_cards(self):
+        parent = linear_card("ENG-1", "Billing v2")
+        open_child = linear_card("ENG-2", "Add invoice table", parent="ENG-1")
+        done_child = linear_card("ENG-3", "Add tax field", parent="ENG-1", checked=True)
+        mark_family([parent, open_child, done_child])
+        self.assertEqual((open_child.parent_title, parent.sub_cards), ("Billing v2", (1, 2)))
+        self.assertIsNone(parent.parent_title)
+
+    def test_a_parent_outside_the_view_shows_its_identifier(self):
+        child = linear_card("ENG-2", "Add invoice table", parent="ENG-1")
+        mark_family([child])
+        self.assertEqual(child.parent_title, "ENG-1")
+
+    def test_a_caret_filter_finds_a_sub_issue_family(self):
+        child = linear_card("ENG-2", "Add invoice table", parent="ENG-1")
+        self.assertTrue(card_matches(child, ["^eng-1"]))
+        self.assertFalse(card_matches(linear_card("ENG-5", "Other"), ["^eng-1"]))
 
 
 class StoreTestCase(unittest.TestCase):

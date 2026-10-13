@@ -629,7 +629,8 @@ class Starter:
                                               team, client.team_states(team["id"]), column, self.ask_state)
                 elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
                     raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
-                if not base and not record.get("base") and card.parent:
+                # A Linear sub-issue can belong to another repository, so only todos start from a parent.
+                if not base and not record.get("base") and card.parent and not issue:
                     base = self._parent_branch(card, repo, checkout)
                 record["base"] = self._base(local, base or record.get("base"), branch)
                 save("base")

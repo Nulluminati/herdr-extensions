@@ -95,6 +95,16 @@ class LinearBoardTests(LinearBoardCase):
             self.assertTrue(any("◆ ENG-2" in c and "PR" not in c for c in cards))
             self.assertFalse(any("◆" in c for c in cards if "local todo" in c))
 
+    async def test_sub_issues_show_their_parent_and_parents_their_progress(self):
+        issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-2")
+        issue["parent"] = {"id": "i1", "identifier": "ENG-1"}
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            cards = self.cards(app)
+            self.assertIn("↳ Issue 1", next(c for c in cards if "Issue 2" in c))
+            self.assertIn("0/1 done", next(c for c in cards if "Issue 1" in c))
+
     async def test_t_hides_and_shows_linear_cards(self):
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:

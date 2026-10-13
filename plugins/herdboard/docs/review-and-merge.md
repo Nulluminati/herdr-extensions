@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. All 7 build steps are built. One part is not: the board does not show Linear sub-issues as sub-cards yet.
+Status: design draft. All 7 build steps are built.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -88,7 +88,8 @@ A sub-card has an Obsidian block link to its parent on its first line, before it
 - The parent and the sub-card are on the same board. A link to an ID that is not on the board is an error in `doctor` (`parent_missing`), and the card shows as a card without a parent.
 - Sub-cards go one level deep. A card with a parent cannot be a parent. `add` and `edit` refuse it with `parent_nested`.
 - Inbox todos can have sub-cards. They have no repository, so `start` and `merge` do not apply.
-- Linear sub-issues already have a parent in Linear. The board will read that parent, so local and Linear cards show the same way. This is not built yet: it needs the parent in the Linear issue query.
+- Linear sub-issues already have a parent in Linear. The board reads that parent, so local and Linear cards show the same way. A sub-issue whose parent is not in the view shows the parent's identifier.
+- A Linear sub-issue does not start from its parent's branch, because its parent can belong to another repository. `start --base` sets the base.
 - The parent link is not part of the title. `show --json` returns it as `parent`. `todo_branch` already removes `[[...]]` from the branch name.
 
 ## Base branch

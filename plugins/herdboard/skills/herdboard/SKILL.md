@@ -23,7 +23,7 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 - A card has `title`, `column`, `checked`, `due`, `tags`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `stale: true` means the Linear data comes from the cache.
 - Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
 - Tags and the due date are part of the card text: `#auth` adds a tag, `📅 2026-11-01` sets the due date.
-- A todo can be a sub-card of another todo on the same board. Its `parent` field names the parent. Sub-cards go one level deep. A sub-card starts from its parent's branch and merges into it.
+- A todo can be a sub-card of another todo on the same board. Its `parent` field names the parent. Sub-cards go one level deep. A sub-card starts from its parent's branch and merges into it. A Linear sub-issue also has `parent` (its parent's identifier), but it starts from the current branch.
 
 ## Read
 

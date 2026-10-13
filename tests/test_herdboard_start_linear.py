@@ -1,6 +1,7 @@
 """Linear start uses the server branch and the normal write path."""
 from unittest.mock import patch
 from pathlib import Path
+import subprocess
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_herdboard_linear_write_cli import WriteCliCase
@@ -29,6 +30,14 @@ class StartLinearTests(WriteCliCase):
         result2 = self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)
         self.assertEqual(result["worktree_path"], result2["worktree_path"])
         self.assertEqual(len(self.inputs("IssueUpdate")), 1)
+
+    def test_a_sub_issue_starts_from_the_current_branch_without_its_parent(self):
+        self.issue("ENG-1")["parent"] = {"id": "i2", "identifier": "ENG-2"}
+        result = self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)
+        head = subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "--short", "HEAD"],
+                              check=True, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(result["base"], head)
+        self.assertIsNone(start.find_record("ENG-2"))
 
     def test_explicit_board_or_checkout_repository(self):
         for repo in ("acme-api", str(self.repo)):

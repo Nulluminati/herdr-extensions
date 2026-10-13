@@ -252,12 +252,18 @@ def log_lines(entries: list[dict]) -> Text:
 
 
 def mark_family(cards: list[CardView]) -> None:
-    """Set each sub-card's parent title and each parent's count of done sub-cards."""
+    """Set each sub-card's parent title and each parent's count of done sub-cards.
+
+    A Linear parent can be outside the view, in another project or assigned to someone
+    else, so a Linear sub-issue without its parent shows the parent's identifier."""
     by_ref = {card.ref: card for card in cards}
     counts: dict[str, list[int]] = {}
     for card in cards:
         parent = by_ref.get(card.parent) if card.parent else None
-        card.parent_title = (split_title(parent.title)[0] or parent.title) if parent else None
+        if parent:
+            card.parent_title = split_title(parent.title)[0] or parent.title
+        else:
+            card.parent_title = card.parent if card.source == "linear" else None
         if card.parent:
             count = counts.setdefault(card.parent, [0, 0])
             count[0] += card.checked

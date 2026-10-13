@@ -312,6 +312,12 @@ class CardTests(unittest.TestCase):
         self.assertEqual(card.url, "https://linear.app/workspace/issue/ENG-2")
         self.assertEqual(card.fetched_at, self.when.isoformat())
 
+    def test_a_sub_issue_names_its_parent(self):
+        issue = linear_data.make_issue(2)
+        issue["parent"] = {"id": "i1", "identifier": "ENG-1"}
+        self.assertEqual(self.card(self.flat(issue)).parent, "ENG-1")
+        self.assertIsNone(self.card(self.flat(linear_data.make_issue(1))).parent)
+
     def test_without_project_description_or_due(self):
         card = self.card(self.flat(linear_data.make_issue(6, project=None, description=None, due=None,
                                                           state=("Shipped", "completed"))))

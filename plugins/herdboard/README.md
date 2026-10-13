@@ -245,7 +245,7 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For an inbox todo, `--repo` is required. `--repo` takes a board name or a path inside a checkout. The tool never picks the first of several linked repositories.
 2. Find the local checkout from a registry of checkouts in `~/.local/state/herdboard/checkouts.json`. The registry maps a repository identity to the paths of its main checkouts. The tool adds the main checkout each time it runs inside a repository. If none is known, `start` asks for a path in a terminal. Without a terminal, or with `--json`, it fails with the code `checkout_unknown`. `--checkout PATH` answers, and the tool stores the answer. When several checkouts are known, the tool uses the most recently seen one that still exists.
 3. Choose the branch. For a Linear issue, the issue's `branchName`. For a todo, the card ID plus a short name from the card text, for example `t7k2-fix-login-timeout`: lowercase, words joined by `-`, without tags, dates and links, at most 50 characters. The tool validates the name with `git check-ref-format --branch`. A todo without an ID gets one first, with the usual write rules.
-4. Choose the base: the local branch that the card branch starts from, and later merges into. `--base` names it. Else a restart keeps the recorded base. Else a sub-card uses its parent's branch, and starts the parent first with `--no-agent` when the parent has no branch. Else it is the branch of the main checkout. A base that is not a local branch, or a checkout with a detached HEAD and no `--base`, fails with `base_unknown` before the worktree exists.
+4. Choose the base: the local branch that the card branch starts from, and later merges into. `--base` names it. Else a restart keeps the recorded base. Else a sub-card uses its parent's branch (a Linear sub-issue does not), and starts the parent first with `--no-agent` when the parent has no branch. Else it is the branch of the main checkout. A base that is not a local branch, or a checkout with a detached HEAD and no `--base`, fails with `base_unknown` before the worktree exists.
 5. Open the worktree:
    - If the state file has a worktree for the card and the path still exists, reuse it. If Herdr has it open as a workspace, focus that workspace. Otherwise open it with `herdr worktree open --path`.
    - If Git already has a worktree for the branch, open that worktree.
@@ -297,7 +297,7 @@ The board reads the state of each open pull request at most once a minute with `
 
 The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config (default `local`).
 
-On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`. `p` sets or removes the parent of a todo. A sub-card shows `↳ <parent title>`, a parent shows `2/5 done`, and the filter `^t5aa` shows `t5aa` and its sub-cards.
+On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`. `p` sets or removes the parent of a todo. A sub-card shows `↳ <parent title>`, a parent shows `2/5 done`, and the filter `^t5aa` shows `t5aa` and its sub-cards. A Linear sub-issue shows the same way, with its parent from Linear. When the parent is not in the view, it shows the parent's identifier, such as `↳ ENG-12`.
 
 ### promote
 
