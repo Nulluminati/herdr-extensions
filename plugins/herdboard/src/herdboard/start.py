@@ -178,6 +178,16 @@ def update_card_token(card: CardView, removed: bool = False) -> None:
             report_card_token(record["pane_id"], None if removed else card_token(card))
 
 
+def card_agent_panes() -> set[str]:
+    """The panes where `start` started an agent for a card."""
+    try:
+        records = _read(state_dir() / "starts.json")
+    except HerdboardError:
+        return set()
+    return {record["pane_id"] for record in records.values()
+            if isinstance(record, dict) and record.get("agent_name") and isinstance(record.get("pane_id"), str)}
+
+
 def _read(path):
     if not path.exists():
         return {}

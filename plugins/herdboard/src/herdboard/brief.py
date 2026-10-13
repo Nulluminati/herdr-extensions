@@ -98,15 +98,21 @@ def brief_text(
         "",
         f"- Read the card again: `{command} --json show {ref}`",
     ]
+    lines.append(
+        f'- Record progress, decisions and blockers in the card\'s activity log: `{command} --json log {ref} "..."`'
+    )
+    lines.append("- Do not change the card title or details. They are the user's text.")
     if linear:
         lines.append("- Ask the user before you change the Linear issue: its state, title, description or comments.")
-    else:
-        lines.append(
-            f'- Record progress or a blocker in the details: `{command} --json edit {ref} --body "..."`. '
-            "This replaces every detail line, so read the card first and keep the lines you want."
-        )
     lines += [
-        f"- When the work is ready for the user to check: `{command} --json move {ref} Review`",
+        "",
+        "## Finish the work",
+        "",
+        f"- Commit every change on the branch `{branch}`. Use conventional commit messages.",
+        f"- When the work is ready for the user to check, commit it, then run `{command} --json move {ref} Review`",
+        f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
+        "Fix, commit, and move the card back to Review.",
+        "- Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.",
         "- Do not move the card to Done. The user does that after the review.",
         "",
     ]

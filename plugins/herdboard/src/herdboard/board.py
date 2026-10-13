@@ -21,6 +21,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
+from . import activity
 from .linear import LinearAuthError
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, split_title
@@ -36,6 +37,7 @@ LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
 START_GROUP = "card-start"
+DETAIL_LOG_ENTRIES = 10
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
 LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
@@ -219,6 +221,20 @@ def detail_lines(lines: list[str], selected: int | None = None) -> Text:
     return text
 
 
+def log_lines(entries: list[dict]) -> Text:
+    """Activity log entries, oldest first: the time and author dim, extra lines indented."""
+    text = Text()
+    for entry in entries:
+        first, *rest = entry["message"].split("\n")
+        if text:
+            text.append("\n")
+        text.append(f"{entry['time']} · {entry['author']} · ", style="dim")
+        text.append(first)
+        for line in rest:
+            text.append("\n" + _hold_indent("\t" + line))
+    return text
+
+
 def card_matches(card: CardView, terms: list[str]) -> bool:
     """True when every term matches: `#tag` a tag by prefix, any other word the card's text."""
     tags = [tag.casefold() for tag in card.tags]
@@ -251,9 +267,11 @@ class DetailScreen(ModalBase):
         Binding("up,k", "item(-1)", "Previous item", show=False),
     ]
 
-    def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round"):
+    def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round",
+                 log: list[dict] | None = None):
         super().__init__()
         self.notes = notes or []
+        self.entries = log or []
         self.tag_style = tag_style
         self.cursor = 0
         self._set_card(card)
@@ -351,6 +369,10 @@ class DetailScreen(ModalBase):
                         yield Label("Note not found", classes="dim")
                     else:
                         yield Markdown(content)
+            if self.entries:
+                block = RichStatic(log_lines(self.entries), id="detail-log", classes="detail-block")
+                block.border_title = "Log"
+                yield block
             hint = "j/k: select item · space: check · " if self.items else ""
             yield Label(f"{hint}e: edit · escape: close", classes="dim")
 
@@ -1349,8 +1371,14 @@ class HerdboardApp(App):
                 notes = self.store.notes_for(card)
             except HerdboardError as error:
                 self.notify(str(error), severity="error")
+        log = None
+        if activity.LOG_REF.match(card.ref):
+            try:
+                log = activity.read(self.store.config, card.ref, DETAIL_LOG_ENTRIES)
+            except HerdboardError as error:
+                self.notify(str(error), severity="error")
         self.push_screen(
-            DetailScreen(card, notes, self.store.config.tag_style),
+            DetailScreen(card, notes, self.store.config.tag_style, log),
             lambda result: self.action_edit() if result == "edit" else None,
         )
 

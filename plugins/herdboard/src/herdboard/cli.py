@@ -6,10 +6,12 @@ import argparse
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Callable
 
+from . import activity
 from .config import THINKING_LEVELS, load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
@@ -22,7 +24,7 @@ from .migrate_convert import convert
 from .model import HerdboardError, IoError, NotFoundError
 from .promote import Promoter
 from .store import CardView, Store
-from .start import Starter, register_checkout
+from .start import Starter, card_agent_panes, register_checkout
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
 
 INIT_HINT = "Run `herdboard init` to create a board for this repository."
@@ -89,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("show", "show one card")
     sub.add_argument("ref")
+    sub.add_argument("--log", action="store_true", help="show every activity log entry, not the last 10")
     sub.add_argument("--offline", action="store_true", help="read Linear from the cache only")
 
     sub = command("move", "move a card to a column, or a todo to another board")
@@ -114,6 +117,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--title", help="the card's new first line, with #tags and 📅 date")
     sub.add_argument("--body", help="the card's new indented lines, one per line; empty clears them")
     sub.add_argument("--body-file", type=Path, help="read the new indented lines from a file")
+
+    sub = command("log", "add an entry to a card's activity log")
+    sub.add_argument("ref")
+    sub.add_argument("message")
 
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
@@ -218,9 +225,20 @@ def _show_linear_text(card: CardView) -> str:
     return "\n".join(lines)
 
 
-def _show_text(card: CardView, notes: list[dict] | None = None) -> str:
+def _log_text(entries: list[dict]) -> list[str]:
+    if not entries:
+        return []
+    lines = ["--- log ---"]
+    for entry in entries:
+        first, *rest = entry["message"].split("\n")
+        lines.append(f"{entry['time']} · {entry['author']} · {first}")
+        lines.extend("\t" + line for line in rest)
+    return lines
+
+
+def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] | None = None) -> str:
     if card.source == "linear":
-        return _show_linear_text(card)
+        return "\n".join([_show_linear_text(card), *_log_text(log or [])])
     lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
     if card.due:
         lines.append(f"due: {card.due}")
@@ -230,6 +248,7 @@ def _show_text(card: CardView, notes: list[dict] | None = None) -> str:
     for note in notes or []:
         lines.append(f"--- {note['name']} ---")
         lines.append("(note not found)" if note["content"] is None else note["content"].rstrip("\n"))
+    lines.extend(_log_text(log or []))
     return "\n".join(lines)
 
 
@@ -377,14 +396,35 @@ def _find_linear_card(ctx: _Context, ref: str) -> tuple[CardView, LinearResult]:
     return card, LinearResult(fetched_at=fetched.fetched_at, stale=fetched.stale)
 
 
+SHOWN_LOG_ENTRIES = 10
+
+
+def _card_log(ctx: _Context, card: CardView) -> list[dict]:
+    """The card's activity log; a card with only a temporary reference has none."""
+    if not activity.LOG_REF.match(card.ref):
+        return []
+    return activity.read(ctx.config, card.ref, None if ctx.args.log else SHOWN_LOG_ENTRIES)
+
+
 def _cmd_show(ctx: _Context) -> dict:
     ref = ctx.args.ref
     if LINEAR_REF.match(ref):
         ctx.views.source.require_active()
         card, result = _find_linear_card(ctx, ref)
-        return {"card": card, "linear": result}
+        return {"card": card, "linear": result, "log": _card_log(ctx, card)}
     card = ctx.store.show(ref)
-    return {"card": card, "notes": ctx.store.notes_for(card)}
+    return {"card": card, "notes": ctx.store.notes_for(card), "log": _card_log(ctx, card)}
+
+
+def _cmd_log(ctx: _Context) -> dict:
+    args = ctx.args
+    if not args.message.strip():
+        raise UsageError("The log message is empty")
+    if LINEAR_REF.match(args.ref):
+        ref = args.ref.upper()
+    else:
+        ref = ctx.store.ensure_id(args.ref).ref
+    return {"ref": ref, "entry": activity.append(ctx.store, ref, args.message, activity.author())}
 
 
 def _require_todo_options(args: argparse.Namespace) -> None:
@@ -428,6 +468,10 @@ class LinearEditError(HerdboardError):
     code = "linear_edit"
 
 
+class AgentEditDenied(HerdboardError):
+    code = "agent_edit_denied"
+
+
 def _cmd_edit(ctx: _Context) -> dict:
     args = ctx.args
     if LINEAR_REF.match(args.ref):
@@ -440,6 +484,13 @@ def _cmd_edit(ctx: _Context) -> dict:
         body = _read_todo_file(path)
     if args.title is None and body is None:
         raise UsageError("Nothing to change: give --title, --body or --body-file")
+    # A guard against mistakes, not a security boundary: the card text is the user's.
+    pane = os.environ.get("HERDR_PANE_ID")
+    if pane and pane in card_agent_panes():
+        raise AgentEditDenied(
+            "Agents do not change the card title or details. "
+            f'Record progress with `herdboard log {args.ref} "..."` instead.'
+        )
     lines = body.splitlines() if body is not None else None
     return {"card": ctx.store.edit(args.ref, title=args.title, body=lines), "edited": True}
 
@@ -710,6 +761,7 @@ COMMANDS = {
     "done": _cmd_done,
     "delete": _cmd_delete,
     "edit": _cmd_edit,
+    "log": _cmd_log,
     "promote": _cmd_promote,
     "start": _cmd_start,
     "init": _cmd_init,
@@ -759,6 +811,12 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
+    if command == "log":
+        if as_json:
+            _emit_json(result)
+        else:
+            print(f"{result['ref']}: logged")
+        return
     if command == "migrate":
         if as_json:
             _emit_json({"board": str(result["board"]), "preview": result["preview"],
@@ -791,6 +849,8 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             data = {"card": _card_dict(result["card"])}
             if result.get("notes") is not None:
                 data["notes"] = result["notes"]
+            if result.get("log") is not None:
+                data["log"] = result["log"]
             if result.get("hint"):
                 data["hint"] = result["hint"]
             if linear is not None:
@@ -804,7 +864,7 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     elif command == "list":
         print(_list_text(result["cards"]))
     elif command == "show":
-        print(_show_text(result["card"], result.get("notes")))
+        print(_show_text(result["card"], result.get("notes"), result.get("log")))
     elif command == "promote":
         print(_card_line(result["card"]))
         if result["sub_issues"]:

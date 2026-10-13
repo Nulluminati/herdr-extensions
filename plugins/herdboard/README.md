@@ -210,12 +210,13 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard list [--view] [--source] [--column] [--json]` | List cards |
 | `herdboard add "text" [--board] [--column]` | Add a todo. Default board: the current repository's board, else `inbox.md`. Default column: the first column |
 | `herdboard add --linear [--team ENG] [--project NAME] [--label NAME] [--column] [--state] "title"` | Create a Linear issue, assigned to you. `--team` is optional when you belong to one team, or when the project has one team. Inside a repository board with exactly one linked project, that project and its link labels are the default, so the issue shows in the repository view. Default column: the first column |
-| `herdboard show <id>` | Show a card and its detail |
+| `herdboard show <id> [--log]` | Show a card, its detail and the last 10 entries of its activity log. `--log` shows every entry |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card. Default position for a todo: bottom. A Linear issue without `--position` keeps its place in Linear's order |
 | `herdboard move <id> --up\|--down` | Swap a todo with the card above or below it in its column. Linear issues keep Linear's order |
 | `herdboard move <id> [column] --board NAME` | Move a todo, with its details and its ID, to another board (`inbox` or a project name). Without a column, it keeps its column name when the board has it, else it goes to the first column. Linear issues stay in Linear |
 | `herdboard done <id>` | Move a card to its board's done column |
 | `herdboard edit <id> [--title TEXT] [--body TEXT \| --body-file PATH]` | Change a todo's first line, its indented lines, or both. The checkbox and the ID stay. `--body ""` removes the indented lines. Linear issues are not edited |
+| `herdboard log <id> "text"` | Append an entry to the card's activity log (see below). Works for todos and Linear issues, with no Linear connection |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
@@ -228,6 +229,12 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 - `list --json` also returns `boards`: each listed board's name, path and every column (title, card limit, done flag), including empty columns.
 - With `--json`, every command writes JSON to standard output, and errors have the form `{"error": {"code": "…", "message": "…"}}`.
 - Exit codes: 0 success, 1 user error (unknown ID, missing column), 2 conflict (the card changed, the lock is held), 3 Linear error.
+
+### log
+
+Each card has an activity log: `<todos_dir>/.herdboard/log/<id>.md`, one file per todo ID or Linear identifier. Obsidian ignores the hidden folder. Each entry is one line, `- 2026-10-12 14:03 · pi · Ready for review.`, and extra lines of a message are indented below it. The author comes from the Herdr pane: the kind of agent in `HERDR_PANE_ID` (`claude`, `pi`), else `user`. The tool only appends, under the store lock.
+
+Agents record progress in the log, not in the card. `edit` fails with `agent_edit_denied` when `HERDR_PANE_ID` is the agent pane of a started card. This guards against mistakes. It is not a security boundary.
 
 ### start
 
@@ -247,6 +254,8 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 On the board, `s` starts the selected card with the default agent. `S` asks for the agent first.
 
 When the board refreshes, it checks each stored worktree. If the path no longer exists, the card shows `worktree removed`. The card does not move by itself, and the state entry stays until the next `start` of that card replaces it.
+
+Review, merge and finish after `start` are designed in [docs/review-and-merge.md](docs/review-and-merge.md).
 
 ### promote
 

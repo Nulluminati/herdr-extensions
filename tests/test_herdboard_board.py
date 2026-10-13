@@ -634,6 +634,34 @@ class ActionTests(BoardTestCase):
             await pilot.pause()
             self.assertNotIsInstance(app.screen, DetailScreen)
 
+    async def test_detail_shows_the_last_log_entries(self):
+        from datetime import datetime
+        from herdboard import activity
+
+        card = self.store.add(self.repo_path, "Ship it", "Todo")
+        for number in range(12):
+            activity.append(self.store, card.ref, f"Entry {number}.", "pi", now=datetime(2026, 10, 12, 9, number))
+        activity.append(self.store, card.ref, "Blocked.\nNo key.", "claude", now=datetime(2026, 10, 12, 10, 0))
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("right", "enter")
+            await pilot.pause()
+            block = app.screen.query_one("#detail-log")
+            self.assertEqual(block.border_title, "Log")
+            lines = block.plain.split("\n")
+            self.assertEqual(lines[0], "2026-10-12 09:03 · pi · Entry 3.")
+            self.assertEqual(lines[-2:], ["2026-10-12 10:00 · claude · Blocked.", "\u00a0\u00a0\u00a0\u00a0No key."])
+
+    async def test_detail_without_a_log_has_no_log_block(self):
+        self.store.add(self.repo_path, "Ship it", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("right", "enter")
+            await pilot.pause()
+            self.assertEqual(list(app.screen.query("#detail-log")), [])
+
     async def test_detail_shows_details_in_their_own_block(self):
         card = self.store.add(self.repo_path, "Ship it", "Todo",
                               body=["- [ ] write notes", "- [x] tag release", "plain line", "  - nested"])

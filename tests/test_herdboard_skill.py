@@ -41,6 +41,15 @@ class SkillTests(unittest.TestCase):
             with self.subTest(argv=argv):
                 parser.parse_args(argv)
 
+    def test_agents_log_progress_instead_of_editing_the_card(self):
+        commands = skill_commands()
+        self.assertIn(["--json", "log", "tep3", "Ready for review: 3 commits."], commands)
+        text = SKILL.read_text(encoding="utf-8")
+        handed = text[text.index("## When a card was handed to you"):text.index("## Errors")]
+        self.assertIn("herdboard --json log", handed)
+        self.assertNotIn("edit --body", handed)
+        self.assertIn("`agent_edit_denied`", text)
+
     def test_every_error_code_in_the_skill_exists(self):
         text = SKILL.read_text(encoding="utf-8")
         table = text[text.index("| Code |"):]
@@ -51,7 +60,8 @@ class SkillTests(unittest.TestCase):
             LinearWriteRejectedError, LinearDisabledError, TeamRequiredError,
             AlreadyPromotedError, NotATodoError)}
         known.add(cli.UsageError.code)
-        known |= {cli.ConfirmationRequired.code, cli.LinearDeleteError.code, cli.LinearEditError.code}
+        known |= {cli.ConfirmationRequired.code, cli.LinearDeleteError.code, cli.LinearEditError.code,
+                  cli.AgentEditDenied.code}
         known |= {"ambiguous_state", "no_state", "checkout_unknown", "repo_required", "herdr_unavailable", "herdr_error"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")

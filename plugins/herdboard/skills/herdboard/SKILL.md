@@ -32,7 +32,7 @@ herdboard --json list --view inbox         # todos that belong to no repository
 herdboard --json list --view all           # every board and your Linear issues
 herdboard --json list --view mine          # Linear issues assigned to the user
 herdboard --json list --column "In progress"
-herdboard --json show tep3
+herdboard --json show tep3                 # also the last 10 activity log entries; --log shows all
 ```
 
 ## Write
@@ -49,7 +49,10 @@ herdboard --json move tep3 --board inbox             # to another board; the ID 
 herdboard --json move tep3 --up                      # one place higher in its column
 herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
 herdboard --json edit tep3 --body "first detail line\nsecond detail line"
+herdboard --json log tep3 "Ready for review: 3 commits."   # append to the card's activity log
 ```
+
+The activity log is the card's history. It works for todos and Linear issues, and it never changes the card text. herdboard records who wrote each entry.
 
 Ask the user first before these. They change shared Linear data, open workspaces, or rewrite many cards:
 
@@ -75,9 +78,12 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 
 1. Read the brief. It has the card's details, linked notes, the worktree and branch, and the exact herdboard command to use.
 2. Do the work that the card describes, in this worktree.
-3. Record progress or a blocker with `edit --body`, as the brief shows.
-4. When the work is ready for the user to check, run `herdboard --json move <id> Review`.
-5. Do not run `done`. The user moves the card to Done.
+3. Record progress, decisions and blockers with `herdboard --json log <id> "..."`. Do not change the card title or details: `edit` fails with `agent_edit_denied` in your pane.
+4. Commit every change on the card's branch, with conventional commit messages.
+5. When the work is ready for the user to check, commit it, then run `herdboard --json move <id> Review`.
+6. When review feedback arrives, move the card to `In progress`. Fix, commit, and move it back to Review.
+7. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
+8. Do not run `done`. The user moves the card to Done.
 
 The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
 
@@ -88,6 +94,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | Code | Do this |
 |---|---|
 | `no_state` | No workflow state of the issue's team maps to that column. Ask the user for another column. |
+| `agent_edit_denied` | You are the card's agent, and the card text is the user's. Record the change with `log` instead. |
 | `linear_edit` | herdboard does not edit Linear issues. Tell the user to edit it in Linear. |
 | `confirmation_required` | `delete` needs `--yes`. Ask the user first, then run it with `--yes`. |
 | `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |

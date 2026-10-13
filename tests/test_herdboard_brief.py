@@ -60,14 +60,21 @@ class BriefTests(unittest.TestCase):
         self.assertIn("### Gone\n\nThe note was not found.\n", text)
 
     def test_how_to_update_the_card(self):
-        text = self.brief(todo())
-        for part in [
-            "herdboard --json show t83k",
-            "herdboard --json edit t83k --body",
-            "herdboard --json move t83k Review",
-            "Do not move the card to Done",
-        ]:
-            self.assertIn(part, text)
+        for card in (todo(), issue()):
+            with self.subTest(source=card.source):
+                text = self.brief(card)
+                for part in [
+                    f"herdboard --json show {card.ref}",
+                    f'herdboard --json log {card.ref} "..."',
+                    "Do not change the card title or details",
+                    "Commit every change on the branch `t83k-move-to-shared`",
+                    f"herdboard --json move {card.ref} Review",
+                    f'herdboard --json move {card.ref} "In progress"',
+                    "Do not push, merge, rebase onto another branch, or remove the worktree",
+                    "Do not move the card to Done",
+                ]:
+                    self.assertIn(part, text)
+                self.assertNotIn("--json edit", text)
 
     def test_the_cli_command_is_used_as_given(self):
         text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b",
