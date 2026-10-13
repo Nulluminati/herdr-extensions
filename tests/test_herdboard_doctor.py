@@ -4,6 +4,7 @@ import fcntl
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import sys
 import subprocess
@@ -240,6 +241,13 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(self.findings("herdr_missing")[0]["level"], "info")
             command.assert_not_called()
 
+    def test_missing_gh_is_info(self):
+        real = shutil.which
+        with patch("herdboard.doctor.shutil.which", side_effect=lambda name: None if name == "gh" else real(name)):
+            found = self.findings("gh_missing")
+        self.assertEqual([(f["level"], f["message"]) for f in found],
+                         [("info", "No GitHub CLI `gh` found. Only merge --pr and finish of a pull request need it.")])
+
     def test_herdr_environment_path_takes_precedence(self):
         executable = self.root / "herdr"
         executable.write_text("#!/bin/sh\nexit 0\n")
@@ -353,7 +361,7 @@ class DoctorTests(unittest.TestCase):
         os.environ.pop("HERDR_BIN_PATH")
         with patch("herdboard.doctor.shutil.which", return_value="/example/herdr") as which:
             self.assertEqual(self.findings("herdr_missing"), [])
-        which.assert_called_once_with("herdr")
+        self.assertEqual(which.call_args_list[0].args, ("herdr",))
 
     def test_valid_linear_links_make_only_read_queries(self):
         self.enable_linear()

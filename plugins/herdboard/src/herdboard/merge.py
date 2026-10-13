@@ -2,22 +2,30 @@
 
 A local merge rebases the branch onto its base in the card's worktree, then fast-forwards
 the base. A conflict happens in the worktree, where the card's agent can fix it, and the
-base never gets a merge commit. `finish` removes the worktree and the branch, and moves the
-card to Done.
+base never gets a merge commit. A pull request merge pushes the branch and opens a GitHub
+pull request with `gh`. `finish` removes the worktree and the branch, and moves the card
+to Done.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import subprocess
+import time
 
 from . import activity
+from .brief import _unindent
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
-from .model import HerdboardError
+from .model import HerdboardError, split_title
 from .start import (Starter, StartError, _lock, _read, _write, agent_live, card_changed, close_review_pane,
                     fetch_linear_card, find_record, herdr, safe_key, state_dir)
+
+
+# The board reads the state of an open pull request at most this often.
+PR_CHECK_SECONDS = 60
 
 
 class MergeError(HerdboardError):
@@ -39,6 +47,58 @@ def _dirty(directory, untracked=True) -> bool:
 def _commit(directory, ref) -> str | None:
     result = _git(directory, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _gh(directory, *args) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["gh", *args], cwd=str(directory), capture_output=True, text=True, timeout=60)
+    except FileNotFoundError as error:
+        raise MergeError("The GitHub CLI `gh` is not installed", "gh_unavailable") from error
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MergeError(f"gh failed: {error}", "pr_failed") from error
+
+
+def _gh_output(directory, *args) -> str:
+    result = _gh(directory, *args)
+    if result.returncode:
+        raise MergeError(f"gh {' '.join(args[:2])} failed: {result.stderr.strip()}", "pr_failed")
+    return result.stdout
+
+
+def refresh_pr_states(now: float | None = None) -> None:
+    """Read the state of each open pull request whose last read is a minute old. Best effort."""
+    now = time.time() if now is None else now
+    path = state_dir() / "starts.json"
+    try:
+        records = _read(path)
+    except HerdboardError:
+        return
+    states = {}
+    for key, record in records.items():
+        if not (isinstance(record, dict) and record.get("pr_url") and record.get("pr_state") == "open"
+                and now - record.get("pr_checked", 0) >= PR_CHECK_SECONDS):
+            continue
+        try:
+            result = _gh(record["checkout"], "pr", "view", record["pr_url"], "--json", "state")
+            state = json.loads(result.stdout)["state"].lower() if result.returncode == 0 else "open"
+        except MergeError:
+            return
+        except (ValueError, KeyError, TypeError, AttributeError):
+            state = "open"
+        states[key] = (record["pr_url"], state)
+    if not states:
+        return
+    try:
+        with _lock(wait=2):
+            records = _read(path)
+            for key, (url, state) in states.items():
+                record = records.get(key)
+                if isinstance(record, dict) and record.get("pr_url") == url:
+                    record["pr_state"] = state
+                    record["pr_checked"] = now
+            _write(path, records)
+    except HerdboardError:
+        return
 
 
 def checkout_of(repository, branch) -> Path | None:
@@ -146,10 +206,44 @@ class Merger:
             if ahead == "0":
                 raise MergeError(f"{branch} has no commits ahead of {base}", "nothing_to_merge")
             if mode == "pr":
-                raise MergeError("merge --pr is not built yet; use --local", "usage")
+                url = self._merge_pr(card, ref, key, record, worktree, branch, base)
+                return {"ref": ref, "mode": "pr", "base": base, "pr_url": url}
             commit = self._merge_local(card, ref, key, record, worktree, checkout, branch, base)
             finished = self._finish(card, ref, key, record, force=False)
         return {"ref": ref, "mode": "local", "base": base, "commit": commit, **finished}
+
+    def _pr_text(self, card, ref):
+        """The pull request title and body: the card's title and description, and the Linear link."""
+        if card.source == "linear":
+            title, lines = card.title, list(card.body)
+        else:
+            title, lines = split_title(card.title)[0] or card.title, [_unindent(line) for line in card.body]
+        if card.url:
+            lines += ["", f"Linear: {card.url}"]
+        lines += ["", f"herdboard card `{ref}`"]
+        return title, "\n".join(lines).strip() + "\n"
+
+    def _merge_pr(self, card, ref, key, record, worktree, branch, base):
+        pushed = _git(worktree, "push", "--quiet", "origin", f"{branch}:refs/heads/{branch}")
+        if pushed.returncode:
+            raise MergeError(f"Cannot push {branch}: {pushed.stderr.strip()}", "push_failed")
+        # Hunk and `git status` compare the branch with its upstream: a push must not change it.
+        _git(worktree, "branch", f"--set-upstream-to={base}", branch)
+        url = record.get("pr_url") if record.get("pr_state") == "open" else None
+        known = url is not None
+        if url is None:
+            listed = json.loads(_gh_output(worktree, "pr", "list", "--head", branch, "--state", "open",
+                                           "--json", "url") or "[]")
+            url = listed[0]["url"] if listed else None
+        if url is None:
+            title, body = self._pr_text(self._card(card, ref), ref)
+            created = _gh_output(worktree, "pr", "create", "--base", base, "--head", branch,
+                                 "--title", title, "--body", body)
+            url = created.strip().splitlines()[-1]
+        record.update(pr_url=url, pr_state="open", pr_checked=time.time())
+        self._persist(key, record)
+        activity.append(self.store, ref, f"PR {'updated' if known else 'opened'}: {url}", "herdboard")
+        return url
 
     def _merge_local(self, card, ref, key, record, worktree, checkout, branch, base):
         target = checkout_of(checkout, base)
@@ -183,9 +277,16 @@ class Merger:
     def _finish(self, card, ref, key, record, force):
         branch, base, checkout = record["branch"], record["base"], Path(record["checkout"])
         exists = _commit(checkout, f"refs/heads/{branch}") is not None
-        merged = not exists or _git(checkout, "merge-base", "--is-ancestor", branch, base).returncode == 0
+        pr_url = record.get("pr_url")
+        if pr_url:
+            state = json.loads(_gh_output(checkout, "pr", "view", pr_url, "--json", "state"))["state"]
+            merged = state == "MERGED"
+            target = f"Pull request {pr_url} is {state.lower()}"
+        else:
+            merged = not exists or _git(checkout, "merge-base", "--is-ancestor", branch, base).returncode == 0
+            target = f"{branch} is not merged into {base}"
         if not merged and not force:
-            raise MergeError(f"{branch} is not merged into {base}. Merge it first, or use --force.", "not_merged")
+            raise MergeError(f"{target}. Merge it first, or use --force.", "not_merged")
         worktree = Path(record["worktree_path"]) if record.get("worktree_path") else None
         present = worktree is not None and worktree.exists()
         if present and _dirty(worktree):
@@ -195,7 +296,12 @@ class Merger:
             self._remove_worktree(record, worktree)
         _git(checkout, "worktree", "prune")
         deleted = False
-        if exists and merged:
+        if exists and merged and pr_url:
+            # GitHub can squash or rebase the pull request, so Git does not see the branch as merged.
+            deleted = _git(checkout, "branch", "-D", branch).returncode == 0
+            if _git(checkout, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode == 0:
+                _git(checkout, "push", "--quiet", "origin", "--delete", branch)
+        elif exists and merged:
             deleted = _git(checkout, "branch", "-d", branch).returncode == 0
         elif exists:
             activity.append(self.store, ref, f"Branch {branch} kept: it is not merged.", "herdboard")

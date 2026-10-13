@@ -323,6 +323,13 @@ def check_herdr():
     return []
 
 
+def check_gh():
+    if shutil.which("gh") is None:
+        return [finding("info", "gh_missing",
+                        "No GitHub CLI `gh` found. Only merge --pr and finish of a pull request need it.")]
+    return []
+
+
 def diagnose(path=None, *, repair_ids=False, offline=False):
     findings, fixed = [], []
     config = None
@@ -357,6 +364,7 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
     for promotion_path in sorted(state.glob("*/*/promotions.json")):
         findings.extend(check_promotions(promotion_path, store_path))
     findings.extend(check_herdr())
+    findings.extend(check_gh())
     summary = {level: sum(f["level"] == level for f in findings) for level in LEVELS}
     return {"findings": findings, "fixed": fixed, "summary": summary}
 

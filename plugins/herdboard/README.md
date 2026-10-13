@@ -220,7 +220,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
 | `herdboard review <id>` | Open the card's branch diff in Hunk, next to its agent (see below) |
-| `herdboard merge <id> [--local \| --pr]` | Merge the card branch into its base, then finish the card (see below). `--pr` is not built yet |
+| `herdboard merge <id> [--local \| --pr]` | Merge the card branch into its base and finish the card, or open a GitHub pull request (see below) |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move the card to Done (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
@@ -278,7 +278,7 @@ On the board, `R` reviews the selected card.
 
 ### merge and finish
 
-The design is in [docs/review-and-merge.md](docs/review-and-merge.md). The local mode is built:
+The design is in [docs/review-and-merge.md](docs/review-and-merge.md). The local mode:
 
 1. Stop with `worktree_dirty` when the card's worktree has uncommitted or untracked files, and with `nothing_to_merge` when the branch has no commits ahead of its base.
 2. If a checkout has the base checked out and has uncommitted changes to tracked files, stop with `base_dirty`.
@@ -288,7 +288,11 @@ The design is in [docs/review-and-merge.md](docs/review-and-merge.md). The local
 
 The tool does not push the base.
 
-`finish` checks that the base contains the branch (else `not_merged`), and that the worktree has no uncommitted or untracked files (else `worktree_dirty`, also with `--force`). Then it closes the Hunk pane, removes the worktree with `herdr worktree remove`, deletes the branch, moves the card to its done column (a card already there stays), logs `Finished.`, and removes the start record. `--force` finishes an unmerged card, but keeps its branch.
+The PR mode pushes the branch to `origin` without `-u`, and sets the base as the upstream again. Then it reuses an open pull request of the branch, or runs `gh pr create` with the card's title and description. It stores the URL, logs `PR opened: <url>`, and leaves the card in Review. Running `merge --pr` again pushes new commits to the same pull request. Errors: `gh_unavailable`, `push_failed`, `pr_failed`.
+
+The board reads the state of each open pull request at most once a minute with `gh pr view`. A card shows `PR open`, `PR merged` or `PR closed`. A card in Done that still has its worktree shows `worktree still exists`. The board never runs `finish` itself.
+
+`finish` checks that the base contains the branch, or for a pull request that `gh pr view` reports it merged (else `not_merged`), and that the worktree has no uncommitted or untracked files (else `worktree_dirty`, also with `--force`). Then it closes the Hunk pane, removes the worktree with `herdr worktree remove`, deletes the branch (with `-D` after a merged pull request, because GitHub can squash it, and also on `origin` if it is still there), moves the card to its done column (a card already there stays), logs `Finished.`, and removes the start record. `--force` finishes an unmerged card, but keeps its branch.
 
 The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config (default `local`).
 

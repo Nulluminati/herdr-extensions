@@ -61,6 +61,9 @@ class CardView:
     fetched_at: str | None = None
     stale: bool = False
     worktree_removed: bool = False
+    # Board-only start status: a worktree still there after Done, and the pull request state.
+    worktree_left: bool = False
+    pr_state: str | None = None
 
 
 @dataclass

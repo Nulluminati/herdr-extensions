@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard), 2 (base and upstream), 3 (review) and 4 (local merge and finish) are built. The other steps are not.
+Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard), 2 (base and upstream), 3 (review), 4 (local merge and finish) and 5 (pull requests) are built. Steps 6 and 7 (sub-cards) are not.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -182,7 +182,7 @@ If a PR for the branch already exists, `merge --pr` stores its URL and does not 
 
 ### PR state on the board
 
-- The board reads the state of each card in Review with a `pr_url`, at most once a minute. It uses `gh pr view --json state`.
+- The board reads the state of each open pull request in the start records, at most once a minute. It uses `gh pr view --json state`.
 - A merged PR shows the marker `PR merged`. A closed PR shows `PR closed`.
 - The board does not run `finish`. You run it.
 - A card in Done that still has a start record and a worktree shows `worktree still exists`. `finish` works on it.

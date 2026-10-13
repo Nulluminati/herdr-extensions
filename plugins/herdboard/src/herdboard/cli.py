@@ -181,7 +181,8 @@ def _card_dict(card: CardView) -> dict:
     data = asdict(card)
     # The list order already carries the sort order, and JSON consumers keep their schema.
     del data["sort_order"]
-    del data["worktree_removed"]  # Board-only status; preserve the CLI card schema.
+    # Board-only status; preserve the CLI card schema.
+    del data["worktree_removed"], data["worktree_left"], data["pr_state"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -872,6 +873,9 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     if command in ("merge", "finish"):
         if as_json:
             _emit_json(result)
+            return
+        if command == "merge" and result["mode"] == "pr":
+            print(f"{result['ref']}: pull request {result['pr_url']}")
             return
         if command == "merge":
             print(f"{result['ref']}: merged into {result['base']} at {result['commit'][:7]}")

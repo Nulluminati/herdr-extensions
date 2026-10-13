@@ -28,6 +28,7 @@ from .model import HerdboardError, join_title, parse_tags, split_title
 from .store import TEMP_REF, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS
+from . import merge as merge_module
 from .merge import Merger
 from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
@@ -40,6 +41,7 @@ WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
 START_GROUP = "card-start"
 DETAIL_LOG_ENTRIES = 10
+PR_STYLES = {"merged": "bold green", "closed": "bold yellow"}
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
 LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
@@ -157,6 +159,10 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
         info.append(Text(f"+{len(card.body)}", style="dim"))
     if card.worktree_removed:
         info.append(Text("worktree removed", style="bold yellow"))
+    if card.pr_state:
+        info.append(Text(f"PR {card.pr_state}", style=PR_STYLES.get(card.pr_state, "dim")))
+    if card.worktree_left:
+        info.append(Text("worktree still exists", style="bold yellow"))
     if info:
         if line:
             line.append("  ")
@@ -1058,13 +1064,18 @@ class HerdboardApp(App):
 
     async def check_files(self) -> None:
         cards = [card for column in self.loaded for card in column.cards]
-        old = [card.worktree_removed for card in cards]
+
+        def status():
+            return [(card.worktree_removed, card.worktree_left, card.pr_state) for card in cards]
+
+        old = status()
         try:
+            await asyncio.to_thread(merge_module.refresh_pr_states)
             await asyncio.to_thread(mark_removed, cards)
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return
-        if self._signature(self.paths_for_safe()) != self.signature or old != [card.worktree_removed for card in cards]:
+        if self._signature(self.paths_for_safe()) != self.signature or old != status():
             await self.reload()
 
     def paths_for_safe(self) -> list[Path]:
@@ -1413,11 +1424,14 @@ class HerdboardApp(App):
         run = (lambda: self.merge_card(ref)) if self.merge_card else (lambda: self._merger().merge(ref))
 
         def notice(result: dict) -> str:
+            if result["mode"] == "pr":
+                return f"Pull request for {result['ref']}: {result['pr_url']}"
             return f"Merged {result['ref']} into {result['base']} at {result['commit'][:7]}, then finished it"
 
         self.push_screen(
             ConfirmScreen(f"Merge {ref}: {card.title} into its base?",
-                          "The branch is rebased onto its base, the base moves forward, and the worktree is removed."),
+                          "Local: rebase onto the base, move the base forward, remove the worktree. "
+                          "PR: push the branch and open a pull request. The board or config sets the mode."),
             lambda answer: self._card_action(run, notice) if answer else None,
         )
 

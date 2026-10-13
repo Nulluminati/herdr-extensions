@@ -68,7 +68,8 @@ herdboard --json start tep3 --agent pi        # worktree, workspace, card to In 
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
-herdboard --json merge tep3                   # rebase onto the base, fast-forward the base, then finish
+herdboard --json merge tep3                   # the repository's mode: local (rebase, fast-forward, finish) or PR
+herdboard --json merge tep3 --pr              # push the branch and open a GitHub pull request; the card stays in Review
 herdboard --json finish tep3                  # after a merge: remove the worktree and branch, card to Done
 herdboard --json promote tep3                 # add --team ENG or --project NAME when the user names them
 herdboard --json add --linear "Fix the login timeout" --team ENG
@@ -126,6 +127,8 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `rebase_conflict` | The rebase conflicted, and herdboard sent the conflict to the card's agent. Tell the user. Do not merge again until the card is back in Review. |
 | `merge_failed` | Git could not fast-forward the base. Tell the user the message. |
 | `not_merged` | `finish` found the branch not merged into its base. Tell the user; `finish --force` keeps the branch. |
+| `gh_unavailable` | The PR path needs the GitHub CLI `gh`. Tell the user. |
+| `push_failed`, `pr_failed` | `git push` or `gh` failed. Tell the user the message. Nothing was merged. |
 | `repo_required` | Ask the user which repository, then use `--repo`. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |
 | `herdr_unavailable`, `herdr_error` | `start` needs a running Herdr, or a Herdr command failed. Tell the user the message. Running `start` again continues from the step that failed. |

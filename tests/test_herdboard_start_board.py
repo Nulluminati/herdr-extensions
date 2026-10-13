@@ -149,6 +149,31 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any("worktree removed" in w.plain for w in app.query(".card")))
             self.assertEqual(self.store.show(self.card.ref).column, "Backlog")
 
+    async def test_refresh_reads_pr_states_and_shows_the_markers(self):
+        from herdboard import merge, start
+        path = self.path.parent / "worktree"
+        path.mkdir()
+        start._write(start.state_dir() / "starts.json", {self.card.ref: {
+            "worktree_path": str(path), "pr_url": "https://github.com/acme/api/pull/7", "pr_state": "open"}})
+        app = self.app()
+
+        def merged():
+            records = start._read(start.state_dir() / "starts.json")
+            records[self.card.ref]["pr_state"] = "merged"
+            start._write(start.state_dir() / "starts.json", records)
+
+        with patch.object(merge, "refresh_pr_states", side_effect=merged) as refresh:
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                self.assertTrue(any("PR open" in w.plain for w in app.query(".card")))
+                await app.check_files()
+                refresh.assert_called()
+                self.assertTrue(any("PR merged" in w.plain for w in app.query(".card")))
+                self.store.done(self.card.ref)
+                await app.check_files()
+                await pilot.pause()
+                self.assertTrue(any("worktree still exists" in w.plain for w in app.query(".card")))
+
     async def test_real_starter_runs_in_thread_for_inbox_view(self):
         await self._real_starter("inbox")
 
