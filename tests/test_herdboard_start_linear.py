@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_herdboard_linear_write_cli import WriteCliCase
 from test_herdboard_start import FakeHerdr
+from test_herdboard_cli import git
 from herdboard import start
 
 
@@ -14,6 +15,9 @@ class StartLinearTests(WriteCliCase):
         self.board()
         from herdboard.linear_links import ProjectLink, LabelLink
         self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]))
+        # A worktree starts from a commit, so the repository needs one.
+        git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "--allow-empty", "-qm", "init")
         self.fake_herdr = FakeHerdr(self.repo.parent)
         self.enterContext(patch.object(start, "command", self.fake_herdr))
 

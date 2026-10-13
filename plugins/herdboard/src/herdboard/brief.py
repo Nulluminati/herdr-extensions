@@ -40,6 +40,7 @@ def brief_text(
     repository: str,
     worktree: str,
     branch: str,
+    base: str,
     command: str,
 ) -> str:
     """A Markdown brief: the task, where to work, and how to keep the card current."""
@@ -69,6 +70,7 @@ def brief_text(
         f"- Repository: `{repository}`",
         f"- Worktree: `{worktree}`",
         f"- Branch: `{branch}`",
+        f"- Base: `{base}`. herdboard merges the branch into it after the review.",
         "",
         "Work only in this worktree. Follow the repository's own agent instructions (AGENTS.md or CLAUDE.md).",
         "",

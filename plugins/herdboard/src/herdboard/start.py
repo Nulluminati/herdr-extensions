@@ -389,6 +389,17 @@ class Starter:
                 return _remember(Path(answer).expanduser(), identity)
         raise StartError(f"No local checkout for {identity}; use --checkout PATH", "checkout_unknown")
 
+    def _base(self, checkout, wanted, branch):
+        """The local branch that the card branch starts from and merges back into."""
+        if wanted is None:
+            wanted = _git(checkout, "symbolic-ref", "--quiet", "--short", "HEAD")
+            if not wanted:
+                raise StartError(f"{checkout} has no branch checked out; use --base BRANCH", "base_unknown")
+        if wanted == branch or _git(checkout, "rev-parse", "--verify", "--quiet", f"refs/heads/{wanted}") is None:
+            raise StartError(f"No local branch {wanted!r} to start from; use --base with a local branch",
+                             "base_unknown")
+        return wanted
+
     def _workspace(self, checkout, branch, record):
         listed = herdr("worktree", "list", "--cwd", str(checkout), "--trust-repository")
         worktrees = listed.get("worktrees", [])
@@ -422,7 +433,8 @@ class Starter:
         else:
             if _git(checkout, "worktree", "prune") is None:
                 raise StartError(f"{checkout}: cannot prune worktrees")
-            result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch, "--focus", "--trust-repository")
+            result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch,
+                           "--base", record["base"], "--focus", "--trust-repository")
         try:
             workspace = result["workspace"]["workspace_id"]
             pane = result["root_pane"]["pane_id"]
@@ -433,7 +445,8 @@ class Starter:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
 
-    def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None):
+    def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None,
+              base=None):
         agent = agent or self.config.start_agent
         if agent not in ("claude", "pi"):
             raise StartError("Agent must be claude or pi", "usage")
@@ -509,8 +522,14 @@ class Starter:
                                               team, client.team_states(team["id"]), column, self.ask_state)
                 elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
                     raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
+                record["base"] = self._base(local, base or record.get("base"), branch)
+                save("base")
                 record.update(self._workspace(local, branch, record))
                 save("worktree")
+                # Hunk and `git status` compare a branch with its upstream, so the base is the upstream.
+                if _git(local, "branch", f"--set-upstream-to={record['base']}", branch) is None:
+                    raise StartError(f"Cannot set {record['base']} as the upstream of {branch}", "upstream_failed")
+                save("upstream")
                 if "move" not in record["steps_done"] and card.column.casefold() != column.casefold():
                     if issue:
                         self.writer.move(card.ref, column, ask=self.ask_state, state_name=state["name"])
@@ -535,10 +554,12 @@ class Starter:
                                 notes = []
                         brief = write_brief(lock_key, brief_text(
                             replace(card, column=column), notes=notes, repository=identity,
-                            worktree=record["worktree_path"], branch=branch, command=herdboard_command(),
+                            worktree=record["worktree_path"], branch=branch, base=record["base"],
+                            command=herdboard_command(),
                         ))
                         message = agent_message(card, brief)
                         record["agent_name"] = name
+                        record["agent"] = agent
                         # Record intent before Herdr can return an unknown startup result.
                         persist()
                         args = agent_arguments(agent, message, model, thinking)
@@ -546,7 +567,7 @@ class Starter:
                               tolerated=("timeout", "agent_not_ready"))
                     save("agent")
                     report_card_token(record["pane_id"], card_token(replace(card, column=column)))
-                result = {k: record.get(k) for k in ("ref", "steps_done", "workspace_id", "pane_id", "worktree_path", "branch", "agent_name")}
+                result = {k: record.get(k) for k in ("ref", "steps_done", "workspace_id", "pane_id", "worktree_path", "branch", "base", "agent_name")}
                 record["steps_done"] = []
                 persist()
                 return result

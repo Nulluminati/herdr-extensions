@@ -50,6 +50,12 @@ class SkillTests(unittest.TestCase):
         self.assertNotIn("edit --body", handed)
         self.assertIn("`agent_edit_denied`", text)
 
+    def test_start_documents_the_base_and_its_errors(self):
+        self.assertIn(["--json", "start", "tep3", "--base", "feature-x"], skill_commands())
+        text = SKILL.read_text(encoding="utf-8")
+        for code in ("base_unknown", "upstream_failed"):
+            self.assertIn(f"`{code}`", text)
+
     def test_every_error_code_in_the_skill_exists(self):
         text = SKILL.read_text(encoding="utf-8")
         table = text[text.index("| Code |"):]
@@ -63,6 +69,7 @@ class SkillTests(unittest.TestCase):
         known |= {cli.ConfirmationRequired.code, cli.LinearDeleteError.code, cli.LinearEditError.code,
                   cli.AgentEditDenied.code}
         known |= {"ambiguous_state", "no_state", "checkout_unknown", "repo_required", "herdr_unavailable", "herdr_error"}
+        known |= {"base_unknown", "upstream_failed"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

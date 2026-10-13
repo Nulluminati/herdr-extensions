@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. Build step 1 (activity log, brief and skill, `edit` guard) is built. The other steps are not.
+Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard) and 2 (base and upstream) are built. The other steps are not.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -175,7 +175,7 @@ If a PR for the branch already exists, `merge --pr` stores its URL and does not 
    - If the check fails, stop with `not_merged`. `--force` continues.
 3. If the worktree has uncommitted or untracked changes, stop with `worktree_dirty`. `--force` does not skip this check, so work is never lost.
 4. Close `review_pane`.
-5. Remove the worktree: `herdr worktree remove --workspace <id>`.
+5. Remove the worktree: `herdr worktree remove --workspace <id>`. Herdr refuses a dirty worktree with `dirty_worktree_requires_force`, removes the folder, closes the workspace, and keeps the branch.
 6. Delete the branch: `git branch -d <branch>`. For a PR that GitHub merged with squash or rebase, Git does not see the branch as merged, so the tool uses `-D` after the check in step 2. Delete the remote branch only if GitHub did not already delete it.
 7. Move the card to its done column, if it is not there already. A Linear issue can already be in Done, because Linear's GitHub integration moves it when the PR merges.
 8. Log: `Finished.` Remove the start record.
@@ -274,8 +274,7 @@ Claude can stop at a permission prompt for `git commit`. That delays Review, but
 Check these against the installed Herdr and hunkdiff before you build the step that needs them:
 
 1. How herdboard opens the hunkdiff branch review for a given workspace and pane. `herdr plugin action invoke` takes no pane. `herdr plugin pane open --entrypoint review-branch --target-pane` opens the pane, but it may skip the link that `send-review` needs.
-2. Whether `herdr worktree remove` refuses a dirty worktree without `--force`.
-3. Whether the Obsidian Kanban plugin opens `[[#^t5aa]]` from a card.
+2. Whether the Obsidian Kanban plugin opens `[[#^t5aa]]` from a card.
 
 ## Build order
 

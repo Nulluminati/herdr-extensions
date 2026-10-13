@@ -46,6 +46,11 @@ class FakeHerdr:
                 path = Path(args[args.index("--path") + 1])
             workspace = f"w{9 + index}"
             path.mkdir(exist_ok=True)
+            if operation == "worktree create":
+                # Herdr creates the branch from --base (else the checkout's branch) when it is new.
+                cwd = args[args.index("--cwd") + 1]
+                base = args[args.index("--base") + 1] if "--base" in args else "HEAD"
+                subprocess.run(["git", "-C", cwd, "branch", branch, base], capture_output=True)
             result = {"workspace": {"workspace_id": workspace}, "root_pane": {"pane_id": workspace + ":p1"}, "worktree": {"path": str(path)}}
             self.worktrees = [w for w in self.worktrees if w["path"] != str(path)]
             self.worktrees.append({"branch": branch, "path": str(path), "open_workspace_id": workspace})
@@ -94,6 +99,74 @@ class StartTests(unittest.TestCase):
         self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
         self.assertTrue(any(c[:2] == ["workspace", "focus"] for c in self.fake.calls))
 
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def upstream(self, branch):
+        return self.git("rev-parse", "--abbrev-ref", branch + "@{u}")
+
+    def create_call(self):
+        return next(c for c in self.fake.calls if c[:2] == ["worktree", "create"])
+
+    def test_base_defaults_to_the_checkout_branch(self):
+        checkout_branch = self.git("symbolic-ref", "--short", "HEAD")
+        result = self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(result["base"], checkout_branch)
+        call = self.create_call()
+        self.assertEqual(call[call.index("--base") + 1], checkout_branch)
+        self.assertEqual(self.upstream(result["branch"]), checkout_branch)
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual(record["base"], checkout_branch)
+
+    def test_explicit_base_is_the_upstream(self):
+        self.git("branch", "feature-x")
+        result = self.starter.start(self.card.ref, no_agent=True, base="feature-x")
+        self.assertEqual(result["base"], "feature-x")
+        call = self.create_call()
+        self.assertEqual(call[call.index("--base") + 1], "feature-x")
+        self.assertEqual(self.upstream(result["branch"]), "feature-x")
+
+    def test_unknown_base_fails_before_the_worktree(self):
+        for base in ("nope", "origin/main", self.card.ref + "-fix-login-timeout"):
+            with self.subTest(base=base), self.assertRaises(start.StartError) as raised:
+                self.starter.start(self.card.ref, no_agent=True, base=base)
+            self.assertEqual(raised.exception.code, "base_unknown")
+        self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
+
+    def test_a_detached_checkout_needs_an_explicit_base(self):
+        self.git("checkout", "-q", "--detach")
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(raised.exception.code, "base_unknown")
+        self.assertIn("--base", str(raised.exception))
+
+    def test_a_restart_keeps_the_recorded_base(self):
+        self.git("branch", "feature-x")
+        result = self.starter.start(self.card.ref, no_agent=True, base="feature-x")
+        again = self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(again["base"], "feature-x")
+        self.assertEqual(self.upstream(result["branch"]), "feature-x")
+
+    def test_a_restart_with_another_base_changes_the_upstream(self):
+        checkout_branch = self.git("symbolic-ref", "--short", "HEAD")
+        self.git("branch", "feature-x")
+        result = self.starter.start(self.card.ref, no_agent=True, base="feature-x")
+        again = self.starter.start(self.card.ref, no_agent=True, base=checkout_branch)
+        self.assertEqual(again["base"], checkout_branch)
+        self.assertEqual(self.upstream(result["branch"]), checkout_branch)
+
+    def test_an_existing_branch_gets_the_upstream(self):
+        branch = start.todo_branch(self.card)
+        self.git("branch", branch)
+        result = self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(self.upstream(branch), result["base"])
+
+    def test_the_record_keeps_the_agent_kind(self):
+        self.starter.start(self.card.ref, agent="pi")
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual(record["agent"], "pi")
+
     def test_stored_closed_workspace_opens(self):
         self.starter.start(self.card.ref, no_agent=True)
         self.fake.worktrees[0]["open_workspace_id"] = None
@@ -123,7 +196,7 @@ class StartTests(unittest.TestCase):
         self.fake.fail = "worktree create"
         with self.assertRaises(start.StartError) as raised:
             self.starter.start(self.card.ref)
-        self.assertEqual(raised.exception.steps_done, ["repository", "checkout", "branch"])
+        self.assertEqual(raised.exception.steps_done, ["repository", "checkout", "branch", "base"])
         self.starter.start(self.card.ref, no_agent=True)
 
     def test_global_requires_repo_even_inside_repository(self):

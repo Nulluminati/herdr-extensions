@@ -64,11 +64,12 @@ Ask the user first before these. They change shared Linear data, open workspaces
 ```bash
 herdboard --json start tep3 --agent pi        # worktree, workspace, card to In progress, pi with the card
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
+herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json promote tep3                 # add --team ENG or --project NAME when the user names them
 herdboard --json add --linear "Fix the login timeout" --team ENG
 ```
 
-`start` without `--agent` starts the default agent (Claude, unless the user's config says otherwise). `--no-agent` still creates the worktree and moves the card.
+`start` without `--agent` starts the default agent (Claude, unless the user's config says otherwise). `--no-agent` still creates the worktree and moves the card. Without `--base`, the card starts from the branch of the main checkout.
 
 `doctor` without `--fix-ids` only reads, and you can run it to explain a problem.
 
@@ -109,6 +110,8 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `already_promoted` | The todo already has a Linear issue (`→ ENG-123`). Tell the user. |
 | `not_a_todo` | `promote` takes a todo, not a Linear issue. |
 | `checkout_unknown` | `start` does not know where the repository is. Ask the user for the path, then use `--checkout PATH`. |
+| `base_unknown` | The base is not a local branch, or the checkout has no branch. Ask the user which local branch to start from, then use `--base BRANCH`. |
+| `upstream_failed` | Git could not set the base as the branch upstream. Tell the user the message. Running `start` again retries. |
 | `repo_required` | Ask the user which repository, then use `--repo`. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |
 | `herdr_unavailable`, `herdr_error` | `start` needs a running Herdr, or a Herdr command failed. Tell the user the message. Running `start` again continues from the step that failed. |

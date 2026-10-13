@@ -140,6 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--checkout", type=Path)
+    sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
     sub = command("doctor", "check boards, configuration, Linear links and state")
     sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
@@ -541,7 +542,8 @@ def _cmd_start(ctx: _Context) -> dict:
         prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
     )
     return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
-                         repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking)
+                         repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking,
+                         base=args.base)
 
 
 def _cmd_init(ctx: _Context) -> dict:
@@ -807,6 +809,8 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             _emit_json(result)
         else:
             print(f"{result['ref']}: {result['branch']} in {result['worktree_path']}")
+            if result.get("base"):
+                print(f"Base: {result['base']}")
             print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))

@@ -33,7 +33,7 @@ class BriefTests(unittest.TestCase):
     def brief(self, card, notes=()):
         return brief_text(card, notes=list(notes), repository="github.com/nulluminati/dotfiles-ansible",
                           worktree="/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared",
-                          branch="t83k-move-to-shared", command="herdboard")
+                          branch="t83k-move-to-shared", base="main", command="herdboard")
 
     def test_todo_brief_has_the_card_and_where_to_work(self):
         text = self.brief(todo())
@@ -45,6 +45,9 @@ class BriefTests(unittest.TestCase):
             "/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared", "`t83k-move-to-shared`",
         ]:
             self.assertIn(part, text)
+
+    def test_the_brief_names_the_base_branch(self):
+        self.assertIn("- Base: `main`. herdboard merges the branch into it after the review.", self.brief(todo()))
 
     def test_details_keep_their_nesting_without_the_card_indent(self):
         text = self.brief(todo())
@@ -77,7 +80,7 @@ class BriefTests(unittest.TestCase):
                 self.assertNotIn("--json edit", text)
 
     def test_the_cli_command_is_used_as_given(self):
-        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b",
+        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
                           command="'/opt/py 3/bin/python' -m herdboard")
         self.assertIn("'/opt/py 3/bin/python' -m herdboard --json show t83k", text)
 
