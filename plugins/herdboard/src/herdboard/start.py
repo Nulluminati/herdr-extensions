@@ -462,6 +462,14 @@ class Starter:
                 return _remember(Path(answer).expanduser(), identity)
         raise StartError(f"No local checkout for {identity}; use --checkout PATH", "checkout_unknown")
 
+    def _parent_branch(self, card, repo, checkout):
+        """A sub-card starts from its parent's branch. A parent without one starts first, with no agent."""
+        found = find_record(card.parent)
+        if found is None or not found[1].get("branch"):
+            self.start(card.parent, no_agent=True, repo=repo, checkout=checkout)
+            found = find_record(card.parent)
+        return found[1]["branch"]
+
     def _base(self, checkout, wanted, branch):
         """The local branch that the card branch starts from and merges back into."""
         if wanted is None:
@@ -621,6 +629,8 @@ class Starter:
                                               team, client.team_states(team["id"]), column, self.ask_state)
                 elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
                     raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
+                if not base and not record.get("base") and card.parent:
+                    base = self._parent_branch(card, repo, checkout)
                 record["base"] = self._base(local, base or record.get("base"), branch)
                 save("base")
                 record.update(self._workspace(local, branch, record))

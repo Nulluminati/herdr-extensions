@@ -81,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("add", "add a card, or with --linear a Linear issue assigned to you")
     sub.add_argument("text")
+    sub.add_argument("--parent", help="make the todo a sub-card of this todo, on its board")
     sub.add_argument("--column")
     sub.add_argument("--position", choices=["top", "bottom"], default="bottom")
     sub.add_argument("--board", help="board name: inbox or a project name")
@@ -119,6 +120,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--title", help="the card's new first line, with #tags and 📅 date")
     sub.add_argument("--body", help="the card's new indented lines, one per line; empty clears them")
     sub.add_argument("--body-file", type=Path, help="read the new indented lines from a file")
+    parent = sub.add_mutually_exclusive_group()
+    parent.add_argument("--parent", help="make the todo a sub-card of this todo, on the same board")
+    parent.add_argument("--no-parent", action="store_true", help="make the sub-card a plain todo again")
 
     sub = command("log", "add an entry to a card's activity log")
     sub.add_argument("ref")
@@ -153,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--local", dest="mode", action="store_const", const="local",
                       help="rebase onto the base and fast-forward it")
     mode.add_argument("--pr", dest="mode", action="store_const", const="pr", help="open a GitHub pull request")
+    sub.add_argument("--force", action="store_true", help="merge a parent card whose sub-cards are not done")
 
     sub = command("finish", "remove a merged card's worktree and branch, and move the card to Done")
     sub.add_argument("ref")
@@ -182,7 +187,7 @@ def _card_dict(card: CardView) -> dict:
     # The list order already carries the sort order, and JSON consumers keep their schema.
     del data["sort_order"]
     # Board-only status; preserve the CLI card schema.
-    del data["worktree_removed"], data["worktree_left"], data["pr_state"]
+    del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -259,6 +264,8 @@ def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] 
     if card.source == "linear":
         return "\n".join([_show_linear_text(card), *_log_text(log or [])])
     lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
+    if card.parent:
+        lines.append(f"parent: {card.parent}")
     if card.due:
         lines.append(f"due: {card.due}")
     if card.tags:
@@ -389,6 +396,13 @@ def _cmd_add(ctx: _Context) -> dict:
     if args.team or args.project or args.label or args.state:
         raise UsageError("--team, --project, --label and --state work only with --linear")
     hint = None
+    if args.parent is not None:
+        if LINEAR_REF.match(args.parent):
+            raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")
+        parent = store.show(args.parent)
+        path = store.ensure_inbox() if args.board == "inbox" else (
+            store.resolve_board(args.board) if args.board else parent.path)
+        return {"card": store.add(path, args.text, args.column, args.position, parent=parent.ref), "hint": None}
     if args.board == "inbox":
         path = store.ensure_inbox()
     elif args.board:
@@ -501,8 +515,8 @@ def _cmd_edit(ctx: _Context) -> dict:
     if args.body_file is not None:
         path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
         body = _read_todo_file(path)
-    if args.title is None and body is None:
-        raise UsageError("Nothing to change: give --title, --body or --body-file")
+    if args.title is None and body is None and args.parent is None and not args.no_parent:
+        raise UsageError("Nothing to change: give --title, --body, --body-file, --parent or --no-parent")
     # A guard against mistakes, not a security boundary: the card text is the user's.
     pane = os.environ.get("HERDR_PANE_ID")
     if pane and pane in card_agent_panes():
@@ -511,7 +525,15 @@ def _cmd_edit(ctx: _Context) -> dict:
             f'Record progress with `herdboard log {args.ref} "..."` instead.'
         )
     lines = body.splitlines() if body is not None else None
-    return {"card": ctx.store.edit(args.ref, title=args.title, body=lines), "edited": True}
+    card = None
+    if args.title is not None or lines is not None:
+        card = ctx.store.edit(args.ref, title=args.title, body=lines)
+    if args.parent is not None or args.no_parent:
+        if args.parent is not None and LINEAR_REF.match(args.parent):
+            raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")
+        parent = ctx.store.show(args.parent).ref if args.parent is not None else None
+        card = ctx.store.set_parent(card.ref if card else args.ref, parent)
+    return {"card": card, "edited": True}
 
 
 class ConfirmationRequired(HerdboardError):
@@ -577,7 +599,7 @@ def _merger(ctx: _Context) -> Merger:
 
 
 def _cmd_merge(ctx: _Context) -> dict:
-    return _merger(ctx).merge(ctx.args.ref, mode=ctx.args.mode)
+    return _merger(ctx).merge(ctx.args.ref, mode=ctx.args.mode, force=ctx.args.force)
 
 
 def _cmd_finish(ctx: _Context) -> dict:

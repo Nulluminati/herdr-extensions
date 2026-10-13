@@ -191,8 +191,13 @@ class Merger:
         meta = self.store.board_meta(path) if path is not None else None
         return (meta.merge if meta else None) or self.config.merge
 
-    def merge(self, ref, mode=None):
+    def merge(self, ref, mode=None, force=False):
         card, ref, key, record = self._started(ref)
+        if card is not None and not force:
+            open_children = [child.ref for child in self.store.children(ref) if not child.checked]
+            if open_children:
+                raise MergeError(f"Sub-cards of {ref} are not done: {', '.join(open_children)}. "
+                                 "Finish them first, or use --force.", "children_open")
         mode = mode or self.mode(card, record)
         worktree = Path(record.get("worktree_path") or "")
         if not record.get("worktree_path") or not worktree.exists():

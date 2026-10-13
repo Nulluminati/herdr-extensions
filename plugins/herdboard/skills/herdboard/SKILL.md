@@ -23,6 +23,7 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 - A card has `title`, `column`, `checked`, `due`, `tags`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `stale: true` means the Linear data comes from the cache.
 - Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
 - Tags and the due date are part of the card text: `#auth` adds a tag, `📅 2026-11-01` sets the due date.
+- A todo can be a sub-card of another todo on the same board. Its `parent` field names the parent. Sub-cards go one level deep. A sub-card starts from its parent's branch and merges into it.
 
 ## Read
 
@@ -50,6 +51,9 @@ herdboard --json move tep3 --up                      # one place higher in its c
 herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
 herdboard --json edit tep3 --body "first detail line\nsecond detail line"
 herdboard --json log tep3 "Ready for review: 3 commits."   # append to the card's activity log
+herdboard --json add "Add invoice table" --parent t5aa     # a sub-card, on the parent's board
+herdboard --json edit tep3 --parent t5aa              # make a todo a sub-card
+herdboard --json edit tep3 --no-parent                # make it a plain todo again
 ```
 
 The activity log is the card's history. It works for todos and Linear issues, and it never changes the card text. herdboard records who wrote each entry.
@@ -129,6 +133,9 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `not_merged` | `finish` found the branch not merged into its base. Tell the user; `finish --force` keeps the branch. |
 | `gh_unavailable` | The PR path needs the GitHub CLI `gh`. Tell the user. |
 | `push_failed`, `pr_failed` | `git push` or `gh` failed. Tell the user the message. Nothing was merged. |
+| `parent_missing` | The parent is not a todo on the same board. Run `list` and use a todo of that board. |
+| `parent_nested` | Sub-cards go one level deep: the parent is a sub-card, or the card has sub-cards. Tell the user. |
+| `children_open` | `merge` of a parent card found sub-cards that are not done. Tell the user; `merge --force` merges anyway. |
 | `repo_required` | Ask the user which repository, then use `--repo`. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |
 | `herdr_unavailable`, `herdr_error` | `start` needs a running Herdr, or a Herdr command failed. Tell the user the message. Running `start` again continues from the step that failed. |

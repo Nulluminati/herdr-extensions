@@ -493,7 +493,7 @@ class MergeCliTests(CliTestCase):
             merger.return_value.finish.return_value = finished
             out, _ = self.run_cli("merge", ref, "--local", directory=self.plain)
             self.assertEqual(out, f"{ref}: merged into main at abcdef1\n{ref}: finished; worktree removed; branch deleted\n")
-            merger.return_value.merge.assert_called_with(ref, mode="local")
+            merger.return_value.merge.assert_called_with(ref, mode="local", force=False)
             out, _ = self.run_cli("finish", ref, "--force", directory=self.plain)
             self.assertEqual(out, f"{ref}: finished; worktree removed; branch kept\n")
             merger.return_value.finish.assert_called_with(ref, force=True)

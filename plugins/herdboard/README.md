@@ -92,6 +92,7 @@ Supported format contract:
 - `#tag` is a category. Headings are statuses, so categories are tags.
 - `📅 YYYY-MM-DD` is a due date. This is the only Obsidian Tasks syntax that the tool reads. The tool does not claim Obsidian Tasks compatibility: recurrence and completion dates are kept as text but not processed.
 - `[[note]]` in a card is a link to a note. The tool keeps it as literal text. With `vault_root` set in config, `show` displays the note's content.
+- `[[#^t5aa]]` in a card's first line is an Obsidian block link to the card `t5aa` on the same board: the card is a sub-card of `t5aa`. It is not a note link, and it is not part of the shown title. Sub-cards go one level deep. A title edit keeps the link; `edit --parent` and `--no-parent` change it.
 - `**Complete**` directly under a heading marks a completed column. The plugin translates this word into the Obsidian display language. The tool accepts the English word and any word set in `complete_markers` in config.
 - `***` directly followed by `## Archive` starts the archive, as in the plugin. The plugin translates "Archive"; `archive_titles` in config adds other names. A `***` before any other heading is an ordinary line. Archive cards are not a column, and commands do not change them. The board can show them on request.
 - `%% kanban:settings` followed by a fenced JSON block and `%%` holds plugin settings. The tool keeps it unchanged.
@@ -208,19 +209,19 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 |---|---|
 | `herdboard board [--view]` | Open the kanban (Textual) |
 | `herdboard list [--view] [--source] [--column] [--json]` | List cards |
-| `herdboard add "text" [--board] [--column]` | Add a todo. Default board: the current repository's board, else `inbox.md`. Default column: the first column |
+| `herdboard add "text" [--board] [--column] [--parent ID]` | Add a todo. Default board: the parent's board, else the current repository's board, else `inbox.md`. Default column: the first column. `--parent` makes it a sub-card |
 | `herdboard add --linear [--team ENG] [--project NAME] [--label NAME] [--column] [--state] "title"` | Create a Linear issue, assigned to you. `--team` is optional when you belong to one team, or when the project has one team. Inside a repository board with exactly one linked project, that project and its link labels are the default, so the issue shows in the repository view. Default column: the first column |
 | `herdboard show <id> [--log]` | Show a card, its detail and the last 10 entries of its activity log. `--log` shows every entry |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card. Default position for a todo: bottom. A Linear issue without `--position` keeps its place in Linear's order |
 | `herdboard move <id> --up\|--down` | Swap a todo with the card above or below it in its column. Linear issues keep Linear's order |
 | `herdboard move <id> [column] --board NAME` | Move a todo, with its details and its ID, to another board (`inbox` or a project name). Without a column, it keeps its column name when the board has it, else it goes to the first column. Linear issues stay in Linear |
 | `herdboard done <id>` | Move a card to its board's done column |
-| `herdboard edit <id> [--title TEXT] [--body TEXT \| --body-file PATH]` | Change a todo's first line, its indented lines, or both. The checkbox and the ID stay. `--body ""` removes the indented lines. Linear issues are not edited |
+| `herdboard edit <id> [--title TEXT] [--body TEXT \| --body-file PATH] [--parent ID \| --no-parent]` | Change a todo's first line, its indented lines, or its parent. The checkbox, the ID and the parent link stay unless `--parent` or `--no-parent` changes the link. `--body ""` removes the indented lines. Linear issues are not edited |
 | `herdboard log <id> "text"` | Append an entry to the card's activity log (see below). Works for todos and Linear issues, with no Linear connection |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
 | `herdboard review <id>` | Open the card's branch diff in Hunk, next to its agent (see below) |
-| `herdboard merge <id> [--local \| --pr]` | Merge the card branch into its base and finish the card, or open a GitHub pull request (see below) |
+| `herdboard merge <id> [--local \| --pr] [--force]` | Merge the card branch into its base and finish the card, or open a GitHub pull request (see below). A parent card with sub-cards that are not done stops with `children_open`; `--force` merges anyway |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move the card to Done (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
@@ -244,7 +245,7 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. For an inbox todo, `--repo` is required. `--repo` takes a board name or a path inside a checkout. The tool never picks the first of several linked repositories.
 2. Find the local checkout from a registry of checkouts in `~/.local/state/herdboard/checkouts.json`. The registry maps a repository identity to the paths of its main checkouts. The tool adds the main checkout each time it runs inside a repository. If none is known, `start` asks for a path in a terminal. Without a terminal, or with `--json`, it fails with the code `checkout_unknown`. `--checkout PATH` answers, and the tool stores the answer. When several checkouts are known, the tool uses the most recently seen one that still exists.
 3. Choose the branch. For a Linear issue, the issue's `branchName`. For a todo, the card ID plus a short name from the card text, for example `t7k2-fix-login-timeout`: lowercase, words joined by `-`, without tags, dates and links, at most 50 characters. The tool validates the name with `git check-ref-format --branch`. A todo without an ID gets one first, with the usual write rules.
-4. Choose the base: the local branch that the card branch starts from, and later merges into. `--base` names it. Else a restart keeps the recorded base. Else it is the branch of the main checkout. A base that is not a local branch, or a checkout with a detached HEAD and no `--base`, fails with `base_unknown` before the worktree exists.
+4. Choose the base: the local branch that the card branch starts from, and later merges into. `--base` names it. Else a restart keeps the recorded base. Else a sub-card uses its parent's branch, and starts the parent first with `--no-agent` when the parent has no branch. Else it is the branch of the main checkout. A base that is not a local branch, or a checkout with a detached HEAD and no `--base`, fails with `base_unknown` before the worktree exists.
 5. Open the worktree:
    - If the state file has a worktree for the card and the path still exists, reuse it. If Herdr has it open as a workspace, focus that workspace. Otherwise open it with `herdr worktree open --path`.
    - If Git already has a worktree for the branch, open that worktree.
@@ -296,7 +297,7 @@ The board reads the state of each open pull request at most once a minute with `
 
 The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config (default `local`).
 
-On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`.
+On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`. `p` sets or removes the parent of a todo. A sub-card shows `↳ <parent title>`, a parent shows `2/5 done`, and the filter `^t5aa` shows `t5aa` and its sub-cards.
 
 ### promote
 
@@ -352,6 +353,7 @@ Target and writes:
 | `linear-projects` frontmatter is not valid | error |
 | The config file does not parse or has an invalid value | error |
 | A board has no done column | warning |
+| A sub-card links to a parent that is not on its board, or that is a sub-card itself | warning |
 | A card has no ID (it gets one on the next write) | info |
 | Linear is enabled, but `LINEAR_API_KEY` is not set or is refused | error |
 | A linked Linear project or label does not exist or is not accessible | warning |
@@ -359,6 +361,7 @@ Target and writes:
 | A `start` record points to a worktree that no longer exists | info |
 | The checkout registry has a path that no longer exists or is no longer that repository | info |
 | No `herdr` binary is found (only `start` needs it) | info |
+| No `gh` is found (only `merge --pr` and `finish` of a pull request need it) | info |
 
 - `--offline` skips the Linear checks.
 - `--fix-ids` gives a new ID to every duplicate except the first, in this order: board path, then file order, with archive cards last. It uses the normal write rules and reports each change. No other check changes a file.

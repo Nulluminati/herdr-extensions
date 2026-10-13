@@ -1253,3 +1253,54 @@ class ThemeTests(BoardTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubCardBoardTests(BoardTestCase):
+    def setUp(self):
+        super().setUp()
+        self.parent = self.store.add(self.repo_path, "Billing v2", "Todo")
+        self.child = self.store.add(self.repo_path, "Add invoice table", "Todo", parent=self.parent.ref)
+        self.done = self.store.add(self.repo_path, "Add tax field", "Done", parent=self.parent.ref)
+        self.other = self.store.add(self.repo_path, "Unrelated", "Todo")
+
+    def card_text(self, app, title):
+        return next(text for text in self.cards(app) if text.startswith(title))
+
+    async def test_sub_cards_show_their_parent_and_parents_their_progress(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            self.assertIn("↳ Billing v2", self.card_text(app, "Add invoice table"))
+            self.assertNotIn("[[#^", self.card_text(app, "Add invoice table"))
+            self.assertIn("1/2 done", self.card_text(app, "Billing v2"))
+            self.assertNotIn("done", self.card_text(app, "Unrelated"))
+
+    async def test_a_caret_filter_shows_one_family(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *f"^{self.parent.ref}")
+            await pilot.pause()
+            titles = sorted(card.ref for column in app.columns for card in column.cards)
+            self.assertEqual(titles, sorted([self.parent.ref, self.child.ref, self.done.ref]))
+
+    async def test_p_sets_and_removes_the_parent(self):
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.press("right")
+            await pilot.pause()
+            while app.current_card().ref != self.other.ref:
+                await pilot.press("down")
+                await pilot.pause()
+            await pilot.press("p")
+            await pilot.pause()
+            screen = app.screen
+            self.assertEqual(screen.labels, ["No parent", "Billing v2"])
+            await pilot.press("down", "enter")
+            await settle(pilot)
+            self.assertEqual(self.store.show(self.other.ref).parent, self.parent.ref)
+            await pilot.press("p")
+            await pilot.pause()
+            await pilot.press("enter")
+            await settle(pilot)
+            self.assertIsNone(self.store.show(self.other.ref).parent)

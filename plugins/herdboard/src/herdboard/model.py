@@ -16,6 +16,8 @@ CARD_START = re.compile(r"^- \[(?P<check>.)\] ")
 BLOCK_ID = re.compile(r" \^(?P<id>[A-Za-z0-9-]+)$")
 DUE_DATE = re.compile(r"📅 (?P<date>\d{4}-\d{2}-\d{2})")
 TAG = re.compile(r"(?<!\S)#(?P<tag>[^\s#]+)")
+# A sub-card's link to its parent card on the same board: an Obsidian block link.
+PARENT_LINK = re.compile(r"\[\[#\^(?P<id>t[0-9a-z]{3})\]\]")
 
 
 class HerdboardError(Exception):
@@ -42,6 +44,12 @@ class DuplicateIdError(HerdboardError):
 
 class NotFoundError(HerdboardError):
     code = "not_found"
+
+
+class ParentError(HerdboardError):
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
 
 
 class IoError(HerdboardError):
@@ -184,11 +192,23 @@ def frontmatter_scalars(lines: list[str]) -> dict[str, str]:
     return values
 
 
+def parent_of(title: str) -> str | None:
+    """The card ID that a sub-card's `[[#^id]]` link names, or None."""
+    match = PARENT_LINK.search(title)
+    return match.group("id") if match else None
+
+
+def with_parent(title: str, parent: str | None) -> str:
+    """The first-line text with its parent link removed, then `[[#^parent]]` added at the end."""
+    text = " ".join(PARENT_LINK.sub("", title).split())
+    return f"{text} [[#^{parent}]]" if parent else text
+
+
 def split_title(title: str) -> tuple[str, list[str], str | None]:
-    """A card's first-line text as (text, tags, due date). Tags and the date leave the text."""
+    """A card's first-line text as (text, tags, due date). Tags, the date and the parent link leave the text."""
     tags = [match.group("tag") for match in TAG.finditer(title)]
     due_match = DUE_DATE.search(title)
-    text = DUE_DATE.sub("", TAG.sub("", title))
+    text = PARENT_LINK.sub("", DUE_DATE.sub("", TAG.sub("", title)))
     return " ".join(text.split()), tags, due_match.group("date") if due_match else None
 
 

@@ -11,7 +11,7 @@ from .identity import IdentityError, _canonical_identity, repo_identity
 from . import linear_links, linear_source
 from .linear import LinearAuthError, LinearError, LinearNetworkError
 from .linear_links import parse_links
-from .model import BLOCK_ID, Board, Card, Column, ConflictError, FormatError, HerdboardError
+from .model import BLOCK_ID, Board, Card, Column, ConflictError, FormatError, HerdboardError, parent_of
 from .promotions import PromotionRecords
 from .start import _entries, _read
 from .store import Store
@@ -107,6 +107,25 @@ def check_duplicate_ids(boards):
                     f"ID {place.card.block_id} duplicates {first.path}:{first.line}.",
                     place.path, place.line, "herdboard doctor --fix-ids")
             for first, place in duplicates(boards)]
+
+
+def check_parents(boards):
+    """Sub-cards whose parent is not on their board, or is a sub-card itself."""
+    findings = []
+    for path, board in sorted(boards.items()):
+        parents = {card.block_id: parent_of(card.title) for _, card in board.all_cards() if card.block_id}
+        for _, card in board.all_cards():
+            parent = parent_of(card.title)
+            if parent is None:
+                continue
+            ref = card.block_id or card.title
+            if parent not in parents:
+                findings.append(finding("warning", "parent_missing",
+                                        f"{ref} links to parent {parent}, which is not on this board.", path))
+            elif parents[parent]:
+                findings.append(finding("warning", "parent_nested",
+                                        f"{ref} has parent {parent}, which is a sub-card itself.", path))
+    return findings
 
 
 def check_duplicate_repos(boards):
@@ -355,6 +374,7 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
                 boards[board_path] = None
         boards = {path: board for path, board in boards.items() if board is not None}
         findings.extend(check_duplicate_ids(boards))
+        findings.extend(check_parents(boards))
         findings.extend(check_duplicate_repos(boards))
         findings.extend(check_linear(config, boards, offline))
     state = linear_source.state_dir()

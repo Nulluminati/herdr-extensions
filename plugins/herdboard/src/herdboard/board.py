@@ -66,6 +66,7 @@ HELP_KEYS = [
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
     ("R", "review a started card in Hunk, next to its agent"),
+    ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
     ("m", "merge the card branch into its base (local or PR, from the config), then finish, after you confirm"),
     ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
     ("v", "cycle view: repo, inbox, all, mine"),
@@ -163,6 +164,10 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
         info.append(Text(f"PR {card.pr_state}", style=PR_STYLES.get(card.pr_state, "dim")))
     if card.worktree_left:
         info.append(Text("worktree still exists", style="bold yellow"))
+    if card.parent_title:
+        info.append(Text(f"↳ {card.parent_title}", style="dim"))
+    if card.sub_cards:
+        info.append(Text(f"{card.sub_cards[0]}/{card.sub_cards[1]} done", style="dim"))
     if info:
         if line:
             line.append("  ")
@@ -246,12 +251,32 @@ def log_lines(entries: list[dict]) -> Text:
     return text
 
 
+def mark_family(cards: list[CardView]) -> None:
+    """Set each sub-card's parent title and each parent's count of done sub-cards."""
+    by_ref = {card.ref: card for card in cards}
+    counts: dict[str, list[int]] = {}
+    for card in cards:
+        parent = by_ref.get(card.parent) if card.parent else None
+        card.parent_title = (split_title(parent.title)[0] or parent.title) if parent else None
+        if card.parent:
+            count = counts.setdefault(card.parent, [0, 0])
+            count[0] += card.checked
+            count[1] += 1
+    for card in cards:
+        count = counts.get(card.ref)
+        card.sub_cards = (count[0], count[1]) if count else None
+
+
 def card_matches(card: CardView, terms: list[str]) -> bool:
-    """True when every term matches: `#tag` a tag by prefix, any other word the card's text."""
+    """True when every term matches: `#tag` a tag by prefix, `^id` a card and its sub-cards,
+    any other word the card's text."""
     tags = [tag.casefold() for tag in card.tags]
     text = " ".join([card.title, card.board or "", *card.tags, *card.body]).casefold()
     for term in terms:
-        if term.startswith("#") and len(term) > 1:
+        if term.startswith("^") and len(term) > 1:
+            if term[1:] not in (card.ref.casefold(), (card.parent or "").casefold()):
+                return False
+        elif term.startswith("#") and len(term) > 1:
             if not any(tag.startswith(term[1:]) for tag in tags):
                 return False
         elif term not in text:
@@ -590,6 +615,27 @@ class BoardChoiceScreen(ModalBase):
         self.dismiss(self.options[event.option_index][1])
 
 
+class ParentScreen(ModalBase):
+    """Choose the parent of a todo: another todo on its board, or no parent."""
+
+    def __init__(self, card: CardView, options: list[CardView]):
+        super().__init__()
+        self.card = card
+        self.options = [None, *options]
+        self.labels = ["No parent", *(split_title(option.title)[0] or option.title for option in options)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"Parent of {split_title(self.card.title)[0]}")
+            yield OptionList(*self.labels, id="parent-choice")
+            yield Label("enter: choose, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        option = self.options[event.option_index]
+        self.dismiss(("parent", option.ref if option else None))
+
+
 class DeleteScreen(ModalBase):
     """Ask before a todo is deleted."""
 
@@ -742,6 +788,7 @@ class HerdboardApp(App):
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("R", "review", "Review"),
+        Binding("p", "parent", "Parent", show=False),
         Binding("m", "merge", "Merge"),
         Binding("f", "finish", "Finish"),
         Binding("v", "cycle_view", "View"),
@@ -867,6 +914,7 @@ class HerdboardApp(App):
             data = by_key.setdefault(card.column.casefold(), ColumnData(card.column))
             data.cards.append(card)
         mark_removed([card for data in by_key.values() for card in data.cards])
+        mark_family([card for data in by_key.values() for card in data.cards])
         if len(paths) == 1 and not linear:
             return list(by_key.values())
         wanted = [name.casefold() for name in self.store.config.columns]
@@ -1315,6 +1363,23 @@ class HerdboardApp(App):
         """Save the dialog's text, if the card still matches what the dialog showed."""
         ref, before = screen.card.ref, screen.card
         self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen)
+
+    def action_parent(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("A Linear issue's sub-issues are set in Linear.", severity="warning")
+            return
+        options = [other for other in self.store.list_cards([card.path])
+                   if other.ref != card.ref and other.parent is None and not TEMP_REF.match(other.ref)]
+        ref = card.ref
+
+        def chosen(answer: tuple[str, str | None] | None) -> None:
+            if answer is not None:
+                self._start_write(lambda: self.store.set_parent(ref, answer[1]))
+
+        self.push_screen(ParentScreen(card, options), chosen)
 
     def action_move_board(self) -> None:
         card = self.current_card()

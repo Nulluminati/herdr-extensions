@@ -21,6 +21,7 @@ from .config import MERGE_MODES, Config
 from .identity import RepoIdentity, find_board, new_board_path, same_repo
 from .model import (
     BLOCK_ID,
+    PARENT_LINK,
     Board,
     Card,
     Column,
@@ -30,6 +31,9 @@ from .model import (
     HerdboardError,
     IoError,
     NotFoundError,
+    ParentError,
+    parent_of,
+    with_parent,
 )
 
 ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -64,6 +68,11 @@ class CardView:
     # Board-only start status: a worktree still there after Done, and the pull request state.
     worktree_left: bool = False
     pr_state: str | None = None
+    # The card ID of a sub-card's parent, from its `[[#^id]]` link.
+    parent: str | None = None
+    # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.
+    parent_title: str | None = None
+    sub_cards: tuple[int, int] | None = None
 
 
 @dataclass
@@ -335,6 +344,7 @@ class Store:
             tags=card.tags,
             body=list(card.body),
             column_limit=column.limit,
+            parent=parent_of(card.title),
         )
 
     def list_cards(self, paths: list[Path] | None = None) -> list[CardView]:
@@ -402,7 +412,7 @@ class Store:
         vault = self.config.vault_root
         if vault is None:
             return None
-        text = "\n".join([card.title, *card.body])
+        text = PARENT_LINK.sub("", "\n".join([card.title, *card.body]))
         names = list(dict.fromkeys(m.group(1).strip() for m in NOTE_LINK.finditer(text)))
         root = vault.resolve()
         notes = []
@@ -667,7 +677,9 @@ class Store:
                 raise ConflictError(f"{path}: card changed on disk since you opened it; open it again")
             if title is not None:
                 ending = f" ^{card.block_id}" if card.block_id else ""
-                card.lines[0] = f"- [{card.check_char}] {title}{ending}"
+                # The parent link is card structure, not text: only set_parent changes it.
+                text = with_parent(title, parent_of(title) or parent_of(card.title))
+                card.lines[0] = f"- [{card.check_char}] {text}{ending}"
             if body is not None:
                 card.lines[1:] = _body_lines(body)
             return column
@@ -682,6 +694,36 @@ class Store:
             return column
 
         return self._modify(ref, change)
+
+    def _check_parent(self, board: Board, path: Path, parent: str, child: str | None) -> None:
+        """Refuse a parent that is not on this board, that has a parent, or whose child has children."""
+        if parent == child:
+            raise ParentError(f"{parent} cannot be its own parent", "usage")
+        cards = [card for _, card in board.all_cards()]
+        found = next((card for card in cards if card.block_id == parent), None)
+        if found is None:
+            raise ParentError(f"No card {parent} on board {self.board_name(path)}; "
+                              "a parent must be on the same board", "parent_missing")
+        if parent_of(found.title):
+            raise ParentError(f"{parent} is a sub-card; sub-cards go one level deep", "parent_nested")
+        if child is not None and any(parent_of(card.title) == child for card in cards):
+            raise ParentError(f"{child} has sub-cards, so it cannot be a sub-card", "parent_nested")
+
+    def set_parent(self, ref: str, parent: str | None) -> CardView:
+        """Set or remove a todo's parent link."""
+        def change(board, path, column, card):
+            if parent is not None:
+                self._check_parent(board, path, parent, card.block_id)
+            ending = f" ^{card.block_id}" if card.block_id else ""
+            card.lines[0] = f"- [{card.check_char}] {with_parent(card.title, parent)}{ending}"
+            return column
+
+        return self._modify(ref, change)
+
+    def children(self, ref: str) -> list[CardView]:
+        """The sub-cards of a todo, in board order."""
+        card = self.show(ref)
+        return [view for view in self.list_cards([card.path]) if view.parent == card.ref]
 
     def ensure_id(self, ref: str) -> CardView:
         """The card, with a block ID: a card without one gets IDs by the usual write rule."""
@@ -725,6 +767,7 @@ class Store:
         column: str | None = None,
         position: str = "bottom",
         body: list[str] | None = None,
+        parent: str | None = None,
     ) -> CardView:
         if not text.strip() or "\n" in text or "\r" in text:
             raise HerdboardError("Card text must be one non-empty line")
@@ -740,6 +783,9 @@ class Store:
             else:
                 target = board.column(column)
             self._assign_ids(path, board)
+            if parent is not None:
+                self._check_parent(board, path, parent, None)
+                text = with_parent(text, parent)
             mark = "x" if self._is_completed(target) else " "
             card = Card([f"- [{mark}] {text}", *_body_lines(body or [])])
             card.set_block_id(self._new_id(self._taken_ids(path, board)))

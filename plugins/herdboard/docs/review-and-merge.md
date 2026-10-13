@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard), 2 (base and upstream), 3 (review), 4 (local merge and finish) and 5 (pull requests) are built. Steps 6 and 7 (sub-cards) are not.
+Status: design draft. Build steps 1 to 6 are built: activity log, base and upstream, review, local merge and finish, pull requests, and sub-cards of local todos. Linear sub-issues on the board and step 7 (`promote` of sub-cards) are not.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -88,7 +88,7 @@ A sub-card has an Obsidian block link to its parent on its first line, before it
 - The parent and the sub-card are on the same board. A link to an ID that is not on the board is an error in `doctor` (`parent_missing`), and the card shows as a card without a parent.
 - Sub-cards go one level deep. A card with a parent cannot be a parent. `add` and `edit` refuse it with `parent_nested`.
 - Inbox todos can have sub-cards. They have no repository, so `start` and `merge` do not apply.
-- Linear sub-issues already have a parent in Linear. The board reads that parent, so local and Linear cards show the same way.
+- Linear sub-issues already have a parent in Linear. The board will read that parent, so local and Linear cards show the same way. This is not built yet: it needs the parent in the Linear issue query.
 - The parent link is not part of the title. `show --json` returns it as `parent`. `todo_branch` already removes `[[...]]` from the branch name.
 
 ## Base branch
@@ -190,7 +190,7 @@ If a PR for the branch already exists, `merge --pr` stores its URL and does not 
 
 ## Board
 
-Keys. The current `r` is reload, so review uses `R`. `R`, `m` and `f` are built; `m` and `f` ask for confirmation. The others are proposed.
+Keys. The current `r` is reload, so review uses `R`. All are built. `m` and `f` ask for confirmation.
 
 | Key | Action |
 |---|---|
