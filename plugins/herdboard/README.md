@@ -219,6 +219,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard log <id> "text"` | Append an entry to the card's activity log (see below). Works for todos and Linear issues, with no Linear connection |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
+| `herdboard review <id>` | Open the card's branch diff in Hunk, next to its agent (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
 | `herdboard init` | Create the board for the current repository |
@@ -258,6 +259,20 @@ On the board, `s` starts the selected card with the default agent. `S` asks for 
 When the board refreshes, it checks each stored worktree. If the path no longer exists, the card shows `worktree removed`. The card does not move by itself, and the state entry stays until the next `start` of that card replaces it.
 
 Review, merge and finish after `start` are designed in [docs/review-and-merge.md](docs/review-and-merge.md).
+
+### review
+
+`herdboard review <id>` opens the work of a started card in the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`). The card's branch has its base as upstream, so Hunk shows `<base>...HEAD`.
+
+1. Read the start record. Without one, or when the worktree is gone, stop with `not_started`.
+2. Focus the card's worktree workspace, or open it again, as `start` does.
+3. If the recorded agent no longer runs, start a new agent of the same kind. Its brief has the card, the full activity log, and a note that review feedback follows. Log: `Agent restarted for review.`
+4. Focus the agent pane, then invoke the hunkdiff action `review:branch`. hunkdiff reads its target from the focused pane, and it links the review to the agent only when that pane runs an agent. Then the hunkdiff `send-review` action sends your comments to that agent. Without the plugin, stop with `hunk_unavailable`.
+5. Store the ID of the new Hunk pane. A second review reuses the open pane. Log: `Review opened.`
+
+Hunk uses much memory, so the pane stays open only while the card is in Review. When a herdboard command or a board key moves the card to another column or deletes it, the tool closes the pane.
+
+On the board, `R` reviews the selected card.
 
 ### promote
 

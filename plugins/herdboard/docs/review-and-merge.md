@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard) and 2 (base and upstream) are built. The other steps are not.
+Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard), 2 (base and upstream) and 3 (review) are built. The other steps are not.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -123,7 +123,7 @@ A sub-card has an Obsidian block link to its parent on its first line, before it
 
 Hunk is the only review tool. herdboard does not show diffs itself. Without the hunkdiff plugin, `review` stops after step 3 with `hunk_unavailable`.
 
-Open the hunkdiff pane through its own action, not as a bare pane: hunkdiff links the review pane to the agent pane, and `send-review` needs that link. How to call the action for a given workspace and pane is not confirmed yet (see "Unconfirmed").
+Open the hunkdiff pane through its own action, not as a bare pane: hunkdiff links the review pane to the agent pane, and `send-review` needs that link. `herdr plugin action invoke` takes no pane: hunkdiff reads the focused pane. So `review` runs `herdr agent focus <agent pane>` first, then `herdr plugin action invoke review:branch --plugin jhochenbaum.hunkdiff`, and finds the new pane by comparing `herdr pane list` before and after. A live test confirmed the link (`agentPaneId` in the hunkdiff index) and the `main...HEAD` target.
 
 ### Close the review pane
 
@@ -190,7 +190,7 @@ If a PR for the branch already exists, `merge --pr` stores its URL and does not 
 
 ## Board
 
-Proposed keys. The current `r` is reload, so review uses `R`.
+Keys. The current `r` is reload, so review uses `R`. `R` is built; the others are proposed.
 
 | Key | Action |
 |---|---|
@@ -273,8 +273,7 @@ Claude can stop at a permission prompt for `git commit`. That delays Review, but
 
 Check these against the installed Herdr and hunkdiff before you build the step that needs them:
 
-1. How herdboard opens the hunkdiff branch review for a given workspace and pane. `herdr plugin action invoke` takes no pane. `herdr plugin pane open --entrypoint review-branch --target-pane` opens the pane, but it may skip the link that `send-review` needs.
-2. Whether the Obsidian Kanban plugin opens `[[#^t5aa]]` from a card.
+1. Whether the Obsidian Kanban plugin opens `[[#^t5aa]]` from a card.
 
 ## Build order
 

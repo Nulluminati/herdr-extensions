@@ -42,6 +42,8 @@ def brief_text(
     branch: str,
     base: str,
     command: str,
+    note: str | None = None,
+    log: list[dict] = (),
 ) -> str:
     """A Markdown brief: the task, where to work, and how to keep the card current."""
     linear = card.source == "linear"
@@ -52,6 +54,8 @@ def brief_text(
     else:
         lines.append(f"You are working on herdboard card `{ref}` on board `{card.board}`, column `{card.column}`.")
     lines.append("")
+    if note:
+        lines += [note, ""]
     facts = []
     if linear:
         facts += [f"Link: {card.url}" if card.url else "", f"State: {card.state}" if card.state else "",
@@ -93,6 +97,13 @@ def brief_text(
             lines += [f"### {note['name']}", ""]
             lines += [content.rstrip("\n") if content is not None else "The note was not found.", ""]
 
+    if log:
+        lines += ["## Activity log", ""]
+        for entry in log:
+            first, *rest = entry["message"].split("\n")
+            lines.append(f"- {entry['time']} · {entry['author']} · {first}")
+            lines += [f"\t{line}" for line in rest]
+        lines.append("")
     lines += [
         "## Keep the card up to date",
         "",

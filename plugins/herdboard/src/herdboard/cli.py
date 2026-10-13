@@ -23,6 +23,7 @@ from .migrate import build_preview, preview_text
 from .migrate_convert import convert
 from .model import HerdboardError, IoError, NotFoundError
 from .promote import Promoter
+from .review import Reviewer
 from .store import CardView, Store
 from .start import Starter, card_agent_panes, register_checkout
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
@@ -141,6 +142,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
+
+    sub = command("review", "open a started card's work in Hunk, next to its agent")
+    sub.add_argument("ref")
 
     sub = command("doctor", "check boards, configuration, Linear links and state")
     sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
@@ -505,13 +509,13 @@ class LinearDeleteError(HerdboardError):
 
 
 def _update_sidebar(command: str, result: dict) -> None:
-    """Show a started card's change in its agent's sidebar row."""
-    from .start import update_card_token
+    """Show a started card's change in Herdr: its agent's sidebar row and its review pane."""
+    from .start import card_changed
 
     if command in ("move", "done", "edit") and result.get("card") is not None:
-        update_card_token(result["card"])
+        card_changed(result["card"])
     elif command == "delete" and result.get("deleted") is not None:
-        update_card_token(result["deleted"], removed=True)
+        card_changed(result["deleted"], removed=True)
 
 
 def _cmd_delete(ctx: _Context) -> dict:
@@ -544,6 +548,12 @@ def _cmd_start(ctx: _Context) -> dict:
     return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
                          repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking,
                          base=args.base)
+
+
+def _cmd_review(ctx: _Context) -> dict:
+    ref = ctx.args.ref
+    reviewer = Reviewer(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(ref) else None)
+    return reviewer.review(ref)
 
 
 def _cmd_init(ctx: _Context) -> dict:
@@ -766,6 +776,7 @@ COMMANDS = {
     "log": _cmd_log,
     "promote": _cmd_promote,
     "start": _cmd_start,
+    "review": _cmd_review,
     "init": _cmd_init,
     "migrate": _cmd_migrate,
     "link": _cmd_link,
@@ -814,6 +825,14 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
+        return
+    if command == "review":
+        if as_json:
+            _emit_json(result)
+        else:
+            print(f"{result['ref']}: Hunk review in pane {result['review_pane']} (workspace {result['workspace_id']})")
+            if result["agent_restarted"]:
+                print("The agent was gone; a new agent started with the card and its log.")
         return
     if command == "log":
         if as_json:

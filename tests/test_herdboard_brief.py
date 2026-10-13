@@ -49,6 +49,18 @@ class BriefTests(unittest.TestCase):
     def test_the_brief_names_the_base_branch(self):
         self.assertIn("- Base: `main`. herdboard merges the branch into it after the review.", self.brief(todo()))
 
+    def test_a_restarted_agent_gets_a_note_and_the_log(self):
+        log = [{"time": "2026-10-12 12:00", "author": "pi", "message": "Two commits.\nTests pass."}]
+        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
+                          command="herdboard", note="The card is in review.", log=log)
+        intro = "column `In progress`.\n\n"
+        self.assertIn(intro + "The card is in review.\n\n", text)
+        self.assertIn("## Activity log\n\n- 2026-10-12 12:00 · pi · Two commits.\n\tTests pass.\n\n", text)
+
+    def test_a_new_agent_gets_no_note_and_no_log(self):
+        text = self.brief(todo())
+        self.assertNotIn("## Activity log", text)
+
     def test_details_keep_their_nesting_without_the_card_indent(self):
         text = self.brief(todo())
         self.assertIn("## Details\n\n- bat\n- [ ] fish\n\t- nested\n", text)

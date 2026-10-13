@@ -28,6 +28,7 @@ from .model import HerdboardError, join_title, parse_tags, split_title
 from .store import TEMP_REF, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS
+from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
 
@@ -61,6 +62,7 @@ HELP_KEYS = [
     ("x", "delete the todo, after you confirm"),
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
+    ("R", "review a started card in Hunk, next to its agent"),
     ("v", "cycle view: repo, inbox, all, mine"),
     ("t", "hide or show Linear cards"),
     ("i", "create the board for this repository"),
@@ -705,6 +707,7 @@ class HerdboardApp(App):
         Binding("x", "delete", "Delete"),
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
+        Binding("R", "review", "Review"),
         Binding("v", "cycle_view", "View"),
         Binding("t", "toggle_linear", "Linear", show=False),
         Binding("i", "init", "Init", show=False),
@@ -730,6 +733,7 @@ class HerdboardApp(App):
         linear_interval: float = LINEAR_SECONDS,
         linear_writer: LinearWriter | None = None,
         start_card: Callable[[str, str | None], dict] | None = None,
+        review_card: Callable[[str], dict] | None = None,
         directory: Path | None = None,
         init_board: Callable[[], Path] | None = None,
     ):
@@ -754,6 +758,7 @@ class HerdboardApp(App):
         self.linear_interval = linear_interval
         self.linear_writer = linear_writer
         self.start_card = start_card
+        self.review_card = review_card
         self.directory = directory or Path.cwd()
         self.starting = False
         self.linear_results: dict[str, LinearResult] = {}
@@ -1075,7 +1080,7 @@ class HerdboardApp(App):
                 return None, error
             if card is not None:
                 # Still in the worker thread: the sidebar update may call Herdr.
-                start_module.update_card_token(card, removed=removed)
+                start_module.card_changed(card, removed=removed)
             return card, None
 
         self.writing = True
@@ -1099,7 +1104,8 @@ class HerdboardApp(App):
             if error:
                 self.notify(str(error), severity="error")
             elif result:
-                self.notify(f"Started {result['ref']} in {result['workspace_id']} ({result['worktree_path']})")
+                self.notify(result.get("notice") or
+                            f"Started {result['ref']} in {result['workspace_id']} ({result['worktree_path']})")
             await self.reload(result["ref"] if result else None)
             self.fetch_linear()
             return
@@ -1333,6 +1339,28 @@ class HerdboardApp(App):
                 return starter.start(ref, agent=agent, repo=repo, model=model, thinking=thinking), None
             except HerdboardError as error:
                 return None, error
+
+        self.starting = True
+        self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+
+    def action_review(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if self.starting or self.writing:
+            self.notify("Busy: a card change is in progress", severity="warning")
+            return
+        ref = card.ref
+
+        def guarded():
+            try:
+                if self.review_card:
+                    result = self.review_card(ref)
+                else:
+                    result = Reviewer(self.store, self.directory, writer=self.linear_writer).review(ref)
+            except HerdboardError as error:
+                return None, error
+            return {**result, "notice": f"Review of {result['ref']} opened in {result['workspace_id']}"}, None
 
         self.starting = True
         self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)

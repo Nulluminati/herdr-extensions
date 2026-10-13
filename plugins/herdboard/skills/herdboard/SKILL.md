@@ -58,6 +58,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 
 - `add --linear` (creates a Linear issue), `promote` (turns a todo into a Linear issue), and `move` or `done` on a Linear issue.
 - `start` (creates a worktree and starts an agent).
+- `review` (focuses the card's workspace and opens Hunk; it can start a new agent).
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `link`, `init`, `migrate --yes`, `doctor --fix-ids`.
 
@@ -65,6 +66,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 herdboard --json start tep3 --agent pi        # worktree, workspace, card to In progress, pi with the card
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
+herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
 herdboard --json promote tep3                 # add --team ENG or --project NAME when the user names them
 herdboard --json add --linear "Fix the login timeout" --team ENG
 ```
@@ -112,6 +114,9 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `checkout_unknown` | `start` does not know where the repository is. Ask the user for the path, then use `--checkout PATH`. |
 | `base_unknown` | The base is not a local branch, or the checkout has no branch. Ask the user which local branch to start from, then use `--base BRANCH`. |
 | `upstream_failed` | Git could not set the base as the branch upstream. Tell the user the message. Running `start` again retries. |
+| `not_started` | The card has no worktree from `start`, or it was removed. Tell the user to run `start` first. |
+| `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`). Tell the user the message. |
+| `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
 | `repo_required` | Ask the user which repository, then use `--repo`. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |
 | `herdr_unavailable`, `herdr_error` | `start` needs a running Herdr, or a Herdr command failed. Tell the user the message. Running `start` again continues from the step that failed. |

@@ -26,9 +26,12 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.store = Store(Config(todos_dir=root / "todos"))
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Start test")
+        self.review = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1",
+                                         "review_pane": "w1:p2", "agent_restarted": False})
         self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
     def app(self):
-        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback)
+        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
+                           review_card=self.review)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -65,6 +68,28 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await app.workers.wait_for_complete()
                 await pilot.pause()
         self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="medium")
+
+    async def test_shift_r_opens_the_review(self):
+        app = self.app()
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            await pilot.press("R")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.review.assert_called_once_with(self.card.ref)
+        self.assertIn((f"Review of {self.card.ref} opened in w1", None), notices)
+
+    async def test_a_review_error_is_shown(self):
+        self.review.side_effect = StartError("No hunk", "hunk_unavailable")
+        app = self.app()
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            await pilot.press("R")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.assertIn(("No hunk", "error"), notices)
 
     async def test_claude_skips_the_model_dialog(self):
         app = self.app()

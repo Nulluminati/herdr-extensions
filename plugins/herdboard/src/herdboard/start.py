@@ -26,6 +26,9 @@ from .linear_states import StateChoices, refuse, resolve_state
 from .model import ConflictError, HerdboardError, IoError, NotFoundError
 from .store import TEMP_REF, CardView
 
+# A card's Hunk review pane stays open only while the card is in this column.
+REVIEW_COLUMN = "Review"
+
 # The pane token that shows a started card in the Herdr sidebar: `$herdboard_card`.
 CARD_TOKEN = "herdboard_card"
 TOKEN_SOURCE = "user:herdboard"
@@ -176,6 +179,62 @@ def update_card_token(card: CardView, removed: bool = False) -> None:
             continue
         if record.get("agent_name") and isinstance(record.get("pane_id"), str):
             report_card_token(record["pane_id"], None if removed else card_token(card))
+
+
+def find_record(ref):
+    """The start record of a card as (key, record), or None. Linear records are keyed by issue ID."""
+    records = _read(state_dir() / "starts.json")
+    record = records.get(ref)
+    if isinstance(record, dict):
+        return ref, record
+    for key, record in records.items():
+        if isinstance(record, dict) and record.get("ref") == ref:
+            return key, record
+    return None
+
+
+def safe_key(key):
+    """A record key that is safe in a file name: for the per-card lock and the brief."""
+    return key if re.fullmatch(r"[a-zA-Z0-9_-]+", key) else hashlib.sha256(key.encode()).hexdigest()
+
+
+def close_review_pane(ref) -> None:
+    """Close a card's Hunk review pane and forget it. Best effort: the pane may be gone already."""
+    path = state_dir() / "starts.json"
+    try:
+        with _lock(wait=2):
+            records = _read(path)
+            found = find_record(ref)
+            if found is None or not found[1].get("review_pane"):
+                return
+            key, record = found
+            pane = record.pop("review_pane")
+            records[key] = record
+            _write(path, records)
+    except HerdboardError:
+        return
+    try:
+        command([os.environ.get("HERDR_BIN_PATH") or "herdr", "plugin", "pane", "close", pane])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def card_changed(card: CardView, removed: bool = False) -> None:
+    """Follow a card change in Herdr: the sidebar row, and the review pane once the card leaves Review."""
+    update_card_token(card, removed=removed)
+    if removed or card.column.casefold() != REVIEW_COLUMN.casefold():
+        close_review_pane(card.ref)
+
+
+def agent_live(record) -> bool:
+    """True when the agent that `start` recorded still runs, in its pane or under its name."""
+    if not record.get("agent_name"):
+        return False
+    tolerated = ("agent_not_found", "pane_not_found")
+    pane_live = herdr("agent", "get", record["pane_id"], tolerated=tolerated)
+    named_live = herdr("agent", "get", record["agent_name"], tolerated=tolerated)
+    live = named_live or pane_live
+    return bool(live and live.get("agent"))
 
 
 def card_agent_panes() -> set[str]:
@@ -445,6 +504,32 @@ class Starter:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
 
+    def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False,
+                     note=None, log=()):
+        """Start an agent in the record's pane, with a brief file for the card."""
+        name = "hb-" + card.ref.lower()
+        # Herdr rejects line breaks in agent arguments, so the details
+        # go to a brief file and the message is one line that names it.
+        notes = []
+        if not linear:
+            try:
+                notes = self.store.notes_for(card)
+            except HerdboardError:
+                notes = []
+        brief = write_brief(lock_key, brief_text(
+            card, notes=notes, repository=record["repository"],
+            worktree=record["worktree_path"], branch=record["branch"], base=record["base"],
+            command=herdboard_command(), note=note, log=log,
+        ))
+        message = agent_message(card, brief)
+        record["agent_name"] = name
+        record["agent"] = agent
+        # Record intent before Herdr can return an unknown startup result.
+        persist()
+        args = agent_arguments(agent, message, model, thinking)
+        herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
+              tolerated=("timeout", "agent_not_ready"))
+
     def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None,
               base=None):
         agent = agent or self.config.start_agent
@@ -475,7 +560,7 @@ class Starter:
             if TEMP_REF.match(card.ref):
                 card = self.store.ensure_id(card.ref)
             key = card.ref
-        lock_key = key if re.fullmatch(r"[a-zA-Z0-9_-]+", key) else hashlib.sha256(key.encode()).hexdigest()
+        lock_key = safe_key(key)
         with _lock(".start-" + lock_key + ".lock"):
             record = {"steps_done": []}
             try:
@@ -537,34 +622,9 @@ class Starter:
                         card = self.store.move(card.ref, column)
                 save("move")
                 if not no_agent:
-                    live = None
-                    if record.get("agent_name"):
-                        pane_live = herdr("agent", "get", record["pane_id"], tolerated=("agent_not_found", "pane_not_found"))
-                        named_live = herdr("agent", "get", record["agent_name"], tolerated=("agent_not_found", "pane_not_found"))
-                        live = named_live or pane_live
-                    if not live or not live.get("agent"):
-                        name = "hb-" + card.ref.lower()
-                        # Herdr rejects line breaks in agent arguments, so the details
-                        # go to a brief file and the message is one line that names it.
-                        notes = []
-                        if not issue:
-                            try:
-                                notes = self.store.notes_for(card)
-                            except HerdboardError:
-                                notes = []
-                        brief = write_brief(lock_key, brief_text(
-                            replace(card, column=column), notes=notes, repository=identity,
-                            worktree=record["worktree_path"], branch=branch, base=record["base"],
-                            command=herdboard_command(),
-                        ))
-                        message = agent_message(card, brief)
-                        record["agent_name"] = name
-                        record["agent"] = agent
-                        # Record intent before Herdr can return an unknown startup result.
-                        persist()
-                        args = agent_arguments(agent, message, model, thinking)
-                        herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
-                              tolerated=("timeout", "agent_not_ready"))
+                    if not agent_live(record):
+                        self.launch_agent(replace(card, column=column), record, agent, model, thinking,
+                                          lock_key, persist, linear=bool(issue))
                     save("agent")
                     report_card_token(record["pane_id"], card_token(replace(card, column=column)))
                 result = {k: record.get(k) for k in ("ref", "steps_done", "workspace_id", "pane_id", "worktree_path", "branch", "base", "agent_name")}
