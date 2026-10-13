@@ -28,6 +28,7 @@ from .model import HerdboardError, join_title, parse_tags, split_title
 from .store import TEMP_REF, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS
+from .merge import Merger
 from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
@@ -63,6 +64,8 @@ HELP_KEYS = [
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
     ("R", "review a started card in Hunk, next to its agent"),
+    ("m", "merge the card branch into its base (local or PR, from the config), then finish, after you confirm"),
+    ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
     ("v", "cycle view: repo, inbox, all, mine"),
     ("t", "hide or show Linear cards"),
     ("i", "create the board for this repository"),
@@ -605,6 +608,31 @@ class DeleteScreen(ModalBase):
         self.dismiss(delete)
 
 
+class ConfirmScreen(ModalBase):
+    """Ask before a card action that changes Git: y runs it, n or escape does not."""
+
+    BINDINGS = [
+        Binding("y", "answer(True)", "Yes"),
+        Binding("n", "answer(False)", "No"),
+    ]
+
+    def __init__(self, question: str, detail: str):
+        super().__init__()
+        self.question = question
+        self.detail = detail
+
+    def compose(self) -> ComposeResult:
+        prompt = Static(Text(self.question), id="confirm-prompt")
+        prompt.plain = self.question
+        with Vertical(classes="dialog"):
+            yield prompt
+            yield Label(self.detail, classes="dim")
+            yield Label("y: yes, n or escape: no", classes="dim")
+
+    def action_answer(self, answer: bool) -> None:
+        self.dismiss(answer)
+
+
 class ModelScreen(ModalBase):
     """Choose pi's model and thinking level before a start. Enter on a model starts."""
 
@@ -708,6 +736,8 @@ class HerdboardApp(App):
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("R", "review", "Review"),
+        Binding("m", "merge", "Merge"),
+        Binding("f", "finish", "Finish"),
         Binding("v", "cycle_view", "View"),
         Binding("t", "toggle_linear", "Linear", show=False),
         Binding("i", "init", "Init", show=False),
@@ -734,6 +764,8 @@ class HerdboardApp(App):
         linear_writer: LinearWriter | None = None,
         start_card: Callable[[str, str | None], dict] | None = None,
         review_card: Callable[[str], dict] | None = None,
+        merge_card: Callable[[str], dict] | None = None,
+        finish_card: Callable[[str], dict] | None = None,
         directory: Path | None = None,
         init_board: Callable[[], Path] | None = None,
     ):
@@ -759,6 +791,8 @@ class HerdboardApp(App):
         self.linear_writer = linear_writer
         self.start_card = start_card
         self.review_card = review_card
+        self.merge_card = merge_card
+        self.finish_card = finish_card
         self.directory = directory or Path.cwd()
         self.starting = False
         self.linear_results: dict[str, LinearResult] = {}
@@ -1343,27 +1377,65 @@ class HerdboardApp(App):
         self.starting = True
         self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
 
+    def _card_action(self, run: Callable[[], dict], notice: Callable[[dict], str]) -> None:
+        """Run a review, merge or finish in a thread worker, like a start: one at a time."""
+        if self.starting or self.writing:
+            self.notify("Busy: a card change is in progress", severity="warning")
+            return
+
+        def guarded():
+            try:
+                result = run()
+            except HerdboardError as error:
+                return None, error
+            return {**result, "notice": notice(result)}, None
+
+        self.starting = True
+        self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+
     def action_review(self) -> None:
         card = self.current_card()
         if card is None:
             return
-        if self.starting or self.writing:
-            self.notify("Busy: a card change is in progress", severity="warning")
+        ref = card.ref
+        run = (lambda: self.review_card(ref)) if self.review_card else (
+            lambda: Reviewer(self.store, self.directory, writer=self.linear_writer).review(ref))
+        self._card_action(run, lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}")
+
+    def _merger(self) -> Merger:
+        return Merger(self.store, self.directory, writer=self.linear_writer, ask_state=self.ask_state)
+
+    def action_merge(self) -> None:
+        card = self.current_card()
+        if card is None:
             return
         ref = card.ref
+        run = (lambda: self.merge_card(ref)) if self.merge_card else (lambda: self._merger().merge(ref))
 
-        def guarded():
-            try:
-                if self.review_card:
-                    result = self.review_card(ref)
-                else:
-                    result = Reviewer(self.store, self.directory, writer=self.linear_writer).review(ref)
-            except HerdboardError as error:
-                return None, error
-            return {**result, "notice": f"Review of {result['ref']} opened in {result['workspace_id']}"}, None
+        def notice(result: dict) -> str:
+            return f"Merged {result['ref']} into {result['base']} at {result['commit'][:7]}, then finished it"
 
-        self.starting = True
-        self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+        self.push_screen(
+            ConfirmScreen(f"Merge {ref}: {card.title} into its base?",
+                          "The branch is rebased onto its base, the base moves forward, and the worktree is removed."),
+            lambda answer: self._card_action(run, notice) if answer else None,
+        )
+
+    def action_finish(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        ref = card.ref
+        run = (lambda: self.finish_card(ref)) if self.finish_card else (lambda: self._merger().finish(ref))
+
+        def notice(result: dict) -> str:
+            return f"Finished {result['ref']}; branch {'deleted' if result['branch_deleted'] else 'kept'}"
+
+        self.push_screen(
+            ConfirmScreen(f"Finish {ref}: {card.title}?",
+                          "The worktree and the merged branch are removed, and the card moves to Done."),
+            lambda answer: self._card_action(run, notice) if answer else None,
+        )
 
     def action_start(self) -> None:
         card = self.current_card()

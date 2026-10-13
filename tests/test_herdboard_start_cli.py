@@ -33,6 +33,14 @@ class StartCliTests(unittest.TestCase):
         self.assertEqual(load_config(self.config).start_agent, "pi")
         self.config.write_text('start_column = "Doing"\n')
         self.assertEqual(load_config(self.config).start_column, "Doing")
+    def test_merge_setting(self):
+        self.assertEqual(load_config(self.config).merge, "local")
+        self.config.write_text('merge = "pr"\n')
+        self.assertEqual(load_config(self.config).merge, "pr")
+        self.config.write_text('merge = "squash"\n')
+        with self.assertRaises(HerdboardError):
+            load_config(self.config)
+
     def test_config_errors(self):
         for text in ('start_agent = "codex"', 'start_agent = 2', 'start_column = ""', 'start_column = []'):
             with self.subTest(text=text):

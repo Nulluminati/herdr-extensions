@@ -26,12 +26,15 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.store = Store(Config(todos_dir=root / "todos"))
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Start test")
+        self.merge = Mock(return_value={"ref": self.card.ref, "mode": "local", "base": "main", "commit": "abcdef12",
+                                        "worktree_removed": True, "branch_deleted": True})
+        self.finish = Mock(return_value={"ref": self.card.ref, "worktree_removed": True, "branch_deleted": False})
         self.review = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1",
                                          "review_pane": "w1:p2", "agent_restarted": False})
         self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
     def app(self):
         app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
-                           review_card=self.review)
+                           review_card=self.review, merge_card=self.merge, finish_card=self.finish)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -79,6 +82,37 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
         self.review.assert_called_once_with(self.card.ref)
         self.assertIn((f"Review of {self.card.ref} opened in w1", None), notices)
+
+    async def run_keys(self, *keys):
+        app = self.app()
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            for key in keys:
+                await pilot.press(key)
+                await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        return notices
+
+    async def test_m_merges_after_y(self):
+        notices = await self.run_keys("m", "y")
+        self.merge.assert_called_once_with(self.card.ref)
+        self.assertIn((f"Merged {self.card.ref} into main at abcdef1, then finished it", None), notices)
+
+    async def test_m_then_n_does_not_merge(self):
+        await self.run_keys("m", "n")
+        self.merge.assert_not_called()
+
+    async def test_f_finishes_after_y(self):
+        notices = await self.run_keys("f", "y")
+        self.finish.assert_called_once_with(self.card.ref)
+        self.assertIn((f"Finished {self.card.ref}; branch kept", None), notices)
+
+    async def test_a_merge_error_is_shown(self):
+        self.merge.side_effect = StartError("Rebase conflict", "rebase_conflict")
+        notices = await self.run_keys("m", "y")
+        self.assertIn(("Rebase conflict", "error"), notices)
 
     async def test_a_review_error_is_shown(self):
         self.review.side_effect = StartError("No hunk", "hunk_unavailable")

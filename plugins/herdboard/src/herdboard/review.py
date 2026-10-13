@@ -7,15 +7,14 @@ the agent. herdboard therefore focuses the agent pane first, then invokes the ac
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 import time
 
 from . import activity
-from .linear_cards import LINEAR_REF, issue_card
-from .model import HerdboardError, NotFoundError
-from .start import (Starter, StartError, _lock, _read, _write, agent_live, find_record, herdr, safe_key,
-                    state_dir)
+from .linear_cards import LINEAR_REF
+from .model import HerdboardError
+from .start import (Starter, StartError, _lock, _read, _write, agent_live, fetch_linear_card, find_record,
+                    herdr, safe_key, state_dir)
 
 HUNK_PLUGIN = "jhochenbaum.hunkdiff"
 REVIEW_NOTE = "The card is in review. Review feedback follows. Wait for it."
@@ -42,15 +41,6 @@ class Reviewer:
             return None, ref.upper()
         card = self.store.show(ref)
         return card, card.ref
-
-    def _linear_card(self, ref):
-        if self.writer is None:
-            raise ReviewError("Linear writes are unavailable", "linear_disabled")
-        with self.writer.online() as client:
-            issue = client.issue(ref)
-        if issue is None:
-            raise NotFoundError(f"No card {ref}")
-        return issue_card(self.config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True)
 
     def _focus_agent(self, pane):
         deadline = time.monotonic() + PANE_WAIT_SECONDS
@@ -113,7 +103,7 @@ class Reviewer:
             if restarted:
                 kind = record.get("agent") or self.config.start_agent
                 thinking = self.config.start_thinking if kind == "pi" else None
-                starter.launch_agent(card or self._linear_card(ref), record, kind, self.config.start_model,
+                starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, self.config.start_model,
                                      thinking, lock_key, persist, linear=card is None, note=REVIEW_NOTE,
                                      log=activity.read(self.config, ref))
                 activity.append(self.store, ref, "Agent restarted for review.", "herdboard")

@@ -1,0 +1,344 @@
+"""Merge a card branch into its base with a rebase and a fast-forward, then finish the card."""
+import json
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
+sys.path.insert(0, str(ROOT / "tests"))
+
+from herdboard import activity, merge, start  # noqa: E402
+from test_herdboard_cli import CliTestCase  # noqa: E402
+from test_herdboard_review import PaneHerdr, ReviewTestCase  # noqa: E402
+
+IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+
+
+class GitHerdr(PaneHerdr):
+    """PaneHerdr whose worktrees are real Git worktrees, removed the way Herdr removes them."""
+
+    def __call__(self, argv, timeout=120):
+        args = argv[1:]
+        operation = " ".join(args[:2])
+        if operation == "worktree remove":
+            self.calls.append(args)
+            workspace = args[args.index("--workspace") + 1]
+            entry = next((w for w in self.worktrees if w["open_workspace_id"] == workspace), None)
+            if entry is None:
+                return self.reply(argv, error="workspace_not_found")
+            removed = subprocess.run(["git", "-C", entry["path"], "worktree", "remove", entry["path"]],
+                                     capture_output=True)
+            if removed.returncode:
+                return self.reply(argv, error="dirty_worktree_requires_force")
+            self.worktrees.remove(entry)
+            self.panes.pop(workspace, None)
+            self.agent = False
+            return self.reply(argv, {"type": "worktree_removed", "workspace_id": workspace})
+        if operation == "agent prompt":
+            self.calls.append(args)
+            return self.reply(argv, {"type": "ok"})
+        result = super().__call__(argv, timeout)
+        if operation == "worktree create":
+            path = json.loads(result.stdout)["result"]["worktree"]["path"]
+            branch = args[args.index("--branch") + 1]
+            cwd = args[args.index("--cwd") + 1]
+            subprocess.run(["git", "-C", cwd, "worktree", "add", path, branch], check=True, capture_output=True)
+        return result
+
+
+class MergeTestCase(ReviewTestCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.dict(os.environ, IDENTITY))
+        self.fake.__class__ = GitHerdr
+        self.merger = merge.Merger(self.store, self.repo)
+
+    def git(self, directory, *args):
+        return subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def commit(self, directory, name, text, message):
+        (Path(directory) / name).write_text(text)
+        self.git(directory, "add", name)
+        self.git(directory, "commit", "-qm", message)
+        return self.git(directory, "rev-parse", "HEAD")
+
+    def started(self, base=None):
+        result = self.starter.start(self.card.ref, agent="pi", base=base)
+        self.worktree = Path(result["worktree_path"])
+        self.branch = result["branch"]
+        return result
+
+    def main_branch(self):
+        return self.git(self.repo, "symbolic-ref", "--short", "HEAD")
+
+    def branch_exists(self, branch):
+        return subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--verify", "--quiet",
+                               f"refs/heads/{branch}"], capture_output=True).returncode == 0
+
+    def records(self):
+        path = start.state_dir() / "starts.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def log(self):
+        return [e["message"] for e in activity.read(self.config, self.card.ref)]
+
+
+class MergeLocalTests(MergeTestCase):
+    def test_a_card_that_was_never_started_cannot_merge(self):
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual(raised.exception.code, "not_started")
+
+    def test_uncommitted_work_stops_the_merge(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        (self.worktree / "b.txt").write_text("not committed\n")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual(raised.exception.code, "worktree_dirty")
+
+    def test_a_branch_without_commits_has_nothing_to_merge(self):
+        self.started()
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual(raised.exception.code, "nothing_to_merge")
+
+    def test_merge_fast_forwards_the_checked_out_base_and_finishes(self):
+        self.started()
+        head = self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        result = self.merger.merge(self.card.ref)
+        main = self.main_branch()
+        self.assertEqual(self.git(self.repo, "rev-parse", main), head)
+        self.assertEqual((self.repo / "a.txt").read_text(), "a\n")
+        self.assertEqual(result, {"ref": self.card.ref, "mode": "local", "base": main, "commit": head,
+                                  "worktree_removed": True, "branch_deleted": True})
+        self.assertFalse(self.worktree.exists())
+        self.assertFalse(self.branch_exists(self.branch))
+        card = self.store.show(self.card.ref)
+        self.assertEqual((card.column, card.checked), ("Done", True))
+        self.assertEqual(self.log(), [f"Merged into {main} at {head[:7]}.", "Finished."])
+        self.assertEqual(self.records(), {})
+
+    def test_merge_rebases_onto_a_base_that_moved(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        moved = self.commit(self.repo, "other.txt", "other\n", "feat: other")
+        result = self.merger.merge(self.card.ref)
+        main = self.main_branch()
+        self.assertEqual(self.git(self.repo, "rev-parse", f"{main}~1"), moved)
+        self.assertEqual(result["commit"], self.git(self.repo, "rev-parse", main))
+        self.assertTrue((self.repo / "a.txt").exists())
+
+    def test_a_base_that_no_checkout_has_moves_without_a_checkout(self):
+        self.git(self.repo, "branch", "feature-x")
+        self.started(base="feature-x")
+        head = self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.merger.merge(self.card.ref)
+        self.assertEqual(self.git(self.repo, "rev-parse", "feature-x"), head)
+        self.assertFalse((self.repo / "a.txt").exists())
+
+    def test_a_dirty_base_checkout_stops_before_the_rebase(self):
+        self.started()
+        self.commit(self.repo, "shared.txt", "one\n", "feat: shared")
+        self.git(self.worktree, "rebase", "-q", self.main_branch())
+        head = self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        (self.repo / "shared.txt").write_text("changed by the user\n")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual(raised.exception.code, "base_dirty")
+        self.assertEqual(self.git(self.worktree, "rev-parse", "HEAD"), head)
+
+    def test_a_failed_fast_forward_changes_nothing_on_the_card(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        (self.repo / "a.txt").write_text("untracked in the base checkout\n")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual(raised.exception.code, "merge_failed")
+        self.assertTrue(self.worktree.exists())
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+
+
+class OldRecordTests(MergeTestCase):
+    def drop_base(self):
+        path = start.state_dir() / "starts.json"
+        records = json.loads(path.read_text())
+        del records[self.card.ref]["base"]
+        path.write_text(json.dumps(records))
+
+    def test_a_record_without_a_base_uses_the_branch_upstream(self):
+        self.started()
+        head = self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.drop_base()
+        self.assertEqual(self.merger.merge(self.card.ref)["base"], self.main_branch())
+        self.assertEqual(self.git(self.repo, "rev-parse", self.main_branch()), head)
+
+    def test_without_a_base_or_an_upstream_the_base_is_unknown(self):
+        self.started()
+        self.drop_base()
+        self.git(self.repo, "branch", "--unset-upstream", self.branch)
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.finish(self.card.ref)
+        self.assertEqual(raised.exception.code, "base_unknown")
+
+
+class ConflictTests(MergeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.commit(self.repo, "shared.txt", "one\n", "feat: shared")
+        self.started()
+        self.store.move(self.card.ref, "Review")
+        self.head = self.commit(self.worktree, "shared.txt", "card\n", "feat: card change")
+        self.main_head = self.commit(self.repo, "shared.txt", "main\n", "feat: main change")
+
+    def test_a_conflict_goes_back_to_the_agent(self):
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual((raised.exception.code, raised.exception.exit_code), ("rebase_conflict", 2))
+        self.assertIn("shared.txt", str(raised.exception))
+        self.assertEqual(self.git(self.worktree, "rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain"), "")
+        self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.main_head)
+        prompts = self.calls("agent", "prompt")
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0][2], "w9:p1")
+        self.assertIn("shared.txt", prompts[0][3])
+        self.assertIn(f"git rebase {self.main_branch()}", prompts[0][3])
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+        self.assertEqual(self.log(), ["Rebase conflict in shared.txt. Sent to the agent."])
+
+    def test_a_conflict_starts_a_new_agent_when_the_old_one_is_gone(self):
+        self.fake.agent = False
+        with self.assertRaises(merge.MergeError):
+            self.merger.merge(self.card.ref)
+        self.assertEqual(self.calls("agent", "prompt"), [])
+        self.assertEqual(len(self.calls("agent", "start")), 2)
+        brief = (start.state_dir() / "briefs" / f"{self.card.ref}.md").read_text()
+        self.assertIn("shared.txt", brief)
+
+
+class FinishTests(MergeTestCase):
+    def test_an_unmerged_branch_does_not_finish(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.finish(self.card.ref)
+        self.assertEqual(raised.exception.code, "not_merged")
+        self.assertTrue(self.worktree.exists())
+
+    def test_force_finishes_but_keeps_an_unmerged_branch(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        result = self.merger.finish(self.card.ref, force=True)
+        self.assertEqual((result["worktree_removed"], result["branch_deleted"]), (True, False))
+        self.assertTrue(self.branch_exists(self.branch))
+        self.assertIn(f"Branch {self.branch} kept: it is not merged.", self.log())
+        self.assertEqual(self.store.show(self.card.ref).column, "Done")
+
+    def test_uncommitted_work_stops_finish_even_with_force(self):
+        self.started()
+        (self.worktree / "b.txt").write_text("not committed\n")
+        for force in (False, True):
+            with self.subTest(force=force), self.assertRaises(merge.MergeError) as raised:
+                self.merger.finish(self.card.ref, force=force)
+            self.assertEqual(raised.exception.code, "worktree_dirty")
+        self.assertTrue((self.worktree / "b.txt").exists())
+
+    def test_finish_closes_the_review_pane(self):
+        self.started()
+        self.store.move(self.card.ref, "Review")
+        from herdboard import review
+        review.Reviewer(self.store, self.repo).review(self.card.ref)
+        self.merger.finish(self.card.ref, force=True)
+        self.assertEqual(self.calls("plugin", "pane", "close"), [["plugin", "pane", "close", "w9:p2:hunk"]])
+
+    def test_a_worktree_that_is_already_gone_still_finishes(self):
+        self.started()
+        self.git(self.repo, "worktree", "remove", str(self.worktree))
+        result = self.merger.finish(self.card.ref)
+        self.assertEqual((result["worktree_removed"], result["branch_deleted"]), (False, True))
+        self.assertEqual(self.calls("worktree", "remove"), [])
+        self.assertEqual(self.store.show(self.card.ref).column, "Done")
+
+    def test_a_card_already_in_done_stays_there(self):
+        self.started()
+        self.store.done(self.card.ref)
+        self.merger.finish(self.card.ref)
+        card = self.store.show(self.card.ref)
+        self.assertEqual((card.column, card.checked), ("Done", True))
+
+
+class MergeModeTests(MergeTestCase):
+    def test_pr_is_not_built_yet(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref, mode="pr")
+        self.assertEqual(raised.exception.code, "usage")
+
+    def set_board_merge(self, value):
+        text = self.board.read_text(encoding="utf-8")
+        self.board.write_text(text.replace("kanban-plugin: board\n", f"kanban-plugin: board\nmerge: {value}\n", 1),
+                              encoding="utf-8")
+
+    def test_the_mode_comes_from_the_board_then_the_config(self):
+        record = {"repository": "x"}
+        card = self.store.show(self.card.ref)
+        self.assertEqual(self.merger.mode(card, record), "local")
+        self.config.merge = "pr"
+        self.assertEqual(self.merger.mode(card, record), "pr")
+        self.set_board_merge("local")
+        self.assertEqual(self.merger.mode(card, record), "local")
+
+    def test_a_linear_card_uses_the_board_of_its_repository(self):
+        self.set_board_merge("pr")
+        repository = self.store.board_meta(self.board).repo
+        self.assertEqual(self.merger.mode(None, {"repository": repository}), "pr")
+        self.assertEqual(self.merger.mode(None, {"repository": "other"}), "local")
+
+    def test_a_bad_board_mode_is_a_board_error(self):
+        self.set_board_merge("squash")
+        meta = self.store.board_meta(self.board)
+        self.assertIsNone(meta.merge)
+        self.assertIn("merge must be local or pr", meta.error)
+
+
+class MergeCliTests(CliTestCase):
+    def card(self):
+        return self.run_json("add", "Fix it", directory=self.plain)["card"]["ref"]
+
+    def test_merge_and_finish_text(self):
+        ref = self.card()
+        merged = {"ref": ref, "mode": "local", "base": "main", "commit": "abcdef1234",
+                  "worktree_removed": True, "branch_deleted": True}
+        finished = {"ref": ref, "worktree_removed": True, "branch_deleted": False}
+        with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.merge.return_value = merged
+            merger.return_value.finish.return_value = finished
+            out, _ = self.run_cli("merge", ref, "--local", directory=self.plain)
+            self.assertEqual(out, f"{ref}: merged into main at abcdef1\n{ref}: finished; worktree removed; branch deleted\n")
+            merger.return_value.merge.assert_called_with(ref, mode="local")
+            out, _ = self.run_cli("finish", ref, "--force", directory=self.plain)
+            self.assertEqual(out, f"{ref}: finished; worktree removed; branch kept\n")
+            merger.return_value.finish.assert_called_with(ref, force=True)
+
+    def test_a_conflict_exits_with_code_2(self):
+        ref = self.card()
+        with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.merge.side_effect = merge.MergeError("conflict", "rebase_conflict", exit_code=2)
+            data = self.run_json("merge", ref, directory=self.plain, expect=2)
+        self.assertEqual(data["error"]["code"], "rebase_conflict")
+
+    def test_local_and_pr_cannot_both_be_given(self):
+        data = self.run_json("merge", "t123", "--local", "--pr", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -17,7 +17,7 @@ from typing import Callable, Iterator
 from . import kanban_md
 from .migrate_convert import Item
 from .linear_links import ProjectLink, parse_links, replace_links
-from .config import Config
+from .config import MERGE_MODES, Config
 from .identity import RepoIdentity, find_board, new_board_path, same_repo
 from .model import (
     BLOCK_ID,
@@ -70,6 +70,8 @@ class BoardMeta:
     repo: str | None
     links: list[ProjectLink]
     error: str | None = None
+    # The board's `merge:` frontmatter: "local", "pr" or None for the config default.
+    merge: str | None = None
 
 
 @dataclass
@@ -228,10 +230,13 @@ class Store:
 
     def board_meta(self, path: Path) -> BoardMeta:
         board = self._read(path)
+        merge = board.frontmatter_value("merge")
+        if merge not in (None, *MERGE_MODES):
+            return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: merge must be local or pr")
         try:
-            return BoardMeta(board.frontmatter_value("repo"), parse_links(board.frontmatter))
+            return BoardMeta(board.frontmatter_value("repo"), parse_links(board.frontmatter), merge=merge)
         except FormatError as error:
-            return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: {error}")
+            return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: {error}", merge=merge)
 
     def update_links(
         self, path: Path, change: Callable[[list[ProjectLink]], list[ProjectLink]]

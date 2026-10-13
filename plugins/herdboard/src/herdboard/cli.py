@@ -22,6 +22,7 @@ from .linear_writes import LinearWriter
 from .migrate import build_preview, preview_text
 from .migrate_convert import convert
 from .model import HerdboardError, IoError, NotFoundError
+from .merge import Merger
 from .promote import Promoter
 from .review import Reviewer
 from .store import CardView, Store
@@ -145,6 +146,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("review", "open a started card's work in Hunk, next to its agent")
     sub.add_argument("ref")
+
+    sub = command("merge", "merge a started card's branch into its base, then finish the card")
+    sub.add_argument("ref")
+    mode = sub.add_mutually_exclusive_group()
+    mode.add_argument("--local", dest="mode", action="store_const", const="local",
+                      help="rebase onto the base and fast-forward it")
+    mode.add_argument("--pr", dest="mode", action="store_const", const="pr", help="open a GitHub pull request")
+
+    sub = command("finish", "remove a merged card's worktree and branch, and move the card to Done")
+    sub.add_argument("ref")
+    sub.add_argument("--force", action="store_true",
+                     help="finish an unmerged card; its branch is kept, and uncommitted work still stops it")
 
     sub = command("doctor", "check boards, configuration, Linear links and state")
     sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
@@ -556,6 +569,26 @@ def _cmd_review(ctx: _Context) -> dict:
     return reviewer.review(ref)
 
 
+def _merger(ctx: _Context) -> Merger:
+    ref = ctx.args.ref
+    return Merger(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(ref) else None,
+                  ask_state=ctx.ask())
+
+
+def _cmd_merge(ctx: _Context) -> dict:
+    return _merger(ctx).merge(ctx.args.ref, mode=ctx.args.mode)
+
+
+def _cmd_finish(ctx: _Context) -> dict:
+    return _merger(ctx).finish(ctx.args.ref, force=ctx.args.force)
+
+
+def _finish_line(result: dict) -> str:
+    worktree = "worktree removed" if result["worktree_removed"] else "no worktree to remove"
+    branch = "branch deleted" if result["branch_deleted"] else "branch kept"
+    return f"{result['ref']}: finished; {worktree}; {branch}"
+
+
 def _cmd_init(ctx: _Context) -> dict:
     if ctx.identity is None:
         raise HerdboardError("Not in a Git repository.")
@@ -777,6 +810,8 @@ COMMANDS = {
     "promote": _cmd_promote,
     "start": _cmd_start,
     "review": _cmd_review,
+    "merge": _cmd_merge,
+    "finish": _cmd_finish,
     "init": _cmd_init,
     "migrate": _cmd_migrate,
     "link": _cmd_link,
@@ -833,6 +868,14 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"{result['ref']}: Hunk review in pane {result['review_pane']} (workspace {result['workspace_id']})")
             if result["agent_restarted"]:
                 print("The agent was gone; a new agent started with the card and its log.")
+        return
+    if command in ("merge", "finish"):
+        if as_json:
+            _emit_json(result)
+            return
+        if command == "merge":
+            print(f"{result['ref']}: merged into {result['base']} at {result['commit'][:7]}")
+        print(_finish_line(result))
         return
     if command == "log":
         if as_json:

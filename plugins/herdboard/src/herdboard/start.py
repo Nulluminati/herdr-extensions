@@ -226,6 +226,17 @@ def card_changed(card: CardView, removed: bool = False) -> None:
         close_review_pane(card.ref)
 
 
+def fetch_linear_card(writer, config, ref) -> CardView:
+    """A Linear issue as a card, read from Linear. Needs a connection."""
+    if writer is None:
+        raise StartError("Linear writes are unavailable", "linear_disabled")
+    with writer.online() as client:
+        issue = client.issue(ref)
+    if issue is None:
+        raise NotFoundError(f"No card {ref}")
+    return issue_card(config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True)
+
+
 def agent_live(record) -> bool:
     """True when the agent that `start` recorded still runs, in its pane or under its name."""
     if not record.get("agent_name"):

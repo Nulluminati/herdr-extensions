@@ -23,6 +23,7 @@ DEFAULT_LINEAR_COLUMNS = {
 DEFAULT_DONE_DAYS = 14
 # pi's thinking levels (`pi --thinking`).
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+MERGE_MODES = ("local", "pr")
 
 
 @dataclass
@@ -63,6 +64,8 @@ class Config:
     # Models the board offers for pi; None reads pi's own `enabledModels`.
     pi_models: list[str] | None = None
     start_column: str | None = None
+    # How `merge` merges a card branch when neither the command nor the board says: "local" or "pr".
+    merge: str = "local"
     # A Textual theme name. The ANSI themes use the terminal's own colors.
     theme: str = "ansi-dark"
     # "round" draws tag ends with Nerd Font half circles; "block" needs no special font.
@@ -193,6 +196,11 @@ def load_config(path: Path | None = None) -> Config:
     config.pi_models = _string_list(path, data, "pi_models")
     config.start_column = _string(path, data, "start_column") or config.linear.columns["started"]
     config.theme = _string(path, data, "theme") or config.theme
+    merge = _string(path, data, "merge")
+    if merge is not None:
+        if merge not in MERGE_MODES:
+            raise HerdboardError(f"{path}: merge must be local or pr")
+        config.merge = merge
     tag_style = _string(path, data, "tag_style")
     if tag_style is not None:
         if tag_style not in ("round", "block"):

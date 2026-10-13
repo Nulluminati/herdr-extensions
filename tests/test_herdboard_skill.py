@@ -56,8 +56,10 @@ class SkillTests(unittest.TestCase):
         for code in ("base_unknown", "upstream_failed"):
             self.assertIn(f"`{code}`", text)
 
-    def test_review_is_documented(self):
-        self.assertIn(["--json", "review", "tep3"], skill_commands())
+    def test_review_merge_and_finish_are_documented(self):
+        commands = skill_commands()
+        for argv in (["--json", "review", "tep3"], ["--json", "merge", "tep3"], ["--json", "finish", "tep3"]):
+            self.assertIn(argv, commands)
 
     def test_every_error_code_in_the_skill_exists(self):
         text = SKILL.read_text(encoding="utf-8")
@@ -73,6 +75,7 @@ class SkillTests(unittest.TestCase):
                   cli.AgentEditDenied.code}
         known |= {"ambiguous_state", "no_state", "checkout_unknown", "repo_required", "herdr_unavailable", "herdr_error"}
         known |= {"base_unknown", "upstream_failed", "not_started", "hunk_unavailable", "agent_unavailable"}
+        known |= {"worktree_dirty", "nothing_to_merge", "base_dirty", "rebase_conflict", "merge_failed", "not_merged"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

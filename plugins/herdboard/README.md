@@ -220,6 +220,8 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
 | `herdboard review <id>` | Open the card's branch diff in Hunk, next to its agent (see below) |
+| `herdboard merge <id> [--local \| --pr]` | Merge the card branch into its base, then finish the card (see below). `--pr` is not built yet |
+| `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move the card to Done (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
 | `herdboard init` | Create the board for the current repository |
@@ -273,6 +275,24 @@ Review, merge and finish after `start` are designed in [docs/review-and-merge.md
 Hunk uses much memory, so the pane stays open only while the card is in Review. When a herdboard command or a board key moves the card to another column or deletes it, the tool closes the pane.
 
 On the board, `R` reviews the selected card.
+
+### merge and finish
+
+The design is in [docs/review-and-merge.md](docs/review-and-merge.md). The local mode is built:
+
+1. Stop with `worktree_dirty` when the card's worktree has uncommitted or untracked files, and with `nothing_to_merge` when the branch has no commits ahead of its base.
+2. If a checkout has the base checked out and has uncommitted changes to tracked files, stop with `base_dirty`.
+3. Rebase the branch onto the base in the worktree. On a conflict, abort the rebase, move the card to In progress, and send the conflicting files to the card's agent (a new agent if it is gone). Exit with `rebase_conflict`, code 2.
+4. Fast-forward the base: `git merge --ff-only` in the checkout that has it, else `git update-ref` with the old value. A failure stops with `merge_failed`.
+5. Log `Merged into <base> at <commit>.` and run `finish`.
+
+The tool does not push the base.
+
+`finish` checks that the base contains the branch (else `not_merged`), and that the worktree has no uncommitted or untracked files (else `worktree_dirty`, also with `--force`). Then it closes the Hunk pane, removes the worktree with `herdr worktree remove`, deletes the branch, moves the card to its done column (a card already there stays), logs `Finished.`, and removes the start record. `--force` finishes an unmerged card, but keeps its branch.
+
+The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config (default `local`).
+
+On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`.
 
 ### promote
 
@@ -357,6 +377,7 @@ start_agent = "claude"     # or "pi"
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
 tag_style = "round"        # tag blocks with Nerd Font round ends; "block" for other fonts
 # start_column = "In progress"   # default: linear.columns.started
+merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
 
 [linear]
 enabled = true            # default: true when LINEAR_API_KEY is set

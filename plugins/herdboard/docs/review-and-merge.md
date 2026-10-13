@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard), 2 (base and upstream) and 3 (review) are built. The other steps are not.
+Status: design draft. Build steps 1 (activity log, brief and skill, `edit` guard), 2 (base and upstream), 3 (review) and 4 (local merge and finish) are built. The other steps are not.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -172,7 +172,7 @@ If a PR for the branch already exists, `merge --pr` stores its URL and does not 
 2. Check the merge:
    - Local: the base contains the branch (`git merge-base --is-ancestor <branch> <base>`).
    - PR: `gh pr view <url>` reports the state `MERGED`.
-   - If the check fails, stop with `not_merged`. `--force` continues.
+   - If the check fails, stop with `not_merged`. `--force` continues, but step 6 then keeps the branch, so no commit is lost.
 3. If the worktree has uncommitted or untracked changes, stop with `worktree_dirty`. `--force` does not skip this check, so work is never lost.
 4. Close `review_pane`.
 5. Remove the worktree: `herdr worktree remove --workspace <id>`. Herdr refuses a dirty worktree with `dirty_worktree_requires_force`, removes the folder, closes the workspace, and keeps the branch.
@@ -190,7 +190,7 @@ If a PR for the branch already exists, `merge --pr` stores its URL and does not 
 
 ## Board
 
-Keys. The current `r` is reload, so review uses `R`. `R` is built; the others are proposed.
+Keys. The current `r` is reload, so review uses `R`. `R`, `m` and `f` are built; `m` and `f` ask for confirmation. The others are proposed.
 
 | Key | Action |
 |---|---|
