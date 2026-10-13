@@ -164,6 +164,13 @@ class ParentCliTests(CliTestCase):
         out, _ = self.run_cli("show", child["ref"], directory=self.plain)
         self.assertIn(f"parent: {parent['ref']}", out)
 
+    def test_list_text_hides_the_parent_link(self):
+        parent = self.add("Billing v2")
+        self.add("Child #api 📅 2026-11-01", "--parent", parent["ref"])
+        out, _ = self.run_cli("list", directory=self.plain)
+        self.assertNotIn("[[#^", out)
+        self.assertRegex(out, r"\n  t[0-9a-z]{3}  Child #api 📅 2026-11-01\n")
+
 
 class SubCardStartTests(MergeTestCase):
     def setUp(self):

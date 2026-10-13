@@ -22,7 +22,7 @@ from .linear_states import refuse
 from .linear_writes import LinearWriter
 from .migrate import build_preview, preview_text
 from .migrate_convert import convert
-from .model import HerdboardError, IoError, NotFoundError
+from .model import HerdboardError, IoError, NotFoundError, with_parent
 from .merge import Merger
 from .promote import Promoter
 from .review import Reviewer
@@ -217,7 +217,7 @@ def _card_line(card: CardView) -> str:
 
 
 def _card_text(card: CardView) -> str:
-    line = f"  {card.ref}  {card.title}"
+    line = f"  {card.ref}  {with_parent(card.title, None)}"
     if card.source == "linear":
         if card.state and card.state.casefold() != card.column.casefold():
             line += f"  [{card.state}]"
