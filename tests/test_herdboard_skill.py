@@ -84,7 +84,7 @@ class SkillTests(unittest.TestCase):
         known |= {"base_unknown", "upstream_failed", "not_started", "hunk_unavailable", "agent_unavailable"}
         known |= {"worktree_dirty", "nothing_to_merge", "base_dirty", "rebase_conflict", "merge_failed", "not_merged"}
         known |= {"gh_unavailable", "push_failed", "pr_failed"}
-        known |= {"parent_missing", "parent_nested", "children_open"}
+        known |= {"parent_missing", "parent_nested", "children_open", "parent_not_promoted"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

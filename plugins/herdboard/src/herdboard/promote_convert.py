@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 
-from .model import BLOCK_ID, CARD_START, DUE_DATE, TAG, HerdboardError
+from .model import BLOCK_ID, CARD_START, DUE_DATE, PARENT_LINK, TAG, HerdboardError
 
 # One level below the card: a tab, or 4 spaces when the vault does not use tabs.
 SUB_ITEM = re.compile(r"^(?:\t| {4})- \[(?P<check>.)\] (?P<title>\S.*)$")
@@ -39,7 +39,7 @@ def promoted_identifier(first_line: str) -> str | None:
 
 def _title(first_line: str) -> str:
     text = BLOCK_ID.sub("", CARD_START.sub("", first_line, count=1))
-    text = TAG.sub("", DUE_DATE.sub("", text))
+    text = PARENT_LINK.sub("", TAG.sub("", DUE_DATE.sub("", text)))
     return re.sub(r"\s{2,}", " ", text).strip()
 
 

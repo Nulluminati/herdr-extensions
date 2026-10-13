@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. Build steps 1 to 6 are built: activity log, base and upstream, review, local merge and finish, pull requests, and sub-cards of local todos. Linear sub-issues on the board and step 7 (`promote` of sub-cards) are not.
+Status: design draft. All 7 build steps are built. One part is not: the board does not show Linear sub-issues as sub-cards yet.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -224,7 +224,8 @@ The herdboard skill gets the same rules, so both Claude and pi follow them.
 
 - A parent todo with sub-cards becomes a Linear issue, and each sub-card becomes a sub-issue. Checklist items still become sub-issues, as now.
 - Each promoted sub-card gets its own `→ ENG-124` marker and moves to its done column, the same as the parent.
-- A sub-card cannot be promoted alone while its parent is a local todo. It stops with `parent_not_promoted`.
+- A sub-card cannot be promoted alone. It stops with `parent_not_promoted`.
+- A sub-card's checklist stays text in its issue description, because sub-issues go one level deep.
 
 ## Configuration
 

@@ -307,6 +307,7 @@ On the board, `m` merges and `f` finishes the selected card, after you confirm w
 2. Create the Linear issue, assigned to you:
    - The first line, without tags, the due date and the block ID, becomes the title.
    - Indented checklist items (`- [ ] …` one level below the card) become sub-issues, in order. A checked item becomes a sub-issue in the completed state.
+   - Each sub-card that has no `→` marker becomes a sub-issue after them, with its own title (without the parent link), state from its column, labels, due date and description. Its checklist stays text in its description, because sub-issues go one level deep. A sub-card alone is refused with `parent_not_promoted`.
    - A tag becomes a label when a label with that name exists in the issue's team or in the workspace. A team label wins over a workspace label.
    - The `📅` date becomes the due date.
    - A linked note becomes the description when `vault_root` is set and the note exists.
@@ -314,7 +315,7 @@ On the board, `m` merges and `f` finishes the selected card, after you confirm w
    - The issue starts in the state of the todo's current column. A todo in Done becomes an issue in the completed state.
    - A sub-issue shares the project and the assignee of the issue, and has no labels. An unchecked sub-issue starts in the state of the issue. If that state is completed, it starts in the state of the first column (the default of `add --linear`).
 3. Record the operation in `~/.local/state/herdboard/<workspace-id>/<user-id>/promotions.json` before the first call: the todo ID, and a client-generated ID and the create arguments for the issue and for each sub-issue. Update the record after each confirmed issue. A rerun follows the record, not the todo, so it creates exactly the planned issues. The cache drop keeps the file. One `promote` runs at a time per account.
-4. Only after Linear confirms the issue and every sub-issue, move the todo to its board's done column and add `→ ENG-123` to its first line, before the block ID. The todo is not deleted. Then remove the record. If the todo changed since `promote` read it, the todo stays as it is, the record stays, and the command exits with code 2. Running `promote` again then finishes the todo update and creates nothing.
+4. Only after Linear confirms the issue and every sub-issue, give each promoted sub-card its own `→ ENG-124` marker and move it to the done column. Then move the todo to its board's done column and add `→ ENG-123` to its first line, before the block ID. The todo is not deleted. Then remove the record. If the todo changed since `promote` read it, the todo stays as it is, the record stays, and the command exits with code 2. Running `promote` again then finishes the todo update and creates nothing.
 5. If a call times out, the tool looks up the recorded ID before it creates anything again (see "Cache and offline use"). Running `promote` again on a todo with a record looks up every recorded ID and creates only what Linear does not have.
 6. A todo whose first line already has `→ <identifier>` is promoted. `promote` refuses it with the code `already_promoted`.
 

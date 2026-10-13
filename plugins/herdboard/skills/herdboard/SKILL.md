@@ -135,6 +135,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `push_failed`, `pr_failed` | `git push` or `gh` failed. Tell the user the message. Nothing was merged. |
 | `parent_missing` | The parent is not a todo on the same board. Run `list` and use a todo of that board. |
 | `parent_nested` | Sub-cards go one level deep: the parent is a sub-card, or the card has sub-cards. Tell the user. |
+| `parent_not_promoted` | `promote` takes the parent card; its sub-cards become sub-issues. Ask the user before you promote the parent. |
 | `children_open` | `merge` of a parent card found sub-cards that are not done. Tell the user; `merge --force` merges anyway. |
 | `repo_required` | Ask the user which repository, then use `--repo`. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |

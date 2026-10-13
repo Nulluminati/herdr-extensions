@@ -1,4 +1,4 @@
-"""Promote a todo to a Linear issue, with its checklist as sub-issues.
+"""Promote a todo to a Linear issue, with its checklist and its sub-cards as sub-issues.
 
 The promotion is recorded before the first call (see promotions.py), so a failure at any
 point leaves a record that a rerun can finish. The todo changes last, only after Linear
@@ -37,6 +37,10 @@ class AlreadyPromotedError(HerdboardError):
 
 class NotATodoError(HerdboardError):
     code = "not_a_todo"
+
+
+class ParentNotPromotedError(HerdboardError):
+    code = "parent_not_promoted"
 
 
 @dataclass
@@ -85,6 +89,10 @@ class Promoter:
         snapshot = self.store.todo_snapshot(todo_id)
         # The plan comes from this snapshot, so its marker is the one that counts.
         self._refuse_if_marked(records, snapshot.view)
+        if snapshot.view.parent:
+            raise ParentNotPromotedError(
+                f"{todo_id} is a sub-card of {snapshot.view.parent}. Promote {snapshot.view.parent}: "
+                "its sub-cards become sub-issues")
         record = records.get(todo_id)
         resuming = record is not None
         warnings = []
@@ -100,6 +108,10 @@ class Promoter:
             error.args = (f"{error}. {again}",)
             raise
         parent, *children = record["issues"]
+        for child in children:
+            # A sub-card that a rerun finds marked was finished by the run before.
+            if child.get("todo") and not promoted_identifier(self.store.show(child["todo"]).title):
+                self.store.finish_promotion(self.store.todo_snapshot(child["todo"]), child["identifier"])
         try:
             todo = self.store.finish_promotion(snapshot, parent["identifier"])
         except ConflictError as error:
@@ -204,12 +216,42 @@ class Promoter:
         for sub, state in zip(converted.subs, sub_states):
             child = {**base, "title": sub.title, "state_id": state["id"], "parent_id": parent_id}
             issues.append({"id": str(uuid.uuid4()), "input": child, "identifier": None})
+        for card in self.store.children(snapshot.view.ref):
+            if promoted_identifier(card.title):
+                continue
+            child = self._sub_card(client, card, team, states, choices, ask, base, parent_id)
+            issues.append({"id": str(uuid.uuid4()), "input": child, "identifier": None, "todo": card.ref})
         return {
             "team": team["key"],
             "project": project["name"] if project else None,
             "state": parent_state["name"],
             "issues": issues,
         }
+
+    def _sub_card(self, client, card, team, states, choices, ask, base, parent_id) -> dict:
+        """The create input of a sub-card's issue: its own title, state, labels, due date and text."""
+        sub_snapshot = self.store.todo_snapshot(card.ref)
+        converted = convert(sub_snapshot.located.lines)
+        completed = self.config.linear.columns["completed"]
+        state = resolve_state(
+            self.config, choices, team, states, completed if sub_snapshot.done else card.column, ask, None,
+            "completed" if sub_snapshot.done else None,
+        )
+        # Sub-issues go one level deep, so a sub-card's checklist stays text in its description.
+        checklist = [f"- [{'x' if sub.checked else ' '}] {sub.title}" for sub in converted.subs]
+        if checklist:
+            converted.leftover += ([""] if converted.leftover else []) + checklist
+            converted.subs = []
+        labels, unlabeled = self._labels(client, team, converted.tags)
+        child = {**base, "title": converted.title, "state_id": state["id"], "parent_id": parent_id}
+        for key, value in (
+            ("label_ids", labels),
+            ("description", self._description(sub_snapshot, converted, unlabeled)),
+            ("due_date", converted.due),
+        ):
+            if value:
+                child[key] = value
+        return child
 
     def _labels(self, client, team: dict, tags: list[str]) -> tuple[list[str], list[str]]:
         """Label IDs for the tags, and the tags that have no label. A team label wins."""

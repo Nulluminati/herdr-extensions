@@ -730,3 +730,53 @@ class StoreTests(PromoteCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubCardTests(PromoteCase):
+    def setUp(self):
+        super().setUp()
+        self.write_board(
+            "## Todo\n\n"
+            "- [ ] Billing v2 #home ^tp00\n\t- [ ] Checklist item\n"
+            "- [ ] Add invoice table [[#^tp00]] 📅 2026-11-05 ^tc01\n\tUse the new API\n\t- [ ] Write the migration\n"
+            "- [ ] Unrelated ^tu02\n\n"
+            "## Done\n\n**Complete**\n"
+            "- [x] Add tax field [[#^tp00]] ^tc02\n"
+        )
+
+    def test_sub_cards_become_sub_issues_of_the_parent(self):
+        result = self.promote("tp00")
+        parent, checklist, table, tax = self.creates()
+        self.assertEqual(parent["title"], "Billing v2")
+        self.assertEqual(checklist["title"], "Checklist item")
+        self.assertEqual(table["title"], "Add invoice table")
+        self.assertEqual(table["dueDate"], "2026-11-05")
+        self.assertEqual(table["description"], "Use the new API\n\n- [ ] Write the migration")
+        self.assertEqual(tax["title"], "Add tax field")
+        self.assertEqual({c["parentId"] for c in (checklist, table, tax)}, {parent["id"]})
+        self.assertEqual(tax["stateId"], "ws-ENG-Done")
+        self.assertEqual(len(result.sub_issues), 3)
+        text = self.text()
+        self.assertIn("- [x] Add invoice table [[#^tp00]] 📅 2026-11-05 → ENG-9 ^tc01", text)
+        self.assertIn("- [x] Add tax field [[#^tp00]] → ENG-10 ^tc02", text)
+        self.assertIn("- [ ] Unrelated ^tu02", text)
+        done = text.index("## Done")
+        self.assertGreater(text.index("Add invoice table"), done)
+
+    def test_a_sub_card_alone_is_refused(self):
+        with self.assertRaises(HerdboardError) as raised:
+            self.promote("tc01")
+        self.assertEqual(raised.exception.code, "parent_not_promoted")
+        self.assertEqual(self.creates(), [])
+
+    def test_a_rerun_finishes_the_sub_cards_without_new_issues(self):
+        self.fake.mutation_failures = [None, None, "http_500"]
+        with self.assertRaises(LinearWriteUnknownError):
+            self.promote("tp00")
+        self.assertNotIn("→", self.text())
+        self.promote("tp00")
+        titles = [c["title"] for c in self.creates()]
+        self.assertEqual(sorted(set(titles)), sorted(["Billing v2", "Checklist item", "Add invoice table",
+                                                      "Add tax field"]))
+        self.assertEqual(len(self.issues_titled("Add invoice table")), 1)
+        self.assertEqual(self.text().count("→ ENG-"), 3)
