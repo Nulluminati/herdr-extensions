@@ -51,6 +51,8 @@ herdboard --json move tep3 --up                      # one place higher in its c
 herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
 herdboard --json edit tep3 --body "first detail line\nsecond detail line"
 herdboard --json log tep3 "Ready for review: 3 commits."   # append to the card's activity log
+herdboard --json attach tep3 docs/spec.md             # copy a large document into the card's attachments
+herdboard --json attach tep3 --remove spec.md         # remove an attachment
 herdboard --json add "Add invoice table" --parent t5aa     # a sub-card, on the parent's board
 herdboard --json edit tep3 --parent t5aa              # make a todo a sub-card
 herdboard --json edit tep3 --no-parent                # make it a plain todo again
@@ -58,10 +60,13 @@ herdboard --json edit tep3 --no-parent                # make it a plain todo aga
 
 The activity log is the card's history. It works for todos and Linear issues, and it never changes the card text. herdboard records who wrote each entry.
 
+Attachments hold documents too large for the card text. `show` lists them in `attachments`. The attachment `plan.md` is the card's plan: the agent that starts work on the card gets it in its brief.
+
 Ask the user first before these. They change shared Linear data, open workspaces, or rewrite many cards:
 
 - `add --linear` (creates a Linear issue), `promote` (turns a todo into a Linear issue), and `move` or `done` on a Linear issue.
 - `start` (creates a worktree and starts an agent).
+- `plan` (opens a Herdr tab and starts a planner agent).
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
@@ -71,6 +76,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 herdboard --json start tep3 --agent pi        # worktree, workspace, card to In progress, pi with the card
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
+herdboard --json plan tep3 --agent claude --model opus   # a planner asks the user questions, then writes plan.md
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
 herdboard --json review tep3 --agent --reviewer pi --model zai/glm-5.3   # another agent reviews; the card's agent gets the findings
 herdboard --json review tep3 --both           # an agent review first, then Hunk
@@ -102,6 +108,10 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 
 The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
 
+## When you plan a card
+
+`herdboard plan` opens you in the repository's main checkout. Your first message names the card and a brief file. Read the brief, then plan the work with the user: read the code, ask about the unknowns, and write the plan to the `plan.md` path that the brief gives. Do not change the code or the card text. herdboard logs each save of the plan.
+
 ## Errors
 
 Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit code 1 is a user error, 2 a conflict, 3 a Linear error.
@@ -129,6 +139,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `not_started` | The card has no worktree from `start`, or it was removed. Tell the user to run `start` first. |
 | `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`). Tell the user the message. |
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
+| `plan_running` | A planner for the card still runs in a Herdr tab. Tell the user to finish or close it. |
 | `review_running` | An agent review of the card still runs. Tell the user; its findings arrive by themselves. |
 | `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes. Tell the user. |
 | `worker_failed` | The agent review or pull request worker did not start, and its agent was closed. Tell the user the message. |

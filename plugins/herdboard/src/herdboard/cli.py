@@ -11,8 +11,9 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity, agent_review, attachments, pr_write
+from . import activity, agent_review, attachments, plan, pr_write
 from .agent_review import AgentReviewer
+from .plan import Planner
 from .config import THINKING_LEVELS, config_path, load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
@@ -154,6 +155,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
+
+    sub = command("plan", "plan a card with an agent in a new tab; the plan becomes the card's plan.md attachment")
+    sub.add_argument("ref")
+    sub.add_argument("--agent", choices=["claude", "pi"])
+    sub.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
+    sub.add_argument("--repo", help="repository board name or checkout path")
+    sub.add_argument("--checkout", type=Path)
+
+    sub = command("plan-wait", "log each save of the plan until the planner ends (run by plan)")
+    sub.add_argument("ref")
 
     sub = command("review", "review a started card's work: in Hunk next to its agent, by another agent, or both")
     sub.add_argument("ref")
@@ -650,6 +662,20 @@ def _cmd_start(ctx: _Context) -> dict:
                          base=args.base)
 
 
+def _cmd_plan(ctx: _Context) -> dict:
+    args = ctx.args
+    planner = Planner(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
+                      prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
+                      config_file=config_path(args.config))
+    return planner.plan(args.ref, agent=args.agent, model=args.model, thinking=args.thinking, repo=args.repo,
+                        checkout=args.checkout)
+
+
+def _cmd_plan_wait(ctx: _Context) -> dict:
+    ref = ctx.args.ref
+    return {"ref": ref, "exit_code": plan.wait(ctx.store, ref)}
+
+
 def _cmd_review(ctx: _Context) -> dict:
     args = ctx.args
     ref = args.ref
@@ -919,6 +945,8 @@ COMMANDS = {
     "attach": _cmd_attach,
     "promote": _cmd_promote,
     "start": _cmd_start,
+    "plan": _cmd_plan,
+    "plan-wait": _cmd_plan_wait,
     "review": _cmd_review,
     "review-wait": _cmd_review_wait,
     "pr-wait": _cmd_pr_wait,
@@ -973,7 +1001,15 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command in ("review-wait", "pr-wait"):
+    if command in ("review-wait", "pr-wait", "plan-wait"):
+        return
+    if command == "plan":
+        if as_json:
+            _emit_json(result)
+        else:
+            model = f" ({result['model']})" if result["model"] else ""
+            print(f"{result['ref']}: {result['agent']}{model} plans in pane {result['pane_id']}, in {result['checkout']}.")
+            print(f"The plan: {result['plan']}")
         return
     if command == "review" and "reviewer" in result:
         if as_json:
@@ -1116,7 +1152,7 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](_Context(args))
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json)
-        if args.command in ("review-wait", "pr-wait"):
+        if args.command in ("review-wait", "pr-wait", "plan-wait"):
             return result["exit_code"]
     except HerdboardError as error:
         if as_json:

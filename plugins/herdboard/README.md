@@ -69,6 +69,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `p` | Set or remove the todo's parent |
 | `s` | Start work with the default agent |
 | `S` | Choose claude or pi, the model and pi's thinking level, then start work |
+| `P` | Plan the card with an agent: choose claude or pi and the model |
 | `R` | Review a started card: in Hunk, by another agent, or both |
 | `m` | Merge the card, after you confirm |
 | `f` | Finish a merged card, after you confirm |
@@ -105,6 +106,14 @@ In a view with several boards, columns with the same name merge. Each card keeps
 
 ## Work on a card
 
+### Plan before the work
+
+1. Select the card and press `P`, or run `herdboard plan t3m9`.
+2. Choose the planner (claude or pi) and its model. A new Herdr tab opens in the repository's main checkout, with the planner in it.
+3. The planner reads the card and the code. It asks you about the unknowns, then writes the plan.
+4. Answer its questions in the tab. Close the tab when the plan is complete.
+5. Start the work with `s`. The agent gets the plan in its brief.
+
 ### Cards into main
 
 1. `herdboard add "Fix login timeout"` adds the card `t3m9`.
@@ -139,6 +148,28 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 `--agent claude|pi`, `--model` and `--thinking` (pi only) choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
 
 A failed `start` reports the steps that worked. Run `start` again to continue from the first step that failed.
+
+### plan
+
+`herdboard plan <id>` starts a planner agent in a new Herdr tab, in the main checkout of the card's repository. It finds the repository and the checkout as `start` does, and takes the same `--repo` and `--checkout`. It creates no worktree or branch, and the card stays in its column.
+
+The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. It can read the repository and write only the card's attachments. Claude asks you before it does anything else. pi gets no shell. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
+
+A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours.
+
+`plan` on a card that has a plan gives the planner the current plan to revise. A second `plan` for a card whose planner still runs fails with `plan_running`.
+
+`--agent claude|pi`, `--model` and `--thinking` (pi only) choose the planner. On the board, `P` asks for them.
+
+### Attachments
+
+Attachments hold documents that are too large for the card text, such as a specification. They are files in `<todos_dir>/.herdboard/attachments/<id>/`, next to the log. They work for Linear cards too, and herdboard posts nothing to Linear.
+
+- `herdboard attach <id> FILE [--name NAME]` copies a file into the card's attachments and logs it. An attachment with the same name is replaced.
+- `herdboard attach <id> --remove NAME` removes an attachment.
+- `herdboard show <id>` lists the attachments.
+
+The work brief from `start` and `review` includes the `plan.md` attachment in full, and lists the other attachments by path.
 
 ### Activity log
 
@@ -261,13 +292,15 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard list [--view] [--board] [--column] [--source todo\|linear]` | List cards |
 | `herdboard add "text" [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
 | `herdboard add --linear "title" [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
-| `herdboard show <id> [--log]` | Show a card and its last 10 log entries. `--log` shows them all |
+| `herdboard show <id> [--log]` | Show a card, its attachments and its last 10 log entries. `--log` shows them all |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card to a column |
 | `herdboard move <id> --up\|--down` | Move a todo up or down in its column |
 | `herdboard move <id> [column] --board NAME` | Move a todo, with its ID and details, to another board |
 | `herdboard done <id> [--state]` | Move a card to its board's done column |
 | `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent]` | Change a todo's first line, its indented lines or its parent. `--body ""` removes the indented lines |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
+| `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
+| `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--checkout PATH]` | Plan the card with an agent in a new Herdr tab |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
 | `herdboard start <id> [--agent claude\|pi] [--model] [--thinking] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model] [--thinking]` | Review a started card's work |
@@ -354,6 +387,7 @@ To make pull requests the default for one repository, add `merge: pr` to the fro
     nulluminati-homelab.md     # one board per repository
     acme-api.md
   .herdboard/log/              # activity logs
+  .herdboard/attachments/      # card attachments, such as plan.md
 ```
 
 A board file uses the format of the Obsidian Kanban plugin:
@@ -421,13 +455,14 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 |---|---|
 | `starts.json` | The worktree, branch, base, agent pane and pull request of each started card |
 | `checkouts.json` | The known main checkouts of each repository |
+| `plans.json`, `plans/<id>.log` | The running planner of each card, and the plan worker's output |
 | `reviews/<id>-<time>-<random>/` | Agent review requests and findings |
 | `prs/<id>-<time>-<random>/` | Pull request requests and the written description |
 | `<workspace>/<user>/` | The Linear cache, state choices and `promote` records, per Linear account |
 
 ## Known limits
 
-- Claude shows its folder trust prompt in a worktree where no Claude ran before. A new agent, reviewer or writer waits until you answer it in its pane.
+- Claude shows its folder trust prompt in a worktree where no Claude ran before. A new agent, reviewer, writer or planner waits until you answer it in its pane.
 - In Claude's default permission mode, the card's agent asks once before it writes the pull request description in the state folder.
 - herdboard does not sync between machines.
 - It is not confirmed that Obsidian opens a `[[#^t5aa]]` parent link from a card.

@@ -34,11 +34,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                                          "review_pane": "w1:p2", "agent_restarted": False})
         self.agent_review = Mock(return_value={"ref": self.card.ref, "reviewer": "claude", "model": "opus",
                                                "pane_id": "w1:p3", "folder": "/f", "then_hunk": False})
+        self.plan = Mock(return_value={"ref": self.card.ref, "agent": "claude", "model": "opus", "pane_id": "w1:p7",
+                                       "checkout": "/repo", "plan": "/plan.md"})
         self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
     def app(self):
         app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
                            review_card=self.review, merge_card=self.merge, finish_card=self.finish,
-                           agent_review_card=self.agent_review)
+                           agent_review_card=self.agent_review, plan_card=self.plan)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -129,6 +131,41 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
         self.agent_review.assert_called_once_with(self.card.ref, reviewer="pi", model="zai/glm-5.3",
                                                   thinking="high", then_hunk=True)
+
+    async def test_shift_p_plans_with_a_chosen_claude_model(self):
+        app = self.app()
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            await pilot.press("P")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ClaudeModelScreen)
+            await pilot.press("down", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.plan.assert_called_once_with(self.card.ref, agent="claude", model="opus", thinking=None)
+        self.callback.assert_not_called()
+        self.assertIn((f"claude (opus) plans {self.card.ref} in a new tab", None), notices)
+
+    async def test_shift_p_plans_with_pi(self):
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("P")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ModelScreen)
+                await pilot.press("down", "enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.plan.assert_called_once_with(self.card.ref, agent="pi", model="zai/glm-5.3", thinking=None)
+
+    async def test_escape_in_the_planner_menu_does_nothing(self):
+        await self.run_keys("P", "escape")
+        self.plan.assert_not_called()
 
     async def test_escape_in_the_review_menu_does_nothing(self):
         await self.run_keys("R", "escape")

@@ -31,6 +31,7 @@ from .config import THINKING_LEVELS
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
+from .plan import Planner
 from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
@@ -66,6 +67,7 @@ HELP_KEYS = [
     ("x", "delete the todo, after you confirm"),
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
+    ("P", "plan the card with an agent in a new tab; the plan goes to the work agent's brief"),
     ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
     ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
     ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
@@ -841,6 +843,7 @@ class HerdboardApp(App):
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("R", "review", "Review"),
+        Binding("P", "plan", "Plan"),
         Binding("p", "parent", "Parent", show=False),
         Binding("m", "merge", "Merge"),
         Binding("f", "finish", "Finish"),
@@ -871,6 +874,7 @@ class HerdboardApp(App):
         start_card: Callable[[str, str | None], dict] | None = None,
         review_card: Callable[[str], dict] | None = None,
         agent_review_card: Callable[..., dict] | None = None,
+        plan_card: Callable[..., dict] | None = None,
         merge_card: Callable[[str], dict] | None = None,
         finish_card: Callable[[str], dict] | None = None,
         directory: Path | None = None,
@@ -899,6 +903,7 @@ class HerdboardApp(App):
         self.start_card = start_card
         self.review_card = review_card
         self.agent_review_card = agent_review_card
+        self.plan_card = plan_card
         self.merge_card = merge_card
         self.finish_card = finish_card
         self.directory = directory or Path.cwd()
@@ -1568,6 +1573,37 @@ class HerdboardApp(App):
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
             return f"Agent review of {result['ref']} by {result['reviewer']}{model_text} started in {result['pane_id']}"
+
+        self._card_action(run, notice)
+
+    def action_plan(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        ref = card.ref
+
+        def chosen_agent(agent: str | None) -> None:
+            if agent == "claude":
+                self.push_screen(ClaudeModelScreen(), lambda choice: choice and self._plan(ref, agent, choice[0], None))
+            elif agent == "pi":
+                self.push_screen(ModelScreen(*pi_model_choices(self.store.config)),
+                                 lambda choice: choice and self._plan(ref, agent, *choice))
+
+        self.push_screen(AgentScreen("Choose the planner"), chosen_agent)
+
+    def _plan(self, ref: str, agent: str, model: str | None, thinking: str | None) -> None:
+        options = {"agent": agent, "model": model, "thinking": thinking}
+
+        def run() -> dict:
+            if self.plan_card:
+                return self.plan_card(ref, **options)
+            planner = Planner(self.store, self.directory, writer=self.linear_writer,
+                              repository_view=self.view == "repo")
+            return planner.plan(ref, repo=self.repo_board if self.view == "repo" else None, **options)
+
+        def notice(result: dict) -> str:
+            model_text = f" ({result['model']})" if result["model"] else ""
+            return f"{result['agent']}{model_text} plans {result['ref']} in a new tab"
 
         self._card_action(run, notice)
 
