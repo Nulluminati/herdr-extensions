@@ -196,6 +196,8 @@ class Planner:
                 card, checkout=local, notes=notes, plan=attachments.plan_text(self.config, ref),
                 files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
                 plan_file=plan_file, command=herdboard_command()))
+            # Read before the launch: the agent can save the plan while `agent start` waits for it.
+            plan_mtime = _mtime(plan_file)
             prompt = _one_line(f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "
                                "it has the card and how to plan it with me.")
             pane = herdr("tab", "create", "--cwd", str(local), "--label", f"plan {ref}",
@@ -211,7 +213,7 @@ class Planner:
             with _lock(wait=2):
                 records = _read(_plans_path())
                 records[ref] = {"pane_id": pane, "kind": kind, "model": model, "started": time.time(),
-                                "plan_mtime": _mtime(plan_file)}
+                                "plan_mtime": plan_mtime}
                 _write(_plans_path(), records)
         activity.append(self.store, ref, f"Planning started: {kind}{f' ({model})' if model else ''}.", "herdboard")
         config = ["--config", str(self.config_file)] if self.config_file else []
@@ -246,23 +248,32 @@ def wait(store, ref) -> int:
     plan_file = attachments.plan_path(store.config, ref)
     deadline = time.monotonic() + PLAN_TIMEOUT_SECONDS
     seen = False
+    status = None
     saves = 0
     while True:
         try:
             status = _reviewer_status(pane)
         except HerdboardError as error:
+            # Herdr did not answer, so the planner can still run: ask again at the next poll.
             print(f"herdboard: {error}", file=sys.stderr)
-            status = None
-        # Herdr can take a moment to detect a new agent, so only a planner that was seen can end.
-        seen = seen or status is not None
-        current = _mtime(plan_file)
-        if current is not None and current != last and status in (None, "idle", "done"):
-            activity.append(store, ref, f"Plan saved: {plan_file}", "herdboard")
-            last = current
-            saves += 1
-        if (seen and status is None) or time.monotonic() >= deadline:
+        else:
+            # Herdr can take a moment to detect a new agent, so only a planner that was seen can end.
+            seen = seen or status is not None
+            current = _mtime(plan_file)
+            if current is not None and current != last and status in (None, "idle", "done"):
+                activity.append(store, ref, f"Plan saved: {plan_file}", "herdboard")
+                last = current
+                saves += 1
+            if seen and status is None:
+                break
+        if time.monotonic() >= deadline:
             break
         time.sleep(POLL_SECONDS)
+    if status is not None:
+        # The record stays, so the planner still blocks a second one for the card.
+        activity.append(store, ref, "The plan saves are no longer logged: the planner still runs after "
+                        f"{PLAN_TIMEOUT_SECONDS // 3600} hours.", "herdboard")
+        return 0
     _forget(ref, pane)
     if saves:
         ended = "Planning ended."

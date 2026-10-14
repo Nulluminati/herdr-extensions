@@ -26,10 +26,13 @@ class PlanHerdr:
 
     def __init__(self):
         self.calls = []
-        # Each status poll takes the next state; None means the planner pane is gone.
+        # Each status poll takes the next state; None means the planner pane is gone, and "error" that
+        # Herdr did not answer.
         self.states = ["working", "idle", None]
         # Called on each poll, before the state is returned: it can write the plan.
         self.on_poll = None
+        # Called while the planner agent starts: it can write the plan.
+        self.on_start = None
 
     def reply(self, argv, result=None, error=None):
         if error:
@@ -48,7 +51,11 @@ class PlanHerdr:
             state = self.states.pop(0) if self.states else None
             if state is None:
                 return self.reply(argv, error="agent_not_found")
+            if state == "error":
+                return self.reply(argv, error="server_unavailable")
             return self.reply(argv, {"agent": {"agent_status": state, "pane_id": args[2]}})
+        if operation == "agent start" and self.on_start:
+            self.on_start()
         return self.reply(argv, {"type": "ok"})
 
     def find(self, *prefix):
@@ -252,6 +259,35 @@ class WaitTests(PlanTestCase):
         with patch.object(plan, "PLAN_TIMEOUT_SECONDS", 0):
             self.assertEqual(self.wait(), 0)
         self.assertEqual(self.log()[-1], "Planning ended without a plan.")
+
+    def test_a_failed_status_query_does_not_end_the_watch(self):
+        self.planner.plan(self.card.ref)
+        polls = iter([None, None, self.write_plan])
+        self.fake.on_poll = lambda: (next(polls, None) or (lambda: None))()
+        self.fake.states = ["working", "error", "idle", None]
+        self.wait()
+        self.assertEqual(self.log(), ["Planning started: claude.", f"Plan saved: {self.plan_file}",
+                                      "Planning ended."])
+
+    def test_a_plan_written_while_the_planner_starts_is_logged(self):
+        self.fake.on_start = self.write_plan
+        self.planner.plan(self.card.ref)
+        self.fake.states = ["idle", None]
+        self.wait()
+        self.assertEqual(self.log(), ["Planning started: claude.", f"Plan saved: {self.plan_file}",
+                                      "Planning ended."])
+
+    def test_a_planner_that_outlives_the_watch_still_blocks_a_second_one(self):
+        self.planner.plan(self.card.ref)
+        self.fake.states = ["working"]
+        with patch.object(plan, "PLAN_TIMEOUT_SECONDS", 0):
+            self.assertEqual(self.wait(), 0)
+        self.assertTrue(self.log()[-1].startswith("The plan saves are no longer logged"))
+        self.assertIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
+        self.fake.states = ["working"]
+        with self.assertRaises(plan.PlanError) as raised:
+            self.planner.plan(self.card.ref)
+        self.assertEqual(raised.exception.code, "plan_running")
 
     def test_no_record_means_nothing_to_wait_for(self):
         self.assertEqual(self.wait(), 1)
