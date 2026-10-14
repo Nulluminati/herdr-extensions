@@ -70,6 +70,8 @@ class FakeLinear:
         self.mutation_delay = 0.3
 
     def __enter__(self):
+        # Keep schema construction outside client request timeouts.
+        linear_schema()
         fake = self
 
         class Handler(BaseHTTPRequestHandler):

@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import graphql
 
@@ -8,12 +9,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard import linear  # noqa: E402
-from linear_fake import linear_schema, validation_errors  # noqa: E402
+from linear_fake import FakeLinear, linear_schema, validation_errors  # noqa: E402
 
 
 class SchemaTests(unittest.TestCase):
     def test_schema_loads(self):
         self.assertIn("Issue", linear_schema().type_map)
+
+    def test_fake_loads_schema_before_requests(self):
+        with patch("linear_fake.linear_schema", wraps=linear_schema) as load_schema:
+            with FakeLinear({}) as fake:
+                load_schema.assert_called_once_with()
+                self.assertEqual(fake.requests, [])
 
     def test_queries_are_registered(self):
         # Every module constant that holds a query is in the registry.
