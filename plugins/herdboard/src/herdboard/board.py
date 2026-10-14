@@ -879,6 +879,7 @@ class HerdboardApp(App):
         finish_card: Callable[[str], dict] | None = None,
         directory: Path | None = None,
         init_board: Callable[[], Path] | None = None,
+        config_file: Path | None = None,
     ):
         super().__init__()
         theme = store.config.theme
@@ -907,6 +908,8 @@ class HerdboardApp(App):
         self.merge_card = merge_card
         self.finish_card = finish_card
         self.directory = directory or Path.cwd()
+        # Passed on to the background workers, so they read the same boards.
+        self.config_file = config_file
         self.starting = False
         self.linear_results: dict[str, LinearResult] = {}
         self.linear_state = "loading" if self.linear_active else "off"
@@ -1568,7 +1571,7 @@ class HerdboardApp(App):
                       then_hunk: bool) -> None:
         options = {"reviewer": reviewer, "model": model, "thinking": thinking, "then_hunk": then_hunk}
         run = (lambda: self.agent_review_card(ref, **options)) if self.agent_review_card else (
-            lambda: AgentReviewer(self.store, self.directory, writer=self.linear_writer).request(ref, **options))
+            lambda: self._agent_reviewer().request(ref, **options))
 
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
@@ -1597,9 +1600,7 @@ class HerdboardApp(App):
         def run() -> dict:
             if self.plan_card:
                 return self.plan_card(ref, **options)
-            planner = Planner(self.store, self.directory, writer=self.linear_writer,
-                              repository_view=self.view == "repo")
-            return planner.plan(ref, repo=self.repo_board if self.view == "repo" else None, **options)
+            return self._planner().plan(ref, repo=self.repo_board if self.view == "repo" else None, **options)
 
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
@@ -1607,8 +1608,16 @@ class HerdboardApp(App):
 
         self._card_action(run, notice)
 
+    def _agent_reviewer(self) -> AgentReviewer:
+        return AgentReviewer(self.store, self.directory, writer=self.linear_writer, config_file=self.config_file)
+
+    def _planner(self) -> Planner:
+        return Planner(self.store, self.directory, writer=self.linear_writer, repository_view=self.view == "repo",
+                       config_file=self.config_file)
+
     def _merger(self) -> Merger:
-        return Merger(self.store, self.directory, writer=self.linear_writer, ask_state=self.ask_state)
+        return Merger(self.store, self.directory, writer=self.linear_writer, ask_state=self.ask_state,
+                      config_file=self.config_file)
 
     def action_merge(self) -> None:
         card = self.current_card()

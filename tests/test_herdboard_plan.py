@@ -277,6 +277,11 @@ class PlanCliTests(CliTestCase):
         self.assertEqual(out, "t123: claude (opus) plans in pane w1:p7, in /repo.\n"
                               "The plan: /todos/.herdboard/attachments/t123/plan.md\n")
 
+    def test_the_board_gets_the_config_file_for_its_workers(self):
+        with patch("herdboard.board.HerdboardApp") as app:
+            self.run_cli("board", directory=self.plain)
+        self.assertEqual(app.call_args.kwargs["config_file"], self.config)
+
     def test_plan_wait_returns_the_worker_code(self):
         with patch.object(plan, "wait", return_value=1) as waited:
             self.run_cli("plan-wait", "t123", directory=self.plain, expect=1)

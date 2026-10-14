@@ -929,6 +929,7 @@ def _cmd_board(ctx: _Context) -> dict:
         linear_writer=ctx.writer,
         directory=ctx.directory,
         init_board=_init_for_board(ctx),
+        config_file=config_path(ctx.args.config),
     ).run()
     return {}
 

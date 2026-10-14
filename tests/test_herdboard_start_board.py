@@ -163,6 +163,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
         self.plan.assert_called_once_with(self.card.ref, agent="pi", model="zai/glm-5.3", thinking=None)
 
+    async def test_the_board_workers_read_the_board_config_file(self):
+        config = Path(self.temp.name) / "custom.toml"
+        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, config_file=config)
+        self.assertEqual(app._planner().config_file, config)
+        self.assertEqual(app._agent_reviewer().config_file, config)
+        self.assertEqual(app._merger().config_file, config)
+
     async def test_escape_in_the_planner_menu_does_nothing(self):
         await self.run_keys("P", "escape")
         self.plan.assert_not_called()
