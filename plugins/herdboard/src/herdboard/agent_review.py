@@ -123,6 +123,8 @@ class AgentReviewer(Reviewer):
             if not (branch_diff or uncommitted or untracked):
                 raise ReviewError(f"{ref} has no commits since {base} and no uncommitted changes",
                                   "nothing_to_review")
+            # Read before the review folder exists, so a failure leaves no folder behind.
+            files = attachments.listing(self.config, ref)
             self._ready_agent(card, ref, key, record, persist)
             reviews = state_dir() / "reviews"
             try:
@@ -131,8 +133,8 @@ class AgentReviewer(Reviewer):
                                                dir=reviews))
                 (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
                 (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
-                (folder / "request.md").write_text(request_text(
-                    card, record, base, folder, untracked, attachments.listing(self.config, ref)), encoding="utf-8")
+                (folder / "request.md").write_text(request_text(card, record, base, folder, untracked, files),
+                                                   encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
             pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),

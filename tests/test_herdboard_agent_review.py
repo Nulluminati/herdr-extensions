@@ -124,6 +124,16 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn(f"Check that the change follows the plan that the user agreed on: `{folder / 'plan.md'}`", text)
         self.assertIn(f"- `{folder / 'spec.md'}`", text)
 
+    def test_an_unreadable_attachment_folder_leaves_no_review_folder(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        with patch.object(attachments, "listing", side_effect=attachments.IoError("cannot read")), \
+                self.assertRaises(attachments.IoError):
+            self.reviewer.request(self.card.ref)
+        reviews = start.state_dir() / "reviews"
+        self.assertEqual(list(reviews.iterdir()) if reviews.exists() else [], [])
+        self.assertEqual(self.calls("pane", "split"), [])
+
     def test_a_request_without_attachments_names_none(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
