@@ -522,6 +522,33 @@ class StartTests(unittest.TestCase):
         text = (start.state_dir() / "briefs" / f"{self.card.ref}.md").read_text()
         self.assertIn(f"--config {custom} --json move {self.card.ref} Review", text)
 
+    def test_the_agent_pane_exports_a_config_file_that_is_not_the_default(self):
+        custom = self.root / "my config.toml"
+        start.Starter(self.store, self.repo, config_file=custom).start(self.card.ref)
+        export = ["pane", "run", "w9:p1", f"export HERDBOARD_CONFIG={start.shlex.quote(str(custom))}"]
+        self.assertIn(export, self.fake.calls)
+        # The shell has the variable before Herdr starts the agent in it.
+        agent = next(i for i, c in enumerate(self.fake.calls) if c[:2] == ["agent", "start"])
+        self.assertLess(self.fake.calls.index(export), agent)
+
+    def test_the_agent_pane_exports_no_default_config_file(self):
+        start.Starter(self.store, self.repo, config_file=config_path()).start(self.card.ref)
+        self.starter.start(self.card.ref)
+        self.assertFalse(any(c[:2] == ["pane", "run"] for c in self.fake.calls))
+
+    def test_a_failed_export_does_not_stop_the_start(self):
+        custom = self.root / "custom.toml"
+        real = self.fake.__call__
+
+        def broken(argv, timeout=120):
+            if argv[1:3] == ["pane", "run"]:
+                raise OSError("no herdr")
+            return real(argv, timeout)
+
+        with patch.object(start, "command", broken):
+            start.Starter(self.store, self.repo, config_file=custom).start(self.card.ref)
+        self.assertTrue(any(c[:2] == ["agent", "start"] for c in self.fake.calls))
+
     def agent_args(self):
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
         return call[call.index("--pane") + 3:]

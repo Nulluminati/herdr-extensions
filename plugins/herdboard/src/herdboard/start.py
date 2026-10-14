@@ -150,6 +150,22 @@ def agent_arguments(agent: str, message: str, model: str | None, thinking: str |
     return [message, *(["--model", model] if model else [])]
 
 
+def export_config(pane_id: str, config_file: Path | None) -> None:
+    """Set HERDBOARD_CONFIG in the pane's shell when the config file is not the default one.
+
+    The agent that starts in the pane then reads the same boards, also with commands that are
+    not in its brief. Herdr cannot set the environment of a worktree's pane, so the shell exports
+    the variable. `export` works in bash, zsh and fish. Best effort: the brief names the file too.
+    """
+    if config_file is None or Path(config_file) == default_config_path():
+        return
+    try:
+        command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "run", pane_id,
+                 f"export HERDBOARD_CONFIG={shlex.quote(str(config_file))}"])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def write_brief(name: str, text: str) -> Path:
     """Write an agent brief to the state folder and return its path."""
     path = state_dir() / "briefs" / f"{name}.md"
@@ -568,6 +584,7 @@ class Starter:
         # Record intent before Herdr can return an unknown startup result.
         persist()
         args = agent_arguments(agent, message, model, thinking)
+        export_config(record["pane_id"], self.config_file)
         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
               tolerated=("timeout", "agent_not_ready"))
 
