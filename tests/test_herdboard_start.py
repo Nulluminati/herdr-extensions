@@ -482,6 +482,17 @@ class StartTests(unittest.TestCase):
         self.assertIn("1. Raise the timeout.\n", text)
         self.assertIn(str(attachments.folder(self.config, self.card.ref) / "spec.md"), text)
 
+    def test_a_plan_that_cannot_be_read_does_not_stop_the_start(self):
+        from herdboard import activity, attachments
+        plan = attachments.plan_path(self.config, self.card.ref)
+        plan.parent.mkdir(parents=True)
+        plan.write_bytes(b"\xff\xfe")
+        self.starter.start(self.card.ref)
+        text = (start.state_dir() / "briefs" / f"{self.card.ref}.md").read_text()
+        self.assertNotIn("## Plan", text)
+        self.assertTrue(any(entry["message"].startswith("The agent does not get the plan")
+                            for entry in activity.read(self.config, self.card.ref)))
+
     def starter_branch(self):
         return start._read(start.state_dir() / "starts.json")[self.card.ref]["branch"]
 

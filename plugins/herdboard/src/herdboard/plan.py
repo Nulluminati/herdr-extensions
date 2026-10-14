@@ -194,7 +194,7 @@ class Planner:
                 except HerdboardError:
                     notes = []
             brief = write_brief(safe_key(ref) + "-plan", brief_text(
-                card, checkout=local, notes=notes, plan=attachments.plan_text(self.config, ref),
+                card, checkout=local, notes=notes, plan=attachments.plan_for_agent(self.store, ref),
                 files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
                 plan_file=plan_file, command=herdboard_command(self.config_file)))
             # Read before the launch: the agent can save the plan while `agent start` waits for it.

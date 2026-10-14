@@ -162,6 +162,13 @@ class RequestTests(PlanTestCase):
         self.assertIn("Old plan.", text)
         self.assertIn(str(attachments.folder(self.config, self.card.ref) / "spec.md"), text)
 
+    def test_a_plan_that_cannot_be_read_does_not_stop_the_planner(self):
+        self.plan_file.parent.mkdir(parents=True)
+        self.plan_file.write_bytes(b"\xff\xfe")
+        self.planner.plan(self.card.ref)
+        self.assertNotIn("A plan exists", self.brief())
+        self.assertTrue(self.log()[0].startswith("The agent does not get the plan"))
+
     def test_the_card_stays_in_its_column(self):
         self.planner.plan(self.card.ref)
         self.assertEqual(self.store.show(self.card.ref).column, self.card.column)

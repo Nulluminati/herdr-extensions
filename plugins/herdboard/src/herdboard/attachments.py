@@ -6,16 +6,19 @@ and they work for Linear cards without a connection.
 
 from __future__ import annotations
 
+import codecs
 import os
 from pathlib import Path
 import re
 import tempfile
 
+from . import activity
 from .activity import LogUsageError, log_path
 from .config import Config
 from .model import IoError, NotFoundError
 
 PLAN_NAME = "plan.md"
+CHUNK = 1024 * 1024
 # A plain file name: no folders, no hidden files, no control characters.
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,99}")
 
@@ -51,26 +54,43 @@ def add(store, ref: str, source: Path, name: str | None = None) -> dict:
     """Copy a file into the card's attachments. An attachment with the same name is replaced."""
     target = folder(store.config, ref) / _name(source.name if name is None else name)
     try:
-        content = source.read_bytes()
+        reader = source.open("rb")
     except FileNotFoundError as error:
         raise NotFoundError(f"{source}: no such file") from error
     except OSError as error:
         raise IoError(f"{source}: cannot read: {error}") from error
+    # The agents read the plan as text, so it must be UTF-8.
+    decoder = codecs.getincrementaldecoder("utf-8")() if target.name == PLAN_NAME else None
     temp = None
-    with store._lock():
+    with reader, store._lock():
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             fd, temp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
             with os.fdopen(fd, "wb") as handle:
-                handle.write(content)
+                # In parts, because an attachment can be large.
+                while chunk := _read(reader, source):
+                    if decoder:
+                        decoder.decode(chunk)
+                    handle.write(chunk)
+                if decoder:
+                    decoder.decode(b"", final=True)
             os.replace(temp, target)
             temp = None
+        except UnicodeDecodeError as error:
+            raise LogUsageError(f"{source}: {PLAN_NAME} must be UTF-8 text") from error
         except OSError as error:
             raise IoError(f"{target}: cannot write the attachment: {error}") from error
         finally:
             if temp is not None:
                 Path(temp).unlink(missing_ok=True)
     return _entry(target)
+
+
+def _read(reader, source: Path) -> bytes:
+    try:
+        return reader.read(CHUNK)
+    except OSError as error:
+        raise IoError(f"{source}: cannot read: {error}") from error
 
 
 def remove(store, ref: str, name: str) -> dict:
@@ -99,3 +119,12 @@ def plan_text(config: Config, ref: str) -> str | None:
         return None
     except (OSError, UnicodeDecodeError) as error:
         raise IoError(f"{path}: cannot read the plan: {error}") from error
+
+
+def plan_for_agent(store, ref: str) -> str | None:
+    """The plan for an agent's brief. A plan that cannot be read does not stop the agent: the log says so."""
+    try:
+        return plan_text(store.config, ref)
+    except IoError as error:
+        activity.append(store, ref, f"The agent does not get the plan: {error}", "herdboard")
+        return None

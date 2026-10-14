@@ -559,7 +559,8 @@ class Starter:
             card, notes=notes, repository=record["repository"],
             worktree=record["worktree_path"], branch=record["branch"], base=record["base"],
             command=herdboard_command(self.config_file), note=note, log=log,
-            plan=attachments.plan_text(self.config, card.ref), attachments=attachments.listing(self.config, card.ref),
+            plan=attachments.plan_for_agent(self.store, card.ref),
+            attachments=attachments.listing(self.config, card.ref),
         ))
         message = agent_message(card, brief)
         record["agent_name"] = name

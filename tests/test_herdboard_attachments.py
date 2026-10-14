@@ -82,6 +82,30 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(attachments.plan_text(self.store.config, "t3m9"), "# Spec\n\nLong text.\n")
         self.assertEqual(attachments.plan_path(self.store.config, "t3m9"), self.folder / "t3m9" / "plan.md")
 
+    def test_a_plan_that_is_not_utf8_text_is_refused(self):
+        image = self.root / "photo.png"
+        image.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        with self.assertRaises(HerdboardError):
+            attachments.add(self.store, "t3m9", image, name="plan.md")
+        self.assertEqual(attachments.listing(self.store.config, "t3m9"), [])
+        self.assertEqual(attachments.add(self.store, "t3m9", image)["size"], 10)
+
+    def test_add_copies_the_file_in_parts(self):
+        # A large document is not read into memory at once.
+        with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("read whole")):
+            attachments.add(self.store, "t3m9", self.doc, name="plan.md")
+        self.assertEqual(attachments.plan_text(self.store.config, "t3m9"), "# Spec\n\nLong text.\n")
+
+    def test_a_plan_for_an_agent_that_cannot_be_read_is_left_out_with_a_warning(self):
+        plan = self.folder / "t3m9" / "plan.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_bytes(b"\xff\xfe")
+        self.assertIsNone(attachments.plan_for_agent(self.store, "t3m9"))
+        message = activity.read(self.store.config, "t3m9")[-1]["message"]
+        self.assertTrue(message.startswith(f"The agent does not get the plan: {plan}: cannot read the plan"))
+        plan.write_text("1. Do it.\n", encoding="utf-8")
+        self.assertEqual(attachments.plan_for_agent(self.store, "t3m9"), "1. Do it.\n")
+
 
 class AttachCliTests(CliTestCase):
     def setUp(self):
