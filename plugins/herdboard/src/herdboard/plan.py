@@ -26,8 +26,6 @@ from .store import TEMP_REF
 # A planning talk with the user can take hours; the worker stops watching after this.
 PLAN_TIMEOUT_SECONDS = 8 * 60 * 60
 POLL_SECONDS = 5
-# A planner that Herdr never shows in this time closed before the worker saw it.
-DETECT_SECONDS = 60
 
 PLAN_FORMAT = """    # Plan: <title>
 
@@ -184,8 +182,9 @@ class Planner:
         with _lock(".plan-" + safe_key(ref) + ".lock"):
             with _lock(wait=2):
                 running = _read(_plans_path()).get(ref)
-            # A planner whose pane is gone, after a worker that died, does not block a new one.
-            if isinstance(running, dict) and _reviewer_status(running["pane_id"]) is not None:
+            # A planner whose pane is gone, after a worker that died, does not block a new one. The pane
+            # counts, not the agent: Herdr can show no agent while Claude waits at its folder trust prompt.
+            if isinstance(running, dict) and _pane_exists(running["pane_id"]):
                 raise PlanError(f"A planner for {ref} still runs in pane {running['pane_id']}", "plan_running")
             plan_file = attachments.plan_path(self.config, ref)
             notes = []
@@ -231,6 +230,10 @@ class Planner:
                 "plan": str(plan_file)}
 
 
+def _pane_exists(pane: str) -> bool:
+    return herdr("pane", "get", pane, tolerated=("pane_not_found",)) is not None
+
+
 def _forget(ref: str, pane: str) -> None:
     with _lock(wait=2):
         records = _read(_plans_path())
@@ -249,26 +252,26 @@ def wait(store, ref) -> int:
     pane, last = record["pane_id"], record.get("plan_mtime")
     plan_file = attachments.plan_path(store.config, ref)
     deadline = time.monotonic() + PLAN_TIMEOUT_SECONDS
-    detect_deadline = time.monotonic() + DETECT_SECONDS
     seen = False
     status = None
     saves = 0
     while True:
         try:
             status = _reviewer_status(pane)
+            # Herdr can take a moment to detect a new agent, and can show none while Claude waits at its
+            # folder trust prompt. So a planner not seen yet ends only when its pane is gone.
+            ended = status is None and (seen or not _pane_exists(pane))
         except HerdboardError as error:
             # Herdr did not answer, so the planner can still run: ask again at the next poll.
             print(f"herdboard: {error}", file=sys.stderr)
         else:
-            # Herdr can take a moment to detect a new agent, so a planner not seen yet ends only after
-            # DETECT_SECONDS.
             seen = seen or status is not None
             current = _mtime(plan_file)
             if current is not None and current != last and status in (None, "idle", "done"):
                 activity.append(store, ref, f"Plan saved: {plan_file}", "herdboard")
                 last = current
                 saves += 1
-            if status is None and (seen or time.monotonic() >= detect_deadline):
+            if ended:
                 break
         if time.monotonic() >= deadline:
             break

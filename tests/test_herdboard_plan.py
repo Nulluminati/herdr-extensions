@@ -33,6 +33,8 @@ class PlanHerdr:
         self.on_poll = None
         # Called while the planner agent starts: it can write the plan.
         self.on_start = None
+        # Each pane check takes the next answer; False means the pane is gone. The pane exists by default.
+        self.panes = []
 
     def reply(self, argv, result=None, error=None):
         if error:
@@ -54,6 +56,10 @@ class PlanHerdr:
             if state == "error":
                 return self.reply(argv, error="server_unavailable")
             return self.reply(argv, {"agent": {"agent_status": state, "pane_id": args[2]}})
+        if operation == "pane get":
+            if not (self.panes.pop(0) if self.panes else True):
+                return self.reply(argv, error="pane_not_found")
+            return self.reply(argv, {"pane": {"pane_id": args[2]}})
         if operation == "agent start" and self.on_start:
             self.on_start()
         return self.reply(argv, {"type": "ok"})
@@ -164,7 +170,8 @@ class RequestTests(PlanTestCase):
 
     def test_a_running_planner_blocks_a_second_one(self):
         self.planner.plan(self.card.ref)
-        self.fake.states = ["idle"]
+        # Herdr shows no agent while Claude waits at its folder trust prompt, but the pane is there.
+        self.fake.states = [None]
         with self.assertRaises(plan.PlanError) as raised:
             self.planner.plan(self.card.ref)
         self.assertEqual(raised.exception.code, "plan_running")
@@ -172,7 +179,7 @@ class RequestTests(PlanTestCase):
 
     def test_a_planner_that_is_gone_does_not_block(self):
         self.planner.plan(self.card.ref)
-        self.fake.states = [None]
+        self.fake.panes = [False]
         self.planner.plan(self.card.ref)
         self.assertEqual(len(self.fake.find("tab", "create")), 2)
 
@@ -260,11 +267,13 @@ class WaitTests(PlanTestCase):
             self.assertEqual(self.wait(), 0)
         self.assertEqual(self.log()[-1], "Planning ended without a plan.")
 
-    def test_a_planner_that_closes_before_the_first_poll_ends_the_watch_soon(self):
+    def test_a_planner_not_shown_yet_is_awaited_while_its_pane_exists(self):
+        # Herdr can show no agent while Claude waits at its folder trust prompt.
         self.planner.plan(self.card.ref)
-        self.fake.states = []
-        with patch.object(plan, "DETECT_SECONDS", 0):
-            self.assertEqual(self.wait(), 0)
+        self.fake.states = [None, None, None]
+        self.fake.panes = [True, True, False]
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(len(self.fake.find("pane", "get")), 3)
         self.assertEqual(self.log()[-1], "Planning ended without a plan.")
         self.assertNotIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
 
