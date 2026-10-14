@@ -77,11 +77,12 @@ class Config:
 
 
 def config_path(path: Path | None = None) -> Path:
+    # Absolute, because agents and workers that get the path run in other folders.
     if path is not None:
-        return Path(path).expanduser()
+        return Path(path).expanduser().absolute()
     explicit = os.environ.get("HERDBOARD_CONFIG")
     if explicit:
-        return Path(explicit).expanduser()
+        return Path(explicit).expanduser().absolute()
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
     return base / "herdboard" / "config.toml"

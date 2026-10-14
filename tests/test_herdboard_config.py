@@ -8,7 +8,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard.config import load_config  # noqa: E402
+from herdboard.config import config_path, load_config  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
 
 
@@ -92,6 +92,12 @@ class ConfigTest(unittest.TestCase):
         config = load_config(path)
         self.assertEqual(config.todos_dir, self.dir / "home" / "t")
         self.assertEqual(config.vault_root, self.dir / "home" / "Notes")
+
+    def test_an_explicit_relative_config_path_becomes_absolute(self):
+        # Agents and workers run in other folders, so they get the full path.
+        with mock.patch("os.getcwd", return_value=str(self.dir / "work")):
+            self.assertEqual(config_path(Path("board.toml")), self.dir / "work" / "board.toml")
+            self.assertEqual(config_path("~/b.toml"), self.dir / "home" / "b.toml")
 
     def test_a_relative_todos_dir_becomes_absolute(self):
         # Agents run in other folders, so every path that herdboard gives them must be absolute.
