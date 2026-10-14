@@ -14,7 +14,8 @@ import tempfile
 import time
 from typing import Callable, Iterator
 
-from . import kanban_md
+from . import attachments, kanban_md
+from .activity import log_path
 from .migrate_convert import Item
 from .linear_links import ProjectLink, parse_links, replace_links
 from .config import MERGE_MODES, Config
@@ -495,7 +496,9 @@ class Store:
     def _new_id(self, taken: set[str]) -> str:
         while True:
             candidate = "t" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
-            if candidate not in taken:
+            # A deleted card keeps its log and attachments, so its ID stays taken.
+            if candidate not in taken and not (log_path(self.config, candidate).exists()
+                                               or attachments.folder(self.config, candidate).exists()):
                 taken.add(candidate)
                 return candidate
 

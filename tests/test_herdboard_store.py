@@ -197,6 +197,15 @@ class IdsTest(StoreTestCase):
             self.assertEqual(self.store._new_id({"taaa"}), "tbbb")
 
 
+    def test_an_id_with_a_log_or_attachments_is_not_reused(self):
+        # A deleted card keeps its log and attachments; a new card must not get them.
+        (self.todos / ".herdboard/log").mkdir(parents=True)
+        (self.todos / ".herdboard/log/taaa.md").write_text("- old\n")
+        (self.todos / ".herdboard/attachments/tbbb").mkdir(parents=True)
+        draws = iter("aaabbbccc")
+        with mock.patch("herdboard.store.secrets.choice", lambda alphabet: next(draws)):
+            self.assertEqual(self.store._new_id(set()), "tccc")
+
 SHIPPED = board_text(
     col("Todo", "- [ ] a ^taaa", "- [ ] b ^tbbb"),
     col("Shipped", "**Complete**"),
