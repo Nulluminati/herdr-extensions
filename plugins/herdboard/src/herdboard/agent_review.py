@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time
 
-from . import activity, start as start_module
+from . import activity, attachments, start as start_module
 from .config import THINKING_LEVELS
 from .model import HerdboardError
 from .review import Reviewer, ReviewError
@@ -52,8 +52,15 @@ def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
             "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)"]
 
 
-def request_text(card, record, base: str, folder: Path, untracked: list[str]) -> str:
+def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = ()) -> str:
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
+    plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
+    others = [entry for entry in files if entry is not plan]
+    card_files = ""
+    if plan:
+        card_files += f"Check that the change follows the plan that the user agreed on: `{plan['path']}`\n"
+    if others:
+        card_files += "The card's other attachments:\n" + "".join(f"- `{entry['path']}`\n" for entry in others)
     body = "\n".join(card.body).strip() if card is not None else ""
     return f"""# Review request
 
@@ -68,7 +75,7 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 - New untracked files (read them from the repository):
 {untracked_list}
 
-Review this change for bugs, security problems and missing tests.
+{card_files}Review this change for bugs, security problems and missing tests.
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
@@ -125,7 +132,8 @@ class AgentReviewer(Reviewer):
                                                dir=reviews))
                 (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
                 (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
-                (folder / "request.md").write_text(request_text(card, record, base, folder, untracked), encoding="utf-8")
+                (folder / "request.md").write_text(request_text(
+                    card, record, base, folder, untracked, attachments.listing(self.config, ref)), encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
             pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),

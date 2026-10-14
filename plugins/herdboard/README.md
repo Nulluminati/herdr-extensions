@@ -155,7 +155,7 @@ A failed `start` reports the steps that worked. Run `start` again to continue fr
 
 The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. Claude can read the repository and edit the card's attachments without a question. For other tools, it follows your default permission mode. pi gets only read, search and write tools, and no shell. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
 
-A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours.
+A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours, but a planner that still runs still blocks a second one.
 
 `plan` on a card that has a plan gives the planner the current plan to revise. A second `plan` for a card whose planner still runs fails with `plan_running`.
 
@@ -169,7 +169,7 @@ Attachments hold documents that are too large for the card text, such as a speci
 - `herdboard attach <id> --remove NAME` removes an attachment.
 - `herdboard show <id>` lists the attachments.
 
-The work brief from `start` and `review` includes the `plan.md` attachment in full, and lists the other attachments by path.
+The work brief from `start` and `review` includes the `plan.md` attachment in full, and lists the other attachments by path. An agent review gets the path of each attachment, and checks the work against the plan.
 
 ### Activity log
 

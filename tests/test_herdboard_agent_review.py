@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard import agent_review, review, start  # noqa: E402
+from herdboard import agent_review, attachments, review, start  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_merge import GitHerdr, MergeTestCase  # noqa: E402
 
@@ -111,6 +111,25 @@ class RequestTests(AgentReviewTestCase):
         for part in ("Fix login timeout", self.branch, self.main_branch(), str(self.worktree), "b.txt",
                      str(folder / "findings.md")):
             self.assertIn(part, text)
+
+    def test_the_request_names_the_plan_and_the_other_attachments(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        for name in ("plan.md", "spec.md"):
+            source = self.root / name
+            source.write_text("# Doc\n")
+            attachments.add(self.store, self.card.ref, source)
+        text = (Path(self.request()["folder"]) / "request.md").read_text()
+        folder = attachments.folder(self.store.config, self.card.ref)
+        self.assertIn(f"Check that the change follows the plan that the user agreed on: `{folder / 'plan.md'}`", text)
+        self.assertIn(f"- `{folder / 'spec.md'}`", text)
+
+    def test_a_request_without_attachments_names_none(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        text = (Path(self.request()["folder"]) / "request.md").read_text()
+        self.assertNotIn("plan that the user agreed on", text)
+        self.assertNotIn("attachments", text)
 
     def test_the_other_kind_reviews_in_a_split_next_to_the_card_agent(self):
         self.started()
