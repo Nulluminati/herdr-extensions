@@ -157,6 +157,8 @@ The planner gets a brief with the card, its linked notes, its attachments, its l
 
 A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours, but a planner that still runs still blocks a second one.
 
+When planning ends with a changed plan and the card's work agent still runs, the worker tells that agent to read the plan. The agent tells you how its work differs, and waits for you to decide.
+
 `plan` on a card that has a plan gives the planner the current plan to revise. A second `plan` for a card whose planner still runs fails with `plan_running`.
 
 `--agent claude|pi`, `--model` and `--thinking` (pi only) choose the planner. On the board, `P` asks for them.
@@ -169,7 +171,7 @@ Attachments hold documents that are too large for the card text, such as a speci
 - `herdboard attach <id> --remove NAME` removes an attachment.
 - `herdboard show <id>` lists the attachments.
 
-The work brief from `start` and `review` includes the `plan.md` attachment in full, and lists the other attachments by path. An agent review gets the path of each attachment, and checks the work against the plan.
+When `start` starts the work agent, its brief includes the `plan.md` attachment in full, and lists the other attachments by path. `review` and a rebase conflict give a brief only to a new agent, when the card's agent is gone. A running agent gets no new brief. An agent review gets the path of each attachment, and checks the work against the plan.
 
 ### Activity log
 
