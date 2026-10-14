@@ -169,7 +169,7 @@ class RequestTests(PlanTestCase):
     def test_the_log_and_the_worker_follow(self):
         self.planner.plan(self.card.ref, model="opus")
         self.assertEqual(self.log(), ["Planning started: claude (opus)."])
-        self.assertEqual(self.workers[0][0], ["plan-wait", self.card.ref])
+        self.assertEqual(self.workers[0][0], ["plan-wait", self.card.ref, "--pane", "w1:p7"])
         record = json.loads((start.state_dir() / "plans.json").read_text())[self.card.ref]
         self.assertEqual(record["pane_id"], "w1:p7")
 
@@ -218,10 +218,10 @@ class RequestTests(PlanTestCase):
 
 
 class WaitTests(PlanTestCase):
-    def wait(self):
+    def wait(self, pane="w1:p7"):
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
-            code = plan.wait(self.store, self.card.ref)
+            code = plan.wait(self.store, self.card.ref, pane)
         return code
 
     def write_plan(self, text="# Plan\n"):
@@ -320,6 +320,13 @@ class WaitTests(PlanTestCase):
             self.planner.plan(self.card.ref)
         self.assertEqual(raised.exception.code, "plan_running")
 
+    def test_a_worker_that_starts_after_another_planner_does_not_watch_it(self):
+        self.planner.plan(self.card.ref)
+        self.assertEqual(self.wait(pane="w1:p3"), 0)
+        self.assertEqual(self.fake.find("agent", "get"), [])
+        self.assertEqual(self.log(), ["Planning started: claude."])
+        self.assertIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
+
     def test_no_record_means_nothing_to_wait_for(self):
         self.assertEqual(self.wait(), 1)
 
@@ -351,8 +358,8 @@ class PlanCliTests(CliTestCase):
 
     def test_plan_wait_returns_the_worker_code(self):
         with patch.object(plan, "wait", return_value=1) as waited:
-            self.run_cli("plan-wait", "t123", directory=self.plain, expect=1)
-        self.assertEqual(waited.call_args.args[1], "t123")
+            self.run_cli("plan-wait", "t123", "--pane", "w1:p7", directory=self.plain, expect=1)
+        self.assertEqual(waited.call_args.args[1:], ("t123", "w1:p7"))
 
 
 if __name__ == "__main__":

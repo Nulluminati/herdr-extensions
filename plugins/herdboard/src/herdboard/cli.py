@@ -166,6 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("plan-wait", "log each save of the plan until the planner ends (run by plan)")
     sub.add_argument("ref")
+    sub.add_argument("--pane", required=True, help="the planner's pane")
 
     sub = command("review", "review a started card's work: in Hunk next to its agent, by another agent, or both")
     sub.add_argument("ref")
@@ -674,7 +675,7 @@ def _cmd_plan(ctx: _Context) -> dict:
 
 def _cmd_plan_wait(ctx: _Context) -> dict:
     ref = ctx.args.ref
-    return {"ref": ref, "exit_code": plan.wait(ctx.store, ref)}
+    return {"ref": ref, "exit_code": plan.wait(ctx.store, ref, ctx.args.pane)}
 
 
 def _cmd_review(ctx: _Context) -> dict:

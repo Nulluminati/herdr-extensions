@@ -221,7 +221,7 @@ class Planner:
         log = state_dir() / "plans" / f"{safe_key(ref)}.log"
         try:
             log.parent.mkdir(parents=True, exist_ok=True)
-            start_worker([*config, "plan-wait", ref], log)
+            start_worker([*config, "plan-wait", ref, "--pane", pane], log)
         except OSError as error:
             # The planner still works without the worker; only the log of its saves is missing.
             activity.append(self.store, ref, f"The plan saves are not logged: the worker did not start: {error}",
@@ -242,14 +242,17 @@ def _forget(ref: str, pane: str) -> None:
             _write(_plans_path(), records)
 
 
-def wait(store, ref) -> int:
-    """The background worker: log each save of the plan until the planner ends. Returns the exit code."""
+def wait(store, ref, pane: str) -> int:
+    """The background worker: log each save of the plan until the planner in `pane` ends. Returns the exit code."""
     with _lock(wait=2):
         record = _read(_plans_path()).get(ref)
     if not isinstance(record, dict):
         print(f"herdboard: no planner is recorded for {ref}", file=sys.stderr)
         return 1
-    pane, last = record["pane_id"], record.get("plan_mtime")
+    if record["pane_id"] != pane:
+        # A later planner replaced this one before the worker started: that planner has its own worker.
+        return 0
+    last = record.get("plan_mtime")
     plan_file = attachments.plan_path(store.config, ref)
     deadline = time.monotonic() + PLAN_TIMEOUT_SECONDS
     seen = False
