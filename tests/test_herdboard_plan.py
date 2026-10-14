@@ -263,9 +263,18 @@ class WaitTests(PlanTestCase):
     def test_a_planner_that_never_shows_up_times_out(self):
         self.planner.plan(self.card.ref)
         self.fake.states = []
+        self.fake.panes = [True, False]
         with patch.object(plan, "PLAN_TIMEOUT_SECONDS", 0):
             self.assertEqual(self.wait(), 0)
         self.assertEqual(self.log()[-1], "Planning ended without a plan.")
+
+    def test_a_planner_not_shown_in_a_pane_that_exists_keeps_its_record_after_the_watch(self):
+        self.planner.plan(self.card.ref)
+        self.fake.states = []
+        with patch.object(plan, "PLAN_TIMEOUT_SECONDS", 0):
+            self.assertEqual(self.wait(), 0)
+        self.assertTrue(self.log()[-1].startswith("The plan saves are no longer logged"))
+        self.assertIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
 
     def test_a_planner_not_shown_yet_is_awaited_while_its_pane_exists(self):
         # Herdr can show no agent while Claude waits at its folder trust prompt.

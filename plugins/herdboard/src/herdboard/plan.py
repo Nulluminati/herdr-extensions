@@ -254,6 +254,7 @@ def wait(store, ref) -> int:
     deadline = time.monotonic() + PLAN_TIMEOUT_SECONDS
     seen = False
     status = None
+    ended = False
     saves = 0
     while True:
         try:
@@ -276,17 +277,22 @@ def wait(store, ref) -> int:
         if time.monotonic() >= deadline:
             break
         time.sleep(POLL_SECONDS)
-    if status is not None:
+    try:
+        running = not ended and (status is not None or _pane_exists(pane))
+    except HerdboardError:
+        # Herdr did not answer, so the planner can still run.
+        running = True
+    if running:
         # The record stays, so the planner still blocks a second one for the card.
         activity.append(store, ref, "The plan saves are no longer logged: the planner still runs after "
                         f"{PLAN_TIMEOUT_SECONDS // 3600} hours.", "herdboard")
         return 0
     _forget(ref, pane)
     if saves:
-        ended = "Planning ended."
+        message = "Planning ended."
     elif record.get("plan_mtime") is not None:
-        ended = "Planning ended without a change to the plan."
+        message = "Planning ended without a change to the plan."
     else:
-        ended = "Planning ended without a plan."
-    activity.append(store, ref, ended, "herdboard")
+        message = "Planning ended without a plan."
+    activity.append(store, ref, message, "herdboard")
     return 0
