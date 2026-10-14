@@ -1,28 +1,29 @@
 # Peer review
 
-Ask the other agent to review uncommitted changes. When there are none, the reviewer gets the commits on the branch since its upstream (`git diff @{u}...HEAD`). Claude's changes go to pi, and pi's changes go to Claude. The reviewer opens in a split pane next to the requester, writes its findings to a file, and the requester gets a prompt to read them.
+Have the other coding agent review your agent's work, inside Herdr. Claude's work goes to pi, and pi's work goes to Claude.
 
-The requester lists each finding with its opinion and then waits for you. It does not change code. One request is one review round.
+The reviewer opens in a split next to your agent. It writes its findings to a file. Your agent then gets a prompt to read them, says for each finding whether it agrees or disagrees, and waits for you. Neither agent changes code. One request is one review round.
 
-## Parts
+## What gets reviewed
 
-- `herdr-plugin.toml` and `bin/peer_review.py`: the Herdr plugin, ID `nulluminati.peer-review`. The `request` action reviews the focused agent's changes.
-- `skills/peer-review/SKILL.md`: the skill that lets Claude and pi request a review. Both agents read `~/.agents/skills/`.
+1. The uncommitted changes: tracked changes against `HEAD`, and new untracked files.
+2. When there are none, the commits on the branch since its upstream (`git diff @{u}...HEAD`).
+
+When there is nothing to review, or the branch has no upstream, the request fails and Herdr shows a notification.
 
 ## Install
 
-From a local clone, so edits take effect at once:
-
-```bash
-herdr plugin link ~/Projects/herdr-extensions/plugins/peer-review
-skills add Nulluminati/herdr-extensions@peer-review -g -y
-```
-
-Or from GitHub:
+Requirements: Herdr 0.9 or later, Python 3.11 or later, Claude Code and pi. The agent skill also needs `jq`.
 
 ```bash
 herdr plugin install Nulluminati/herdr-extensions/plugins/peer-review
-skills add Nulluminati/herdr-extensions@peer-review -g -y
+npx skills add Nulluminati/herdr-extensions@peer-review -g -y
+```
+
+To work on the plugin from a clone, link it instead, so edits take effect at once:
+
+```bash
+herdr plugin link ~/Projects/herdr-extensions/plugins/peer-review
 ```
 
 Bind the action in `~/.config/herdr/config.toml`:
@@ -37,31 +38,37 @@ description = "peer review: ask the other agent to review the focused agent's ch
 
 ## Use
 
-- Press the bound key in a Claude or pi pane, or
-- Ask the agent: "get a peer review from pi" (or "from Claude").
+Do one of these:
 
-The review files go to `~/.local/state/peer-review/<timestamp>/`:
+- Press the bound key in a Claude or pi pane.
+- Ask the agent for a review, for example "get a peer review from pi". The skill runs the request.
+
+The request returns at once. A background worker waits for the findings and then prompts your agent.
+
+Each review has a folder, `~/.local/state/peer-review/<timestamp>/`:
 
 | File | Content |
 |---|---|
-| `request.md` | Instructions for the reviewer |
-| `diff.patch` | Tracked changes against `HEAD` |
+| `request.md` | The instructions for the reviewer |
+| `diff.patch` | The change under review |
 | `findings.md` | The reviewer's findings |
 | `worker.log` | Errors from the background worker |
 
 ## Reviewer permissions
 
-- pi runs with only the `read`, `grep`, `find`, `ls` and `write` tools. It cannot run commands or edit files, but `write` is not limited to the review directory.
-- Claude runs in `dontAsk` mode. It can only read, search and edit files inside the review directory.
+- pi runs with only the `read`, `grep`, `find`, `ls` and `write` tools. It cannot run commands or edit files. Its `write` tool is not limited to the review folder.
+- Claude runs in `dontAsk` mode. It can read and search, and it can edit only files in the review folder.
 
 ## Known limits
 
-- In a folder that Claude has not seen, Claude shows its folder trust prompt first. Answer it in the reviewer pane. The review then starts.
-- The requester must be a Claude or pi pane inside a Git repository. The repository needs uncommitted changes, or commits on a branch that has an upstream.
-- A failed request shows a Herdr notification. The details are also in `herdr plugin log list`.
+- In a folder where no Claude ran before, Claude shows its folder trust prompt first. Answer it in the reviewer pane, and the review starts.
+- The focused pane must run Claude or pi, inside a Git repository.
+- `herdr plugin log list` shows the details of a failed request.
 
 ## Tests
 
 ```bash
 uv run python -m unittest tests/test_peer_review.py
 ```
+
+Run it from the repository root.

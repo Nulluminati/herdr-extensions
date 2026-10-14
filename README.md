@@ -1,14 +1,15 @@
 # herdr-extensions
 
-Plugins for [Herdr](https://herdr.dev), the terminal multiplexer for coding agents. They are built for Claude Code and pi.
+Plugins for [Herdr](https://herdr.dev), the terminal multiplexer for coding agents. They work with Claude Code and pi.
 
 | Plugin | What it does |
 |---|---|
-| [peer-review](plugins/peer-review/) | Asks the other agent to review uncommitted changes. Claude's work goes to pi, and pi's work goes to Claude. |
+| [herdboard](plugins/herdboard/) | A kanban board for Markdown todos and Linear issues. A card can start work in its own worktree with an agent, then go through review and merge, locally or as a draft GitHub pull request. |
+| [peer-review](plugins/peer-review/) | Has the other agent review your agent's work: Claude's work goes to pi, and pi's work goes to Claude. It reviews uncommitted changes, else the branch commits since the upstream. |
 
 ## Install
 
-Each plugin lives in its own directory under `plugins/`. Install one from GitHub:
+Install a plugin from GitHub:
 
 ```bash
 herdr plugin install Nulluminati/herdr-extensions/plugins/<plugin>
@@ -21,10 +22,14 @@ git clone git@github.com:Nulluminati/herdr-extensions.git ~/Projects/herdr-exten
 herdr plugin link ~/Projects/herdr-extensions/plugins/<plugin>
 ```
 
-A plugin that ships agent skills lists the `skills add` command in its README.
+Each plugin's README gives the other steps: its agent skill, its key binding and, for herdboard, the `herdboard` command.
 
 ## Development
+
+Run the tests from the repository root:
 
 ```bash
 uv run python -m unittest discover -s tests
 ```
+
+[AGENTS.md](AGENTS.md) describes the layout and the rules for plugin code.
