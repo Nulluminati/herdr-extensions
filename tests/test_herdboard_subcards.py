@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard import merge, start  # noqa: E402
+from herdboard import cli, merge, start  # noqa: E402
 from herdboard.board import card_matches, mark_family  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.model import HerdboardError, parent_of, split_title, with_parent  # noqa: E402
@@ -54,6 +54,10 @@ class LinearFamilyTests(unittest.TestCase):
         child = linear_card("ENG-2", "Add invoice table", parent="ENG-1")
         mark_family([child])
         self.assertEqual(child.parent_title, "ENG-1")
+
+    def test_list_text_keeps_link_text_in_a_linear_title(self):
+        card = linear_card("ENG-2", "Fix [[#^t123]] parsing")
+        self.assertEqual(cli._card_text(card), "  ENG-2  Fix [[#^t123]] parsing")
 
     def test_a_caret_filter_finds_a_sub_issue_family(self):
         child = linear_card("ENG-2", "Add invoice table", parent="ENG-1")

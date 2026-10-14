@@ -217,7 +217,9 @@ def _card_line(card: CardView) -> str:
 
 
 def _card_text(card: CardView) -> str:
-    line = f"  {card.ref}  {with_parent(card.title, None)}"
+    # A Linear issue keeps its parent outside the title, so its title text stays as it is.
+    title = card.title if card.source == "linear" else with_parent(card.title, None)
+    line = f"  {card.ref}  {title}"
     if card.source == "linear":
         if card.state and card.state.casefold() != card.column.casefold():
             line += f"  [{card.state}]"
