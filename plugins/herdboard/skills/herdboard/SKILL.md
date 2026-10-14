@@ -75,7 +75,8 @@ herdboard --json review tep3                  # open the card's branch diff in H
 herdboard --json review tep3 --agent --reviewer pi --model zai/glm-5.3   # another agent reviews; the card's agent gets the findings
 herdboard --json review tep3 --both           # an agent review first, then Hunk
 herdboard --json merge tep3                   # the repository's mode: local (rebase, fast-forward, finish) or PR
-herdboard --json merge tep3 --pr              # push the branch and open a GitHub pull request; the card stays in Review
+herdboard --json merge tep3 --pr              # an agent writes the description, then a draft PR opens; the card stays in Review
+herdboard --json merge tep3 --pr --rewrite    # an open PR: an agent rewrites its description (without --rewrite: push only)
 herdboard --json finish tep3                  # after a merge: remove the worktree and branch, card to Done
 herdboard --json promote tep3                 # add --team ENG or --project NAME when the user names them
 herdboard --json add --linear "Fix the login timeout" --team ENG
@@ -130,7 +131,8 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
 | `review_running` | An agent review of the card still runs. Tell the user; its findings arrive by themselves. |
 | `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes. Tell the user. |
-| `worker_failed` | The agent review worker did not start, and the reviewer was closed. Tell the user the message. |
+| `worker_failed` | The agent review or pull request worker did not start, and its agent was closed. Tell the user the message. |
+| `pr_writing` | An agent still writes the card's pull request description. Wait; the PR opens when it is done. |
 | `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. |
 | `nothing_to_merge` | The card branch has no commits ahead of its base. Tell the user. |
 | `base_dirty` | The checkout of the base branch has uncommitted changes. Tell the user to commit or stash them. |

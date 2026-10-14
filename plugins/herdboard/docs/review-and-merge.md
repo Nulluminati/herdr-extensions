@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. All 8 build steps are built.
+Status: design draft. All 9 build steps are built.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -51,6 +51,7 @@ Non-goals: a merge queue that runs by itself, CI checks before a local merge, re
 | `pr_url` | The PR URL after `merge --pr` |
 | `pr_state` | The last PR state that the board read: `open`, `merged` or `closed` |
 | `pr_checked` | The time of that read |
+| `pr_write` | While an agent writes the PR description: the folder, the writer pane (or no key when the card's agent writes), whether it rewrites an open PR |
 
 A record that was written before this change has no `base`. Commands that need the base then use the upstream of the card branch (see "Base branch"). Without an upstream, they stop with `base_unknown`.
 
@@ -107,7 +108,7 @@ A sub-card has an Obsidian block link to its parent on its first line, before it
 |---|---|
 | `herdboard log <id> "text"` | Append an entry to the card's activity log |
 | `herdboard review <id> [--human \| --agent \| --both]` | Open the card's work in Hunk next to its agent, have another agent review it, or both |
-| `herdboard merge <id> [--local \| --pr] [--force]` | Merge the card branch into its base |
+| `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch into its base |
 | `herdboard finish <id> [--force]` | Remove the worktree and the branch, and move the card to Done |
 | `herdboard start <id> [--base REF]` | As now, plus the base |
 | `herdboard add "text" [--parent ID]` | As now, plus the parent link |
@@ -191,13 +192,63 @@ The tool does not push the base. CI runs when you push it.
 
 #### PR
 
-1. Push the branch without `-u`: `git push origin <branch>`.
-2. Run `gh pr create --base <base> --head <branch> --title <card title> --body <body>`. The body has the card description and a link to the Linear issue, if one exists. It does not have the log.
-3. Store `pr_url` and `pr_state = "open"`.
-4. Log: `PR opened: <url>.`
-5. The card stays in Review.
+An agent writes the PR title and description. herdboard pushes the branch and opens the PR.
 
-If a PR for the branch already exists, `merge --pr` stores its URL and does not create another.
+1. If `pr_write` is in the start record and its writer still runs, stop with `pr_writing`.
+2. If a PR for the branch is already open, store its URL:
+   - Without `--rewrite`: push the branch without `-u` (`git push origin <branch>`), log `PR updated: <url>`, and stop.
+   - With `--rewrite`: continue at step 3. The board asks first: "A pull request is open. Rewrite its description? This replaces any edits made on GitHub."
+3. Find the PR templates in the worktree, in the places that GitHub reads: `pull_request_template.md` in the root, `.github/` and `docs/`, and every `.md` file in a `PULL_REQUEST_TEMPLATE/` folder in those places. Names are not case-sensitive.
+4. Write the folder `<state>/prs/<key>-<time>-<random>/` with `request.md` and `branch.patch` (`git diff <base>...HEAD`). `request.md` has the card title and description, the branch, the base, the template paths and the rules below.
+5. Choose the writer:
+   - If the card's agent runs, it writes. herdboard prompts it when it is idle.
+   - Else, start a writer agent of the card's kind in a split of the workspace root pane, as `hb-<id>-pr`. It has the same read-only limits as the agent reviewer, and it can write only `pr.md` in the folder. Its first message also has the full log.
+6. Store `pr_write`. Log: `PR description requested from <writer>.`
+7. Start a background worker and return.
+
+The writer's rules, in `request.md`:
+
+- Write `pr.md`. The first line is the title. The rest is the body.
+- The title always follows one conventional commit guide, whatever the style of the repository: `<type>(<scope>): <summary>`. The type is one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci` or `chore`. The scope is optional. The summary is in the imperative mood, starts in lower case and has no period. The title is at most 72 characters. A breaking change adds `!` before the colon.
+- Describe only the testing that the notes or the change show. Claim no check that nobody ran.
+- With one template, follow it: the same headings in the same order. With several, pick the one that fits.
+- With no template, use this format. Leave out "Trade-offs" when there are none:
+
+  ```markdown
+  <title>
+
+  ## Why
+  One to three sentences: what was wrong or missing, and who it affected.
+
+  ## What changed
+  The approach and the decisions, not a list of changed files.
+
+  ## Trade-offs
+  What was given up, or the risks.
+
+  ## Testing
+  How the change was checked.
+  ```
+
+- Keep it short. Write plain prose. Use the `humanizer` skill if you have it.
+- Do not name the tools, the agent or the card. Do not add a Linear link.
+- Do not run `gh`, push, or change code.
+
+The worker:
+
+1. Waits for `pr.md` and an idle writer, for 30 minutes at most.
+2. Closes the writer pane, if herdboard started one.
+3. Reads the title from the first line, without a leading `#`. An empty title is a failure.
+4. Adds `Linear: <url>` at the end of the body for a Linear card.
+5. Pushes the branch without `-u`.
+6. Runs `gh pr create --draft --base <base> --head <branch> --title <title> --body-file <body>`. With `--rewrite`, it runs `gh pr edit <url> --title <title> --body-file <body>`.
+7. Stores `pr_url` and `pr_state = "open"`, and removes `pr_write`.
+8. Logs `PR opened: <url>` or `PR description rewritten: <url>`.
+9. Shows a Herdr notification with the URL.
+
+On a failure (no `pr.md`, a timeout, an empty title, a push or `gh` error), the worker logs `PR not opened: <reason>`, shows a notification, and removes `pr_write`. It opens no PR. If the card was finished first, the worker only closes the writer pane.
+
+The card stays in Review. The board shows `PR: writing` while `pr_write` exists. The PR has no line that names herdboard.
 
 ### finish
 
@@ -292,7 +343,8 @@ merge: pr
 | `parent_not_promoted` | A sub-card was promoted before its parent |
 | `review_running` | An agent review of the card still runs |
 | `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes |
-| `worker_failed` | The agent review worker did not start. The reviewer pane is closed |
+| `worker_failed` | The agent review or PR worker did not start. Its pane is closed |
+| `pr_writing` | An agent still writes the card's PR description |
 
 ## Claude and pi
 
@@ -303,6 +355,7 @@ merge: pr
 | Hunk feedback | hunkdiff `send-review` to the pane | Same |
 | Conflict message | `herdr agent prompt` | Same |
 | Agent reviewer | `--permission-mode dontAsk`, read tools, edits only in the review folder | `--tools read,grep,find,ls,write` |
+| PR writer | The card's agent, else a writer with the reviewer's limits | Same |
 | New agent | `herdr agent start --kind claude` with the brief and the log | `--kind pi`, same message |
 
 Claude can stop at a permission prompt for `git commit`. That delays Review, but does not change the design.
@@ -325,9 +378,10 @@ Each step is usable without the steps after it.
 6. Sub-cards and parent cards.
 7. `promote` of sub-cards.
 8. Agent review from `review` and the board.
+9. Agent-written draft PRs: the writer, the worker, `--rewrite` and the board confirmation.
 
 ## Testing
 
 - Unit tests use a fake `herdr`, a fake `gh` and temporary Git repositories. Rebase, conflict, fast-forward and branch removal run against real Git in a temporary folder.
 - Live test in a Herdr pane with a throwaway repository, for each agent kind: start, commit, review, feedback through Hunk, local merge with and without a conflict, finish.
-- Live test of the PR path on a throwaway GitHub repository.
+- Live test of the PR path on a throwaway GitHub repository: a new draft PR with and without a template, a PR written by a writer agent, and `--rewrite` of an open PR.

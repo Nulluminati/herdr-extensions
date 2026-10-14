@@ -68,7 +68,7 @@ HELP_KEYS = [
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
     ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
     ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
-    ("m", "merge the card branch into its base (local or PR, from the config), then finish, after you confirm"),
+    ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
     ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
     ("v", "cycle view: repo, inbox, all, mine"),
     ("t", "hide or show Linear cards"),
@@ -167,6 +167,8 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
         info.append(Text("worktree still exists", style="bold yellow"))
     if card.agent_review:
         info.append(Text(f"agent review: {card.agent_review}", style="bold"))
+    if card.pr_writing:
+        info.append(Text("PR: writing", style="bold"))
     if card.parent_title:
         info.append(Text(f"↳ {card.parent_title}", style="dim"))
     if card.sub_cards:
@@ -1167,7 +1169,8 @@ class HerdboardApp(App):
         cards = [card for column in self.loaded for card in column.cards]
 
         def status():
-            return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review) for card in cards]
+            return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review, card.pr_writing)
+                    for card in cards]
 
         old = status()
         try:
@@ -1576,18 +1579,41 @@ class HerdboardApp(App):
         if card is None:
             return
         ref = card.ref
-        run = (lambda: self.merge_card(ref)) if self.merge_card else (lambda: self._merger().merge(ref))
+        pr_open = card.pr_state == "open"
+
+        def run_merge(**options) -> dict:
+            return self.merge_card(ref, **options) if self.merge_card else self._merger().merge(ref, **options)
 
         def notice(result: dict) -> str:
+            if result["mode"] == "pr" and result["pr_action"] == "pushed":
+                return f"Pushed {result['ref']} to its pull request {result['pr_url']}"
             if result["mode"] == "pr":
-                return f"Pull request for {result['ref']}: {result['pr_url']}"
+                writer = result["writer"][0].upper() + result["writer"][1:]
+                return f"{writer} writes the pull request description of {result['ref']}"
             return f"Merged {result['ref']} into {result['base']} at {result['commit'][:7]}, then finished it"
+
+        def rewrite(answer: bool) -> None:
+            self._card_action(lambda: run_merge(rewrite=bool(answer)), notice)
+
+        def confirmed(answer: bool) -> None:
+            if not answer:
+                return
+            if not pr_open:
+                self._card_action(run_merge, notice)
+                return
+            self.push_screen(
+                ConfirmScreen("A pull request is open. Rewrite its description?",
+                              "Yes: an agent writes it again. This replaces any edits made on GitHub. "
+                              "No: only push the branch."),
+                rewrite,
+            )
 
         self.push_screen(
             ConfirmScreen(f"Merge {ref}: {card.title} into its base?",
                           "Local: rebase onto the base, move the base forward, remove the worktree. "
-                          "PR: push the branch and open a pull request. The board or config sets the mode."),
-            lambda answer: self._card_action(run, notice) if answer else None,
+                          "PR: an agent writes the description, then a draft pull request opens. "
+                          "The board or config sets the mode."),
+            confirmed,
         )
 
     def action_finish(self) -> None:

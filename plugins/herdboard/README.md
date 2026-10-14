@@ -221,7 +221,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model NAME] [--thinking LEVEL]` | Open the card's branch diff in Hunk next to its agent, have another agent review it, or both (see below) |
-| `herdboard merge <id> [--local \| --pr] [--force]` | Merge the card branch into its base and finish the card, or open a GitHub pull request (see below). A parent card with sub-cards that are not done stops with `children_open`; `--force` merges anyway |
+| `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch into its base and finish the card, or have an agent describe a draft GitHub pull request (see below). A parent card with sub-cards that are not done stops with `children_open`; `--force` merges anyway |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move the card to Done (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
 | `herdboard link <project> [--label]` | Link the current repository board to a Linear project |
@@ -302,7 +302,14 @@ The design is in [docs/review-and-merge.md](docs/review-and-merge.md). The local
 
 The tool does not push the base.
 
-The PR mode pushes the branch to `origin` without `-u`, and sets the base as the upstream again. Then it reuses an open pull request of the branch, or runs `gh pr create` with the card's title and description. It stores the URL, logs `PR opened: <url>`, and leaves the card in Review. Running `merge --pr` again pushes new commits to the same pull request. Errors: `gh_unavailable`, `push_failed`, `pr_failed`.
+The PR mode has an agent write the pull request title and description:
+
+1. If the branch already has an open pull request, `merge --pr` only pushes the new commits and logs `PR updated: <url>`. With `--rewrite`, an agent also writes its description again (the board asks first, because this replaces edits made on GitHub).
+2. Otherwise herdboard writes a request to `<state>/prs/<card>-<time>-<random>/`: the card, its log, the branch diff, and the pull request templates of the repository (`pull_request_template.md` in the root, `.github/` or `docs/`, in any case, and `PULL_REQUEST_TEMPLATE/*.md`). Without a template, the request gives a short format: Why, What changed, Trade-offs (only when there are some), Testing.
+3. The card's agent writes `pr.md`: the title on the first line, as a conventional commit (`feat(auth): add magic links`), then the description. When the card's agent is gone, a read-only writer agent of the same kind starts in a split, as `hb-<id>-pr`. The text names no tools and no card.
+4. A background worker (`herdboard pr-wait`) waits for `pr.md` for up to 30 minutes. Then it pushes the branch to `origin` without `-u`, sets the base as the upstream again, and runs `gh pr create --draft` (or `gh pr edit` with `--rewrite`). For a Linear card it adds the issue link at the end. It stores the URL, logs `PR opened: <url>`, and shows a Herdr notification. The card stays in Review and shows `PR: writing` until then.
+
+A failure (no text, a timeout, a push or `gh` error) logs `PR not opened: <reason>` and shows a notification; no pull request opens. Errors: `gh_unavailable`, `push_failed`, `pr_failed`, `pr_writing` (an agent still writes the description), `worker_failed`.
 
 The board reads the state of each open pull request at most once a minute with `gh pr view`. A card shows `PR open`, `PR merged` or `PR closed`. A card in Done that still has its worktree shows `worktree still exists`. The board never runs `finish` itself.
 
@@ -310,7 +317,7 @@ The board reads the state of each open pull request at most once a minute with `
 
 The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config (default `local`).
 
-On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`. `p` sets or removes the parent of a todo. A sub-card shows `↳ <parent title>`, a parent shows `2/5 done`, and the filter `^t5aa` shows `t5aa` and its sub-cards. A Linear sub-issue shows the same way, with its parent from Linear. When the parent is not in the view, it shows the parent's identifier, such as `↳ ENG-12`.
+On the board, `m` merges and `f` finishes the selected card, after you confirm with `y`. When the card has an open pull request, `m` then asks whether an agent rewrites its description; `n` only pushes. `p` sets or removes the parent of a todo. A sub-card shows `↳ <parent title>`, a parent shows `2/5 done`, and the filter `^t5aa` shows `t5aa` and its sub-cards. A Linear sub-issue shows the same way, with its parent from Linear. When the parent is not in the view, it shows the parent's identifier, such as `↳ ENG-12`.
 
 ### promote
 

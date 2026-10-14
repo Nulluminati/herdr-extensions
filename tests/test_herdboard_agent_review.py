@@ -24,6 +24,8 @@ class ReviewerHerdr(GitHerdr):
         self.findings = "## Confirmed problems\n- [high] a.py:1: bug. Fix it.\n- [low] a.py:2: style.\n"
         self.review_folder = None
         self.reviewer_pane = None
+        # The file that the agent in the split writes when it turns idle.
+        self.output = "findings.md"
 
     def __call__(self, argv, timeout=120):
         args = argv[1:]
@@ -54,7 +56,7 @@ class ReviewerHerdr(GitHerdr):
             if state is None:
                 return self.reply(argv, error="agent_not_found")
             if state == "idle" and self.findings is not None and self.review_folder:
-                (self.review_folder / "findings.md").write_text(self.findings)
+                (self.review_folder / self.output).write_text(self.findings)
             return self.reply(argv, {"agent": {"agent_status": state, "pane_id": args[2]}})
         return super().__call__(argv, timeout)
 

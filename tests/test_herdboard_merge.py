@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard import activity, merge, start  # noqa: E402
+from herdboard import activity, merge, pr_write, start  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_review import PaneHerdr, ReviewTestCase  # noqa: E402
 
@@ -275,7 +275,7 @@ class FinishTests(MergeTestCase):
 
 
 class FakeGh:
-    """`gh` for pull requests: list, create and view, with the URL of one pull request."""
+    """`gh` for pull requests: list, create, edit and view, with the URL of one pull request."""
 
     def __init__(self):
         self.calls = []
@@ -283,14 +283,20 @@ class FakeGh:
         self.state = "OPEN"
         self.missing = False
         self.url = "https://github.com/acme/api/pull/7"
+        # The text of each --body-file, read when gh runs.
+        self.bodies = []
 
     def __call__(self, directory, *args):
         if self.missing:
             raise merge.MergeError("gh is not installed", "gh_unavailable")
         self.calls.append(list(args))
+        if "--body-file" in args:
+            self.bodies.append(Path(args[args.index("--body-file") + 1]).read_text())
         if args[:2] == ("pr", "list"):
             out = json.dumps([{"url": url} for url in self.existing])
         elif args[:2] == ("pr", "create"):
+            out = self.url + "\n"
+        elif args[:2] == ("pr", "edit"):
             out = self.url + "\n"
         elif args[:2] == ("pr", "view"):
             out = json.dumps({"state": self.state})
@@ -308,43 +314,44 @@ class PullRequestTestCase(MergeTestCase):
         self.git(self.repo, "push", "-q", "origin", self.main_branch())
         self.gh = FakeGh()
         self.enterContext(patch.object(merge, "_gh", self.gh))
+        self.workers = []
+        self.enterContext(patch.object(pr_write, "start_worker",
+                                       lambda arguments, log: self.workers.append((arguments, log))))
 
     def remote_branches(self):
         return self.git(self.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 
 
 class PullRequestTests(PullRequestTestCase):
-    def test_merge_pr_pushes_and_opens_a_pull_request(self):
+    def test_merge_pr_asks_for_a_description_and_pushes_nothing_yet(self):
         self.started()
         self.store.move(self.card.ref, "Review")
-        self.store.edit(self.card.ref, body=["Use a 30 minute session."])
         head = self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         result = self.merger.merge(self.card.ref, mode="pr")
-        main = self.main_branch()
-        self.assertEqual(result, {"ref": self.card.ref, "mode": "pr", "base": main, "pr_url": self.gh.url})
-        self.assertEqual(self.git(self.origin, "rev-parse", self.branch), head)
-        self.assertEqual(self.git(self.repo, "rev-parse", "--abbrev-ref", self.branch + "@{u}"), main)
-        create = next(c for c in self.gh.calls if c[:2] == ["pr", "create"])
-        self.assertEqual(create[create.index("--base") + 1], main)
-        self.assertEqual(create[create.index("--head") + 1], self.branch)
-        self.assertEqual(create[create.index("--title") + 1], "Fix login timeout")
-        self.assertIn("Use a 30 minute session.", create[create.index("--body") + 1])
-        record = self.records()[self.card.ref]
-        self.assertEqual((record["pr_url"], record["pr_state"]), (self.gh.url, "open"))
-        self.assertEqual(self.log(), [f"PR opened: {self.gh.url}"])
+        self.assertEqual((result["mode"], result["pr_action"], result["pr_url"]), ("pr", "writing", None))
+        self.assertEqual(result["writer"], "the card's agent")
+        self.assertEqual(self.remote_branches(), self.main_branch())
+        self.assertFalse(any(c[:2] == ["pr", "create"] for c in self.gh.calls))
+        self.assertEqual(len(self.workers), 1)
         self.assertTrue(self.worktree.exists())
         self.assertEqual(self.store.show(self.card.ref).column, "Review")
-        self.assertNotEqual(self.git(self.repo, "rev-parse", main), head)
+        self.assertNotEqual(self.git(self.repo, "rev-parse", self.main_branch()), head)
 
     def test_an_open_pull_request_is_reused_and_updated(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.gh.existing = ["https://github.com/acme/api/pull/3"]
-        self.assertEqual(self.merger.merge(self.card.ref, mode="pr")["pr_url"], "https://github.com/acme/api/pull/3")
+        result = self.merger.merge(self.card.ref, mode="pr")
+        self.assertEqual((result["pr_url"], result["pr_action"]), ("https://github.com/acme/api/pull/3", "pushed"))
+        self.assertEqual(self.log(), ["PR updated: https://github.com/acme/api/pull/3"])
+        record = self.records()[self.card.ref]
+        self.assertEqual((record["pr_url"], record["pr_state"]), ("https://github.com/acme/api/pull/3", "open"))
         head = self.commit(self.worktree, "b.txt", "b\n", "feat: b")
         self.merger.merge(self.card.ref, mode="pr")
         self.assertEqual(self.git(self.origin, "rev-parse", self.branch), head)
+        self.assertEqual(self.git(self.repo, "rev-parse", "--abbrev-ref", self.branch + "@{u}"), self.main_branch())
         self.assertFalse(any(c[:2] == ["pr", "create"] for c in self.gh.calls))
+        self.assertEqual(self.workers, [])
 
     def test_without_gh_the_pull_request_cannot_open(self):
         self.started()
@@ -354,14 +361,22 @@ class PullRequestTests(PullRequestTestCase):
             self.merger.merge(self.card.ref, mode="pr")
         self.assertEqual(raised.exception.code, "gh_unavailable")
 
-    def test_a_failed_push_stops(self):
+    def test_a_failed_push_to_an_open_pull_request_stops(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.gh.existing = ["https://github.com/acme/api/pull/3"]
         self.git(self.repo, "remote", "remove", "origin")
         with self.assertRaises(merge.MergeError) as raised:
             self.merger.merge(self.card.ref, mode="pr")
         self.assertEqual(raised.exception.code, "push_failed")
-        self.assertEqual(self.gh.calls, [])
+        self.assertEqual(self.log(), [])
+
+    def test_rewrite_works_only_for_a_pull_request(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref, mode="local", rewrite=True)
+        self.assertEqual(raised.exception.code, "usage")
 
     def test_the_board_merge_setting_picks_the_pull_request(self):
         text = self.board.read_text(encoding="utf-8")
@@ -377,6 +392,7 @@ class PullRequestFinishTests(PullRequestTestCase):
         super().setUp()
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.gh.existing = [self.gh.url]
         self.merger.merge(self.card.ref, mode="pr")
 
     def test_an_open_pull_request_does_not_finish(self):
@@ -406,6 +422,7 @@ class PullRequestStateTests(PullRequestTestCase):
         super().setUp()
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.gh.existing = [self.gh.url]
         self.merger.merge(self.card.ref, mode="pr")
         self.gh.calls.clear()
 
@@ -436,7 +453,7 @@ class PullRequestStateTests(PullRequestTestCase):
     def test_the_board_card_shows_the_state_and_a_left_worktree(self):
         card = self.store.show(self.card.ref)
         start.mark_removed([card])
-        self.assertEqual((card.pr_state, card.worktree_left), ("open", False))
+        self.assertEqual((card.pr_state, card.worktree_left, card.pr_writing), ("open", False, False))
         done = self.store.done(self.card.ref)
         start.mark_removed([done])
         self.assertTrue(done.worktree_left)
@@ -477,11 +494,23 @@ class MergeCliTests(CliTestCase):
 
     def test_merge_pr_text(self):
         ref = self.card()
-        result = {"ref": ref, "mode": "pr", "base": "main", "pr_url": "https://github.com/acme/api/pull/7"}
+        writing = {"ref": ref, "mode": "pr", "base": "main", "pr_url": None, "pr_action": "writing",
+                   "writer": "the card's agent", "folder": "/f"}
+        pushed = {"ref": ref, "mode": "pr", "base": "main", "pr_url": "https://github.com/acme/api/pull/7",
+                  "pr_action": "pushed"}
         with patch("herdboard.cli.Merger") as merger:
-            merger.return_value.merge.return_value = result
+            merger.return_value.merge.return_value = writing
             out, _ = self.run_cli("merge", ref, "--pr", directory=self.plain)
-        self.assertEqual(out, f"{ref}: pull request https://github.com/acme/api/pull/7\n")
+            self.assertEqual(out, f"{ref}: the card's agent writes the pull request description. Files: /f\n"
+                                  "The draft pull request opens when the description is ready.\n")
+            merger.return_value.merge.return_value = pushed
+            out, _ = self.run_cli("merge", ref, "--pr", directory=self.plain)
+            self.assertEqual(out, f"{ref}: pushed to the open pull request https://github.com/acme/api/pull/7\n"
+                                  "Use --rewrite to rewrite its description.\n")
+            merger.return_value.merge.return_value = {**writing, "pr_url": "https://github.com/acme/api/pull/7"}
+            out, _ = self.run_cli("merge", ref, "--rewrite", directory=self.plain)
+            self.assertIn("rewrites the description of https://github.com/acme/api/pull/7", out)
+            merger.return_value.merge.assert_called_with(ref, mode=None, force=False, rewrite=True)
 
     def test_merge_and_finish_text(self):
         ref = self.card()
@@ -493,7 +522,7 @@ class MergeCliTests(CliTestCase):
             merger.return_value.finish.return_value = finished
             out, _ = self.run_cli("merge", ref, "--local", directory=self.plain)
             self.assertEqual(out, f"{ref}: merged into main at abcdef1\n{ref}: finished; worktree removed; branch deleted\n")
-            merger.return_value.merge.assert_called_with(ref, mode="local", force=False)
+            merger.return_value.merge.assert_called_with(ref, mode="local", force=False, rewrite=False)
             out, _ = self.run_cli("finish", ref, "--force", directory=self.plain)
             self.assertEqual(out, f"{ref}: finished; worktree removed; branch kept\n")
             merger.return_value.finish.assert_called_with(ref, force=True)
@@ -508,6 +537,15 @@ class MergeCliTests(CliTestCase):
     def test_local_and_pr_cannot_both_be_given(self):
         data = self.run_json("merge", "t123", "--local", "--pr", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "usage")
+
+    def test_rewrite_cannot_go_with_local(self):
+        data = self.run_json("merge", "t123", "--local", "--rewrite", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+
+    def test_pr_wait_returns_the_worker_exit_code(self):
+        with patch.object(pr_write, "wait", return_value=1) as wait:
+            self.run_cli("pr-wait", "t123", "--folder", "/f", directory=self.plain, expect=1)
+        self.assertEqual(wait.call_args.args[1:], ("t123", Path("/f")))
 
 
 if __name__ == "__main__":

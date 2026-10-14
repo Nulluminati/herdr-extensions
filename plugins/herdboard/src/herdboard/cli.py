@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity, agent_review
+from . import activity, agent_review, pr_write
 from .agent_review import AgentReviewer
 from .config import THINKING_LEVELS, config_path, load_config
 from .identity import repo_identity
@@ -172,8 +172,15 @@ def build_parser() -> argparse.ArgumentParser:
     mode = sub.add_mutually_exclusive_group()
     mode.add_argument("--local", dest="mode", action="store_const", const="local",
                       help="rebase onto the base and fast-forward it")
-    mode.add_argument("--pr", dest="mode", action="store_const", const="pr", help="open a GitHub pull request")
+    mode.add_argument("--pr", dest="mode", action="store_const", const="pr",
+                      help="have an agent write the description, then open a draft GitHub pull request")
+    sub.add_argument("--rewrite", action="store_true",
+                     help="have an agent rewrite the description of the open pull request, not only push")
     sub.add_argument("--force", action="store_true", help="merge a parent card whose sub-cards are not done")
+
+    sub = command("pr-wait", "wait for a pull request description and open the PR (run by merge --pr)")
+    sub.add_argument("ref")
+    sub.add_argument("--folder", type=Path, required=True)
 
     sub = command("finish", "remove a merged card's worktree and branch, and move the card to Done")
     sub.add_argument("ref")
@@ -204,6 +211,7 @@ def _card_dict(card: CardView) -> dict:
     del data["sort_order"]
     # Board-only status; preserve the CLI card schema.
     del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"], data["agent_review"]
+    del data["pr_writing"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -627,11 +635,19 @@ def _cmd_review_wait(ctx: _Context) -> dict:
 def _merger(ctx: _Context) -> Merger:
     ref = ctx.args.ref
     return Merger(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(ref) else None,
-                  ask_state=ctx.ask())
+                  ask_state=ctx.ask(), config_file=config_path(ctx.args.config))
 
 
 def _cmd_merge(ctx: _Context) -> dict:
-    return _merger(ctx).merge(ctx.args.ref, mode=ctx.args.mode, force=ctx.args.force)
+    if ctx.args.rewrite and ctx.args.mode == "local":
+        raise UsageError("--rewrite works only for a pull request")
+    return _merger(ctx).merge(ctx.args.ref, mode=ctx.args.mode, force=ctx.args.force, rewrite=ctx.args.rewrite)
+
+
+def _cmd_pr_wait(ctx: _Context) -> dict:
+    ref = ctx.args.ref
+    code = pr_write.wait(ctx.store, ref, ctx.args.folder, writer=ctx.writer if LINEAR_REF.match(ref) else None)
+    return {"ref": ref, "exit_code": code}
 
 
 def _cmd_finish(ctx: _Context) -> dict:
@@ -866,6 +882,7 @@ COMMANDS = {
     "start": _cmd_start,
     "review": _cmd_review,
     "review-wait": _cmd_review_wait,
+    "pr-wait": _cmd_pr_wait,
     "merge": _cmd_merge,
     "finish": _cmd_finish,
     "init": _cmd_init,
@@ -917,7 +934,7 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command == "review-wait":
+    if command in ("review-wait", "pr-wait"):
         return
     if command == "review" and "reviewer" in result:
         if as_json:
@@ -942,7 +959,17 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             _emit_json(result)
             return
         if command == "merge" and result["mode"] == "pr":
-            print(f"{result['ref']}: pull request {result['pr_url']}")
+            if result["pr_action"] == "pushed":
+                print(f"{result['ref']}: pushed to the open pull request {result['pr_url']}")
+                print("Use --rewrite to rewrite its description.")
+            elif result["pr_url"]:
+                print(f"{result['ref']}: {result['writer']} rewrites the description of {result['pr_url']}. "
+                      f"Files: {result['folder']}")
+                print("The pull request changes when the description is ready.")
+            else:
+                print(f"{result['ref']}: {result['writer']} writes the pull request description. "
+                      f"Files: {result['folder']}")
+                print("The draft pull request opens when the description is ready.")
             return
         if command == "merge":
             print(f"{result['ref']}: merged into {result['base']} at {result['commit'][:7]}")
@@ -1040,7 +1067,7 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](_Context(args))
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json)
-        if args.command == "review-wait":
+        if args.command in ("review-wait", "pr-wait"):
             return result["exit_code"]
     except HerdboardError as error:
         if as_json:

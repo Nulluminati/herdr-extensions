@@ -2,6 +2,7 @@
 import asyncio
 import subprocess
 import threading
+import time
 import os
 from pathlib import Path
 import sys
@@ -165,6 +166,39 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         notices = await self.run_keys("m", "y")
         self.merge.assert_called_once_with(self.card.ref)
         self.assertIn((f"Merged {self.card.ref} into main at abcdef1, then finished it", None), notices)
+
+    def open_pr(self, **extra):
+        from herdboard import start
+        path = self.path.parent / "worktree"
+        path.mkdir(exist_ok=True)
+        start._write(start.state_dir() / "starts.json", {self.card.ref: {
+            "worktree_path": str(path), "pr_url": "https://github.com/acme/api/pull/7", "pr_state": "open",
+            "pr_checked": time.time(), **extra}})
+
+    async def test_m_on_an_open_pr_asks_before_it_rewrites_the_description(self):
+        self.open_pr()
+        self.merge.return_value = {"ref": self.card.ref, "mode": "pr", "base": "main",
+                                   "pr_url": "https://github.com/acme/api/pull/7", "pr_action": "writing",
+                                   "writer": "the card's agent", "folder": "/f"}
+        notices = await self.run_keys("m", "y", "y")
+        self.merge.assert_called_once_with(self.card.ref, rewrite=True)
+        self.assertIn((f"The card's agent writes the pull request description of {self.card.ref}", None), notices)
+
+    async def test_m_on_an_open_pr_can_only_push(self):
+        self.open_pr()
+        self.merge.return_value = {"ref": self.card.ref, "mode": "pr", "base": "main",
+                                   "pr_url": "https://github.com/acme/api/pull/7", "pr_action": "pushed"}
+        notices = await self.run_keys("m", "y", "n")
+        self.merge.assert_called_once_with(self.card.ref, rewrite=False)
+        self.assertIn((f"Pushed {self.card.ref} to its pull request https://github.com/acme/api/pull/7", None),
+                      notices)
+
+    async def test_a_written_pr_description_shows_on_the_card(self):
+        self.open_pr(pr_write={"folder": "/f", "pane_id": "w1:p1", "own_pane": False})
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertTrue(any("PR: writing" in w.plain for w in app.query(".card")))
 
     async def test_m_then_n_does_not_merge(self):
         await self.run_keys("m", "n")

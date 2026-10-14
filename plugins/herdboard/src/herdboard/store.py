@@ -70,6 +70,8 @@ class CardView:
     pr_state: str | None = None
     # Board-only: the kind of agent that reviews the card now, while an agent review runs.
     agent_review: str | None = None
+    # Board-only: True while an agent writes the card's pull request description.
+    pr_writing: bool = False
     # The card ID of a sub-card's parent, from its `[[#^id]]` link.
     parent: str | None = None
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.

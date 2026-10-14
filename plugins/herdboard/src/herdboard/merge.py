@@ -2,9 +2,9 @@
 
 A local merge rebases the branch onto its base in the card's worktree, then fast-forwards
 the base. A conflict happens in the worktree, where the card's agent can fix it, and the
-base never gets a merge commit. A pull request merge pushes the branch and opens a GitHub
-pull request with `gh`. `finish` removes the worktree and the branch, and moves the card
-to Done.
+base never gets a merge commit. A pull request merge has an agent write the description,
+then pushes the branch and opens a draft GitHub pull request with `gh` (see `pr_write`).
+`finish` removes the worktree and the branch, and moves the card to Done.
 """
 
 from __future__ import annotations
@@ -15,11 +15,10 @@ from pathlib import Path
 import subprocess
 import time
 
-from . import activity
-from .brief import _unindent
+from . import activity, pr_write
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
-from .model import HerdboardError, split_title
+from .model import HerdboardError
 from .start import (Starter, StartError, _lock, _read, _write, agent_live, card_changed, close_review_pane,
                     fetch_linear_card, find_record, herdr, safe_key, state_dir)
 
@@ -63,6 +62,15 @@ def _gh_output(directory, *args) -> str:
     if result.returncode:
         raise MergeError(f"gh {' '.join(args[:2])} failed: {result.stderr.strip()}", "pr_failed")
     return result.stdout
+
+
+def push_branch(worktree, branch, base) -> None:
+    """Push the branch for a pull request, and keep its upstream on the base."""
+    pushed = _git(worktree, "push", "--quiet", "origin", f"{branch}:refs/heads/{branch}")
+    if pushed.returncode:
+        raise MergeError(f"Cannot push {branch}: {pushed.stderr.strip()}", "push_failed")
+    # Hunk and `git status` compare the branch with its upstream: a push must not change it.
+    _git(worktree, "branch", f"--set-upstream-to={base}", branch)
 
 
 def refresh_pr_states(now: float | None = None) -> None:
@@ -114,12 +122,14 @@ def checkout_of(repository, branch) -> Path | None:
 
 
 class Merger:
-    def __init__(self, store, directory, writer=None, ask_state=refuse):
+    def __init__(self, store, directory, writer=None, ask_state=refuse, config_file: Path | None = None):
         self.store = store
         self.config = store.config
         self.directory = Path(directory)
         self.writer = writer
         self.ask_state = ask_state
+        # Passed on to the pull request worker, so it reads the same boards.
+        self.config_file = config_file
 
     def _started(self, ref):
         """The card (None for Linear until needed), its reference, and its start record."""
@@ -191,7 +201,7 @@ class Merger:
         meta = self.store.board_meta(path) if path is not None else None
         return (meta.merge if meta else None) or self.config.merge
 
-    def merge(self, ref, mode=None, force=False):
+    def merge(self, ref, mode=None, force=False, rewrite=False):
         card, ref, key, record = self._started(ref)
         if card is not None and not force:
             open_children = [child.ref for child in self.store.children(ref) if not child.checked]
@@ -199,6 +209,8 @@ class Merger:
                 raise MergeError(f"Sub-cards of {ref} are not done: {', '.join(open_children)}. "
                                  "Finish them first, or use --force.", "children_open")
         mode = mode or self.mode(card, record)
+        if rewrite and mode != "pr":
+            raise MergeError("--rewrite works only for a pull request", "usage")
         worktree = Path(record.get("worktree_path") or "")
         if not record.get("worktree_path") or not worktree.exists():
             raise MergeError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again", "not_started")
@@ -211,44 +223,30 @@ class Merger:
             if ahead == "0":
                 raise MergeError(f"{branch} has no commits ahead of {base}", "nothing_to_merge")
             if mode == "pr":
-                url = self._merge_pr(card, ref, key, record, worktree, branch, base)
-                return {"ref": ref, "mode": "pr", "base": base, "pr_url": url}
+                return {"ref": ref, "mode": "pr", "base": base,
+                        **self._merge_pr(card, ref, key, record, worktree, branch, base, rewrite)}
             commit = self._merge_local(card, ref, key, record, worktree, checkout, branch, base)
             finished = self._finish(card, ref, key, record, force=False)
         return {"ref": ref, "mode": "local", "base": base, "commit": commit, **finished}
 
-    def _pr_text(self, card, ref):
-        """The pull request title and body: the card's title and description, and the Linear link."""
-        if card.source == "linear":
-            title, lines = card.title, list(card.body)
-        else:
-            title, lines = split_title(card.title)[0] or card.title, [_unindent(line) for line in card.body]
-        if card.url:
-            lines += ["", f"Linear: {card.url}"]
-        lines += ["", f"herdboard card `{ref}`"]
-        return title, "\n".join(lines).strip() + "\n"
-
-    def _merge_pr(self, card, ref, key, record, worktree, branch, base):
-        pushed = _git(worktree, "push", "--quiet", "origin", f"{branch}:refs/heads/{branch}")
-        if pushed.returncode:
-            raise MergeError(f"Cannot push {branch}: {pushed.stderr.strip()}", "push_failed")
-        # Hunk and `git status` compare the branch with its upstream: a push must not change it.
-        _git(worktree, "branch", f"--set-upstream-to={base}", branch)
+    def _merge_pr(self, card, ref, key, record, worktree, branch, base, rewrite):
+        """Push to an open pull request, or have an agent write the description of a new one (or of the
+        open one, with `rewrite`)."""
+        pr_write.check_running(ref, record)
         url = record.get("pr_url") if record.get("pr_state") == "open" else None
-        known = url is not None
         if url is None:
             listed = json.loads(_gh_output(worktree, "pr", "list", "--head", branch, "--state", "open",
                                            "--json", "url") or "[]")
             url = listed[0]["url"] if listed else None
-        if url is None:
-            title, body = self._pr_text(self._card(card, ref), ref)
-            created = _gh_output(worktree, "pr", "create", "--base", base, "--head", branch,
-                                 "--title", title, "--body", body)
-            url = created.strip().splitlines()[-1]
-        record.update(pr_url=url, pr_state="open", pr_checked=time.time())
-        self._persist(key, record)
-        activity.append(self.store, ref, f"PR {'updated' if known else 'opened'}: {url}", "herdboard")
-        return url
+        if url is not None and not rewrite:
+            push_branch(worktree, branch, base)
+            record.update(pr_url=url, pr_state="open", pr_checked=time.time())
+            self._persist(key, record)
+            activity.append(self.store, ref, f"PR updated: {url}", "herdboard")
+            return {"pr_url": url, "pr_action": "pushed"}
+        written = pr_write.request(self, self._card(card, ref), ref, key, record, worktree, base, url,
+                                   lambda: self._persist(key, record))
+        return {"pr_url": url, "pr_action": "writing", **written}
 
     def _merge_local(self, card, ref, key, record, worktree, checkout, branch, base):
         target = checkout_of(checkout, base)

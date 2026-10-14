@@ -65,7 +65,7 @@ class SkillTests(unittest.TestCase):
     def test_review_merge_and_finish_are_documented(self):
         commands = skill_commands()
         for argv in (["--json", "review", "tep3"], ["--json", "merge", "tep3"], ["--json", "merge", "tep3", "--pr"],
-                     ["--json", "finish", "tep3"]):
+                     ["--json", "merge", "tep3", "--pr", "--rewrite"], ["--json", "finish", "tep3"]):
             self.assertIn(argv, commands)
 
     def test_agent_review_is_documented(self):
@@ -93,7 +93,7 @@ class SkillTests(unittest.TestCase):
         known |= {"worktree_dirty", "nothing_to_merge", "base_dirty", "rebase_conflict", "merge_failed", "not_merged"}
         known |= {"gh_unavailable", "push_failed", "pr_failed"}
         known |= {"parent_missing", "parent_nested", "children_open", "parent_not_promoted"}
-        known |= {"review_running", "nothing_to_review", "worker_failed"}
+        known |= {"review_running", "nothing_to_review", "worker_failed", "pr_writing"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())
