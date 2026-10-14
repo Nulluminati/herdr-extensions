@@ -260,6 +260,14 @@ class WaitTests(PlanTestCase):
             self.assertEqual(self.wait(), 0)
         self.assertEqual(self.log()[-1], "Planning ended without a plan.")
 
+    def test_a_planner_that_closes_before_the_first_poll_ends_the_watch_soon(self):
+        self.planner.plan(self.card.ref)
+        self.fake.states = []
+        with patch.object(plan, "DETECT_SECONDS", 0):
+            self.assertEqual(self.wait(), 0)
+        self.assertEqual(self.log()[-1], "Planning ended without a plan.")
+        self.assertNotIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
+
     def test_a_failed_status_query_does_not_end_the_watch(self):
         self.planner.plan(self.card.ref)
         polls = iter([None, None, self.write_plan])

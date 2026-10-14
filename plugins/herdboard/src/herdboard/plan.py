@@ -26,6 +26,8 @@ from .store import TEMP_REF
 # A planning talk with the user can take hours; the worker stops watching after this.
 PLAN_TIMEOUT_SECONDS = 8 * 60 * 60
 POLL_SECONDS = 5
+# A planner that Herdr never shows in this time closed before the worker saw it.
+DETECT_SECONDS = 60
 
 PLAN_FORMAT = """    # Plan: <title>
 
@@ -247,6 +249,7 @@ def wait(store, ref) -> int:
     pane, last = record["pane_id"], record.get("plan_mtime")
     plan_file = attachments.plan_path(store.config, ref)
     deadline = time.monotonic() + PLAN_TIMEOUT_SECONDS
+    detect_deadline = time.monotonic() + DETECT_SECONDS
     seen = False
     status = None
     saves = 0
@@ -257,14 +260,15 @@ def wait(store, ref) -> int:
             # Herdr did not answer, so the planner can still run: ask again at the next poll.
             print(f"herdboard: {error}", file=sys.stderr)
         else:
-            # Herdr can take a moment to detect a new agent, so only a planner that was seen can end.
+            # Herdr can take a moment to detect a new agent, so a planner not seen yet ends only after
+            # DETECT_SECONDS.
             seen = seen or status is not None
             current = _mtime(plan_file)
             if current is not None and current != last and status in (None, "idle", "done"):
                 activity.append(store, ref, f"Plan saved: {plan_file}", "herdboard")
                 last = current
                 saves += 1
-            if seen and status is None:
+            if status is None and (seen or time.monotonic() >= detect_deadline):
                 break
         if time.monotonic() >= deadline:
             break
