@@ -150,7 +150,7 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
                                            encoding="utf-8")
     except OSError as error:
         raise merge.MergeError(f"{requests}: cannot write the pull request request: {error}", "io") from error
-    starter = Starter(merger.store, merger.directory, writer=merger.writer)
+    starter = Starter(merger.store, merger.directory, writer=merger.writer, config_file=merger.config_file)
     record.update(starter._workspace(Path(record["checkout"]), record["branch"], record))
     persist()
     kind = record.get("agent") or config.start_agent

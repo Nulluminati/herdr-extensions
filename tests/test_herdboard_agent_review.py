@@ -248,6 +248,13 @@ class WaitTests(AgentReviewTestCase):
         self.assertNotIn("agent_review", self.records()[self.card.ref])
         self.assertEqual(self.calls("plugin", "action", "invoke"), [])
 
+    def test_the_answer_command_uses_the_worker_config_file(self):
+        self.request()
+        custom = self.root / "custom.toml"
+        with contextlib.redirect_stderr(io.StringIO()):
+            agent_review.wait(self.store, self.card.ref, self.folder, config_file=custom)
+        self.assertIn(f"--config {custom} log {self.card.ref}", self.calls("agent", "prompt")[-1][3])
+
     def test_the_prompt_waits_for_a_busy_card_agent(self):
         self.request()
         self.wait()

@@ -70,6 +70,7 @@ class StartCliTests(unittest.TestCase):
                       "--model", "openai-codex/gpt-6.1-sol", "--thinking", "medium"])
         kwargs = starter.return_value.start.call_args.kwargs
         self.assertEqual((kwargs["model"], kwargs["thinking"]), ("openai-codex/gpt-6.1-sol", "medium"))
+        self.assertEqual(starter.call_args.kwargs["config_file"], self.config)
 
     def test_cli_start_json(self):
         result = {"steps_done": ["repository"], "workspace_id": "w1", "pane_id": "w1:p1", "branch": "t123-task", "worktree_path": "/tmp/work", "agent_name": None, "ref": "t123"}

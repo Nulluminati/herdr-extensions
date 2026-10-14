@@ -186,7 +186,7 @@ class Merger:
             herdr("agent", "prompt", record["pane_id"], text)
         else:
             kind = record.get("agent") or self.config.start_agent
-            Starter(self.store, self.directory, writer=self.writer).launch_agent(
+            Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file).launch_agent(
                 card, record, kind, self.config.start_model,
                 self.config.start_thinking if kind == "pi" else None, safe_key(key),
                 lambda: self._persist(key, record), linear=card.source == "linear", note=text,

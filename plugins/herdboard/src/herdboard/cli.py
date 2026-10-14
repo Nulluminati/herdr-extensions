@@ -656,6 +656,7 @@ def _cmd_start(ctx: _Context) -> dict:
         writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
         ask_state=ctx.ask(),
         prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
+        config_file=config_path(args.config),
     )
     return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
                          repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking,
@@ -684,7 +685,7 @@ def _cmd_review(ctx: _Context) -> dict:
     if kind == "human":
         if args.reviewer or args.model or args.thinking:
             raise UsageError("--reviewer, --model and --thinking need --agent or --both")
-        return Reviewer(ctx.store, ctx.directory, writer=writer).review(ref)
+        return Reviewer(ctx.store, ctx.directory, writer=writer, config_file=config_path(args.config)).review(ref)
     reviewer = AgentReviewer(ctx.store, ctx.directory, writer=writer, config_file=config_path(args.config))
     return {"kind": kind, **reviewer.request(ref, reviewer=args.reviewer, model=args.model,
                                              thinking=args.thinking, then_hunk=kind == "both")}
@@ -692,7 +693,8 @@ def _cmd_review(ctx: _Context) -> dict:
 
 def _cmd_review_wait(ctx: _Context) -> dict:
     ref = ctx.args.ref
-    code = agent_review.wait(ctx.store, ref, ctx.args.folder, writer=ctx.writer if LINEAR_REF.match(ref) else None)
+    code = agent_review.wait(ctx.store, ref, ctx.args.folder, writer=ctx.writer if LINEAR_REF.match(ref) else None,
+                             config_file=config_path(ctx.args.config))
     return {"ref": ref, "exit_code": code}
 
 

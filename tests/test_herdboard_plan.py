@@ -146,6 +146,11 @@ class RequestTests(PlanTestCase):
             self.assertIn(part, text)
         self.assertNotIn("A plan exists", text)
 
+    def test_the_brief_command_uses_the_planner_config_file(self):
+        custom = self.root / "custom.toml"
+        plan.Planner(self.store, self.repo, config_file=custom).plan(self.card.ref)
+        self.assertIn(f"--config {custom} --json show {self.card.ref}", self.brief())
+
     def test_an_existing_plan_and_attachments_go_into_the_brief(self):
         source = self.root / "spec.md"
         source.write_text("Old plan.\n")

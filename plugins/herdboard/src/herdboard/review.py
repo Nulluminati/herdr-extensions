@@ -29,11 +29,13 @@ class ReviewError(HerdboardError):
 
 
 class Reviewer:
-    def __init__(self, store, directory, writer=None):
+    def __init__(self, store, directory, writer=None, config_file: Path | None = None):
         self.store = store
         self.config = store.config
         self.directory = Path(directory)
         self.writer = writer
+        # Passed on to the agents and workers, so they read the same boards.
+        self.config_file = config_file
 
     def _card(self, ref):
         """The card for a todo ID. A Linear card is fetched only when an agent must start again."""
@@ -103,7 +105,7 @@ class Reviewer:
         """Open the card's workspace, and start a new agent when the old one is gone.
 
         Returns True when a new agent started. The caller holds the card's start lock."""
-        starter = Starter(self.store, self.directory, writer=self.writer)
+        starter = Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file)
         record.update(starter._workspace(Path(record["checkout"]), record["branch"], record))
         persist()
         if agent_live(record):

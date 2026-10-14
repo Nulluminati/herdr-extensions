@@ -175,7 +175,7 @@ class Planner:
         card, issue = self._card(ref)
         ref = card.ref
         starter = Starter(self.store, self.directory, writer=self.writer, prompt_checkout=self.prompt_checkout,
-                          repository_view=self.repository_view)
+                          repository_view=self.repository_view, config_file=self.config_file)
         identity = starter._repository(card, repo, issue)
         found = find_record(ref)
         local = starter._checkout(identity, checkout, found[1] if found else None)
@@ -196,7 +196,7 @@ class Planner:
             brief = write_brief(safe_key(ref) + "-plan", brief_text(
                 card, checkout=local, notes=notes, plan=attachments.plan_text(self.config, ref),
                 files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
-                plan_file=plan_file, command=herdboard_command()))
+                plan_file=plan_file, command=herdboard_command(self.config_file)))
             # Read before the launch: the agent can save the plan while `agent start` waits for it.
             plan_mtime = _mtime(plan_file)
             prompt = _one_line(f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "

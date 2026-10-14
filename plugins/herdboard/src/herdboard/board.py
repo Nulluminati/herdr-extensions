@@ -1508,7 +1508,8 @@ class HerdboardApp(App):
                         return self.start_card(ref, agent, model=model, thinking=thinking), None
                     return self.start_card(ref, agent), None
                 starter = Starter(self.store, self.directory, writer=self.linear_writer,
-                                  ask_state=self.ask_state, repository_view=self.view == "repo")
+                                  ask_state=self.ask_state, repository_view=self.view == "repo",
+                                  config_file=self.config_file)
                 repo = self.repo_board if self.view == "repo" else None
                 return starter.start(ref, agent=agent, repo=repo, model=model, thinking=thinking), None
             except HerdboardError as error:
@@ -1550,7 +1551,8 @@ class HerdboardApp(App):
 
     def _human_review(self, ref: str) -> None:
         run = (lambda: self.review_card(ref)) if self.review_card else (
-            lambda: Reviewer(self.store, self.directory, writer=self.linear_writer).review(ref))
+            lambda: Reviewer(self.store, self.directory, writer=self.linear_writer,
+                             config_file=self.config_file).review(ref))
         self._card_action(run, lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}")
 
     def _chosen_reviewer(self, ref: str, reviewer: str | None, then_hunk: bool) -> None:

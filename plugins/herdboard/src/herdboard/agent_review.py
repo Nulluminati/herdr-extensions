@@ -94,8 +94,7 @@ If you find nothing, write "No findings."
 
 class AgentReviewer(Reviewer):
     def __init__(self, store, directory, writer=None, config_file: Path | None = None):
-        super().__init__(store, directory, writer=writer)
-        self.config_file = config_file
+        super().__init__(store, directory, writer=writer, config_file=config_file)
 
     def request(self, ref, reviewer=None, model=None, thinking=None, then_hunk=False):
         if reviewer is not None and reviewer not in REVIEWERS:
@@ -213,7 +212,7 @@ def _forget(ref: str) -> dict | None:
         return record
 
 
-def wait(store, ref, folder: Path, writer=None) -> int:
+def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None) -> int:
     """The background worker: wait for the findings and deliver them. Returns the exit code."""
     try:
         review = json.loads((Path(folder) / "review.json").read_text(encoding="utf-8"))
@@ -239,7 +238,7 @@ def wait(store, ref, folder: Path, writer=None) -> int:
                         "herdboard")
         message = (f"An agent review of this card by {kind} is ready: {findings}. Read it. "
                    "For each finding, say if you agree or disagree, and why. "
-                   f"Record your answer with herdboard log {ref}. "
+                   f"Record your answer with {start_module.herdboard_command(config_file)} log {ref}. "
                    "Do not change any code. Wait for the user to decide what to fix.")
         timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000
         try:
@@ -255,7 +254,7 @@ def wait(store, ref, folder: Path, writer=None) -> int:
         activity.append(store, ref, f"Agent review failed: {error}", "herdboard")
     if review.get("then_hunk"):
         try:
-            Reviewer(store, record["checkout"], writer=writer).review(ref)
+            Reviewer(store, record["checkout"], writer=writer, config_file=config_file).review(ref)
         except HerdboardError as failure:
             print(f"herdboard: cannot open Hunk: {failure}", file=sys.stderr)
             activity.append(store, ref, f"Hunk did not open after the agent review: {failure}", "herdboard")

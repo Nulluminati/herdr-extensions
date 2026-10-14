@@ -19,7 +19,7 @@ import time
 
 from . import attachments
 from .brief import agent_message, brief_text, card_token
-from .config import THINKING_LEVELS
+from .config import THINKING_LEVELS, config_path
 from .identity import _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_source import state_dir
@@ -94,16 +94,21 @@ def herdr(*args, tolerated=()):
     return found
 
 
-def herdboard_command() -> str:
+def herdboard_command(config_file: Path | None = None) -> str:
     """How an agent runs this herdboard: the installed command, else this Python with `-m`.
 
     A `herdboard` inside this Python's own environment is on the path only while
-    `uv run` runs it, so the agent's shell would not find it.
+    `uv run` runs it, so the agent's shell would not find it. A config file that is not the
+    default one is named, so the agent reads the same boards.
     """
     found = shutil.which("herdboard")
     if found and not Path(found).resolve().is_relative_to(Path(sys.prefix).resolve()):
-        return "herdboard"
-    return f"{shlex.quote(sys.executable)} -m herdboard"
+        program = "herdboard"
+    else:
+        program = f"{shlex.quote(sys.executable)} -m herdboard"
+    if config_file is not None and Path(config_file) != config_path():
+        program += f" --config {shlex.quote(str(config_file))}"
+    return program
 
 
 def pi_model_choices(config) -> tuple[str | None, list[str]]:
@@ -391,7 +396,7 @@ def mark_removed(cards):
 
 class Starter:
     def __init__(self, store, directory, writer=None, ask_state=refuse,
-                 prompt_checkout=None, repository_view=True):
+                 prompt_checkout=None, repository_view=True, config_file: Path | None = None):
         self.store = store
         self.config = store.config
         self.directory = Path(directory)
@@ -399,6 +404,8 @@ class Starter:
         self.ask_state = ask_state
         self.prompt_checkout = prompt_checkout
         self.repository_view = repository_view
+        # Named in the agent's brief, so the agent reads the same boards.
+        self.config_file = config_file
 
     def _repository(self, card, repo, issue=None):
         if card.path is not None:
@@ -546,7 +553,7 @@ class Starter:
         brief = write_brief(lock_key, brief_text(
             card, notes=notes, repository=record["repository"],
             worktree=record["worktree_path"], branch=record["branch"], base=record["base"],
-            command=herdboard_command(), note=note, log=log,
+            command=herdboard_command(self.config_file), note=note, log=log,
             plan=attachments.plan_text(self.config, card.ref), attachments=attachments.listing(self.config, card.ref),
         ))
         message = agent_message(card, brief)

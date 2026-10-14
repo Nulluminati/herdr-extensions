@@ -494,6 +494,19 @@ class StartTests(unittest.TestCase):
         with patch.object(start.shutil, "which", return_value="/home/n/.local/bin/herdboard"):
             self.assertEqual(start.herdboard_command(), "herdboard")
 
+    def test_the_brief_command_names_a_config_file_that_is_not_the_default(self):
+        custom = self.root / "my config.toml"
+        with patch.object(start.shutil, "which", return_value="/home/n/.local/bin/herdboard"):
+            self.assertEqual(start.herdboard_command(custom), f"herdboard --config {start.shlex.quote(str(custom))}")
+            self.assertEqual(start.herdboard_command(start.config_path()), "herdboard")
+            self.assertEqual(start.herdboard_command(None), "herdboard")
+
+    def test_the_brief_uses_the_starter_config_file(self):
+        custom = self.root / "custom.toml"
+        start.Starter(self.store, self.repo, config_file=custom).start(self.card.ref)
+        text = (start.state_dir() / "briefs" / f"{self.card.ref}.md").read_text()
+        self.assertIn(f"--config {custom} --json move {self.card.ref} Review", text)
+
     def agent_args(self):
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
         return call[call.index("--pane") + 3:]
