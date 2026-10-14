@@ -59,7 +59,7 @@ def planner_arguments(kind: str, prompt: str, folder: Path, model: str | None,
                       thinking: str | None) -> list[str]:
     """The planner's arguments after Herdr's `--`: it reads the repository and writes only the attachments.
 
-    Claude keeps its default permission mode, because the user is in the tab to answer its prompts."""
+    Claude keeps the user's default permission mode, because the user is in the tab to answer its prompts."""
     if kind == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return ["--tools", "read,grep,find,ls,write,edit", *options, "--", prompt]

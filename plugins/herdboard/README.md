@@ -153,7 +153,7 @@ A failed `start` reports the steps that worked. Run `start` again to continue fr
 
 `herdboard plan <id>` starts a planner agent in a new Herdr tab, in the main checkout of the card's repository. It finds the repository and the checkout as `start` does, and takes the same `--repo` and `--checkout`. It creates no worktree or branch, and the card stays in its column.
 
-The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. It can read the repository and write only the card's attachments. Claude asks you before it does anything else. pi gets no shell. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
+The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. Claude can read the repository and edit the card's attachments without a question. For other tools, it follows your default permission mode. pi gets only read, search and write tools, and no shell. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
 
 A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours.
 
