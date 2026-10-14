@@ -814,9 +814,16 @@ class HerdboardApp(App):
     #card-due { width: 1fr; }
     /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
     App:ansi .card { border: round ansi_bright_black; margin: 0; }
-    /* In the ANSI themes the accent and the done color are both green; selection uses blue. */
-    App:ansi .card.selected { background: ansi_default; border: round $primary; text-style: bold; }
-    App:ansi .column.current { border: round $primary; }
+    App:ansi .column { border: round ansi_bright_black; }
+    App:ansi .column.completed { border: round $success; }
+    /* In the ANSI themes the accent and the done color are both green, and the title bar is blue.
+       The current column uses magenta and the selected card yellow, so each has its own color.
+       Cards outside the current column fade. */
+    App:ansi .column .card { color: ansi_bright_black; }
+    App:ansi .column.current { border: round ansi_magenta; }
+    App:ansi .column.current .column-header { background: ansi_magenta; color: ansi_black; }
+    App:ansi .column.current .card { color: ansi_default; }
+    App:ansi .card.selected { background: ansi_default; border: heavy ansi_yellow; text-style: bold; }
     App:ansi #title-bar { color: ansi_black; }
     App:ansi .dialog { border: round $primary; }
     App:ansi .detail-block { border: round ansi_bright_black; }

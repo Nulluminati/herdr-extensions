@@ -1244,11 +1244,34 @@ class ThemeTests(BoardTestCase):
 
     async def test_cards_have_a_border_in_the_terminal_palette(self):
         self.store.add(self.repo_path, "first")
+        self.store.add(self.repo_path, "second")
         app = self.make_app()
         async with app.run_test(size=(140, 30)) as pilot:
             await pilot.pause()
-            card = app.query_one(".card")
+            card = next(w for w in app.query(".card") if not w.has_class("selected"))
             self.assertEqual(card.styles.border_top[0], "round")
+
+    async def test_the_current_column_and_the_selected_card_have_their_own_colors(self):
+        self.store.add(self.repo_path, "selected", "Todo")
+        self.store.add(self.repo_path, "beside", "Todo")
+        self.store.add(self.repo_path, "elsewhere", "Done")
+        app = self.make_app()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            column = app.query_one(".column.current")
+            selected = app.query_one(".card.selected")
+            beside = next(w for w in column.query(".card") if w.plain.startswith("beside"))
+            elsewhere = next(w for w in app.query(".card") if w.plain.startswith("elsewhere"))
+            magenta, yellow, bright_black = 5, 3, 8
+            self.assertEqual(column.styles.border_top[1].ansi, magenta)
+            self.assertEqual(column.query_one(".column-header").styles.background.ansi, magenta)
+            self.assertEqual(selected.styles.border_top[0], "heavy")
+            self.assertEqual(selected.styles.border_top[1].ansi, yellow)
+            # Cards outside the current column fade, so the eye goes to one column.
+            self.assertEqual(elsewhere.styles.color.ansi, bright_black)
+            self.assertNotEqual(beside.styles.color.ansi, bright_black)
 
 
 if __name__ == "__main__":
