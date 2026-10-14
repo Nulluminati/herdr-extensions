@@ -203,6 +203,19 @@ class RequestTests(PlanTestCase):
         self.assertFalse((start.state_dir() / "plans.json").exists())
         self.assertEqual(self.workers, [])
 
+    def test_a_tab_without_a_root_pane_is_a_herdr_error(self):
+        original = self.fake.__call__
+        for result in ({"tab": {}}, {"root_pane": {}}, {"root_pane": []}):
+            def shaped(argv, timeout=120, result=result):
+                if argv[1:3] == ["tab", "create"]:
+                    return self.fake.reply(argv, result)
+                return original(argv, timeout)
+
+            with self.subTest(result=result), patch.object(start, "command", shaped), \
+                    self.assertRaises(start.StartError) as raised:
+                self.planner.plan(self.card.ref)
+            self.assertEqual(raised.exception.code, "herdr_error")
+
     def test_thinking_works_only_with_pi(self):
         with self.assertRaises(plan.PlanError) as raised:
             self.planner.plan(self.card.ref, thinking="high")

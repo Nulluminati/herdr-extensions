@@ -89,6 +89,10 @@ def herdr(*args, tolerated=()):
         root = found.get("root_pane")
         if root is not None and (not isinstance(root, dict) or not isinstance(root.get("pane_id"), str)):
             raise StartError(f"Unexpected Herdr root pane: {output}", "herdr_error")
+    if operation == ("tab", "create"):
+        root = found.get("root_pane")
+        if not isinstance(root, dict) or not isinstance(root.get("pane_id"), str):
+            raise StartError(f"Unexpected Herdr root pane: {output}", "herdr_error")
     if operation == ("agent", "get") and not isinstance(found.get("agent"), (dict, type(None))):
         raise StartError(f"Unexpected Herdr agent: {output}", "herdr_error")
     return found
