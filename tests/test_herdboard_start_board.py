@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
-from herdboard.board import ModelScreen, HerdboardApp
+from herdboard.board import ClaudeModelScreen, ModelScreen, HerdboardApp, ReviewKindScreen
 from herdboard.config import Config
 from herdboard.store import Store
 from herdboard.start import StartError
@@ -31,10 +31,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.finish = Mock(return_value={"ref": self.card.ref, "worktree_removed": True, "branch_deleted": False})
         self.review = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1",
                                          "review_pane": "w1:p2", "agent_restarted": False})
+        self.agent_review = Mock(return_value={"ref": self.card.ref, "reviewer": "claude", "model": "opus",
+                                               "pane_id": "w1:p3", "folder": "/f", "then_hunk": False})
         self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
     def app(self):
         app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
-                           review_card=self.review, merge_card=self.merge, finish_card=self.finish)
+                           review_card=self.review, merge_card=self.merge, finish_card=self.finish,
+                           agent_review_card=self.agent_review)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -72,16 +75,79 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
         self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="medium")
 
-    async def test_shift_r_opens_the_review(self):
+    async def test_shift_r_then_human_opens_the_review(self):
         app = self.app()
         notices = []
         app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
         async with app.run_test() as pilot:
             await pilot.press("R")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ReviewKindScreen)
+            await pilot.press("enter")
             await app.workers.wait_for_complete()
             await pilot.pause()
         self.review.assert_called_once_with(self.card.ref)
+        self.agent_review.assert_not_called()
         self.assertIn((f"Review of {self.card.ref} opened in w1", None), notices)
+
+    async def test_an_agent_review_by_claude_with_a_chosen_model(self):
+        app = self.app()
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            await pilot.press("R")
+            await pilot.pause()
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ClaudeModelScreen)
+            self.assertEqual(app.screen.labels, ["claude default", "opus", "sonnet", "haiku"])
+            await pilot.press("down", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.agent_review.assert_called_once_with(self.card.ref, reviewer="claude", model="opus", thinking=None,
+                                                  then_hunk=False)
+        self.review.assert_not_called()
+        self.assertIn((f"Agent review of {self.card.ref} by claude (opus) started in w1:p3", None), notices)
+
+    async def test_both_with_a_pi_reviewer(self):
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("R")
+                await pilot.pause()
+                await pilot.press("down", "down", "enter")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ModelScreen)
+                app.screen.query_one("#thinking").value = "high"
+                await pilot.press("down", "enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.agent_review.assert_called_once_with(self.card.ref, reviewer="pi", model="zai/glm-5.3",
+                                                  thinking="high", then_hunk=True)
+
+    async def test_escape_in_the_review_menu_does_nothing(self):
+        await self.run_keys("R", "escape")
+        self.review.assert_not_called()
+        self.agent_review.assert_not_called()
+
+    async def test_a_running_agent_review_shows_on_the_card(self):
+        from herdboard import start
+        path = self.path.parent / "worktree"
+        path.mkdir()
+        start._write(start.state_dir() / "starts.json", {self.card.ref: {
+            "worktree_path": str(path), "agent_review": {"kind": "pi", "pane_id": "w1:p3"}}})
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertTrue(any("agent review: pi" in w.plain for w in app.query(".card")))
+            start._write(start.state_dir() / "starts.json", {self.card.ref: {"worktree_path": str(path)}})
+            await app.check_files()
+            await pilot.pause()
+            self.assertFalse(any("agent review" in w.plain for w in app.query(".card")))
 
     async def run_keys(self, *keys):
         app = self.app()
@@ -121,6 +187,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
         async with app.run_test() as pilot:
             await pilot.press("R")
+            await pilot.pause()
+            await pilot.press("enter")
             await app.workers.wait_for_complete()
             await pilot.pause()
         self.assertIn(("No hunk", "error"), notices)

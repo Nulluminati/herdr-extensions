@@ -68,6 +68,14 @@ class SkillTests(unittest.TestCase):
                      ["--json", "finish", "tep3"]):
             self.assertIn(argv, commands)
 
+    def test_agent_review_is_documented(self):
+        commands = skill_commands()
+        self.assertIn(["--json", "review", "tep3", "--agent", "--reviewer", "pi", "--model", "zai/glm-5.3"], commands)
+        self.assertIn(["--json", "review", "tep3", "--both"], commands)
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("agent review", text)
+        self.assertIn("agree or disagree", text)
+
     def test_every_error_code_in_the_skill_exists(self):
         text = SKILL.read_text(encoding="utf-8")
         table = text[text.index("| Code |"):]
@@ -85,6 +93,7 @@ class SkillTests(unittest.TestCase):
         known |= {"worktree_dirty", "nothing_to_merge", "base_dirty", "rebase_conflict", "merge_failed", "not_merged"}
         known |= {"gh_unavailable", "push_failed", "pr_failed"}
         known |= {"parent_missing", "parent_nested", "children_open", "parent_not_promoted"}
+        known |= {"review_running", "nothing_to_review", "worker_failed"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

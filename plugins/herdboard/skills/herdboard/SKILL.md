@@ -62,7 +62,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 
 - `add --linear` (creates a Linear issue), `promote` (turns a todo into a Linear issue), and `move` or `done` on a Linear issue.
 - `start` (creates a worktree and starts an agent).
-- `review` (focuses the card's workspace and opens Hunk; it can start a new agent).
+- `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `link`, `init`, `migrate --yes`, `doctor --fix-ids`.
@@ -72,6 +72,8 @@ herdboard --json start tep3 --agent pi        # worktree, workspace, card to In 
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
+herdboard --json review tep3 --agent --reviewer pi --model zai/glm-5.3   # another agent reviews; the card's agent gets the findings
+herdboard --json review tep3 --both           # an agent review first, then Hunk
 herdboard --json merge tep3                   # the repository's mode: local (rebase, fast-forward, finish) or PR
 herdboard --json merge tep3 --pr              # push the branch and open a GitHub pull request; the card stays in Review
 herdboard --json finish tep3                  # after a merge: remove the worktree and branch, card to Done
@@ -93,8 +95,9 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 4. Commit every change on the card's branch, with conventional commit messages.
 5. When the work is ready for the user to check, commit it, then run `herdboard --json move <id> Review`.
 6. When review feedback arrives, move the card to `In progress`. Fix, commit, and move it back to Review.
-7. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
-8. Do not run `done`. The user moves the card to Done.
+7. When an agent review arrives, read the findings file. For each finding, say if you agree or disagree, and why. Record the answer with `herdboard --json log <id> "..."`. Do not change code. Wait for the user to decide what to fix.
+8. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
+9. Do not run `done`. The user moves the card to Done.
 
 The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
 
@@ -125,6 +128,9 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `not_started` | The card has no worktree from `start`, or it was removed. Tell the user to run `start` first. |
 | `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`). Tell the user the message. |
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
+| `review_running` | An agent review of the card still runs. Tell the user; its findings arrive by themselves. |
+| `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes. Tell the user. |
+| `worker_failed` | The agent review worker did not start, and the reviewer was closed. Tell the user the message. |
 | `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. |
 | `nothing_to_merge` | The card branch has no commits ahead of its base. Tell the user. |
 | `base_dirty` | The checkout of the base branch has uncommitted changes. Tell the user to commit or stash them. |

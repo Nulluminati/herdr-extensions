@@ -220,7 +220,7 @@ Outside Git, or before a repository board exists, `add` goes to `inbox.md` unles
 | `herdboard log <id> "text"` | Append an entry to the card's activity log (see below). Works for todos and Linear issues, with no Linear connection |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines. Asks first in a terminal; without a terminal or with `--json`, `--yes` is required. Linear issues are not deleted |
 | `herdboard start <id> [--agent claude\|pi] [--model NAME] [--thinking LEVEL] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card (see below). `--model` sets the agent's model (pi: `provider/model`; Claude: `opus`, `sonnet` and so on). `--thinking` sets pi's thinking level |
-| `herdboard review <id>` | Open the card's branch diff in Hunk, next to its agent (see below) |
+| `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model NAME] [--thinking LEVEL]` | Open the card's branch diff in Hunk next to its agent, have another agent review it, or both (see below) |
 | `herdboard merge <id> [--local \| --pr] [--force]` | Merge the card branch into its base and finish the card, or open a GitHub pull request (see below). A parent card with sub-cards that are not done stops with `children_open`; `--force` merges anyway |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move the card to Done (see below) |
 | `herdboard promote <id> [--team ENG] [--project] [--state]` | Turn a todo into a Linear issue (see below) |
@@ -275,7 +275,20 @@ Review, merge and finish after `start` are designed in [docs/review-and-merge.md
 
 Hunk uses much memory, so the pane stays open only while the card is in Review. When a herdboard command or a board key moves the card to another column or deletes it, the tool closes the pane.
 
-On the board, `R` reviews the selected card.
+On the board, `R` reviews the selected card. It asks for Human, Agent or Both. For an agent review, it then asks for the reviewer (claude or pi) and the model: `opus`, `sonnet` or `haiku` for Claude, and the start dialog's model list for pi.
+
+### Agent review
+
+`herdboard review <id> --agent` has a second agent review the work of a started card. `--both` does the agent review first, and opens Hunk when the findings are ready.
+
+1. The reviewer is `--reviewer`, else the other kind than the card's agent: Claude reviews pi's work, and pi reviews Claude's work. `--model` and `--thinking` (pi only) choose its model.
+2. The reviewer gets the commits since the base (`git diff <base>...HEAD`), the uncommitted changes, and the untracked files. Without any of them, the command stops with `nothing_to_review`. A second request while one runs stops with `review_running`.
+3. The reviewer starts in a split next to the card's agent, as `hb-<id>-review`. It can read the repository and write only `findings.md` in its review folder, `~/.local/state/herdboard/reviews/<id>-<time>-<random>/`. These are the same limits as the peer-review plugin.
+4. A background worker (`herdboard review-wait`) waits up to 30 minutes for the findings. Then it closes the reviewer pane, and logs `Agent review by <kind> done: <n> findings. <path>`.
+5. The worker waits until the card's agent is idle, and sends it the findings. The agent says for each finding if it agrees or disagrees, logs its answer, changes no code, and waits for you.
+6. A Herdr notification says that the review is done or failed. A failed review is logged, and the card's agent gets no prompt.
+
+While the agent review runs, the card shows `agent review: <kind>`.
 
 ### merge and finish
 

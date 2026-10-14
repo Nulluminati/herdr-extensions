@@ -77,7 +77,8 @@ class Reviewer:
                                   "hunk_unavailable")
             time.sleep(0.2)
 
-    def review(self, ref):
+    def _started(self, ref):
+        """The card, its ID, and its start record key and record. Stops when the card has no worktree."""
         card, ref = self._card(ref)
         found = find_record(ref)
         if found is None or not found[1].get("worktree_path"):
@@ -86,7 +87,9 @@ class Reviewer:
         if not Path(record["worktree_path"]).exists():
             raise ReviewError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again",
                               "not_started")
-        lock_key = safe_key(key)
+        return card, ref, key, record
+
+    def _persister(self, key, record):
         state_path = state_dir() / "starts.json"
 
         def persist():
@@ -94,19 +97,30 @@ class Reviewer:
                 records = _read(state_path)
                 records[key] = record
                 _write(state_path, records)
+        return persist
 
-        with _lock(".start-" + lock_key + ".lock"):
-            starter = Starter(self.store, self.directory, writer=self.writer)
-            record.update(starter._workspace(Path(record["checkout"]), record["branch"], record))
-            persist()
-            restarted = not agent_live(record)
-            if restarted:
-                kind = record.get("agent") or self.config.start_agent
-                thinking = self.config.start_thinking if kind == "pi" else None
-                starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, self.config.start_model,
-                                     thinking, lock_key, persist, linear=card is None, note=REVIEW_NOTE,
-                                     log=activity.read(self.config, ref))
-                activity.append(self.store, ref, "Agent restarted for review.", "herdboard")
+    def _ready_agent(self, card, ref, key, record, persist):
+        """Open the card's workspace, and start a new agent when the old one is gone.
+
+        Returns True when a new agent started. The caller holds the card's start lock."""
+        starter = Starter(self.store, self.directory, writer=self.writer)
+        record.update(starter._workspace(Path(record["checkout"]), record["branch"], record))
+        persist()
+        if agent_live(record):
+            return False
+        kind = record.get("agent") or self.config.start_agent
+        thinking = self.config.start_thinking if kind == "pi" else None
+        starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, self.config.start_model,
+                             thinking, safe_key(key), persist, linear=card is None, note=REVIEW_NOTE,
+                             log=activity.read(self.config, ref))
+        activity.append(self.store, ref, "Agent restarted for review.", "herdboard")
+        return True
+
+    def review(self, ref):
+        card, ref, key, record = self._started(ref)
+        persist = self._persister(key, record)
+        with _lock(".start-" + safe_key(key) + ".lock"):
+            restarted = self._ready_agent(card, ref, key, record, persist)
             self._focus_agent(record["pane_id"])
             record["review_pane"] = self._open_hunk(record)
             persist()

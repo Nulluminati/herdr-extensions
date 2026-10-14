@@ -30,6 +30,7 @@ from . import start as start_module
 from .config import THINKING_LEVELS
 from . import merge as merge_module
 from .merge import Merger
+from .agent_review import AgentReviewer
 from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
@@ -65,7 +66,7 @@ HELP_KEYS = [
     ("x", "delete the todo, after you confirm"),
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
-    ("R", "review a started card in Hunk, next to its agent"),
+    ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
     ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
     ("m", "merge the card branch into its base (local or PR, from the config), then finish, after you confirm"),
     ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
@@ -164,6 +165,8 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
         info.append(Text(f"PR {card.pr_state}", style=PR_STYLES.get(card.pr_state, "dim")))
     if card.worktree_left:
         info.append(Text("worktree still exists", style="bold yellow"))
+    if card.agent_review:
+        info.append(Text(f"agent review: {card.agent_review}", style="bold"))
     if card.parent_title:
         info.append(Text(f"↳ {card.parent_title}", style="dim"))
     if card.sub_cards:
@@ -588,17 +591,59 @@ class StateScreen(ModalBase):
 
 
 class AgentScreen(ModalBase):
-    """Select the agent before starting a card."""
+    """Select the agent before starting a card, or the agent that reviews one."""
+
+    def __init__(self, title: str = "Choose an agent"):
+        super().__init__()
+        self.title_text = title
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("Choose an agent")
+            yield Label(self.title_text)
             yield OptionList("claude", "pi")
             yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         self.dismiss(("claude", "pi")[event.option_index])
+
+
+class ReviewKindScreen(ModalBase):
+    """Choose how to review a started card."""
+
+    KINDS = ("human", "agent", "both")
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Review")
+            yield OptionList("Human: open Hunk next to the card's agent",
+                             "Agent: another agent reviews, the card's agent answers",
+                             "Both: an agent review first, then Hunk")
+            yield Label("enter: choose, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.KINDS[event.option_index])
+
+
+class ClaudeModelScreen(ModalBase):
+    """Choose the model of a Claude reviewer. It returns `(model,)`, where None is Claude's default."""
+
+    MODELS = (None, "opus", "sonnet", "haiku")
+
+    def __init__(self):
+        super().__init__()
+        self.labels = ["claude default", *self.MODELS[1:]]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Choose Claude's model")
+            yield OptionList(*self.labels)
+            yield Label("enter: start, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss((self.MODELS[event.option_index],))
 
 
 class BoardChoiceScreen(ModalBase):
@@ -823,6 +868,7 @@ class HerdboardApp(App):
         linear_writer: LinearWriter | None = None,
         start_card: Callable[[str, str | None], dict] | None = None,
         review_card: Callable[[str], dict] | None = None,
+        agent_review_card: Callable[..., dict] | None = None,
         merge_card: Callable[[str], dict] | None = None,
         finish_card: Callable[[str], dict] | None = None,
         directory: Path | None = None,
@@ -850,6 +896,7 @@ class HerdboardApp(App):
         self.linear_writer = linear_writer
         self.start_card = start_card
         self.review_card = review_card
+        self.agent_review_card = agent_review_card
         self.merge_card = merge_card
         self.finish_card = finish_card
         self.directory = directory or Path.cwd()
@@ -1120,7 +1167,7 @@ class HerdboardApp(App):
         cards = [card for column in self.loaded for card in column.cards]
 
         def status():
-            return [(card.worktree_removed, card.worktree_left, card.pr_state) for card in cards]
+            return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review) for card in cards]
 
         old = status()
         try:
@@ -1480,9 +1527,46 @@ class HerdboardApp(App):
         if card is None:
             return
         ref = card.ref
+
+        def chosen(kind: str | None) -> None:
+            if kind == "human":
+                self._human_review(ref)
+            elif kind is not None:
+                self.push_screen(AgentScreen("Choose the reviewer"),
+                                 lambda reviewer: self._chosen_reviewer(ref, reviewer, kind == "both"))
+
+        self.push_screen(ReviewKindScreen(), chosen)
+
+    def _human_review(self, ref: str) -> None:
         run = (lambda: self.review_card(ref)) if self.review_card else (
             lambda: Reviewer(self.store, self.directory, writer=self.linear_writer).review(ref))
         self._card_action(run, lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}")
+
+    def _chosen_reviewer(self, ref: str, reviewer: str | None, then_hunk: bool) -> None:
+        if reviewer is None:
+            return
+        if reviewer == "claude":
+            self.push_screen(ClaudeModelScreen(), lambda choice: choice and
+                             self._agent_review(ref, reviewer, choice[0], None, then_hunk))
+            return
+
+        def chosen(choice: tuple[str | None, str | None] | None) -> None:
+            if choice is not None:
+                self._agent_review(ref, reviewer, *choice, then_hunk)
+
+        self.push_screen(ModelScreen(*pi_model_choices(self.store.config)), chosen)
+
+    def _agent_review(self, ref: str, reviewer: str, model: str | None, thinking: str | None,
+                      then_hunk: bool) -> None:
+        options = {"reviewer": reviewer, "model": model, "thinking": thinking, "then_hunk": then_hunk}
+        run = (lambda: self.agent_review_card(ref, **options)) if self.agent_review_card else (
+            lambda: AgentReviewer(self.store, self.directory, writer=self.linear_writer).request(ref, **options))
+
+        def notice(result: dict) -> str:
+            model_text = f" ({result['model']})" if result["model"] else ""
+            return f"Agent review of {result['ref']} by {result['reviewer']}{model_text} started in {result['pane_id']}"
+
+        self._card_action(run, notice)
 
     def _merger(self) -> Merger:
         return Merger(self.store, self.directory, writer=self.linear_writer, ask_state=self.ask_state)

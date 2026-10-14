@@ -1,6 +1,6 @@
 # Review and merge
 
-Status: design draft. All 7 build steps are built.
+Status: design draft. All 8 build steps are built.
 
 `start` gives a card a worktree and an agent. The agent moves the card to Review. This design covers what happens after that: review the work, send feedback to the agent, merge the branch, and clean up. It also adds an activity log for agents and sub-cards for local todos.
 
@@ -106,7 +106,7 @@ A sub-card has an Obsidian block link to its parent on its first line, before it
 | Command | Action |
 |---|---|
 | `herdboard log <id> "text"` | Append an entry to the card's activity log |
-| `herdboard review <id>` | Open the card's work in Hunk next to its agent |
+| `herdboard review <id> [--human \| --agent \| --both]` | Open the card's work in Hunk next to its agent, have another agent review it, or both |
 | `herdboard merge <id> [--local \| --pr] [--force]` | Merge the card branch into its base |
 | `herdboard finish <id> [--force]` | Remove the worktree and the branch, and move the card to Done |
 | `herdboard start <id> [--base REF]` | As now, plus the base |
@@ -133,6 +133,38 @@ Hunk uses much memory, so one Hunk pane stays open only while its card is in Rev
 - When a card leaves Review by a herdboard command (`move`, `merge`, `finish`, a board key), the tool closes `review_pane` and removes the key.
 - An agent that moves its card to In progress also closes the pane, because it uses `move`.
 - `herdr worktree remove` also makes hunkdiff close its pane, through its `worktree.removed` event.
+
+### Agent review
+
+`herdboard review <id> --agent [--reviewer claude|pi] [--model NAME] [--thinking LEVEL]` asks a second agent to review the card's work. `--both` does the agent review first, then opens Hunk. `--human` is the default and is the review above.
+
+- `--reviewer` defaults to the other kind: a Claude card gets a pi reviewer, and a pi card gets a Claude reviewer.
+- `--model` is one model name. `--thinking` works only with pi.
+- The board offers the Claude models `opus`, `sonnet` and `haiku`, and pi's model list from the start dialog.
+
+Steps:
+
+1. Read the start record. Without one, stop with `not_started`. If an agent review of the card still runs, stop with `review_running`. A stored review whose reviewer agent is gone does not count.
+2. Find the card's agent, as in `review` step 3. Start a new one if it is gone.
+3. Collect the change: `git diff <base>...HEAD`, the uncommitted changes (`git diff HEAD`) and the untracked files, all in the worktree. If all are empty, stop with `nothing_to_review`.
+4. Write the review folder `<state>/reviews/<key>-<time>-<random>/`: `request.md`, `branch.patch`, `uncommitted.patch`. `request.md` has the card title and description, the branch, the base, the worktree, what to check and the findings format.
+5. Split the card agent's pane to the right, without focus, in the worktree. Start the reviewer there as `hb-<id>-review`. It can only read the repository and write `findings.md` in the review folder. These are the same limits as the peer-review plugin.
+6. Store `agent_review` in the start record: the folder, the pane, the kind, the model and whether Hunk follows. Log: `Agent review started: pi (model).`
+7. Start a background worker and return.
+
+The worker:
+
+1. Waits for `findings.md` and an idle reviewer, for 30 minutes at most.
+2. Closes the reviewer pane. Agents use memory too.
+3. Logs: `Agent review by pi done: <n> findings. <findings path>`.
+4. Waits until the card's agent is idle. Then it sends this prompt: read the findings, say for each one if you agree or disagree and why, record the answer with `herdboard log`, change no code, and wait for the user.
+5. With `--both`, it opens Hunk as `review` does.
+6. Shows a Herdr notification: `Agent review of <id> done`.
+7. Removes `agent_review` from the record.
+
+On a failure (the reviewer stopped, a timeout, a Herdr error), the worker logs `Agent review failed: <reason>`, shows a Herdr notification, and does not prompt the card's agent. With `--both`, it still opens Hunk. If the card was finished before the review ended, the worker only closes the pane.
+
+The board shows `agent review` on a card while its agent review runs.
 
 ### merge
 
@@ -195,7 +227,7 @@ Keys. The current `r` is reload, so review uses `R`. All are built. `m` and `f` 
 
 | Key | Action |
 |---|---|
-| `R` | review |
+| `R` | review: choose human, agent or both. For an agent review, choose the agent and the model |
 | `m` | merge with the repository default |
 | `M` | merge, and ask for the mode first |
 | `f` | finish |
@@ -258,6 +290,9 @@ merge: pr
 | `parent_nested` | The parent already has a parent |
 | `parent_missing` | The parent ID is not on the board |
 | `parent_not_promoted` | A sub-card was promoted before its parent |
+| `review_running` | An agent review of the card still runs |
+| `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes |
+| `worker_failed` | The agent review worker did not start. The reviewer pane is closed |
 
 ## Claude and pi
 
@@ -267,6 +302,7 @@ merge: pr
 | Log author | From the stored agent kind | From the stored agent kind |
 | Hunk feedback | hunkdiff `send-review` to the pane | Same |
 | Conflict message | `herdr agent prompt` | Same |
+| Agent reviewer | `--permission-mode dontAsk`, read tools, edits only in the review folder | `--tools read,grep,find,ls,write` |
 | New agent | `herdr agent start --kind claude` with the brief and the log | `--kind pi`, same message |
 
 Claude can stop at a permission prompt for `git commit`. That delays Review, but does not change the design.
@@ -288,6 +324,7 @@ Each step is usable without the steps after it.
 5. `merge --pr`, the PR marker, and `finish` for PR cards.
 6. Sub-cards and parent cards.
 7. `promote` of sub-cards.
+8. Agent review from `review` and the board.
 
 ## Testing
 

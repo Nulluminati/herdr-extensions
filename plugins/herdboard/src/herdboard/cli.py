@@ -11,8 +11,9 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity
-from .config import THINKING_LEVELS, load_config
+from . import activity, agent_review
+from .agent_review import AgentReviewer
+from .config import THINKING_LEVELS, config_path, load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_links import LabelLink, ProjectLink
@@ -148,8 +149,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
-    sub = command("review", "open a started card's work in Hunk, next to its agent")
+    sub = command("review", "review a started card's work: in Hunk next to its agent, by another agent, or both")
     sub.add_argument("ref")
+    kind = sub.add_mutually_exclusive_group()
+    kind.add_argument("--human", dest="kind", action="store_const", const="human",
+                      help="open the work in Hunk next to the card's agent (the default)")
+    kind.add_argument("--agent", dest="kind", action="store_const", const="agent",
+                      help="have another agent review the work; the card's agent gets the findings")
+    kind.add_argument("--both", dest="kind", action="store_const", const="both",
+                      help="an agent review first, then Hunk")
+    sub.add_argument("--reviewer", choices=["claude", "pi"],
+                     help="the reviewing agent; default: the other kind than the card's agent")
+    sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi reviewer's thinking level")
+
+    sub = command("review-wait", "wait for an agent review and deliver it (run by review --agent)")
+    sub.add_argument("ref")
+    sub.add_argument("--folder", type=Path, required=True)
 
     sub = command("merge", "merge a started card's branch into its base, then finish the card")
     sub.add_argument("ref")
@@ -187,7 +203,7 @@ def _card_dict(card: CardView) -> dict:
     # The list order already carries the sort order, and JSON consumers keep their schema.
     del data["sort_order"]
     # Board-only status; preserve the CLI card schema.
-    del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"]
+    del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"], data["agent_review"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -587,9 +603,23 @@ def _cmd_start(ctx: _Context) -> dict:
 
 
 def _cmd_review(ctx: _Context) -> dict:
+    args = ctx.args
+    ref = args.ref
+    writer = ctx.writer if LINEAR_REF.match(ref) else None
+    kind = args.kind or "human"
+    if kind == "human":
+        if args.reviewer or args.model or args.thinking:
+            raise UsageError("--reviewer, --model and --thinking need --agent or --both")
+        return Reviewer(ctx.store, ctx.directory, writer=writer).review(ref)
+    reviewer = AgentReviewer(ctx.store, ctx.directory, writer=writer, config_file=config_path(args.config))
+    return {"kind": kind, **reviewer.request(ref, reviewer=args.reviewer, model=args.model,
+                                             thinking=args.thinking, then_hunk=kind == "both")}
+
+
+def _cmd_review_wait(ctx: _Context) -> dict:
     ref = ctx.args.ref
-    reviewer = Reviewer(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(ref) else None)
-    return reviewer.review(ref)
+    code = agent_review.wait(ctx.store, ref, ctx.args.folder, writer=ctx.writer if LINEAR_REF.match(ref) else None)
+    return {"ref": ref, "exit_code": code}
 
 
 def _merger(ctx: _Context) -> Merger:
@@ -833,6 +863,7 @@ COMMANDS = {
     "promote": _cmd_promote,
     "start": _cmd_start,
     "review": _cmd_review,
+    "review-wait": _cmd_review_wait,
     "merge": _cmd_merge,
     "finish": _cmd_finish,
     "init": _cmd_init,
@@ -883,6 +914,18 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
+        return
+    if command == "review-wait":
+        return
+    if command == "review" and "reviewer" in result:
+        if as_json:
+            _emit_json(result)
+        else:
+            model = f" ({result['model']})" if result["model"] else ""
+            print(f"{result['ref']}: agent review by {result['reviewer']}{model} "
+                  f"in pane {result['pane_id']}. Files: {result['folder']}")
+            print("The card's agent gets the findings when they are ready."
+                  + (" Hunk opens when the findings are ready." if result["then_hunk"] else ""))
         return
     if command == "review":
         if as_json:
@@ -995,6 +1038,8 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](_Context(args))
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json)
+        if args.command == "review-wait":
+            return result["exit_code"]
     except HerdboardError as error:
         if as_json:
             details = {"code": error.code, "message": str(error)}

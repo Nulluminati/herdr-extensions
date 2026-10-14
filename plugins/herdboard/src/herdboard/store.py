@@ -68,6 +68,8 @@ class CardView:
     # Board-only start status: a worktree still there after Done, and the pull request state.
     worktree_left: bool = False
     pr_state: str | None = None
+    # Board-only: the kind of agent that reviews the card now, while an agent review runs.
+    agent_review: str | None = None
     # The card ID of a sub-card's parent, from its `[[#^id]]` link.
     parent: str | None = None
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.
