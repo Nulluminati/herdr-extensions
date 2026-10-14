@@ -1,11 +1,11 @@
 ---
 name: peer-review
-description: "Ask the other coding agent to review your uncommitted changes through Herdr. Claude's changes go to pi and pi's changes go to Claude. Use only when the user asks for a peer review, a second opinion from the other agent, or a review by pi or Claude. Requires HERDR_ENV=1."
+description: "Ask the other coding agent to review your changes through Herdr: uncommitted changes, else your branch commits since its upstream. Claude's changes go to pi and pi's changes go to Claude. Use only when the user asks for a peer review, a second opinion from the other agent, or a review by pi or Claude. Requires HERDR_ENV=1."
 ---
 
 # Peer review
 
-A peer review opens the other agent in a split pane next to you. That agent reviews the uncommitted changes in your repository and writes its findings to a file. You do not wait for it.
+A peer review opens the other agent in a split pane next to you. That agent reviews the uncommitted changes in your repository (or, when there are none, your branch commits since its upstream) and writes its findings to a file. You do not wait for it.
 
 ## Request a review
 
@@ -38,6 +38,7 @@ A new prompt arrives with the path of `findings.md`. Then:
 
 ## Limits
 
-- Only uncommitted changes are reviewed: tracked changes against `HEAD` and new untracked files.
-- The command fails when there are no uncommitted changes. Tell the user.
+- Uncommitted changes are reviewed first: tracked changes against `HEAD` and new untracked files.
+- When there are none, the commits on your branch since its upstream are reviewed.
+- The command fails when there are no uncommitted changes and no commits since the upstream. Tell the user.
 - One review round. Do not request a second review unless the user asks.

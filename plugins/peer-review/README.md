@@ -1,6 +1,6 @@
 # Peer review
 
-Ask the other agent to review uncommitted changes. Claude's changes go to pi, and pi's changes go to Claude. The reviewer opens in a split pane next to the requester, writes its findings to a file, and the requester gets a prompt to read them.
+Ask the other agent to review uncommitted changes. When there are none, the reviewer gets the commits on the branch since its upstream (`git diff @{u}...HEAD`). Claude's changes go to pi, and pi's changes go to Claude. The reviewer opens in a split pane next to the requester, writes its findings to a file, and the requester gets a prompt to read them.
 
 The requester lists each finding with its opinion and then waits for you. It does not change code. One request is one review round.
 
@@ -32,7 +32,7 @@ Bind the action in `~/.config/herdr/config.toml`:
 key = "prefix+shift+p"
 type = "plugin_action"
 command = "nulluminati.peer-review.request"
-description = "peer review: ask the other agent to review uncommitted changes"
+description = "peer review: ask the other agent to review the focused agent's changes"
 ```
 
 ## Use
@@ -57,7 +57,8 @@ The review files go to `~/.local/state/peer-review/<timestamp>/`:
 ## Known limits
 
 - In a folder that Claude has not seen, Claude shows its folder trust prompt first. Answer it in the reviewer pane. The review then starts.
-- The requester must be a Claude or pi pane inside a Git repository with uncommitted changes.
+- The requester must be a Claude or pi pane inside a Git repository. The repository needs uncommitted changes, or commits on a branch that has an upstream.
+- A failed request shows a Herdr notification. The details are also in `herdr plugin log list`.
 
 ## Tests
 

@@ -78,8 +78,13 @@ class PeerReviewTests(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[:3] == ["herdr", "agent", "wait"]:
             return subprocess.CompletedProcess(argv, 0, "{}", "")
+        if argv[:3] == ["herdr", "notification", "show"]:
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[0] == "git":
-            return subprocess.run(argv, check=True, capture_output=True, text=True)
+            try:
+                return subprocess.run(argv, check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as error:
+                raise peer_review.ReviewError(error.stderr.strip()) from error
         self.fail(f"Unexpected command: {argv}")
 
     def run_request(self, *arguments):
@@ -210,6 +215,70 @@ class PeerReviewTests(unittest.TestCase):
         self.assertIn("No uncommitted changes", self.errors.getvalue())
         self.assertFalse(any(argv[:3] == ["herdr", "pane", "split"] for argv in self.calls))
         self.assertEqual(self.workers, [])
+
+    def branch_with_upstream(self):
+        """A `feature` branch whose upstream is the first branch, with one commit on it."""
+        first = subprocess.run(["git", "-C", str(self.repository), "symbolic-ref", "--short", "HEAD"],
+                               check=True, capture_output=True, text=True).stdout.strip()
+        git(self.repository, "checkout", "--quiet", "-b", "feature")
+        git(self.repository, "branch", f"--set-upstream-to={first}")
+        (self.repository / "app.py").write_text("print('committed')\n")
+        git(self.repository, "commit", "--quiet", "-am", "feat: commit")
+        return first
+
+    def test_committed_work_is_reviewed_against_the_upstream(self):
+        upstream = self.branch_with_upstream()
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0)
+        review = self.only_review()
+        self.assertIn("+print('committed')", (review / "diff.patch").read_text())
+        request = (review / "request.md").read_text()
+        self.assertIn(f"commits on `feature` since `{upstream}`", request)
+        self.assertEqual(len(self.workers), 1)
+
+    def test_uncommitted_changes_win_over_the_upstream(self):
+        self.branch_with_upstream()
+        (self.repository / "app.py").write_text("print('uncommitted')\n")
+
+        self.run_request()
+
+        diff = (self.only_review() / "diff.patch").read_text()
+        self.assertIn("+print('uncommitted')", diff)
+        self.assertNotIn("+print('committed')", diff)
+
+    def test_a_branch_level_with_its_upstream_has_nothing_to_review(self):
+        self.branch_with_upstream()
+        git(self.repository, "branch", "level")
+        git(self.repository, "branch", "--set-upstream-to=level")
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        self.assertIn("No uncommitted changes, and no commits on feature since level", self.errors.getvalue())
+
+    def test_a_failed_request_shows_a_herdr_notification(self):
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        notification = next(argv for argv in self.calls if argv[:3] == ["herdr", "notification", "show"])
+        self.assertEqual(notification[3:5], ["Peer review failed", "--body"])
+        self.assertIn("No uncommitted changes", notification[5])
+
+    def test_a_failed_notification_does_not_hide_the_error(self):
+        original = self.fake_command
+
+        def failing(argv, timeout=120):
+            if argv[:3] == ["herdr", "notification", "show"]:
+                raise peer_review.ReviewError("no server")
+            return original(argv, timeout)
+
+        self.fake_command = failing
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        self.assertIn("No uncommitted changes", self.errors.getvalue())
 
     def test_request_from_a_pane_without_an_agent_fails(self):
         status, _ = self.run_request("--pane", "w1:p2")

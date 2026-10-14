@@ -2,7 +2,11 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Ask the other agent (Claude or pi) to review uncommitted changes in a Herdr pane."""
+"""Ask the other agent (Claude or pi) to review changes in a Herdr pane.
+
+The changes are the uncommitted ones. When there are none, they are the commits
+on the branch since its upstream, so committed agent work can be reviewed too.
+"""
 
 import argparse
 import json
@@ -77,20 +81,42 @@ def reviewer_arguments(reviewer: str, review: Path) -> list[str]:
     ]
 
 
-def write_request(review: Path, repository: Path, requester: str) -> None:
+def git_output(repository: Path, *arguments: str) -> str | None:
+    """The output of a Git command, or None when Git fails."""
+    try:
+        return command(["git", "-C", str(repository), *arguments]).stdout
+    except ReviewError:
+        return None
+
+
+def changes(repository: Path, requester: str) -> tuple[str, list[str], str]:
+    """The diff to review, the untracked files, and a sentence that says what the diff holds."""
     diff = command(["git", "-C", str(repository), "diff", "HEAD"]).stdout
     untracked = command(
         ["git", "-C", str(repository), "ls-files", "--others", "--exclude-standard"]
     ).stdout.splitlines()
-    if not diff and not untracked:
-        raise ReviewError(f"No uncommitted changes in {repository}")
+    if diff or untracked:
+        return diff, untracked, f"{requester} changed the repository at `{repository}`."
+    upstream = (git_output(repository, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}") or "").strip()
+    if not upstream:
+        raise ReviewError(f"No uncommitted changes in {repository}, and its branch has no upstream to compare with")
+    branch = command(["git", "-C", str(repository), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
+    diff = command(["git", "-C", str(repository), "diff", f"{upstream}...HEAD"]).stdout
+    if not diff:
+        raise ReviewError(f"No uncommitted changes, and no commits on {branch} since {upstream}, in {repository}")
+    return diff, [], (f"{requester} made commits on `{branch}` since `{upstream}` "
+                      f"in the repository at `{repository}`.")
+
+
+def write_request(review: Path, repository: Path, requester: str) -> None:
+    diff, untracked, summary = changes(repository, requester)
 
     review.mkdir(parents=True)
     (review / "diff.patch").write_text(diff)
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
     (review / "request.md").write_text(f"""# Peer review request
 
-{requester} changed the repository at `{repository}`.
+{summary}
 
 - Diff of tracked files: `{review / "diff.patch"}`
 - New untracked files (read them from the repository):
@@ -208,7 +234,8 @@ def deliver(review: Path, requester: str, reviewer_pane: str, reviewer: str) -> 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    request_parser = commands.add_parser("request", help="start a review of uncommitted changes")
+    request_parser = commands.add_parser(
+        "request", help="start a review of uncommitted changes, else of the commits since the upstream")
     request_parser.add_argument("--pane", help="pane of the requesting agent (default: this pane)")
     deliver_parser = commands.add_parser("deliver", help=argparse.SUPPRESS)
     deliver_parser.add_argument("--review", type=Path, required=True)
@@ -223,7 +250,17 @@ def main(argv: list[str] | None = None) -> int:
         return deliver(arguments.review, arguments.requester, arguments.reviewer_pane, arguments.reviewer)
     except ReviewError as error:
         print(f"peer-review: {error}", file=sys.stderr)
+        if arguments.command == "request":
+            notify_failure(str(error))
         return 1
+
+
+def notify_failure(message: str) -> None:
+    """Show a failed request in Herdr: a plugin action's error output goes only to the plugin log."""
+    try:
+        herdr("notification", "show", "Peer review failed", "--body", message)
+    except ReviewError as error:
+        print(f"peer-review: cannot show a notification: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":

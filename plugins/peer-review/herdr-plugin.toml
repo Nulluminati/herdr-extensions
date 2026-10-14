@@ -3,13 +3,13 @@ name = "Peer Review"
 version = "0.1.0"
 # Needs agent start and agent prompt --wait.
 min_herdr_version = "0.9.0"
-description = "Ask the other agent to review uncommitted changes: Claude's work goes to pi, pi's work goes to Claude."
+description = "Ask the other agent to review uncommitted changes, else the branch commits since its upstream: Claude's work goes to pi, pi's work goes to Claude."
 platforms = ["linux", "macos"]
 
 # Herdr runs actions from the plugin root. The script returns at once and a
 # background worker prompts the requesting agent when the findings are ready.
 [[actions]]
 id = "request"
-title = "Peer review: uncommitted changes of the focused agent"
+title = "Peer review: changes of the focused agent"
 contexts = ["pane", "workspace"]
 command = ["python3", "bin/peer_review.py", "request"]
