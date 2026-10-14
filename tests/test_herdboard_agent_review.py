@@ -122,7 +122,8 @@ class RequestTests(AgentReviewTestCase):
         text = (Path(self.request()["folder"]) / "request.md").read_text()
         folder = attachments.folder(self.store.config, self.card.ref)
         self.assertIn(f"Check that the change follows the plan that the user agreed on: `{folder / 'plan.md'}`", text)
-        self.assertIn(f"- `{folder / 'spec.md'}`", text)
+        # A blank line ends the list, so the instructions do not join its last item.
+        self.assertIn(f"- `{folder / 'spec.md'}`\n\nReview this change", text)
 
     def test_an_unreadable_attachment_folder_leaves_no_review_folder(self):
         self.started()

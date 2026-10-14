@@ -61,6 +61,8 @@ def request_text(card, record, base: str, folder: Path, untracked: list[str], fi
         card_files += f"Check that the change follows the plan that the user agreed on: `{plan['path']}`\n"
     if others:
         card_files += "The card's other attachments:\n" + "".join(f"- `{entry['path']}`\n" for entry in others)
+    if card_files:
+        card_files += "\n"
     body = "\n".join(card.body).strip() if card is not None else ""
     return f"""# Review request
 
