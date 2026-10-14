@@ -160,7 +160,8 @@ def load_config(path: Path | None = None) -> Config:
     todos_dir = _string(path, data, "todos_dir")
     if todos_dir is not None:
         try:
-            config.todos_dir = Path(todos_dir).expanduser()
+            # Absolute, because agents that read the attachments run in other folders.
+            config.todos_dir = Path(todos_dir).expanduser().absolute()
         except RuntimeError as error:
             raise HerdboardError(f"{path}: invalid todos_dir: {error}") from error
     columns = _string_list(path, data, "columns")

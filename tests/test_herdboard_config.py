@@ -93,6 +93,13 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.todos_dir, self.dir / "home" / "t")
         self.assertEqual(config.vault_root, self.dir / "home" / "Notes")
 
+    def test_a_relative_todos_dir_becomes_absolute(self):
+        # Agents run in other folders, so every path that herdboard gives them must be absolute.
+        path = self.write(self.dir / "a.toml", 'todos_dir = "t"\n')
+        with mock.patch("os.getcwd", return_value=str(self.dir / "work")):
+            config = load_config(path)
+        self.assertEqual(config.todos_dir, self.dir / "work" / "t")
+
     def test_all_values(self):
         path = self.write(self.dir / "a.toml", 'complete_markers = ["Complete", "Shipped"]\n')
         self.assertEqual(load_config(path).complete_markers, ["Complete", "Shipped"])
