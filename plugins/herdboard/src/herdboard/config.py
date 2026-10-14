@@ -83,6 +83,11 @@ def config_path(path: Path | None = None) -> Path:
     explicit = os.environ.get("HERDBOARD_CONFIG")
     if explicit:
         return Path(explicit).expanduser().absolute()
+    return default_config_path()
+
+
+def default_config_path() -> Path:
+    """The config file when neither --config nor HERDBOARD_CONFIG names one."""
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
     return base / "herdboard" / "config.toml"

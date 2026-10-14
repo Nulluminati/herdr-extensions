@@ -19,7 +19,7 @@ import time
 
 from . import attachments
 from .brief import agent_message, brief_text, card_token
-from .config import THINKING_LEVELS, config_path
+from .config import THINKING_LEVELS, default_config_path
 from .identity import _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_source import state_dir
@@ -103,14 +103,15 @@ def herdboard_command(config_file: Path | None = None) -> str:
 
     A `herdboard` inside this Python's own environment is on the path only while
     `uv run` runs it, so the agent's shell would not find it. A config file that is not the
-    default one is named, so the agent reads the same boards.
+    default one is named, so the agent reads the same boards. That includes one from
+    HERDBOARD_CONFIG: an agent that Herdr starts may not have the variable.
     """
     found = shutil.which("herdboard")
     if found and not Path(found).resolve().is_relative_to(Path(sys.prefix).resolve()):
         program = "herdboard"
     else:
         program = f"{shlex.quote(sys.executable)} -m herdboard"
-    if config_file is not None and Path(config_file) != config_path():
+    if config_file is not None and Path(config_file) != default_config_path():
         program += f" --config {shlex.quote(str(config_file))}"
     return program
 

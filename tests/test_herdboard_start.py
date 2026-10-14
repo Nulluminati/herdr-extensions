@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
-from herdboard.config import Config
+from herdboard.config import Config, config_path
 from herdboard.identity import repo_identity
 from herdboard.store import Store
 from herdboard import start
@@ -498,8 +498,12 @@ class StartTests(unittest.TestCase):
         custom = self.root / "my config.toml"
         with patch.object(start.shutil, "which", return_value="/home/n/.local/bin/herdboard"):
             self.assertEqual(start.herdboard_command(custom), f"herdboard --config {start.shlex.quote(str(custom))}")
-            self.assertEqual(start.herdboard_command(start.config_path()), "herdboard")
+            self.assertEqual(start.herdboard_command(config_path()), "herdboard")
             self.assertEqual(start.herdboard_command(None), "herdboard")
+            # An agent that Herdr starts may not have HERDBOARD_CONFIG, so the command names that file.
+            with patch.dict(os.environ, {"HERDBOARD_CONFIG": str(custom)}):
+                self.assertEqual(start.herdboard_command(config_path()),
+                                 f"herdboard --config {start.shlex.quote(str(custom))}")
 
     def test_the_brief_uses_the_starter_config_file(self):
         custom = self.root / "custom.toml"
