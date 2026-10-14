@@ -470,6 +470,18 @@ class StartTests(unittest.TestCase):
         self.assertIn(f"Branch: `{self.starter_branch()}`", text)
         self.assertIn(f"--json move {self.card.ref} Review", text)
 
+    def test_the_brief_has_the_plan_and_the_attachments(self):
+        from herdboard import attachments
+        source = self.root / "spec.md"
+        source.write_text("1. Raise the timeout.\n")
+        attachments.add(self.store, self.card.ref, source, name="plan.md")
+        attachments.add(self.store, self.card.ref, source)
+        self.starter.start(self.card.ref)
+        text = (start.state_dir() / "briefs" / f"{self.card.ref}.md").read_text()
+        self.assertIn("## Plan\n\nYou and the user agreed", text)
+        self.assertIn("1. Raise the timeout.\n", text)
+        self.assertIn(str(attachments.folder(self.config, self.card.ref) / "spec.md"), text)
+
     def starter_branch(self):
         return start._read(start.state_dir() / "starts.json")[self.card.ref]["branch"]
 

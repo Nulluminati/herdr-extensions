@@ -74,6 +74,22 @@ class BriefTests(unittest.TestCase):
         self.assertIn("## Linked notes\n\n### Stow notes\n\nUse stow -t ~\n", text)
         self.assertIn("### Gone\n\nThe note was not found.\n", text)
 
+    def test_the_plan_is_included_and_other_attachments_are_listed(self):
+        files = [{"name": "plan.md", "path": "/todos/.herdboard/attachments/t83k/plan.md", "size": 20},
+                 {"name": "spec.pdf", "path": "/todos/.herdboard/attachments/t83k/spec.pdf", "size": 9000}]
+        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
+                          command="herdboard", plan="## Steps\n\n1. Add stow.\n", attachments=files)
+        self.assertIn("## Plan\n\nYou and the user agreed on this plan before the work started. "
+                      "Follow it. Log each change to it.\n\n## Steps\n\n1. Add stow.\n\n", text)
+        self.assertIn("## Attachments\n\nRead them when you need them.\n\n"
+                      "- `/todos/.herdboard/attachments/t83k/spec.pdf`\n", text)
+        self.assertNotIn("attachments/t83k/plan.md", text)
+
+    def test_a_card_without_a_plan_or_attachments_has_neither_section(self):
+        text = self.brief(todo())
+        self.assertNotIn("## Plan", text)
+        self.assertNotIn("## Attachments", text)
+
     def test_how_to_update_the_card(self):
         for card in (todo(), issue()):
             with self.subTest(source=card.source):

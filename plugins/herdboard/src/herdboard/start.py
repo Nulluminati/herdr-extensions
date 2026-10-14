@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 
+from . import attachments
 from .brief import agent_message, brief_text, card_token
 from .config import THINKING_LEVELS
 from .identity import _git, repo_identity
@@ -546,6 +547,7 @@ class Starter:
             card, notes=notes, repository=record["repository"],
             worktree=record["worktree_path"], branch=record["branch"], base=record["base"],
             command=herdboard_command(), note=note, log=log,
+            plan=attachments.plan_text(self.config, card.ref), attachments=attachments.listing(self.config, card.ref),
         ))
         message = agent_message(card, brief)
         record["agent_name"] = name

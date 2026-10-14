@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import unicodedata
 
+from .attachments import PLAN_NAME
 from .model import split_title
 from .store import CardView
 
@@ -44,6 +45,8 @@ def brief_text(
     command: str,
     note: str | None = None,
     log: list[dict] = (),
+    plan: str | None = None,
+    attachments: list[dict] = (),
 ) -> str:
     """A Markdown brief: the task, where to work, and how to keep the card current."""
     linear = card.source == "linear"
@@ -96,6 +99,16 @@ def brief_text(
             content = note["content"]
             lines += [f"### {note['name']}", ""]
             lines += [content.rstrip("\n") if content is not None else "The note was not found.", ""]
+
+    if plan and plan.strip():
+        lines += ["## Plan", "",
+                  "You and the user agreed on this plan before the work started. Follow it. Log each change to it.",
+                  "", plan.strip("\n"), ""]
+    # The plan is in the brief already, so only the other attachments are listed.
+    others = [entry for entry in attachments if entry["name"] != PLAN_NAME]
+    if others:
+        lines += ["## Attachments", "", "Read them when you need them.", ""]
+        lines += [f"- `{entry['path']}`" for entry in others] + [""]
 
     if log:
         lines += ["## Activity log", ""]

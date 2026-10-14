@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity, agent_review, pr_write
+from . import activity, agent_review, attachments, pr_write
 from .agent_review import AgentReviewer
 from .config import THINKING_LEVELS, config_path, load_config
 from .identity import repo_identity
@@ -128,6 +128,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("log", "add an entry to a card's activity log")
     sub.add_argument("ref")
     sub.add_argument("message")
+
+    sub = command("attach", "add a file to a card's attachments, or remove one")
+    sub.add_argument("ref")
+    sub.add_argument("file", nargs="?", type=Path)
+    sub.add_argument("--name", help="the attachment's name; default: the file's name")
+    sub.add_argument("--remove", metavar="NAME", help="remove the attachment with this name")
 
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
@@ -286,9 +292,14 @@ def _log_text(entries: list[dict]) -> list[str]:
     return lines
 
 
-def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] | None = None) -> str:
+def _attachments_text(files: list[dict]) -> list[str]:
+    return ["--- attachments ---", *(entry["path"] for entry in files)] if files else []
+
+
+def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] | None = None,
+               files: list[dict] | None = None) -> str:
     if card.source == "linear":
-        return "\n".join([_show_linear_text(card), *_log_text(log or [])])
+        return "\n".join([_show_linear_text(card), *_attachments_text(files or []), *_log_text(log or [])])
     lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
     if card.parent:
         lines.append(f"parent: {card.parent}")
@@ -300,6 +311,7 @@ def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] 
     for note in notes or []:
         lines.append(f"--- {note['name']} ---")
         lines.append("(note not found)" if note["content"] is None else note["content"].rstrip("\n"))
+    lines.extend(_attachments_text(files or []))
     lines.extend(_log_text(log or []))
     return "\n".join(lines)
 
@@ -465,14 +477,23 @@ def _card_log(ctx: _Context, card: CardView) -> list[dict]:
     return activity.read(ctx.config, card.ref, None if ctx.args.log else SHOWN_LOG_ENTRIES)
 
 
+def _card_attachments(ctx: _Context, card: CardView) -> list[dict]:
+    """The card's attachments; a card with only a temporary reference has none."""
+    if not activity.LOG_REF.match(card.ref):
+        return []
+    return attachments.listing(ctx.config, card.ref)
+
+
 def _cmd_show(ctx: _Context) -> dict:
     ref = ctx.args.ref
     if LINEAR_REF.match(ref):
         ctx.views.source.require_active()
         card, result = _find_linear_card(ctx, ref)
-        return {"card": card, "linear": result, "log": _card_log(ctx, card)}
+        return {"card": card, "linear": result, "log": _card_log(ctx, card),
+                "attachments": _card_attachments(ctx, card)}
     card = ctx.store.show(ref)
-    return {"card": card, "notes": ctx.store.notes_for(card), "log": _card_log(ctx, card)}
+    return {"card": card, "notes": ctx.store.notes_for(card), "log": _card_log(ctx, card),
+            "attachments": _card_attachments(ctx, card)}
 
 
 def _cmd_log(ctx: _Context) -> dict:
@@ -484,6 +505,23 @@ def _cmd_log(ctx: _Context) -> dict:
     else:
         ref = ctx.store.ensure_id(args.ref).ref
     return {"ref": ref, "entry": activity.append(ctx.store, ref, args.message, activity.author())}
+
+
+def _cmd_attach(ctx: _Context) -> dict:
+    args = ctx.args
+    if (args.file is None) == (args.remove is None):
+        raise UsageError("Give a file to attach, or --remove NAME")
+    if args.remove is not None and args.name is not None:
+        raise UsageError("--name works only when you attach a file")
+    ref = args.ref.upper() if LINEAR_REF.match(args.ref) else ctx.store.ensure_id(args.ref).ref
+    if args.remove is not None:
+        removed = attachments.remove(ctx.store, ref, args.remove)
+        activity.append(ctx.store, ref, f"Removed the attachment {removed['name']}.", activity.author())
+        return {"ref": ref, "removed": removed}
+    path = args.file if args.file.is_absolute() else ctx.directory / args.file
+    added = attachments.add(ctx.store, ref, path, args.name)
+    activity.append(ctx.store, ref, f"Attached {added['name']}.", activity.author())
+    return {"ref": ref, "attachment": added}
 
 
 def _require_todo_options(args: argparse.Namespace) -> None:
@@ -878,6 +916,7 @@ COMMANDS = {
     "delete": _cmd_delete,
     "edit": _cmd_edit,
     "log": _cmd_log,
+    "attach": _cmd_attach,
     "promote": _cmd_promote,
     "start": _cmd_start,
     "review": _cmd_review,
@@ -975,6 +1014,14 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"{result['ref']}: merged into {result['base']} at {result['commit'][:7]}")
         print(_finish_line(result))
         return
+    if command == "attach":
+        if as_json:
+            _emit_json(result)
+        elif "removed" in result:
+            print(f"{result['ref']}: removed {result['removed']['name']}")
+        else:
+            print(f"{result['ref']}: attached {result['attachment']['name']}")
+        return
     if command == "log":
         if as_json:
             _emit_json(result)
@@ -1015,6 +1062,8 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                 data["notes"] = result["notes"]
             if result.get("log") is not None:
                 data["log"] = result["log"]
+            if result.get("attachments") is not None:
+                data["attachments"] = result["attachments"]
             if result.get("hint"):
                 data["hint"] = result["hint"]
             if linear is not None:
@@ -1028,7 +1077,7 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     elif command == "list":
         print(_list_text(result["cards"]))
     elif command == "show":
-        print(_show_text(result["card"], result.get("notes"), result.get("log")))
+        print(_show_text(result["card"], result.get("notes"), result.get("log"), result.get("attachments")))
     elif command == "promote":
         print(_card_line(result["card"]))
         if result["sub_issues"]:
