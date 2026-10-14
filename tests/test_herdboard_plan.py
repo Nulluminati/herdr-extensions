@@ -35,6 +35,8 @@ class PlanHerdr:
         self.on_start = None
         # Each pane check takes the next answer; False means the pane is gone. The pane exists by default.
         self.panes = []
+        # Panes and names of live work agents, which `start` recorded.
+        self.work_agents = set()
 
     def reply(self, argv, result=None, error=None):
         if error:
@@ -47,6 +49,8 @@ class PlanHerdr:
         operation = " ".join(args[:2])
         if operation == "tab create":
             return self.reply(argv, {"tab": {"tab_id": "w1:t4"}, "root_pane": {"pane_id": "w1:p7"}})
+        if operation == "agent get" and args[2] in self.work_agents:
+            return self.reply(argv, {"agent": {"agent_status": "working", "pane_id": args[2]}})
         if operation == "agent get":
             if self.on_poll:
                 self.on_poll()
@@ -346,6 +350,42 @@ class WaitTests(PlanTestCase):
         self.assertEqual(self.fake.find("agent", "get"), [])
         self.assertEqual(self.log(), ["Planning started: claude."])
         self.assertIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
+
+    def start_work_agent(self):
+        start._write(start.state_dir() / "starts.json",
+                     {self.card.ref: {"ref": self.card.ref, "pane_id": "w9:p1", "agent_name": f"hb-{self.card.ref}"}})
+        self.fake.work_agents = {"w9:p1", f"hb-{self.card.ref}"}
+
+    def test_a_changed_plan_goes_to_the_card_agent_when_planning_ends(self):
+        self.start_work_agent()
+        self.planner.plan(self.card.ref)
+        self.fake.on_poll = lambda: self.plan_file.exists() or self.write_plan()
+        self.fake.states = ["idle", None]
+        self.wait()
+        self.assertEqual(self.fake.find("agent", "wait")[0][:3], ["agent", "wait", "w9:p1"])
+        prompts = self.fake.find("agent", "prompt")
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0][2], "w9:p1")
+        self.assertIn(str(self.plan_file), prompts[0][3])
+        self.assertIn("Wait for the user", prompts[0][3])
+        self.assertEqual(self.log()[-2:], ["Planning ended.", "Sent the plan to the card's agent."])
+
+    def test_an_unchanged_plan_is_not_sent_to_the_card_agent(self):
+        self.start_work_agent()
+        self.planner.plan(self.card.ref)
+        self.fake.states = ["idle", None]
+        self.wait()
+        self.assertEqual(self.fake.find("agent", "prompt"), [])
+
+    def test_a_changed_plan_without_a_live_card_agent_is_not_sent(self):
+        self.start_work_agent()
+        self.fake.work_agents = set()
+        self.planner.plan(self.card.ref)
+        self.fake.on_poll = lambda: self.plan_file.exists() or self.write_plan()
+        self.fake.states = ["idle", None, None, None]
+        self.wait()
+        self.assertEqual(self.fake.find("agent", "prompt"), [])
+        self.assertEqual(self.log()[-1], "Planning ended.")
 
     def test_no_record_means_nothing_to_wait_for(self):
         self.assertEqual(self.wait(), 1)

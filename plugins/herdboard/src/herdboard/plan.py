@@ -8,23 +8,27 @@ does the work gets the plan in its brief. A background worker logs each save of 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
-from . import activity, attachments
+from . import activity, attachments, start as start_module
 from .agent_review import _reviewer_status, start_worker
 from .brief import _one_line, _title, _unindent
 from .config import THINKING_LEVELS
 from .linear_cards import LINEAR_REF, issue_card
 from .model import HerdboardError, NotFoundError
-from .start import (Starter, StartError, _lock, _read, _write, find_record, herdboard_command, herdr, safe_key,
-                    state_dir, write_brief)
+from .start import (Starter, StartError, _lock, _read, _write, agent_live, find_record, herdboard_command, herdr,
+                    safe_key, state_dir, write_brief)
 from .store import TEMP_REF
 
 # A planning talk with the user can take hours; the worker stops watching after this.
 PLAN_TIMEOUT_SECONDS = 8 * 60 * 60
 POLL_SECONDS = 5
+# How long the worker waits for a busy work agent before it sends the changed plan.
+AGENT_WAIT_SECONDS = 30 * 60
 
 PLAN_FORMAT = """    # Plan: <title>
 
@@ -297,4 +301,24 @@ def wait(store, ref, pane: str) -> int:
     else:
         message = "Planning ended without a plan."
     activity.append(store, ref, message, "herdboard")
+    if saves:
+        _send_plan(store, ref, plan_file)
     return 0
+
+
+def _send_plan(store, ref: str, plan_file: Path) -> None:
+    """Tell the card's work agent, when one runs, that the plan changed. The user decides what changes."""
+    try:
+        found = find_record(ref)
+        if found is None or not agent_live(found[1]):
+            return
+        pane = found[1]["pane_id"]
+        start_module.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", pane,
+                              "--until", "idle", "--timeout", str(AGENT_WAIT_SECONDS * 1000)],
+                             timeout=AGENT_WAIT_SECONDS + 60)
+        herdr("agent", "prompt", pane, f"The plan for this card changed: {plan_file}. Read it. "
+              "Tell the user how your work differs from the plan. Wait for the user to decide what to change.")
+    except (HerdboardError, OSError, subprocess.TimeoutExpired) as failure:
+        print(f"herdboard: cannot send the plan to the card's agent: {failure}", file=sys.stderr)
+        return
+    activity.append(store, ref, "Sent the plan to the card's agent.", "herdboard")
