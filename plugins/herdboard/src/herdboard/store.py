@@ -509,7 +509,11 @@ class Store:
         return notes
 
     def show(self, ref: str, archived: bool = False) -> CardView:
-        """A card. With `archived`, also a card from an archive, found by its ID; else an archived card raises."""
+        """A card. With `archived`, also a card from an archive, found by its ID or its archive reference;
+        else an archived card raises."""
+        if archived and ARCHIVE_REF.match(ref):
+            path, number, _ = self._locate_archived(ref)
+            return self._archive_views(path, self._read(path))[number - 1]
         try:
             located = self._resolve(ref)
         except ArchivedError:
@@ -917,6 +921,19 @@ class Store:
             raise ConflictError(f"{path}: card changed on disk; retry")
         return card
 
+    def _archive_id(self, ref: str) -> CardView:
+        """Give the archive card of an archive reference a new ID."""
+        path, number, lines = self._locate_archived(ref)
+        with self._lock():
+            board = self._read(path)
+            self._require_writable(path, board)
+            card = self._archived_card(board, path, ref, number, lines)
+            taken: set[str] = set()
+            self._assign_ids(path, board, taken)
+            card.set_block_id(self._new_id(taken))
+            self._write(path, board)
+        return self._view(path, board.archive, card, card.block_id)
+
     def archived_parent(self, ref: str) -> CardView | None:
         """The parent of an archived sub-card, when the parent is archived too."""
         path, number, lines = self._locate_archived(ref)
@@ -985,10 +1002,12 @@ class Store:
     def ensure_id(self, ref: str, archived: bool = False) -> CardView:
         """The card, with a block ID: a card without one gets IDs by the usual write rule.
 
-        With `archived`, an archived card is returned too; it always has an ID.
+        With `archived`, an archived card is returned too. One without an ID gets one.
         """
         view = self.show(ref, archived)
-        if TEMP_REF.match(view.ref):
+        if view.archived and ARCHIVE_REF.match(view.ref):
+            view = self._archive_id(view.ref)
+        elif TEMP_REF.match(view.ref):
             view = self._modify(ref, lambda board, path, column, card: column)
         return view
 

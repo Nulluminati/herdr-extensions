@@ -102,13 +102,13 @@ The archive keeps old todos off the board. It is the archive of the Obsidian Kan
 
 - `A`, or `herdboard archive <id>`, moves a todo to the archive. `L` on the last column does the same when the archive column shows.
 - `D`, or `herdboard archive --done`, archives every card in the done column. In a view with several boards, `D` archives the done column of each board.
-- `z` shows the archive column at the end of the board. The board hides it again on the next `z`.
+- `z` shows the archive column at the end of the board. The board hides it again on the next `z`. `a` does not add cards to the archive column.
 - `A` on an archived card, or `herdboard unarchive <id>`, moves it back to the done column. A card that Obsidian archived without an ID takes its archive reference, such as `acme-api:archive-2` from `list --archived`, and gets an ID.
 - A sub-card whose parent is archived too brings its parent back with it. The board asks first. The command asks in a terminal, and needs `--yes` without one.
 
-herdboard does not archive a card whose worktree still exists or whose agent still runs: `finish` it first. A parent whose sub-cards stay on the board does not archive either. `archive --done` keeps these cards in the done column and reports why.
+herdboard does not archive a card whose worktree still exists, or whose agent or planner still runs. `finish` the card, or close the planner tab, first. A parent whose sub-cards stay on the board does not archive either. `archive --done` keeps these cards in the done column and reports why.
 
-An archived card keeps its ID, its log and its attachments. `show` and `log` work on it. Other commands, such as `start`, `plan`, `review`, `merge` and `attach`, refuse it with `archived` before they change anything. Linear issues are not archived here.
+An archived card keeps its ID, its log and its attachments. `show` and `log` work on it, also with an archive reference. `log` gives a card without an ID its ID. Other commands, such as `start`, `plan`, `review`, `merge` and `attach`, refuse it with `archived` before they change anything. Linear issues are not archived here.
 
 ### Card markers
 

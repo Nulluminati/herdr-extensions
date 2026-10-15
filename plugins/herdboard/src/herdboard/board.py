@@ -1950,6 +1950,10 @@ class HerdboardApp(App):
         if not self.columns:
             self.notify("The view has no columns", severity="error")
             return
+        if self.columns[self.col].archive:
+            self.notify("Cards cannot be added to the archive. Add the card to a column, then archive it.",
+                        severity="warning")
+            return
         path = self._add_path()
         column = self.columns[self.col].name
         self.push_screen(AddScreen(self._add_options(path), path, column))

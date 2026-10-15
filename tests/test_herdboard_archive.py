@@ -11,7 +11,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard import cli, kanban_md, start  # noqa: E402
+from herdboard import cli, kanban_md, plan, start  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.model import ConflictError, HerdboardError, NotFoundError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -92,6 +92,18 @@ class ArchiveStoreTest(unittest.TestCase):
             with self.assertRaises(NotFoundError) as caught:
                 call()
             self.assertEqual(caught.exception.code, "archived")
+
+    def test_show_and_ensure_id_take_an_archive_reference(self):
+        path = self.put(board_text(col("Done"), archive="***\n\n## Archive\n\n- [x] old ^t000\n- [x] no id\n\n"))
+        card = self.store.show("p:archive-2", archived=True)
+        self.assertEqual((card.ref, card.title, card.archived), ("p:archive-2", "no id", True))
+        with self.assertRaises(NotFoundError):
+            self.store.show("p:archive-2")
+        given = self.store.ensure_id("p:archive-2", archived=True)
+        self.assertRegex(given.ref, r"^t[0-9a-z]{3}$")
+        self.assertTrue(given.archived)
+        board = kanban_md.parse(path.read_text())
+        self.assertEqual([c.block_id for c in board.archive.cards], ["t000", given.ref])
 
     def test_archive_by_temporary_reference_checks_the_card_id(self):
         self.put(board_text(col("Todo", "- [ ] one ^t111"), col("Done")))
@@ -283,6 +295,16 @@ class ArchiveBlockerTest(unittest.TestCase):
         self.assertEqual(start.archive_blocker("t111"),
                          f"its worktree still exists at {worktree}. Finish the card first")
 
+    def test_a_running_planner_blocks(self):
+        path = start.state_dir() / "plans.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"t111": {"pane_id": "p9"}}))
+        with mock.patch.object(plan, "_pane_exists", return_value=True) as exists:
+            self.assertEqual(start.archive_blocker("t111"), "its planner still runs in pane p9")
+        exists.assert_called_once_with("p9")
+        with mock.patch.object(plan, "_pane_exists", return_value=False):
+            self.assertIsNone(start.archive_blocker("t111"))
+
     def test_a_running_agent_blocks(self):
         self.record(worktree_path=str(self.root / "gone"), agent_name="hb-t111", pane_id="p1")
         with mock.patch.object(start, "agent_live", return_value=True) as live:
@@ -392,6 +414,13 @@ class ArchiveCliTest(unittest.TestCase):
         out, _ = self.run_cli("unarchive", "t222", "--yes")
         self.assertEqual(out, "t222 → Done (p)\nAlso unarchived the parent t111.\n")
         self.assertEqual(self.run_json("show", "t111")["log"][-1]["message"], "Unarchived.")
+
+    def test_show_and_log_take_an_archive_reference(self):
+        self.board.write_text(board_text(col("Done", "**Complete**"), archive="***\n\n## Archive\n\n- [x] no id\n\n"))
+        self.assertEqual(self.run_json("show", "p:archive-1")["card"]["title"], "no id")
+        ref = self.run_json("log", "p:archive-1", "note")["ref"]
+        self.assertRegex(ref, r"^t[0-9a-z]{3}$")
+        self.assertEqual(self.run_json("show", ref)["log"][-1]["message"], "note")
 
     def test_linear_cards_are_not_archived(self):
         for command in ("archive", "unarchive"):

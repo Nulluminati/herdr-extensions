@@ -276,7 +276,13 @@ def agent_live(record) -> bool:
 
 
 def archive_blocker(ref) -> str | None:
-    """Why a started card must stay on the board: its worktree still exists, or its agent still runs."""
+    """Why a card must stay on the board: its planner still runs, its worktree still exists, or its agent still runs."""
+    # `plan` imports this module, so it loads here.
+    from .plan import running_planner
+
+    pane = running_planner(ref)
+    if pane is not None:
+        return f"its planner still runs in pane {pane}"
     found = find_record(ref)
     if found is None:
         return None

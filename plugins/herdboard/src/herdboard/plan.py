@@ -237,6 +237,15 @@ def _pane_exists(pane: str) -> bool:
     return herdr("pane", "get", pane, tolerated=("pane_not_found",)) is not None
 
 
+def running_planner(ref: str) -> str | None:
+    """The pane of the card's planner while it still runs, else None."""
+    with _lock(wait=2):
+        running = _read(_plans_path()).get(ref)
+    if isinstance(running, dict) and isinstance(running.get("pane_id"), str) and _pane_exists(running["pane_id"]):
+        return running["pane_id"]
+    return None
+
+
 def _forget(ref: str, pane: str) -> None:
     with _lock(wait=2):
         records = _read(_plans_path())

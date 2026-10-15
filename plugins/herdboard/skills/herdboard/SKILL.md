@@ -132,7 +132,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
-| `card_active` | The card's worktree still exists or its agent still runs. Tell the user; `finish` the card first. |
+| `card_active` | The card's worktree still exists, or its agent or planner still runs. Tell the user the message. |
 | `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
 | `linear_archive` | herdboard archives only todos. Tell the user. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |

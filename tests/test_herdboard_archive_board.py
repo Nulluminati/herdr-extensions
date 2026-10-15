@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import start  # noqa: E402
-from herdboard.board import ConfirmScreen, HelpScreen  # noqa: E402
+from herdboard.board import AddScreen, ConfirmScreen, HelpScreen  # noqa: E402
 from test_herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
 
 
@@ -93,6 +93,17 @@ class ArchiveBoardTests(BoardTestCase):
             await settle(pilot)
             self.assertNotIn("child card", "\n".join(self.archived(self.repo_path)))
             self.assertNotIn("parent card", self.archived(self.repo_path))
+
+    async def test_a_in_the_archive_column_adds_nothing(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("z")
+            await settle(pilot)
+            app.col = len(app.columns) - 1
+            await pilot.press("a")
+            await pilot.pause()
+            self.assertNotIsInstance(app.screen, AddScreen)
 
     async def test_A_refuses_an_active_card(self):
         app = self.make_app()
