@@ -20,9 +20,10 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 ## Cards
 
 - A card reference is a todo ID (`tep3`), a temporary reference (`acme-api:12`, before the board has IDs) or a Linear identifier (`ENG-123`). Use the `ref` field from `list` output.
-- A card has `title`, `column`, `checked`, `due`, `tags`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `archived: true` means the todo is in its board's archive. `stale: true` means the Linear data comes from the cache.
+- A card has `title`, `column`, `checked`, `due`, `tags`, `type`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `archived: true` means the todo is in its board's archive. `stale: true` means the Linear data comes from the cache.
 - Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
 - Tags and the due date are part of the card text: `#auth` adds a tag, `📅 2026-11-01` sets the due date.
+- The type is a tag too: `#type/bug`. The `type` field holds `bug`, and `tags` leaves it out. The `types` setting lists the types (default: bug, feature, chore, docs, refactor). A Linear issue's type is its first label that names a type.
 - A todo can be a sub-card of another todo on the same board. Its `parent` field names the parent. Sub-cards go one level deep. A sub-card starts from its parent's branch and merges into it. A Linear sub-issue also has `parent` (its parent's identifier), but it starts from the current branch.
 
 ## Read
@@ -44,6 +45,7 @@ Do these when the user asks for them, or when a handed-over card tells you to up
 ```bash
 herdboard --json add "Fix the login timeout #auth 📅 2026-11-01"   # this repository's board, else the inbox
 herdboard --json add "Buy milk" --board inbox
+herdboard --json add "Fix the login timeout" --type bug     # adds #type/bug
 herdboard --json move tep3 "In progress"
 herdboard --json move ENG-123 Review
 herdboard --json done tep3
@@ -51,6 +53,7 @@ herdboard --json move tep3 --board inbox             # to another board; the ID 
 herdboard --json move tep3 --up                      # one place higher in its column
 herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
 herdboard --json edit tep3 --body "first detail line\nsecond detail line"
+herdboard --json edit tep3 --type feature             # or --no-type
 herdboard --json log tep3 "Ready for review: 3 commits."   # append to the card's activity log
 herdboard --json attach tep3 docs/spec.md             # copy a large document into the card's attachments
 herdboard --json attach tep3 --remove spec.md         # remove an attachment
@@ -130,6 +133,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `linear_edit` | herdboard does not edit Linear issues. Tell the user to edit it in Linear. |
 | `confirmation_required` | `delete` needs `--yes`. `unarchive` needs it when the card's parent is archived too, because the parent comes back with it. Ask the user first, then run it with `--yes`. |
 | `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |
+| `unknown_type` | The type is not in the `types` setting. The message lists the types. Use one of them, or ask the user. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
 | `card_active` | The card's worktree still exists, or its agent or planner still runs. Tell the user the message. |

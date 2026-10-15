@@ -59,10 +59,10 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `h` `j` `k` `l` or the arrow keys | Select a column or a card |
 | `H` / `L` (or shift+left / shift+right) | Move the card to the previous or next column |
 | `K` / `J` (or shift+up / shift+down) | Move a todo up or down in its column |
-| `/` | Filter. Words match the title, tags and details. `#tag` matches a tag. `^t5aa` shows `t5aa` and its sub-cards. Escape clears the filter |
+| `/` | Filter. Words match the title, tags and details. `#tag` matches a tag, and `#type/bug` a type. `^t5aa` shows `t5aa` and its sub-cards. Escape clears the filter |
 | enter | Card detail, with the last 10 log entries |
 | `a` | Add a card to the selected column |
-| `e` | Edit the todo: title, tags, due date and details. ctrl+s saves |
+| `e` | Edit the todo: title, type, tags, due date and details. ctrl+s saves |
 | `d` | Mark the card done |
 | `b` | Move the todo to another board, for example from the inbox to this repository |
 | `x` | Delete the todo, after you confirm |
@@ -95,6 +95,18 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | project (`--view project --project NAME`) | One Linear project's issues and the todos of every repository linked to it |
 
 In a view with several boards, columns with the same name merge. Each card keeps its own board, so a move writes to the correct file.
+
+### Card types
+
+A card can have one type, such as bug or feature. The type is an Obsidian nested tag on the first line: `#type/bug`. Obsidian shows it as a tag.
+
+- `herdboard add "Fix login timeout" --type bug` writes `Fix login timeout #type/bug`. `edit <id> --type feature` changes the type, and `--no-type` removes it.
+- On the board, the add and edit forms have a Type field. The card shows the type before its tags. Bug is red, feature green, docs cyan and refactor magenta.
+- The `types` setting lists the allowed types. The default is bug, feature, chore, docs and refactor. herdboard refuses another type with `unknown_type`. A `#type/<name>` tag that you write yourself always counts.
+- JSON output has the type in `type`. `tags` leaves out the `type/` tag.
+- `start` puts the conventional commit type in front of the branch name: `fix/t3m9-fix-login-timeout` for a bug, `feat/` for a feature. Other types use their own name, such as `chore/`. A Linear issue keeps its own branch name.
+- The agent brief names the type and its commit type. The pull request title uses that commit type.
+- A Linear issue's type is its first label that names a type, in any letter case. `Bug` is the type bug. `add --linear --type bug` adds the label `bug`, and `promote` turns `#type/bug` into that label.
 
 ### Archive
 
@@ -157,7 +169,7 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 
 1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. An inbox todo needs `--repo`, which takes a board name or a path in a checkout.
 2. Find the local checkout. herdboard records every main checkout that it runs in. When it knows none, it asks for a path, or `--checkout PATH` gives one.
-3. Choose the branch. A Linear issue uses its own branch name. A todo uses its ID and a short name from its title, such as `t3m9-fix-login-timeout`.
+3. Choose the branch. A Linear issue uses its own branch name. A todo uses its ID and a short name from its title, such as `t3m9-fix-login-timeout`. A typed todo's branch starts with the commit type, such as `fix/t3m9-fix-login-timeout`.
 4. Choose the base: `--base`, else the recorded base of an earlier start, else the parent's branch for a sub-card, else the branch of the main checkout. A Linear sub-issue does not use its parent's branch, because the parent can belong to another repository.
 5. Open the worktree with `herdr worktree create`, or reuse the card's worktree when it exists. The base becomes the upstream of the card branch, so `git status` and Hunk compare the branch with its base.
 6. Move the card to In progress (`start_column`). A Linear issue moves to its started state.
@@ -266,6 +278,7 @@ Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal AP
 | Card | Issue |
 | Sub-card or indented checklist item | Sub-issue |
 | `#tag` | Label |
+| `#type/bug` | The label `bug` (any letter case) |
 | `📅` date | Due date |
 | Card ID (`t7k2`) | Identifier (`ENG-123`) |
 
@@ -299,7 +312,7 @@ Linear cards follow Linear's manual order, after the local cards of the column. 
 
 `herdboard promote <id> [--team ENG] [--project NAME] [--state NAME]` turns a todo into a Linear issue assigned to you:
 
-- The first line becomes the title. Tags become labels when a label with that name exists. The due date stays. A linked note becomes the description when `vault_root` is set.
+- The first line becomes the title. Tags become labels when a label with that name exists. `#type/bug` becomes the label `bug`. The due date stays. A linked note becomes the description when `vault_root` is set.
 - Indented checklist items and sub-cards become sub-issues. A sub-card cannot be promoted alone (`parent_not_promoted`).
 - The issue starts in the state of the todo's column.
 - Anything that herdboard cannot convert goes into the description as text.
@@ -312,14 +325,14 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 |---|---|
 | `herdboard board [--view NAME] [--project NAME]` | Open the board |
 | `herdboard list [--view] [--board] [--column] [--source todo\|linear] [--archived]` | List cards. `--archived` lists the archived todos |
-| `herdboard add "text" [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
-| `herdboard add --linear "title" [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
+| `herdboard add "text" [--type NAME] [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
+| `herdboard add --linear "title" [--type NAME] [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
 | `herdboard show <id> [--log]` | Show a card, its attachments and its last 10 log entries. `--log` shows them all |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card to a column |
 | `herdboard move <id> --up\|--down` | Move a todo up or down in its column |
 | `herdboard move <id> [column] --board NAME` | Move a todo, with its ID and details, to another board |
 | `herdboard done <id> [--state]` | Move a card to its board's done column |
-| `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent]` | Change a todo's first line, its indented lines or its parent. `--body ""` removes the indented lines |
+| `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's first line, its indented lines, its parent or its type. `--body ""` removes the indented lines |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
 | `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--checkout PATH]` | Plan the card with an agent in a new Herdr tab |
@@ -382,6 +395,7 @@ start_agent = "claude"     # or "pi"
 merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
 tag_style = "round"        # tag ends in Nerd Font half circles; "block" for other fonts
+types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
 
 [linear]
 # enabled = true           # default: on when the API key is set
