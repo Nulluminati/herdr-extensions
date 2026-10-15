@@ -49,6 +49,17 @@ class FrontmatterValueTests(unittest.TestCase):
         with self.assertRaisesRegex(FormatError, "'merge' has a nested value"):
             kanban_md.set_frontmatter_value(before, "merge", "pr")
 
+    def test_an_indented_comment_or_blank_line_after_the_key_stays(self):
+        for extra in ("  # Merge policy", "  "):
+            before = FRONT.replace("board\n", f"board\nmerge: local\n{extra}\n")
+            text = kanban_md.set_frontmatter_value(before, "merge", "pr")
+            self.assertEqual(text, FRONT.replace("board\n", f"board\nmerge: pr\n{extra}\n"))
+
+    def test_a_nested_value_after_a_comment_is_a_format_error(self):
+        before = FRONT.replace("board\n", "board\nmerge:\n  # policy\n\n  mode: pr\n")
+        with self.assertRaisesRegex(FormatError, "nested value"):
+            kanban_md.set_frontmatter_value(before, "merge", "pr")
+
     def test_a_duplicate_key_is_a_format_error(self):
         before = FRONT.replace("board\n", "board\nmerge: pr\nmerge: local\n")
         with self.assertRaisesRegex(FormatError, "duplicate key 'merge'"):
