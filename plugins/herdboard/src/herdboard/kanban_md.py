@@ -171,7 +171,10 @@ def set_frontmatter_value(text: str, key: str, value: str | None) -> str:
     if not lines or lines[0] != "---" or end is None:
         raise FormatError("frontmatter must be closed")
     key_line = re.compile(rf"^{re.escape(key)}:(\s|$)")
-    found = next((i for i in range(1, end) if key_line.match(lines[i])), None)
+    matches = [i for i in range(1, end) if key_line.match(lines[i])]
+    if len(matches) > 1:
+        raise FormatError(f"duplicate key {key!r} in frontmatter")
+    found = matches[0] if matches else None
     new = [] if value is None else [f"{key}: {value}"]
     if found is not None:
         lines[found:found + 1] = new

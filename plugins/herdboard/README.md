@@ -256,7 +256,7 @@ Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal AP
 
 `herdboard link "API Platform" [--label repo:api]` links the current repository board to a Linear project. The repository view then shows every issue of that project. With labels, it shows only the issues that have one of the labels. `link --remove` removes the link. A project can serve several repositories, and a repository can have several projects.
 
-On the board, `c` shows the linked projects. Press enter on a project to mark it for removal. Type a project name, and optional labels separated by commas, to link a project. ctrl+s writes the changes. A link needs a Linear connection, a removal does not.
+On the board, `c` shows the linked projects. Press enter on a project to mark it for removal. Type a project name, and optional labels separated by commas, to link a project. Enter in the project field moves to the labels. ctrl+s, or enter in the labels field, writes the changes. A label name with a comma needs `herdboard link --label`. A link needs a Linear connection, a removal does not.
 
 When Linear's GitHub integration attaches a pull request from this repository to an issue, the card shows `PR`.
 

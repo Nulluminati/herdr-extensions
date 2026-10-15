@@ -44,6 +44,11 @@ class FrontmatterValueTests(unittest.TestCase):
         with self.assertRaisesRegex(FormatError, "frontmatter must be closed"):
             kanban_md.set_frontmatter_value("---\nkanban-plugin: board\n## Todo\n", "merge", "pr")
 
+    def test_a_duplicate_key_is_a_format_error(self):
+        before = FRONT.replace("board\n", "board\nmerge: pr\nmerge: local\n")
+        with self.assertRaisesRegex(FormatError, "duplicate key 'merge'"):
+            kanban_md.set_frontmatter_value(before, "merge", "pr")
+
 
 class WithLinkTests(unittest.TestCase):
     def test_a_new_project_goes_last(self):
@@ -70,6 +75,27 @@ class StoreMergeTests(BoardTestCase):
         with self.assertRaisesRegex(HerdboardError, "local or pr"):
             self.store.set_merge(self.repo_path, "squash")
         self.assertEqual(self.repo_path.read_text(), before)
+
+    def test_merge_and_links_change_in_one_write(self):
+        self.store.update_links(self.repo_path, lambda links: [ProjectLink("p1", "One")])
+        self.store.update_config(self.repo_path, merge="pr",
+                                 change_links=lambda links: links + [ProjectLink("p2", "Two")])
+        meta = self.store.board_meta(self.repo_path)
+        self.assertEqual((meta.merge, [link.id for link in meta.links]), ("pr", ["p1", "p2"]))
+
+    def test_a_failed_link_change_leaves_the_merge_mode(self):
+        text = self.repo_path.read_text().replace("repo:", "other: 1\nother: 2\nrepo:")
+        self.repo_path.write_text(text)
+        with self.assertRaisesRegex(FormatError, "duplicate key 'other'"):
+            self.store.update_config(self.repo_path, merge="pr", change_links=lambda links: [])
+        self.assertEqual(self.repo_path.read_text(), text)
+
+    def test_a_duplicate_merge_key_is_not_written(self):
+        text = self.repo_path.read_text().replace("repo:", "merge: pr\nmerge: local\nrepo:")
+        self.repo_path.write_text(text)
+        with self.assertRaisesRegex(FormatError, "duplicate key 'merge'"):
+            self.store.set_merge(self.repo_path, "pr")
+        self.assertEqual(self.repo_path.read_text(), text)
 
 
 class ConfigScreenTests(BoardTestCase):
@@ -150,6 +176,57 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
         self.assertEqual(self.store.board_meta(self.repo_path).links, [ProjectLink("p1", "Platform")])
 
+    async def test_one_save_changes_the_merge_mode_and_removes_and_adds_links(self):
+        self.link(ProjectLink("p1", "Platform"))
+        self.link(ProjectLink("p2", "Billing"))
+        app = self.make_app(resolve_link=lambda name, labels: ProjectLink("p3", name))
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-merge").value = "pr"
+            screen.query_one("#config-links").focus()
+            await pilot.press("enter")
+            screen.query_one("#config-project").value = "Mobile"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        meta = self.store.board_meta(self.repo_path)
+        self.assertEqual(meta.merge, "pr")
+        self.assertEqual(meta.links, [ProjectLink("p2", "Billing"), ProjectLink("p3", "Mobile")])
+
+    async def test_a_failed_link_write_writes_nothing_and_shows_the_error(self):
+        text = self.repo_path.read_text().replace("repo:", "other: 1\nother: 2\nrepo:")
+        self.repo_path.write_text(text)
+        app = self.make_app(resolve_link=lambda name, labels: ProjectLink("p3", name))
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-merge").value = "pr"
+            screen.query_one("#config-project").value = "Mobile"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertIs(app.screen, screen)
+            self.assertIn("duplicate key 'other'", screen.query_one("#config-error").plain)
+        self.assertEqual(self.repo_path.read_text(), text)
+
+    async def test_enter_in_the_project_field_moves_to_the_labels(self):
+        asked = []
+        app = self.make_app(resolve_link=lambda name, labels: asked.append(name) or ProjectLink("p3", name))
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-project").focus()
+            screen.query_one("#config-project").value = "Mobile"
+            await pilot.press("enter")
+            await settle(pilot)
+            self.assertIs(app.screen, screen)
+            self.assertIs(app.focused, screen.query_one("#config-labels"))
+            self.assertEqual(asked, [])
+            screen.query_one("#config-labels").value = "repo:api"
+            await pilot.press("enter")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+        self.assertEqual(asked, ["Mobile"])
+
     async def test_saving_a_project_name_links_it_with_its_labels(self):
         asked = []
 
@@ -204,6 +281,18 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
         self.assertEqual(self.repo_path.read_text(), before)
+
+    async def test_c_on_a_missing_board_file_shows_the_error(self):
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            self.repo_path.unlink()
+            await pilot.press("c")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+            messages = [(n.message, n.severity) for n in app._notifications]
+            self.assertTrue(any("cannot read board" in m and level == "error" for m, level in messages), messages)
+            self.assertTrue(app.is_running)
 
     async def test_c_without_a_repository_board_explains(self):
         app = self.make_app(view="inbox", repo=False)

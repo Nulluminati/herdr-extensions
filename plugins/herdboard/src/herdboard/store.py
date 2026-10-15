@@ -80,6 +80,10 @@ class CardView:
     sub_cards: tuple[int, int] | None = None
 
 
+# `Store.update_config` leaves the merge mode as it is.
+KEEP = object()
+
+
 @dataclass
 class BoardMeta:
     """What Linear views need from a board: its repository and its project links."""
@@ -273,7 +277,20 @@ class Store:
 
     def set_merge(self, path: Path, merge: str | None) -> None:
         """Set the `merge:` frontmatter of a board, or remove it for None (the config default)."""
-        if merge not in (None, *MERGE_MODES):
+        self.update_config(path, merge=merge)
+
+    def update_config(
+        self,
+        path: Path,
+        merge: str | None | object = KEEP,
+        change_links: Callable[[list[ProjectLink]], list[ProjectLink]] | None = None,
+    ) -> None:
+        """Set the `merge:` frontmatter (None removes it) and rewrite the links with `change_links`.
+
+        `KEEP` leaves the merge mode, and None for `change_links` leaves the links. Both changes
+        apply to the text in memory, then go to the file in one write, so a failed one writes nothing.
+        """
+        if merge is not KEEP and merge not in (None, *MERGE_MODES):
             raise HerdboardError(f"merge must be local or pr, not {merge!r}")
         with self._lock():
             try:
@@ -283,7 +300,10 @@ class Store:
                 raise IoError(f"{path}: cannot read board: {error}") from error
             board = kanban_md.parse(text, tuple(self.config.archive_titles))
             self._require_writable(path, board)
-            text = kanban_md.set_frontmatter_value(text, "merge", merge)
+            if change_links is not None:
+                text = replace_links(text, change_links(parse_links(board.frontmatter)))
+            if merge is not KEEP:
+                text = kanban_md.set_frontmatter_value(text, "merge", merge)
             self._write_file(path, text.encode("utf-8"), mode)
 
     def import_target(

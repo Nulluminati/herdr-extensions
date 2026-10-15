@@ -26,7 +26,7 @@ from .linear import LinearAuthError
 from .linear_links import ProjectLink, with_link
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, split_title
-from .store import TEMP_REF, BoardMeta, CardView, Store
+from .store import KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS
 from . import merge as merge_module
@@ -830,7 +830,11 @@ class ConfigScreen(ModalBase):
         event.option_list.replace_option_prompt_at_index(event.option_index, self._link_label(link))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the project field moves to its labels. Enter in the labels field saves."""
         event.stop()
+        if event.input.id == "config-project":
+            self.query_one("#config-labels", Input).focus()
+            return
         self.action_save()
 
     def show_error(self, message: str) -> None:
@@ -1908,7 +1912,11 @@ class HerdboardApp(App):
             self.notify("There is no repository board to configure. Press i in a repository to create one.",
                         severity="warning")
             return
-        meta = self.store.board_meta(path)
+        try:
+            meta = self.store.board_meta(path)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
         if meta.error:
             self.notify(meta.error, severity="error")
             return
@@ -1921,14 +1929,13 @@ class HerdboardApp(App):
 
         def write() -> None:
             link = resolve(project, labels) if project and resolve else None
-            if merge != before:
-                self.store.set_merge(path, merge)
-            if removed or link:
-                def change(links: list[ProjectLink]) -> list[ProjectLink]:
-                    kept = [l for l in links if l.id not in removed]
-                    return with_link(kept, link) if link else kept
 
-                self.store.update_links(path, change)
+            def change(links: list[ProjectLink]) -> list[ProjectLink]:
+                kept = [l for l in links if l.id not in removed]
+                return with_link(kept, link) if link else kept
+
+            self.store.update_config(path, merge=KEEP if merge == before else merge,
+                                     change_links=change if removed or link else None)
 
         self._start_write(write, add=screen, refetch=bool(removed or project))
 
