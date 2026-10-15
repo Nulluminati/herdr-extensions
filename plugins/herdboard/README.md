@@ -66,6 +66,9 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `d` | Mark the card done |
 | `b` | Move the todo to another board, for example from the inbox to this repository |
 | `x` | Delete the todo, after you confirm |
+| `A` | Archive the todo. In the archive column, move it back to the done column |
+| `D` | Archive every card in the done column, after you confirm |
+| `z` | Show or hide the archive column |
 | `p` | Set or remove the todo's parent |
 | `s` | Start work with the default agent |
 | `S` | Choose claude or pi, the model and pi's thinking level, then start work |
@@ -92,6 +95,19 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | project (`--view project --project NAME`) | One Linear project's issues and the todos of every repository linked to it |
 
 In a view with several boards, columns with the same name merge. Each card keeps its own board, so a move writes to the correct file.
+
+### Archive
+
+The archive keeps old todos off the board. It is the archive of the Obsidian Kanban plugin: a `***` line and a `## Archive` heading after the last column. Obsidian shows it in its own archive view.
+
+- `A`, or `herdboard archive <id>`, moves a todo to the archive. `L` on the last column does the same when the archive column shows.
+- `D`, or `herdboard archive --done`, archives every card in the done column. In a view with several boards, `D` archives the done column of each board.
+- `z` shows the archive column at the end of the board. The board hides it again on the next `z`.
+- `A` on an archived card, or `herdboard unarchive <id>`, moves it back to the done column.
+
+herdboard does not archive a card whose worktree still exists or whose agent still runs: `finish` it first. A parent whose sub-cards stay on the board does not archive either. `archive --done` keeps these cards in the done column and reports why.
+
+An archived card keeps its ID, its log and its attachments. `show` and `log` work on it. Other commands refuse it with `archived`. Linear issues are not archived here.
 
 ### Card markers
 
@@ -294,7 +310,7 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | Command | Action |
 |---|---|
 | `herdboard board [--view NAME] [--project NAME]` | Open the board |
-| `herdboard list [--view] [--board] [--column] [--source todo\|linear]` | List cards |
+| `herdboard list [--view] [--board] [--column] [--source todo\|linear] [--archived]` | List cards. `--archived` lists the archived todos |
 | `herdboard add "text" [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
 | `herdboard add --linear "title" [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
 | `herdboard show <id> [--log]` | Show a card, its attachments and its last 10 log entries. `--log` shows them all |
@@ -307,6 +323,8 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
 | `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--checkout PATH]` | Plan the card with an agent in a new Herdr tab |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
+| `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
+| `herdboard unarchive <id>` | Move an archived todo back to its board's done column |
 | `herdboard start <id> [--agent claude\|pi] [--model] [--thinking] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
@@ -439,7 +457,7 @@ merge: pr
 - `[[#^t5aa]]` makes the card a sub-card of `t5aa` on the same board. Sub-cards go one level deep.
 - `[[note]]` is a note link. With `vault_root` set, `show` displays the note.
 - `**Complete**` under a heading marks the done column. A move into it checks the box, and a move out clears it.
-- `***` and `## Archive` start the archive. Commands do not change archive cards.
+- `***` and `## Archive` start the archive. Only `archive` and `unarchive` move cards in and out of it.
 - herdboard keeps every line that it does not understand, the settings block, the line endings and the indent style.
 
 ### Repository identity

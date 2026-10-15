@@ -13,7 +13,7 @@ from herdboard import cli  # noqa: E402
 from herdboard.linear import LinearError, LinearWriteRejectedError, LinearWriteUnknownError  # noqa: E402
 from herdboard.linear_source import LinearDisabledError  # noqa: E402
 from herdboard.linear_writes import LinearOfflineError, TeamRequiredError  # noqa: E402
-from herdboard.model import ConflictError, NotFoundError  # noqa: E402
+from herdboard.model import ArchivedError, CardActiveError, ConflictError, NotFoundError  # noqa: E402
 from herdboard.promote import AlreadyPromotedError, NotATodoError  # noqa: E402
 
 
@@ -100,6 +100,7 @@ class SkillTests(unittest.TestCase):
         known |= {"gh_unavailable", "push_failed", "pr_failed"}
         known |= {"parent_missing", "parent_nested", "children_open", "parent_not_promoted"}
         known |= {"review_running", "nothing_to_review", "worker_failed", "pr_writing", "plan_running"}
+        known |= {ArchivedError.code, CardActiveError.code, cli.LinearArchiveError.code, "has_sub_cards"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

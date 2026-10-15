@@ -1,6 +1,6 @@
 ---
 name: herdboard
-description: "Read and update the user's kanban boards with the herdboard CLI: local todos in ~/todos (one board per repository plus an inbox) and their Linear issues. Use when the user asks about their todos, backlog, board, cards, or Linear issues, asks to add, move, finish, start or promote a card, or when a herdboard card was handed to you as your first message. Not for your own session task list."
+description: "Read and update the user's kanban boards with the herdboard CLI: local todos in ~/todos (one board per repository plus an inbox) and their Linear issues. Use when the user asks about their todos, backlog, board, cards, or Linear issues, asks to add, move, finish, start, archive or promote a card, or when a herdboard card was handed to you as your first message. Not for your own session task list."
 ---
 
 # herdboard
@@ -20,7 +20,7 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 ## Cards
 
 - A card reference is a todo ID (`tep3`), a temporary reference (`acme-api:12`, before the board has IDs) or a Linear identifier (`ENG-123`). Use the `ref` field from `list` output.
-- A card has `title`, `column`, `checked`, `due`, `tags`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `stale: true` means the Linear data comes from the cache.
+- A card has `title`, `column`, `checked`, `due`, `tags`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `archived: true` means the todo is in its board's archive. `stale: true` means the Linear data comes from the cache.
 - Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
 - Tags and the due date are part of the card text: `#auth` adds a tag, `📅 2026-11-01` sets the due date.
 - A todo can be a sub-card of another todo on the same board. Its `parent` field names the parent. Sub-cards go one level deep. A sub-card starts from its parent's branch and merges into it. A Linear sub-issue also has `parent` (its parent's identifier), but it starts from the current branch.
@@ -34,6 +34,7 @@ herdboard --json list --view all           # every board and your Linear issues
 herdboard --json list --view mine          # Linear issues assigned to the user
 herdboard --json list --column "In progress"
 herdboard --json show tep3                 # also the last 10 activity log entries; --log shows all
+herdboard --json list --archived           # the archived todos of this repository's board
 ```
 
 ## Write
@@ -56,7 +57,11 @@ herdboard --json attach tep3 --remove spec.md         # remove an attachment
 herdboard --json add "Add invoice table" --parent t5aa     # a sub-card, on the parent's board
 herdboard --json edit tep3 --parent t5aa              # make a todo a sub-card
 herdboard --json edit tep3 --no-parent                # make it a plain todo again
+herdboard --json archive tep3                        # to the board's archive, hidden on the board
+herdboard --json unarchive tep3                      # back to the board's done column
 ```
+
+The archive keeps old todos out of the columns. Commands other than `show`, `log` and `unarchive` refuse an archived todo. Linear issues are not archived here.
 
 The activity log is the card's history. It works for todos and Linear issues, and it never changes the card text. herdboard records who wrote each entry.
 
@@ -70,6 +75,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
+- `archive --done` (archives every card in the board's done column).
 - `link`, `init`, `migrate --yes`, `doctor --fix-ids`.
 
 ```bash
@@ -124,6 +130,10 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `confirmation_required` | `delete` needs `--yes`. Ask the user first, then run it with `--yes`. |
 | `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
+| `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
+| `card_active` | The card's worktree still exists or its agent still runs. Tell the user; `finish` the card first. |
+| `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
+| `linear_archive` | herdboard archives only todos. Tell the user. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |
 | `conflict` | The card changed, or another write holds the lock. Run `show` again, then retry once. |
 | `ambiguous_state` | Several Linear states match the column. The error lists `candidates`. Ask the user which one, then run the command again with `--state NAME`. |

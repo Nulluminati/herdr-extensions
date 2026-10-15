@@ -810,6 +810,12 @@ class Store:
 
         return self._modify(ref, change, located)
 
+    def done_cards(self, path: Path) -> list[CardView]:
+        """The cards in the board's done column."""
+        board = self._read(path)
+        done = self._done_column(board, path)
+        return [view for view in self.list_cards([path]) if view.column == done.title]
+
     def archive_done(
         self, path: Path, blocked: Callable[[str], str | None] | None = None,
     ) -> tuple[list[CardView], list[tuple[CardView, str]]]:

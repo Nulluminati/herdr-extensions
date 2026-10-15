@@ -66,6 +66,9 @@ HELP_KEYS = [
     ("e", "edit the todo: title, tags, due date and details (ctrl+s saves)"),
     ("b", "move the todo to another board, for example from the inbox to this repository"),
     ("x", "delete the todo, after you confirm"),
+    ("A", "archive the todo; in the archive column, move it back to the done column"),
+    ("D", "archive every card in the done column, after you confirm"),
+    ("z", "show or hide the archive column"),
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
     ("P", "plan the card with an agent in a new tab; the plan goes to the work agent's brief"),
@@ -90,6 +93,7 @@ class ColumnData:
     limit: int | None = None
     completed: bool = False
     cards: list[CardView] = field(default_factory=list)
+    archive: bool = False
 
     @property
     def header(self) -> str:
@@ -914,6 +918,10 @@ class HerdboardApp(App):
     App:ansi .card { border: round ansi_bright_black; margin: 0; }
     App:ansi .column { border: round ansi_bright_black; }
     App:ansi .column.completed { border: round $success; }
+    .column.archive { border: dashed $surface-lighten-2; }
+    App:ansi .column.archive { border: dashed ansi_bright_black; }
+    .column.archive.current { border: dashed $accent; }
+    App:ansi .column.archive.current { border: dashed ansi_magenta; }
     /* In the ANSI themes the accent and the done color are both green, and the title bar is blue.
        The current column uses magenta and the selected card yellow, so each has its own color.
        Cards outside the current column fade. */
@@ -945,6 +953,9 @@ class HerdboardApp(App):
         Binding("e", "edit", "Edit"),
         Binding("b", "move_board", "Board"),
         Binding("x", "delete", "Delete"),
+        Binding("A", "archive", "Archive"),
+        Binding("D", "archive_done", "Archive done", show=False),
+        Binding("z", "toggle_archive", "Show archive", show=False),
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("R", "review", "Review"),
@@ -1002,6 +1013,7 @@ class HerdboardApp(App):
         # Finds a Linear project and its labels by name for the config dialog; None without Linear.
         self.resolve_link = resolve_link
         self.hide_linear = False
+        self.show_archive = False
         self.reload_interval = reload_interval
         self.linear_for = linear_for
         self.linear_active = linear_active and linear_for is not None
@@ -1074,8 +1086,12 @@ class HerdboardApp(App):
 
     def _load(self, paths: list[Path]) -> list[ColumnData]:
         by_key: dict[str, ColumnData] = {}
+        archive = ColumnData(self.store.config.archive_titles[0], archive=True)
         for path in paths:
-            for column in self.store.snapshot(path).columns:
+            snapshot = self.store.snapshot(path)
+            if snapshot.archive is not None:
+                archive.cards.extend(snapshot.archive.cards)
+            for column in snapshot.columns:
                 data = by_key.setdefault(column.title.casefold(), ColumnData(column.title))
                 if data.limit is None:
                     data.limit = column.limit
@@ -1088,11 +1104,13 @@ class HerdboardApp(App):
         mark_removed([card for data in by_key.values() for card in data.cards])
         mark_family([card for data in by_key.values() for card in data.cards])
         if len(paths) == 1 and not linear:
-            return list(by_key.values())
-        wanted = [name.casefold() for name in self.store.config.columns]
-        ordered = [by_key[key] for key in wanted if key in by_key]
-        ordered += [data for key, data in by_key.items() if key not in wanted]
-        return ordered
+            ordered = list(by_key.values())
+        else:
+            wanted = [name.casefold() for name in self.store.config.columns]
+            ordered = [by_key[key] for key in wanted if key in by_key]
+            ordered += [data for key, data in by_key.items() if key not in wanted]
+        # The archive column is last, apart from a column with the same name.
+        return ordered + [archive] if self.show_archive else ordered
 
     def current_card(self) -> CardView | None:
         if not self.columns:
@@ -1163,7 +1181,8 @@ class HerdboardApp(App):
         if not terms:
             return columns
         return [
-            ColumnData(c.name, c.limit, c.completed, [card for card in c.cards if card_matches(card, terms)])
+            ColumnData(c.name, c.limit, c.completed, [card for card in c.cards if card_matches(card, terms)],
+                       c.archive)
             for c in columns
         ]
 
@@ -1224,6 +1243,8 @@ class HerdboardApp(App):
         if self.filter_text:
             shown = sum(len(c.cards) for c in self.columns)
             title.plain += f' · filter: "{self.filter_text}" ({shown} of {sum(len(c.cards) for c in self.loaded)})'
+        if self.show_archive:
+            title.plain += " · archive shown"
         if self.repo_board is None and self.init_board is not None:
             title.plain += " · no board for this repository: press i to create it"
         title.update(Text(title.plain))
@@ -1243,7 +1264,7 @@ class HerdboardApp(App):
             self._show_selection()
 
     def _column_widget(self, column: ColumnData, show_board: bool) -> Vertical:
-        classes = "column completed" if column.completed else "column"
+        classes = "column" + (" completed" if column.completed else "") + (" archive" if column.archive else "")
         cards = VerticalScroll(
             *[CardWidget(card, show_board, self.store.config.tag_style) for card in column.cards], classes="cards", can_focus=False
         )
@@ -1253,6 +1274,7 @@ class HerdboardApp(App):
 
     async def _update_column(self, widget: Vertical, column: ColumnData, show_board: bool) -> None:
         widget.set_class(column.completed, "completed")
+        widget.set_class(column.archive, "archive")
         header = widget.query_one(ColumnHeader)
         if header.plain != column.header:
             header.plain = column.header
@@ -1498,6 +1520,12 @@ class HerdboardApp(App):
         target = self.col + step
         if card is None or not 0 <= target < len(self.columns):
             return
+        if card.archived:
+            self.notify("Press A to move the card back to the done column.", severity="warning")
+            return
+        if self.columns[target].archive:
+            self.action_archive()
+            return
         name = self.columns[target].name
         if card.source == "linear":
             self._linear_write(card, lambda writer: writer.move(card.ref, name, None, self.ask_state))
@@ -1603,6 +1631,65 @@ class HerdboardApp(App):
             DeleteScreen(card),
             lambda delete: self._start_write(lambda: self.store.delete(ref), removed=True) if delete else None,
         )
+
+    def action_archive(self) -> None:
+        """Archive the todo, or move an archived todo back to the done column."""
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("herdboard archives only todos.", severity="warning")
+            return
+        ref = card.ref
+
+        def archive() -> CardView:
+            changed = self.store.archive(ref, blocked=start_module.archive_blocker)
+            activity.append(self.store, changed.ref, "Archived.", activity.author())
+            return changed
+
+        def unarchive() -> CardView:
+            changed = self.store.unarchive(ref)
+            activity.append(self.store, changed.ref, "Unarchived.", activity.author())
+            return changed
+
+        self._start_write(unarchive if card.archived else archive)
+
+    def action_archive_done(self) -> None:
+        """Archive every card in the done column of each board in the view, after a confirmation."""
+        try:
+            count = sum(len(self.store.done_cards(path)) for path in self.paths)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        if not count:
+            self.notify("The done column has no cards.")
+            return
+        paths = list(self.paths)
+
+        def write() -> None:
+            kept = []
+            total = 0
+            for path in paths:
+                archived, skipped = self.store.archive_done(path, blocked=start_module.archive_blocker)
+                for card in archived:
+                    activity.append(self.store, card.ref, "Archived.", activity.author())
+                total += len(archived)
+                kept += [f"{card.ref}: {reason}" for card, reason in skipped]
+            notice = f"Archived {total} card{'' if total == 1 else 's'}."
+            if kept:
+                notice += " Kept " + "; ".join(kept)
+            self.call_from_thread(self.notify, notice)
+
+        names = ", ".join(self.store.board_name(path) for path in paths)
+        self.push_screen(
+            ConfirmScreen(f"Archive {count} card{'' if count == 1 else 's'} from the done column?",
+                          f"Boards: {names}. Press z to show the archive."),
+            lambda answer: self._start_write(write) if answer else None,
+        )
+
+    async def action_toggle_archive(self) -> None:
+        self.show_archive = not self.show_archive
+        await self.reload()
 
     def _start_card(self, ref: str, agent: str | None, model: str | None = None,
                     thinking: str | None = None) -> None:
