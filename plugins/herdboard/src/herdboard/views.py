@@ -163,6 +163,9 @@ class Views:
                 identities.add(meta.repo)
             for link in meta.links:
                 add_project(link, True)
+            if meta.pins:
+                pin_ids = [pin.id for pin in meta.pins]
+                jobs.append(("Linear pinned issues", lambda: source.pinned_issues(pin_ids)))
         elif view == "project":
             project_id = self._project_id(ask_linear=True)
             names = {}

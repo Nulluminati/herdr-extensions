@@ -286,6 +286,58 @@ class RefreshTests(LinearEnvTestCase):
             self.source(offline=True).issue("ENG-99")
 
 
+class PinnedSourceTests(LinearEnvTestCase):
+    def test_pinned_issues_are_fetched_by_id_and_cached(self):
+        fetched = self.source().pinned_issues(["i5", "i1", "i404"])
+        self.assertEqual([i["identifier"] for i in fetched.data], ["ENG-1", "ENG-5"])
+        self.assertFalse(fetched.stale)
+        self.assertEqual(self.requests("PinnedIssues")[0]["variables"]["filter"]["id"],
+                         {"in": ["i5", "i1", "i404"]})
+        self.endpoint = DEAD
+        offline = self.source(offline=True).pinned_issues(["i1", "i404", "i5"])
+        self.assertTrue(offline.stale)
+        self.assertEqual([i["identifier"] for i in offline.data], ["ENG-1", "ENG-5"])
+        with self.assertRaises(CacheMiss):
+            self.source(offline=True).pinned_issues(["i1"])
+
+    def test_issue_finds_a_pinned_issue_offline(self):
+        self.source().pinned_issues(["i5"])
+        self.endpoint = DEAD
+        found = self.source(offline=True).issue("ENG-5")
+        self.assertEqual(found.data["id"], "i5")
+
+    def test_search_returns_open_issues_of_my_teams(self):
+        self.fixtures["issues"].append({**linear_data.make_issue(7), "identifier": "OPS-7",
+                                        "team": linear_data.OPS})
+        self.fixtures["my_team_ids"] = ["t-eng"]
+        found = self.source().search("issue")
+        self.assertEqual([i["identifier"] for i in found], ["ENG-1", "ENG-2", "ENG-3", "ENG-5"])
+        self.assertEqual(found[0], {"id": "i1", "identifier": "ENG-1", "title": "Issue 1",
+                                    "state": {"name": "Todo", "type": "unstarted"},
+                                    "team": {"key": "ENG"}, "project": {"name": "Platform"}})
+        self.assertEqual(self.requests("SearchIssues")[0]["variables"]["filter"]["team"],
+                         {"id": {"in": ["t-eng"]}})
+
+    def test_search_for_an_identifier_fetches_that_issue_from_any_team(self):
+        self.fixtures["issues"].append({**linear_data.make_issue(7), "identifier": "OPS-7",
+                                        "team": linear_data.OPS, "project": None})
+        self.fixtures["my_team_ids"] = ["t-eng"]
+        found = self.source().search(" ops-7 ")
+        self.assertEqual(found, [{"id": "i7", "identifier": "OPS-7", "title": "Issue 7",
+                                  "state": {"name": "Todo", "type": "unstarted"},
+                                  "team": {"key": "OPS"}, "project": None}])
+        self.assertEqual(self.requests("SearchIssues"), [])
+        self.assertEqual(self.source().search("ENG-404"), [])
+
+    def test_search_needs_linear(self):
+        with self.assertRaises(LinearDisabledError):
+            with mock.patch.dict(os.environ, {"LINEAR_API_KEY": ""}):
+                self.source().search("issue")
+        with self.assertRaisesRegex(LinearError, "connection"):
+            self.source(offline=True).search("issue")
+        self.assertEqual(self.requests("SearchIssues"), [])
+
+
 class CardTests(unittest.TestCase):
     def setUp(self):
         self.config = Config()

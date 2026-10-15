@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from .config import Config
 from .linear import LinearClient, LinearError, LinearNetworkError
+from .linear_cards import LINEAR_REF
 from .model import HerdboardError
 
 
@@ -271,6 +272,34 @@ class LinearSource:
             return {"project": project, "issues": issues, "missing_labels": missing}
 
         return self._fetch(query, load)
+
+    def pinned_issues(self, ids: list[str]) -> Fetched:
+        """The pinned issues among ids that exist and are open or recently done."""
+        query = "pinned-" + hashlib.sha256("\0".join(sorted(ids)).encode("utf-8")).hexdigest()[:12]
+        return self._fetch(query, lambda client: client.issues_by_ids(ids, self.settings.done_days))
+
+    def search(self, term: str) -> list[dict]:
+        """Open issues of the user's teams that match term, from Linear and never the cache.
+
+        A term such as ENG-123 skips the search and returns that issue, from any team and in
+        any state, or nothing when Linear does not know it. Each result has id, identifier,
+        title, state (name, type), team (key) and project (name, or None).
+        """
+        self.require_active()
+        if self.offline:
+            raise LinearError("Linear search needs a connection")
+        term = term.strip()
+        if LINEAR_REF.match(term):
+            found = self.client.issue(term.upper())
+            if found is None:
+                return []
+            project = found.get("project")
+            return [{"id": found["id"], "identifier": found["identifier"], "title": found["title"],
+                     "state": {"name": found["state"]["name"], "type": found["state"]["type"]},
+                     "team": {"key": found["team"]["key"]},
+                     "project": {"name": project["name"]} if project else None}]
+        team_ids = [team["id"] for team in self.client.my_teams()]
+        return self.client.search_issues(term, team_ids)
 
     def my_issues(self) -> Fetched:
         return self._fetch("mine", lambda client: client.my_issues(self.settings.done_days))

@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink  # noqa: E402
+from herdboard.linear_pins import IssuePin  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 from linear_data import PR_URL  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
@@ -40,6 +41,10 @@ class LinearCliCase(CliTestCase, LinearEnvTestCase):
         store = self.store_for()
         store.update_links(store.projects_dir / "acme-api.md", lambda _: list(links))
 
+    def repin(self, *pins):
+        store = self.store_for()
+        store.update_pins(store.projects_dir / "acme-api.md", lambda _: list(pins))
+
     def listing(self, *args, directory=None, expect=0):
         return self.run_json("list", *args, directory=directory or self.repo, expect=expect)
 
@@ -59,6 +64,30 @@ class ViewTests(LinearCliCase):
         self.assertEqual(set(data["linear"]), {"fetched_at", "stale"})
         self.assertFalse(data["linear"]["stale"])
         self.assertNotIn("errors", data)
+
+    def test_repo_view_shows_pinned_issues(self):
+        self.repin(IssuePin("i5", "ENG-5"), IssuePin("i6", "ENG-6"))
+        data = self.listing()
+        self.assertEqual(self.refs(data)[1:], ["ENG-5", "ENG-6"])
+        self.assertEqual(len(self.requests("PinnedIssues")), 1)
+
+    def test_pinned_issue_of_a_linked_project_shows_once(self):
+        self.link("Platform")
+        self.repin(IssuePin("i2", "ENG-2"), IssuePin("i5", "ENG-5"))
+        self.assertEqual(sorted(self.refs(self.listing())[1:]), ["ENG-1", "ENG-2", "ENG-3", "ENG-5"])
+
+    def test_pinned_canceled_issue_is_hidden_but_stays_pinned(self):
+        self.repin(IssuePin("i4", "ENG-4"))
+        self.assertEqual(self.refs(self.listing())[1:], [])
+        self.assertEqual(self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").pins,
+                         [IssuePin("i4", "ENG-4")])
+
+    def test_project_view_has_no_pins(self):
+        self.link("Mobile")
+        self.repin(IssuePin("i1", "ENG-1"))
+        refs = self.refs(self.listing("--view", "project", "--project", "Mobile"))
+        self.assertIn("ENG-5", refs)
+        self.assertNotIn("ENG-1", refs)
 
     def test_canceled_issues_are_hidden(self):
         self.link("Platform")
