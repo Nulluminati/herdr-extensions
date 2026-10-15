@@ -81,6 +81,8 @@ class CardView:
     agent_review: str | None = None
     # Board-only: True while an agent writes the card's pull request description.
     pr_writing: bool = False
+    # Board-only: the kind of agent that plans the card while its planner pane exists.
+    planning: str | None = None
     # The card ID of a sub-card's parent, from its `[[#^id]]` link.
     parent: str | None = None
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.

@@ -34,7 +34,7 @@ from .config import THINKING_LEVELS
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
-from .plan import Planner
+from .plan import Planner, mark_planning
 from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
@@ -191,6 +191,8 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
         info.append(Text(f"agent review: {card.agent_review}", style="bold"))
     if card.pr_writing:
         info.append(Text("PR: writing", style="bold"))
+    if card.planning:
+        info.append(Text(f"planning: {card.planning}", style="bold cyan"))
     if card.parent_title:
         info.append(Text(f"↳ {card.parent_title}", style="dim"))
     if card.sub_cards:
@@ -1260,6 +1262,7 @@ class HerdboardApp(App):
             data = by_key.setdefault(card.column.casefold(), ColumnData(card.column))
             data.cards.append(card)
         mark_removed([card for data in by_key.values() for card in data.cards])
+        mark_planning([card for data in by_key.values() for card in data.cards])
         mark_family([card for data in by_key.values() for card in data.cards])
         if len(paths) == 1 and not linear:
             ordered = list(by_key.values())
@@ -1466,13 +1469,15 @@ class HerdboardApp(App):
         cards = [card for column in self.loaded for card in column.cards]
 
         def status():
-            return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review, card.pr_writing)
+            return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review, card.pr_writing,
+                     card.planning)
                     for card in cards]
 
         old = status()
         try:
             await asyncio.to_thread(merge_module.refresh_pr_states)
             await asyncio.to_thread(mark_removed, cards)
+            await asyncio.to_thread(mark_planning, cards)
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return

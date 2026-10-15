@@ -129,6 +129,7 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 |---|---|
 | `↳ <parent>` | A sub-card. For a Linear sub-issue whose parent is not in the view, the marker shows the parent's identifier, such as `↳ ENG-12` |
 | `2/5 done` | A parent card and the progress of its sub-cards |
+| `planning: pi`, `planning: claude` | The card's planner runs. The card keeps its current column |
 | `agent review: pi` | An agent review runs |
 | `PR: writing` | An agent writes the pull request description |
 | `PR open`, `PR merged`, `PR closed` | The state of the card's pull request. The board reads it at most once a minute |

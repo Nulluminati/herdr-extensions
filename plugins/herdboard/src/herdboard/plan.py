@@ -246,6 +246,27 @@ def running_planner(ref: str) -> str | None:
     return None
 
 
+def mark_planning(cards) -> None:
+    """Set the board-only planner kind for cards whose recorded planner pane still exists."""
+    with _lock(wait=2):
+        records = _read(_plans_path())
+    for card in cards:
+        card.planning = None
+        record = records.get(card.ref)
+        if not isinstance(record, dict) or record.get("kind") not in ("claude", "pi"):
+            continue
+        pane = record.get("pane_id")
+        if not isinstance(pane, str) or not pane:
+            continue
+        try:
+            exists = _pane_exists(pane)
+        except HerdboardError:
+            # A failed Herdr check does not mean that planning ended; keep the recorded kind.
+            exists = True
+        if exists:
+            card.planning = record["kind"]
+
+
 def _forget(ref: str, pane: str) -> None:
     with _lock(wait=2):
         records = _read(_plans_path())
