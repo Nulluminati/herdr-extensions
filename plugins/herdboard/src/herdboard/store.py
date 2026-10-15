@@ -304,6 +304,7 @@ class Store:
                 text = replace_links(text, change_links(parse_links(board.frontmatter)))
             if merge is not KEEP:
                 text = kanban_md.set_frontmatter_value(text, "merge", merge)
+            parse_links(kanban_md.parse(text, tuple(self.config.archive_titles)).frontmatter)
             self._write_file(path, text.encode("utf-8"), mode)
 
     def import_target(

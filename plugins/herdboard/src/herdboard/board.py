@@ -801,7 +801,7 @@ class ConfigScreen(ModalBase):
         modes = [(f"config default ({self.default_merge})", "default"),
                  ("local: merge into the base branch", "local"),
                  ("pr: open a draft pull request", "pr")]
-        with Vertical(classes="dialog card-form"):
+        with VerticalScroll(classes="dialog card-form config", can_focus=False):
             yield RichStatic(Text(f"Config of {self.path.stem}", style="bold"), id="config-heading")
             if self.meta.repo:
                 yield Label(f"repo: {self.meta.repo}", classes="dim")
@@ -842,6 +842,7 @@ class ConfigScreen(ModalBase):
         error.rich_text = Text(message)
         error.plain = message
         error.update(error.rich_text)
+        self.call_after_refresh(error.scroll_visible, animate=False)
 
     def action_save(self) -> None:
         merge = self.query_one("#config-merge", Select).value
@@ -904,7 +905,8 @@ class HerdboardApp(App):
     #config-merge { border: round $surface-lighten-2; height: auto; }
     #config-merge > SelectCurrent { border: none; }
     #config-merge:focus-within { border: round $primary; }
-    #config-links { height: auto; max-height: 8; border: round $surface-lighten-2; }
+    .config, #config-links { scrollbar-size-vertical: 1; }
+    #config-links { height: auto; max-height: 6; border: round $surface-lighten-2; }
     #config-links:focus { border: round $primary; }
     #config-project { width: 2fr; }
     #config-labels { width: 1fr; }

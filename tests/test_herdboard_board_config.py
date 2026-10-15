@@ -44,6 +44,11 @@ class FrontmatterValueTests(unittest.TestCase):
         with self.assertRaisesRegex(FormatError, "frontmatter must be closed"):
             kanban_md.set_frontmatter_value("---\nkanban-plugin: board\n## Todo\n", "merge", "pr")
 
+    def test_a_nested_value_is_a_format_error(self):
+        before = FRONT.replace("board\n", "board\nmerge:\n  mode: pr\n")
+        with self.assertRaisesRegex(FormatError, "'merge' has a nested value"):
+            kanban_md.set_frontmatter_value(before, "merge", "pr")
+
     def test_a_duplicate_key_is_a_format_error(self):
         before = FRONT.replace("board\n", "board\nmerge: pr\nmerge: local\n")
         with self.assertRaisesRegex(FormatError, "duplicate key 'merge'"):
@@ -88,6 +93,21 @@ class StoreMergeTests(BoardTestCase):
         self.repo_path.write_text(text)
         with self.assertRaisesRegex(FormatError, "duplicate key 'other'"):
             self.store.update_config(self.repo_path, merge="pr", change_links=lambda links: [])
+        self.assertEqual(self.repo_path.read_text(), text)
+
+    def test_a_nested_merge_value_is_not_written(self):
+        text = self.repo_path.read_text().replace("repo:", "merge:\n  mode: pr\nrepo:")
+        self.repo_path.write_text(text)
+        with self.assertRaisesRegex(FormatError, "nested value"):
+            self.store.set_merge(self.repo_path, "pr")
+        self.assertEqual(self.repo_path.read_text(), text)
+
+    def test_a_change_that_makes_the_frontmatter_invalid_is_not_written(self):
+        text = self.repo_path.read_text()
+        with mock.patch.object(kanban_md, "set_frontmatter_value",
+                               side_effect=lambda text, key, value: text.replace("repo:", "bad: [\nrepo:")):
+            with self.assertRaisesRegex(FormatError, "invalid YAML"):
+                self.store.set_merge(self.repo_path, "pr")
         self.assertEqual(self.repo_path.read_text(), text)
 
     def test_a_duplicate_merge_key_is_not_written(self):
@@ -281,6 +301,28 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
         self.assertEqual(self.repo_path.read_text(), before)
+
+    async def test_a_long_error_stays_in_view_in_a_small_terminal(self):
+        for number in range(8):
+            self.link(ProjectLink(f"p{number}", f"Project {number}", [LabelLink(f"l{number}", "repo:api")]))
+
+        def resolve(name, labels):
+            raise HerdboardError("No Linear project named " + repr(name) + ". " + "Check the name. " * 12)
+
+        app = self.make_app(resolve_link=resolve)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-project").value = "Nope"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            error = screen.query_one("#config-error")
+            self.assertIn("No Linear project named 'Nope'", error.plain)
+            visible = screen._compositor.visible_widgets
+            self.assertIn(error, visible)
+            region, clip = visible[error]
+            self.assertEqual(region.intersection(clip), region)
+            self.assertGreater(region.height, 1)
 
     async def test_c_on_a_missing_board_file_shows_the_error(self):
         app = self.make_app()

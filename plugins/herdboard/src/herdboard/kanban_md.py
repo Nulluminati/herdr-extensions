@@ -175,6 +175,8 @@ def set_frontmatter_value(text: str, key: str, value: str | None) -> str:
     if len(matches) > 1:
         raise FormatError(f"duplicate key {key!r} in frontmatter")
     found = matches[0] if matches else None
+    if found is not None and found + 1 < end and lines[found + 1][:1] in (" ", "\t", "-"):
+        raise FormatError(f"{key!r} has a nested value in frontmatter; it must be one value")
     new = [] if value is None else [f"{key}: {value}"]
     if found is not None:
         lines[found:found + 1] = new
