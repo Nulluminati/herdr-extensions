@@ -160,6 +160,25 @@ class RequestTests(AgentReviewTestCase):
                                     f"Edit(/{folder}/**)"])
         self.assertEqual(result["reviewer"], "claude")
 
+    def test_the_review_starts_in_the_background(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.fake.calls.clear()
+        self.request()
+        self.assertEqual(self.calls("workspace", "focus"), [])
+
+    def test_a_closed_card_workspace_opens_in_the_background(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        for entry in self.fake.worktrees:
+            entry["open_workspace_id"] = None
+        self.fake.calls.clear()
+        self.request()
+        opened = self.calls("worktree", "open")
+        self.assertEqual(len(opened), 1)
+        self.assertIn("--no-focus", opened[0])
+        self.assertNotIn("--focus", opened[0])
+
     def test_a_chosen_pi_reviewer_gets_its_model_and_thinking(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")

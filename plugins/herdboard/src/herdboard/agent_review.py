@@ -127,7 +127,8 @@ class AgentReviewer(Reviewer):
                                   "nothing_to_review")
             # Read before the review folder exists, so a failure leaves no folder behind.
             files = attachments.listing(self.config, ref)
-            self._ready_agent(card, ref, key, record, persist)
+            # The review runs in the background: the user stays where they are.
+            self._ready_agent(card, ref, key, record, persist, focus=False)
             reviews = state_dir() / "reviews"
             try:
                 reviews.mkdir(parents=True, exist_ok=True)

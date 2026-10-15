@@ -101,12 +101,13 @@ class Reviewer:
                 _write(state_path, records)
         return persist
 
-    def _ready_agent(self, card, ref, key, record, persist):
+    def _ready_agent(self, card, ref, key, record, persist, focus=True):
         """Open the card's workspace, and start a new agent when the old one is gone.
 
+        With focus False the workspace opens in the background.
         Returns True when a new agent started. The caller holds the card's start lock."""
         starter = Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file)
-        record.update(starter._workspace(Path(record["checkout"]), record["branch"], record))
+        record.update(starter._workspace(Path(record["checkout"]), record["branch"], record, focus=focus))
         persist()
         if agent_live(record):
             return False

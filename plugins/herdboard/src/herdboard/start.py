@@ -536,7 +536,8 @@ class Starter:
                              "base_unknown")
         return wanted
 
-    def _workspace(self, checkout, branch, record):
+    def _workspace(self, checkout, branch, record, focus=True):
+        """Open the card's worktree workspace. With focus False it opens in the background."""
         listed = herdr("worktree", "list", "--cwd", str(checkout), "--trust-repository")
         worktrees = listed.get("worktrees", [])
         stored = record.get("worktree_path")
@@ -554,7 +555,8 @@ class Starter:
             entry = next((w for w in worktrees if Path(w["path"]).resolve() == Path(path).resolve()), None)
             workspace = entry.get("open_workspace_id") if entry else None
             if workspace:
-                herdr("workspace", "focus", workspace)
+                if focus:
+                    herdr("workspace", "focus", workspace)
                 info = herdr("workspace", "get", workspace)
                 root = (info.get("root_pane") or {}).get("pane_id")
                 if root is None:
@@ -565,12 +567,13 @@ class Starter:
                 if not root:
                     raise StartError(f"Workspace {workspace} has no root pane")
                 return {"workspace_id": workspace, "pane_id": root, "worktree_path": str(path)}
-            result = herdr("worktree", "open", "--cwd", str(checkout), "--path", str(path), "--focus", "--trust-repository")
+            result = herdr("worktree", "open", "--cwd", str(checkout), "--path", str(path),
+                           "--focus" if focus else "--no-focus", "--trust-repository")
         else:
             if _git(checkout, "worktree", "prune") is None:
                 raise StartError(f"{checkout}: cannot prune worktrees")
             result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch,
-                           "--base", record["base"], "--focus", "--trust-repository")
+                           "--base", record["base"], "--focus" if focus else "--no-focus", "--trust-repository")
         try:
             workspace = result["workspace"]["workspace_id"]
             pane = result["root_pane"]["pane_id"]
