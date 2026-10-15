@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -104,6 +105,42 @@ class ArchiveStoreTest(unittest.TestCase):
         self.assertTrue(given.archived)
         board = kanban_md.parse(path.read_text())
         self.assertEqual([c.block_id for c in board.archive.cards], ["t000", given.ref])
+
+    def test_show_by_archive_reference_reads_the_board_once(self):
+        self.put(board_text(col("Done"), archive="***\n\n## Archive\n\n- [x] a\n- [x] b\n\n"))
+        original = self.store._read
+        calls = []
+
+        def shrinking(read_path):
+            board = original(read_path)
+            calls.append(read_path)
+            if len(calls) > 1:
+                del board.archive.items[board.archive.items.index(board.archive.cards[-1])]
+            return board
+
+        self.store._read = shrinking
+        self.assertEqual(self.store.show("p:archive-2", archived=True).title, "b")
+        self.store._read = original
+        with self.assertRaises(NotFoundError):
+            self.store.show("p:archive-3", archived=True)
+
+    def test_show_by_id_of_a_card_that_left_the_archive(self):
+        path = self.put(board_text(col("Done"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
+        other = self.todos / "projects/q.md"
+        other.write_text(board_text(col("Done")))
+        found = iter([path, other])
+        self.store._find_archived = lambda ref: next(found)
+        with self.assertRaises(NotFoundError) as caught:
+            self.store.show("t000", archived=True)
+        self.assertEqual(caught.exception.code, "not_found")
+
+    def test_unarchive_needs_a_done_column(self):
+        path = self.put(board_text(col("Todo"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
+        before = path.read_text()
+        with self.assertRaises(HerdboardError) as caught:
+            self.store.unarchive("t000")
+        self.assertIn("no done column", str(caught.exception))
+        self.assertEqual(path.read_text(), before)
 
     def test_archive_by_temporary_reference_checks_the_card_id(self):
         self.put(board_text(col("Todo", "- [ ] one ^t111"), col("Done")))
@@ -385,6 +422,45 @@ class ArchiveCliTest(unittest.TestCase):
         for args in (("archive",), ("archive", "t111", "--done"), ("archive", "t111", "--board", "p")):
             with self.subTest(args=args):
                 self.assertEqual(self.run_json(*args, expect=1)["error"]["code"], "usage")
+
+    def test_archive_done_in_a_repository_without_a_board(self):
+        repo = self.plain.parent / "api"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/acme/api.git"], check=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["--config", str(self.config), "-C", str(repo), "--json", "archive", "--done"])
+        self.assertEqual(code, 1)
+        error = json.loads(out.getvalue())["error"]
+        self.assertEqual(error["code"], "usage")
+        self.assertIn("herdboard init", error["message"])
+        self.assertIn("--board inbox", error["message"])
+        self.assertFalse((self.todos / "inbox.md").exists())
+
+    def test_archive_done_needs_a_done_column(self):
+        self.board.write_text(board_text(col("Todo", "- [ ] open ^t111")))
+        error = self.run_json("archive", "--done", "--board", "p", expect=1)["error"]
+        self.assertIn("no done column", error["message"])
+
+    def test_list_archived_refuses_linear_and_column_filters(self):
+        for args in (("--source", "linear"), ("--column", "Done")):
+            with self.subTest(args=args):
+                error = self.run_json("list", "--board", "p", "--archived", *args, expect=1)["error"]
+                self.assertEqual(error["code"], "usage")
+
+    def test_unarchive_declined_in_a_terminal(self):
+        self.board.write_text(board_text(
+            col("Done", "**Complete**"),
+            archive="***\n\n## Archive\n\n- [x] parent ^t111\n- [x] child [[#^t111]] ^t222\n\n",
+        ))
+        before = self.board.read_text()
+        with mock.patch.object(cli, "_interactive", return_value=True), \
+                mock.patch.object(sys, "stdin", io.StringIO("n\n")):
+            out, err = self.run_cli("unarchive", "t222")
+        self.assertEqual(out, "Nothing unarchived.\n")
+        self.assertIn("t111", err)
+        self.assertEqual(self.board.read_text(), before)
 
     def test_list_archived(self):
         self.run_cli("archive", "t222")

@@ -511,9 +511,15 @@ class Store:
     def show(self, ref: str, archived: bool = False) -> CardView:
         """A card. With `archived`, also a card from an archive, found by its ID or its archive reference;
         else an archived card raises."""
-        if archived and ARCHIVE_REF.match(ref):
-            path, number, _ = self._locate_archived(ref)
-            return self._archive_views(path, self._read(path))[number - 1]
+        temp = ARCHIVE_REF.match(ref) if archived else None
+        if temp:
+            path = self.resolve_board(temp.group("board"))
+            # One read: a second one can find a shorter archive.
+            views = self._archive_views(path, self._read(path))
+            number = int(temp.group("number"))
+            if not 1 <= number <= len(views):
+                raise NotFoundError(f"No archived card {ref}")
+            return views[number - 1]
         try:
             located = self._resolve(ref)
         except ArchivedError:
@@ -521,7 +527,12 @@ class Store:
                 raise
             self._check_unique(ref)
             path = self._find_archived(ref)
-            return next(view for view in self._archive_views(path, self._read(path)) if view.ref == ref)
+            views = self._archive_views(path, self._read(path)) if path is not None else []
+            # The card can leave the archive between the reads.
+            view = next((view for view in views if view.ref == ref), None)
+            if view is None:
+                raise NotFoundError(f"No card {ref}")
+            return view
         column, card = self._find(self._read(located.path), located)
         return self._view(located.path, column, card, card.block_id or ref)
 

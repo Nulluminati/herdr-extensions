@@ -1673,15 +1673,19 @@ class HerdboardApp(App):
 
     def action_archive_done(self) -> None:
         """Archive every card in the done column of each board in the view, after a confirmation."""
-        try:
-            count = sum(len(self.store.done_cards(path)) for path in self.paths)
-        except HerdboardError as error:
-            self.notify(str(error), severity="error")
-            return
+        count = 0
+        paths = []
+        for path in self.paths:
+            try:
+                cards = self.store.done_cards(path)
+            except HerdboardError:
+                # A board without a done column has nothing to archive.
+                continue
+            count += len(cards)
+            paths.append(path)
         if not count:
             self.notify("The done column has no cards.")
             return
-        paths = list(self.paths)
 
         def write() -> None:
             kept = []

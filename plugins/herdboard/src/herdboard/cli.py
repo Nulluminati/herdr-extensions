@@ -678,7 +678,12 @@ def _cmd_archive(ctx: _Context) -> dict:
         elif args.board:
             path = store.resolve_board(args.board)
         else:
-            path = ctx.repo_board() or store.ensure_inbox()
+            path = ctx.repo_board()
+            if path is None and ctx.identity is not None:
+                # A bulk archive of the inbox needs a clear request.
+                raise UsageError(f"No board for this repository. {INIT_HINT} "
+                                 "Use --board inbox to archive the inbox's done column.")
+            path = path or store.ensure_inbox()
         archived, skipped = store.archive_done(path, blocked=start_module.archive_blocker)
         for card in archived:
             activity.append(store, card.ref, "Archived.", activity.author())

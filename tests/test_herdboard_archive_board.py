@@ -149,6 +149,20 @@ class ArchiveBoardTests(BoardTestCase):
             self.assertEqual(self.archived(self.repo_path), ["done card", "done too"])
             self.assertEqual(self.titles(self.repo_path), ["open card"])
 
+    async def test_D_skips_a_board_without_a_done_column(self):
+        other = self.root / "todos/projects/no-done.md"
+        other.write_text("---\n\nkanban-plugin: board\n\n---\n\n## Todo\n\n- [ ] x\n\n")
+        app = self.make_app("all")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("D")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ConfirmScreen)
+            self.assertIn("2 cards", app.screen.query_one("#confirm-prompt").plain)
+            await pilot.press("y")
+            await settle(pilot)
+            self.assertEqual(self.archived(self.repo_path), ["done card", "done too"])
+
     async def test_D_without_done_cards(self):
         self.store.archive_done(self.repo_path)
         app = self.make_app()

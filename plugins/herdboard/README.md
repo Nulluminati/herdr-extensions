@@ -101,7 +101,7 @@ In a view with several boards, columns with the same name merge. Each card keeps
 The archive keeps old todos off the board. It is the archive of the Obsidian Kanban plugin: a `***` line and a `## Archive` heading after the last column. Obsidian shows it in its own archive view.
 
 - `A`, or `herdboard archive <id>`, moves a todo to the archive. `L` on the last column does the same when the archive column shows.
-- `D`, or `herdboard archive --done`, archives every card in the done column. In a view with several boards, `D` archives the done column of each board.
+- `D`, or `herdboard archive --done`, archives every card in the done column. In a view with several boards, `D` archives the done column of each board, and skips a board without one. In a repository without a board, `archive --done` needs `--board inbox` to archive the inbox.
 - `z` shows the archive column at the end of the board. The board hides it again on the next `z`. `a` does not add cards to the archive column.
 - `A` on an archived card, or `herdboard unarchive <id>`, moves it back to the done column. A card that Obsidian archived without an ID takes its archive reference, such as `acme-api:archive-2` from `list --archived`, and gets an ID.
 - A sub-card whose parent is archived too brings its parent back with it. The board asks first. The command asks in a terminal, and needs `--yes` without one.
