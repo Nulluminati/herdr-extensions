@@ -1065,6 +1065,7 @@ def _cmd_board(ctx: _Context) -> dict:
         # The project lookup reads Linear, so an offline board gets none.
         resolve_link=(lambda name, labels: _project_link(ctx, name, labels))
         if views.source.active and not views.source.offline else None,
+        search_issues=views.source.search if views.source.active and not views.source.offline else None,
     ).run()
     return {}
 

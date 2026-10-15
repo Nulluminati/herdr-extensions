@@ -27,6 +27,7 @@ from textual.worker import Worker, WorkerState
 from . import activity, attachments
 from .linear import LinearAuthError
 from .linear_links import ProjectLink, with_link
+from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, plain_tags, split_title
 from .store import KEEP, TEMP_REF, BoardMeta, CardView, Store
@@ -85,7 +86,9 @@ HELP_KEYS = [
     ("v", "cycle view: repo, inbox, all, mine"),
     ("t", "hide or show Linear cards"),
     ("i", "create the board for this repository"),
-    ("c", "board config: the merge mode and the linked Linear projects (ctrl+s saves)"),
+    ("I", "search Linear (on enter) and pin an issue to this repository's board"),
+    ("u", "remove the pin of a pinned Linear issue"),
+    ("c", "board config: the merge mode, the linked Linear projects and the pinned issues (ctrl+s saves)"),
     ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
@@ -815,23 +818,112 @@ class ClaudeModelScreen(ModalBase):
 
 
 class BoardChoiceScreen(ModalBase):
-    """Choose the board that a todo moves to."""
+    """Choose the board that a todo moves to, or another board for `prompt`."""
 
-    def __init__(self, card: CardView, options: list[tuple[str, Path]]):
+    def __init__(self, card: CardView | None, options: list[tuple[str, Path]], prompt: str | None = None):
         super().__init__()
         self.card = card
         self.options = options
         self.board_labels = [label for label, _ in options]
+        self.prompt = prompt
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"Move {split_title(self.card.title)[0]} to")
+            yield Label(self.prompt or f"Move {split_title(self.card.title)[0]} to")
             yield OptionList(*self.board_labels, id="board-choice")
-            yield Label("enter: move, escape: cancel", classes="dim")
+            yield Label("enter: choose, escape: cancel" if self.prompt else "enter: move, escape: cancel",
+                        classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         self.dismiss(self.options[event.option_index][1])
+
+
+class IssueSearchScreen(ModalBase):
+    """Search Linear and choose an issue. The search runs on enter only, in a thread.
+
+    Linear allows few searches per minute, so typing never searches. The screen returns the
+    chosen search result, or None.
+    """
+
+    def __init__(self, search: Callable[[str], list[dict]], board_name: str):
+        super().__init__()
+        self.search = search
+        self.board_name = board_name
+        self.results: list[dict] = []
+        self.searching = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(f"Pin a Linear issue to {self.board_name}")
+            yield Input(placeholder="words, or an identifier such as ENG-123", id="issue-search")
+            yield RichStatic(Text("Open issues of your teams. An identifier finds an issue of any team."),
+                             id="issue-status", classes="dim")
+            yield OptionList(id="issue-results")
+            yield Label("enter: search, or pin the issue · tab: results · escape: cancel", classes="dim")
+
+    @staticmethod
+    def _label(issue: dict) -> Text:
+        text = Text(f"{issue['identifier']}  ", style="bold")
+        text.append(issue["title"])
+        details = [issue["state"]["name"], issue["team"]["key"]]
+        if issue.get("project"):
+            details.append(issue["project"]["name"])
+        text.append("  " + " · ".join(details), style="dim")
+        return text
+
+    def _status(self, message: str, error: bool = False) -> None:
+        status = self.query_one("#issue-status", RichStatic)
+        status.rich_text = Text(message)
+        status.plain = message
+        status.set_class(error, "error")
+        status.set_class(not error, "dim")
+        status.update(status.rich_text)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        term = event.value.strip()
+        if not term or self.searching:
+            return
+        self.searching = True
+        self.results = []
+        self.query_one("#issue-results", OptionList).clear_options()
+        self._status("Searching…")
+        search = self.search
+
+        def guarded() -> tuple[list[dict] | None, HerdboardError | None]:
+            try:
+                return search(term), None
+            except HerdboardError as error:
+                return None, error
+
+        self.run_worker(guarded, thread=True, exit_on_error=False)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+            return
+        self.searching = False
+        results, error = None, None
+        if event.state == WorkerState.SUCCESS:
+            results, error = event.worker.result
+        elif event.state == WorkerState.ERROR:
+            error = event.worker.error
+        if error is not None or results is None:
+            self._status(str(error or "The search was cancelled"), error=True)
+            return
+        self.results = results
+        options = self.query_one("#issue-results", OptionList)
+        options.add_options([self._label(issue) for issue in results])
+        if not results:
+            self._status("No open issues match.")
+            return
+        self._status(f"{len(results)} open issue{'s' if len(results) != 1 else ''}")
+        options.highlighted = 0
+        options.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.results[event.option_index])
 
 
 class ParentScreen(ModalBase):
@@ -929,9 +1021,9 @@ class ModelScreen(ModalBase):
 
 
 class ConfigScreen(ModalBase):
-    """A board's frontmatter settings: the merge mode and the Linear project links.
+    """A board's frontmatter settings: the merge mode, the Linear project links and pinned issues.
 
-    Enter on a link marks it for removal, or keeps it again. ctrl+s writes every change.
+    Enter on a link or a pin marks it for removal, or keeps it again. ctrl+s writes every change.
     """
 
     BINDINGS = [Binding("ctrl+s", "save", "Save")]
@@ -944,6 +1036,14 @@ class ConfigScreen(ModalBase):
         self.default_merge = default_merge
         self.can_link = can_link
         self.removed: set[str] = set()
+        self.removed_pins: set[str] = set()
+
+    def _pin_label(self, pin: IssuePin) -> Text:
+        text = Text(pin.identifier)
+        if pin.id in self.removed_pins:
+            text.stylize("strike")
+            text.append("  remove", style="bold red")
+        return text
 
     def _link_label(self, link: ProjectLink) -> Text:
         text = Text(link.name)
@@ -974,6 +1074,9 @@ class ConfigScreen(ModalBase):
                                               id="config-links"), "Linear projects")
             else:
                 yield Label("No Linear projects are linked.", classes="dim")
+            if self.meta.pins:
+                yield self._titled(OptionList(*[self._pin_label(pin) for pin in self.meta.pins],
+                                              id="config-pins"), "Pinned Linear issues")
             if self.can_link:
                 with Horizontal(classes="form-row"):
                     yield self._titled(Input(placeholder="API Platform", id="config-project",
@@ -981,12 +1084,17 @@ class ConfigScreen(ModalBase):
                     yield self._titled(Input(placeholder="repo:api, bug", id="config-labels",
                                              select_on_focus=False), "Labels")
             yield RichStatic(Text(""), id="config-error", classes="error")
-            if self.meta.links:
-                yield Label("enter on a project: remove it, or keep it again", classes="dim")
+            if self.meta.links or self.meta.pins:
+                yield Label("enter on a project or an issue: remove it, or keep it again", classes="dim")
             yield Label("ctrl+s: save · tab: next field · escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
+        if event.option_list.id == "config-pins":
+            pin = self.meta.pins[event.option_index]
+            self.removed_pins ^= {pin.id}
+            event.option_list.replace_option_prompt_at_index(event.option_index, self._pin_label(pin))
+            return
         link = self.meta.links[event.option_index]
         self.removed ^= {link.id}
         event.option_list.replace_option_prompt_at_index(event.option_index, self._link_label(link))
@@ -1013,7 +1121,7 @@ class ConfigScreen(ModalBase):
             project = self.query_one("#config-project", Input).value.strip()
             labels = [label.strip() for label in self.query_one("#config-labels", Input).value.split(",")]
         self.app.submit_config(self, None if merge == "default" else merge, set(self.removed),
-                               project, [label for label in labels if label])
+                               project, [label for label in labels if label], set(self.removed_pins))
 
 
 class CellMouseDriver(LinuxDriver):
@@ -1078,9 +1186,13 @@ class HerdboardApp(App):
     #config-merge { border: round $surface-lighten-2; height: auto; }
     #config-merge > SelectCurrent { border: none; }
     #config-merge:focus-within { border: round $primary; }
-    .config, #config-links { scrollbar-size-vertical: 1; }
-    #config-links { height: auto; max-height: 6; border: round $surface-lighten-2; }
-    #config-links:focus { border: round $primary; }
+    .config, #config-links, #config-pins { scrollbar-size-vertical: 1; }
+    #config-links, #config-pins { height: auto; max-height: 6; border: round $surface-lighten-2; }
+    #config-links:focus, #config-pins:focus { border: round $primary; }
+    #issue-search { border: round $surface-lighten-2; }
+    #issue-search:focus { border: round $primary; }
+    #issue-results { height: auto; max-height: 12; border: round $surface-lighten-2; }
+    #issue-results:focus { border: round $primary; }
     #config-project { width: 2fr; }
     #config-labels { width: 1fr; }
     /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
@@ -1137,6 +1249,8 @@ class HerdboardApp(App):
         Binding("t", "toggle_linear", "Linear", show=False),
         Binding("i", "init", "Init", show=False),
         Binding("c", "config", "Config", show=False),
+        Binding("I", "import_issue", "Pin issue", show=False),
+        Binding("u", "unpin", "Unpin", show=False),
         Binding("r", "reload", "Reload"),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
@@ -1169,6 +1283,7 @@ class HerdboardApp(App):
         init_board: Callable[[], Path] | None = None,
         config_file: Path | None = None,
         resolve_link: Callable[[str, list[str]], ProjectLink] | None = None,
+        search_issues: Callable[[str], list[dict]] | None = None,
     ):
         super().__init__()
         theme = store.config.theme
@@ -1183,6 +1298,8 @@ class HerdboardApp(App):
         self.init_board = init_board
         # Finds a Linear project and its labels by name for the config dialog; None without Linear.
         self.resolve_link = resolve_link
+        # Searches Linear for the `I` dialog; None without a Linear connection.
+        self.search_issues = search_issues
         self.hide_linear = False
         self.show_archive = False
         self.reload_interval = reload_interval
@@ -2229,7 +2346,7 @@ class HerdboardApp(App):
         self.push_screen(ConfigScreen(path, meta, self.store.config.merge, self.resolve_link is not None))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
-                      project: str, labels: list[str]) -> None:
+                      project: str, labels: list[str], removed_pins: set[str] = frozenset()) -> None:
         """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing."""
         path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
 
@@ -2240,10 +2357,82 @@ class HerdboardApp(App):
                 kept = [l for l in links if l.id not in removed]
                 return with_link(kept, link) if link else kept
 
-            self.store.update_config(path, merge=KEEP if merge == before else merge,
-                                     change_links=change if removed or link else None)
+            self.store.update_config(
+                path, merge=KEEP if merge == before else merge,
+                change_links=change if removed or link else None,
+                change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None)
 
-        self._start_write(write, add=screen, refetch=bool(removed or project))
+        self._start_write(write, add=screen, refetch=bool(removed or project or removed_pins))
+
+    def action_import_issue(self) -> None:
+        """Search Linear and pin the chosen issue to this repository's board, or a chosen one."""
+        if self.search_issues is None:
+            self.notify("Pinning a Linear issue needs Linear and a connection.", severity="warning")
+            return
+        if self.repo_board is not None:
+            self._search_and_pin(self.repo_board)
+            return
+        try:
+            boards = [path for path in self.store.board_paths() if self.store.board_meta(path).repo]
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        if not boards:
+            self.notify("There is no repository board to pin to. Press i in a repository to create one.",
+                        severity="warning")
+            return
+        options = [(self.store.board_name(path), path) for path in sorted(boards, key=self.store.board_name)]
+
+        def chosen(path: Path | None) -> None:
+            if path is not None:
+                self._search_and_pin(path)
+
+        self.push_screen(BoardChoiceScreen(None, options, prompt="Pin a Linear issue to"), chosen)
+
+    def _search_and_pin(self, board: Path) -> None:
+        name = self.store.board_name(board)
+
+        def pin(issue: dict | None) -> None:
+            if issue is None:
+                return
+            identifier = issue["identifier"]
+
+            def write() -> None:
+                _, added = add_pin(self.store, board, issue)
+                self.call_from_thread(self.notify, f"Pinned {identifier} to {name}" if added
+                                      else f"{identifier} is already pinned to {name}")
+
+            self._start_write(write, refetch=True)
+
+        self.push_screen(IssueSearchScreen(self.search_issues, name), pin)
+
+    def action_unpin(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source != "linear":
+            self.notify("Only a pinned Linear issue can be unpinned.", severity="warning")
+            return
+        board = self.repo_board if self.view == "repo" else None
+        if board is None:
+            self.notify("Unpin works in the repo view, where the board's pinned issues show.", severity="warning")
+            return
+        try:
+            pins = self.store.board_meta(board).pins
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        ref = card.ref
+        if not any(pin.identifier.casefold() == ref.casefold() for pin in pins):
+            self.notify(f"{ref} is not pinned to this board: a linked Linear project shows it.",
+                        severity="warning")
+            return
+
+        def write() -> None:
+            unpin_issue(self.store, board, ref)
+            self.call_from_thread(self.notify, f"Unpinned {ref}")
+
+        self._start_write(write, refetch=True)
 
     async def action_reload(self) -> None:
         await self.reload()
