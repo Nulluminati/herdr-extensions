@@ -60,7 +60,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `H` / `L` (or shift+left / shift+right) | Move the card to the previous or next column |
 | `K` / `J` (or shift+up / shift+down) | Move a todo up or down in its column |
 | `/` | Filter. Words match the title, tags and details. `#tag` matches a tag, and `#type/bug` a type. `^t5aa` shows `t5aa` and its sub-cards. Escape clears the filter |
-| enter | Card detail, with the last 10 log entries |
+| enter | Card detail, with the attachments and the last 10 log entries. In the detail, `o` opens an attachment |
 | `a` | Add a card to the selected column |
 | `e` | Edit the todo: title, type, tags, due date and details. ctrl+s saves |
 | `d` | Mark the card done |
@@ -201,6 +201,8 @@ Attachments hold documents that are too large for the card text, such as a speci
 - `herdboard attach <id> FILE [--name NAME]` copies a file into the card's attachments and logs it. An attachment with the same name is replaced.
 - `herdboard attach <id> --remove NAME` removes an attachment.
 - `herdboard show <id>` lists the attachments.
+
+The card detail on the board lists the attachments with their sizes. Press `o` to open one. With more than one attachment, you choose it from a list. herdboard shows a UTF-8 text file of 1 MB or less itself, and draws a `.md` file as Markdown. Other files open in the default application, with `xdg-open` on Linux or `open` on macOS.
 
 When `start` starts the work agent, its brief includes the `plan.md` attachment in full, and lists the other attachments by path. `review` and a rebase conflict give a brief only to a new agent, when the card's agent is gone. A running agent gets no new brief. An agent review gets the path of each attachment, and checks the work against the plan.
 

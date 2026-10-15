@@ -106,6 +106,32 @@ class AttachmentTests(unittest.TestCase):
         plan.write_text("1. Do it.\n", encoding="utf-8")
         self.assertEqual(attachments.plan_for_agent(self.store, "t3m9"), "1. Do it.\n")
 
+    def test_view_text_reads_a_text_attachment(self):
+        self.assertEqual(attachments.view_text(self.doc), "# Spec\n\nLong text.\n")
+
+    def test_view_text_is_none_for_a_binary_file(self):
+        image = self.root / "shot.png"
+        image.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00")
+        self.assertIsNone(attachments.view_text(image))
+        latin = self.root / "old.txt"
+        latin.write_bytes(b"caf\xe9\n")
+        self.assertIsNone(attachments.view_text(latin))
+
+    def test_view_text_is_none_for_a_file_too_large_to_show(self):
+        big = self.root / "big.log"
+        big.write_text("x" * (attachments.VIEW_LIMIT + 1), encoding="utf-8")
+        self.assertIsNone(attachments.view_text(big))
+
+    def test_view_text_of_a_missing_file_is_an_io_error(self):
+        with self.assertRaises(HerdboardError) as caught:
+            attachments.view_text(self.root / "gone.md")
+        self.assertIn("gone.md: cannot read the attachment", str(caught.exception))
+
+    def test_size_label(self):
+        self.assertEqual(attachments.size_label(19), "19 B")
+        self.assertEqual(attachments.size_label(2048), "2.0 KB")
+        self.assertEqual(attachments.size_label(5 * 1024 * 1024 + 1), "5.0 MB")
+
 
 class AttachCliTests(CliTestCase):
     def setUp(self):

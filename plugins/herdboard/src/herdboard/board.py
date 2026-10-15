@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -21,7 +23,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
-from . import activity
+from . import activity, attachments
 from .linear import LinearAuthError
 from .linear_links import ProjectLink, with_link
 from .linear_writes import LinearWriter
@@ -60,7 +62,7 @@ HELP_KEYS = [
     ("shift+down, J", "move the todo down in its column"),
     ("/", "filter: words match title, tags and details; #tag matches a tag, #type/bug a type; enter keeps it"),
     ("escape", "clear the filter"),
-    ("enter", "card detail"),
+    ("enter", "card detail; there, o opens an attachment"),
     ("a", "add a card to the selected column: title, type, tags, due date, details, and the board"),
     ("d", "mark the card done (a Linear card moves to its completed state)"),
     ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
@@ -326,21 +328,35 @@ class RichStatic(Static):
         super().__init__(text, **kwargs)
 
 
+def attachment_lines(files: list[dict]) -> Text:
+    """One line per attachment: its name, then its size in a dim column."""
+    width = max((len(entry["name"]) for entry in files), default=0)
+    text = Text()
+    for entry in files:
+        if text:
+            text.append("\n")
+        text.append(entry["name"].ljust(width + 2))
+        text.append(attachments.size_label(entry["size"]), style="dim")
+    return text
+
+
 class DetailScreen(ModalBase):
-    """A card in full: title, tags and date, where it lives, its details and linked notes."""
+    """A card in full: title, tags and date, where it lives, its details, linked notes and attachments."""
 
     BINDINGS = [
         Binding("e", "edit", "Edit"),
+        Binding("o", "open_attachment", "Open attachment"),
         Binding("space", "toggle", "Check"),
         Binding("down,j", "item(1)", "Next item", show=False),
         Binding("up,k", "item(-1)", "Previous item", show=False),
     ]
 
     def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round",
-                 log: list[dict] | None = None):
+                 log: list[dict] | None = None, files: list[dict] | None = None):
         super().__init__()
         self.notes = notes or []
         self.entries = log or []
+        self.files = files or []
         self.tag_style = tag_style
         self.cursor = 0
         self._set_card(card)
@@ -439,15 +455,95 @@ class DetailScreen(ModalBase):
                         yield Label("Note not found", classes="dim")
                     else:
                         yield Markdown(content)
+            if self.files:
+                block = RichStatic(attachment_lines(self.files), id="detail-files", classes="detail-block")
+                block.border_title = "Attachments"
+                yield block
             if self.entries:
                 block = RichStatic(log_lines(self.entries), id="detail-log", classes="detail-block")
                 block.border_title = "Log"
                 yield block
             hint = "j/k: select item · space: check · " if self.items else ""
+            if self.files:
+                hint += "o: open attachment · "
             yield Label(f"{hint}e: edit · escape: close", classes="dim")
 
     def action_edit(self) -> None:
         self.dismiss("edit")
+
+    def action_open_attachment(self) -> None:
+        if not self.files:
+            self.notify("The card has no attachments", severity="warning")
+        elif len(self.files) == 1:
+            self.open_attachment(self.files[0])
+        else:
+            self.app.push_screen(AttachmentChoiceScreen(self.files),
+                                 lambda entry: self.open_attachment(entry) if entry else None)
+
+    def open_attachment(self, entry: dict) -> None:
+        """Show a text attachment in the board. Another file opens in the system's default application."""
+        path = Path(entry["path"])
+        try:
+            text = attachments.view_text(path)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        if text is not None:
+            self.app.push_screen(AttachmentScreen(entry["name"], text))
+            return
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        try:
+            subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as error:
+            self.notify(f"Cannot open {entry['name']} with {opener}: {error}", severity="error")
+            return
+        self.notify(f"Opened {entry['name']} with {opener}")
+
+
+class AttachmentChoiceScreen(ModalBase):
+    """Choose which of the card's attachments to open."""
+
+    def __init__(self, files: list[dict]):
+        super().__init__()
+        self.files = files
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Open an attachment")
+            yield OptionList(*(entry["name"] for entry in self.files))
+            yield Label("enter: open, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.files[event.option_index])
+
+
+class AttachmentScreen(ModalBase):
+    """A text attachment, read only. A Markdown file is drawn as Markdown."""
+
+    BINDINGS = [
+        Binding("down,j", "scroll(1)", "Down", show=False),
+        Binding("up,k", "scroll(-1)", "Up", show=False),
+    ]
+
+    def __init__(self, name: str, text: str):
+        super().__init__()
+        self.name_text = name
+        self.text = text
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(classes="dialog detail attachment", can_focus=False):
+            yield RichStatic(Text(self.name_text, style="bold"), id="attachment-title")
+            if self.name_text.lower().endswith(".md"):
+                with Vertical(classes="detail-block detail-note"):
+                    yield Markdown(self.text)
+            else:
+                yield RichStatic(Text(self.text), id="attachment-text", classes="detail-block")
+            yield Label("j/k: scroll · escape: close", classes="dim")
+
+    def action_scroll(self, step: int) -> None:
+        self.query_one(".attachment", VerticalScroll).scroll_relative(y=step, animate=False)
 
 
 class HelpScreen(ModalBase):
@@ -935,6 +1031,7 @@ class HerdboardApp(App):
     #detail-title { margin-bottom: 1; }
     #detail-chips { margin-bottom: 1; }
     #detail-meta { margin-bottom: 1; }
+    #attachment-title { margin-bottom: 1; }
     .detail-block { height: auto; border: round $surface-lighten-2; padding: 0 1; margin-bottom: 1; }
     .detail-note Markdown { margin: 0; padding: 0; }
     .card-form { max-height: 95%; }
@@ -1982,13 +2079,18 @@ class HerdboardApp(App):
             except HerdboardError as error:
                 self.notify(str(error), severity="error")
         log = None
+        files = None
         if activity.LOG_REF.match(card.ref):
             try:
                 log = activity.read(self.store.config, card.ref, DETAIL_LOG_ENTRIES)
             except HerdboardError as error:
                 self.notify(str(error), severity="error")
+            try:
+                files = attachments.listing(self.store.config, card.ref)
+            except HerdboardError as error:
+                self.notify(str(error), severity="error")
         self.push_screen(
-            DetailScreen(card, notes, self.store.config.tag_style, log),
+            DetailScreen(card, notes, self.store.config.tag_style, log, files),
             lambda result: self.action_edit() if result == "edit" else None,
         )
 

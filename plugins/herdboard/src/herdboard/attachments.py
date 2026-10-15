@@ -19,6 +19,8 @@ from .model import IoError, NotFoundError
 
 PLAN_NAME = "plan.md"
 CHUNK = 1024 * 1024
+# The largest attachment that the board shows itself; a larger one opens in another application.
+VIEW_LIMIT = 1024 * 1024
 # A plain file name: no folders, no hidden files, no control characters.
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,99}")
 
@@ -104,6 +106,30 @@ def remove(store, ref: str, name: str) -> dict:
         except OSError as error:
             raise IoError(f"{target}: cannot remove the attachment: {error}") from error
     return entry
+
+
+def view_text(path: Path) -> str | None:
+    """The attachment as text for the board's viewer, or None when it is not UTF-8 text
+    or is too large to show there."""
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(VIEW_LIMIT + 1)
+    except OSError as error:
+        raise IoError(f"{path}: cannot read the attachment: {error}") from error
+    if len(data) > VIEW_LIMIT or b"\x00" in data:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def size_label(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
 
 
 def plan_path(config: Config, ref: str) -> Path:
