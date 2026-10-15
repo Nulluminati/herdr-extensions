@@ -525,13 +525,15 @@ class Starter:
         Nothing happens when the repository has no board or a linked project of the board
         already shows the issue. A failure is only a warning: the start goes on.
         """
-        board = next((p for p in self.store.board_paths() if self.store.board_meta(p).repo == identity), None)
-        if board is None or _links_show(self.store.board_meta(board), issue):
-            return
+        board = None
         try:
+            board = next((p for p in self.store.board_paths() if self.store.board_meta(p).repo == identity), None)
+            if board is None or _links_show(self.store.board_meta(board), issue):
+                return
             add_pin(self.store, board, issue)
         except HerdboardError as error:
-            print(f"herdboard: warning: cannot pin {issue['identifier']} to {board}: {error}", file=sys.stderr)
+            where = board or f"the board of {identity}"
+            print(f"herdboard: warning: cannot pin {issue['identifier']} to {where}: {error}", file=sys.stderr)
 
     def _checkout(self, identity, explicit, record=None):
         if explicit:
