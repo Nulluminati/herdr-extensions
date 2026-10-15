@@ -179,9 +179,11 @@ class ArchiveBoardTests(BoardTestCase):
             await pilot.press("question_mark")
             await pilot.pause()
             self.assertIsInstance(app.screen, HelpScreen)
-            text = app.screen.query_one("#help").plain
-            for key in ("\nA ", "\nD ", "\nz "):
-                self.assertIn(key, text)
+            keys = [w.plain for w in app.screen.query(".help-key")]
+            for key in ("A", "D", "z"):
+                self.assertIn(key, keys)
+            whats = [w.plain for w in app.screen.query(".help-what")]
+            self.assertTrue(any("archive the todo" in what for what in whats))
 
 
 if __name__ == "__main__":

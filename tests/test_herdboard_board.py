@@ -39,6 +39,13 @@ async def fill(pilot, text, submit=True):
         await settle(pilot)
 
 
+def help_rows(screen):
+    """The key and description of every help entry, in the order the screen shows them."""
+    keys = [w.plain for w in screen.query(".help-key")]
+    whats = [w.plain for w in screen.query(".help-what")]
+    return list(zip(keys, whats))
+
+
 class BoardTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # unittest runs the loop in debug mode, which slows every Textual message several times
@@ -743,13 +750,28 @@ class ActionTests(BoardTestCase):
             await pilot.press("question_mark")
             await pilot.pause()
             self.assertIsInstance(app.screen, HelpScreen)
-            text = app.screen.query_one("#help").plain
-            for key in ["shift+left", "enter", "escape", "quit"]:
-                self.assertIn(key, text)
+            rows = help_rows(app.screen)
+            keys = [key for key, _ in rows]
+            for key in ["shift+left, H", "enter", "escape", "q"]:
+                self.assertIn(key, keys)
+            self.assertEqual(dict(rows)["q"], "quit")
             await pilot.press("escape")
             self.assertNotIsInstance(app.screen, HelpScreen)
             await pilot.press("q")
         self.assertFalse(app.is_running)
+
+    async def test_help_wraps_a_long_entry_under_its_own_description(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            lines = [strip.text for strip in app.screen._compositor.render_strips()]
+        first = next(i for i, line in enumerate(lines) if "shift+left, H" in line)
+        tail = lines[first + 1]
+        self.assertIn("connection)", tail, "the entry should wrap at 80 columns")
+        # The wrapped tail sits in the description column, not under the keys.
+        self.assertEqual(tail.index("connection)"), lines[first].index("move card to previous column"))
 
 
 class ReloadTests(BoardTestCase):

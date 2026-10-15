@@ -14,7 +14,7 @@ from typing import Callable
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, HorizontalScroll, Vertical, VerticalScroll
+from textual.containers import Container, Horizontal, HorizontalScroll, Vertical, VerticalScroll
 from textual.driver import Driver
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen
@@ -436,12 +436,18 @@ class DetailScreen(ModalBase):
 
 
 class HelpScreen(ModalBase):
+    """The key list. Each description wraps inside its own column, so a long entry stays aligned."""
+
     def compose(self) -> ComposeResult:
-        plain = "\n".join(f"{key:<16}{what}" for key, what in HELP_KEYS)
-        with VerticalScroll(classes="dialog"):
-            help_text = Static(Text(plain), id="help")
-            help_text.plain = plain
-            yield help_text
+        with VerticalScroll(classes="dialog help"):
+            with Container(id="help", classes="help-grid"):
+                for key, what in HELP_KEYS:
+                    key_label = Static(Text(key), classes="help-key")
+                    key_label.plain = key
+                    yield key_label
+                    what_label = Static(Text(what), classes="help-what")
+                    what_label.plain = what
+                    yield what_label
             yield Label("escape: close", classes="dim")
 
 
@@ -887,6 +893,11 @@ class HerdboardApp(App):
     .column.current { border: round $accent; }
     .dialog { width: 70; max-width: 90%; height: auto; max-height: 80%; padding: 1 2;
               border: round $accent; background: $surface; }
+    .help { width: 90; max-width: 95%; }
+    .help-grid { layout: grid; grid-size: 2; grid-columns: 16 1fr; grid-rows: auto;
+                 grid-gutter: 0 1; width: 100%; height: auto; }
+    .help-key { width: 16; height: auto; }
+    .help-what { height: auto; }
     .dim { color: $text-muted; }
     .error { color: $error; }
     ModalBase { align: center middle; }
