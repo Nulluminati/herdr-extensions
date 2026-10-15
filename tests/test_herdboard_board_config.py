@@ -305,12 +305,12 @@ class ConfigScreenTests(BoardTestCase):
             self.assertTrue(any("no repository board" in m for m in messages), messages)
 
 
-def board_arguments(case):
+def board_arguments(case, *args):
     """The keyword arguments that the `board` command gives the app."""
     seen = {}
     with mock.patch.object(HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)), \
             mock.patch.object(HerdboardApp, "run"):
-        case.run_cli("board", directory=case.repo)
+        case.run_cli("board", *args, directory=case.repo)
     return seen
 
 
@@ -328,6 +328,10 @@ class BoardCommandLinearTests(LinearCliCase):
                          ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]))
         with self.assertRaisesRegex(HerdboardError, "No Linear project named 'Nope'"):
             resolve("Nope", [])
+
+    def test_an_offline_board_gets_no_project_lookup(self):
+        self.board()
+        self.assertIsNone(board_arguments(self, "--offline")["resolve_link"])
 
 
 if __name__ == "__main__":

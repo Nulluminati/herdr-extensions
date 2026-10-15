@@ -930,7 +930,9 @@ def _cmd_board(ctx: _Context) -> dict:
         directory=ctx.directory,
         init_board=_init_for_board(ctx),
         config_file=config_path(ctx.args.config),
-        resolve_link=(lambda name, labels: _project_link(ctx, name, labels)) if views.source.active else None,
+        # The project lookup reads Linear, so an offline board gets none.
+        resolve_link=(lambda name, labels: _project_link(ctx, name, labels))
+        if views.source.active and not views.source.offline else None,
     ).run()
     return {}
 
