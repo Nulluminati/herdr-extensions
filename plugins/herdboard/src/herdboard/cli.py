@@ -928,17 +928,14 @@ def _cmd_add_linear(ctx: _Context) -> dict:
     args = ctx.args
     if args.board:
         raise UsageError("--linear and --board cannot be used together")
-    labels = list(args.label)
-    if args.type is not None:
-        # The type is the label of that name; with --team, that team's label wins.
-        kind = ctx.config.type_named(args.type)
-        labels.append(f"{args.team}/{kind}" if args.team else kind)
+    # The type is the label of that name: the issue's team label, else the workspace label.
+    kind = ctx.config.type_named(args.type) if args.type is not None else None
     writer = ctx.writer
     with writer.online() as client:
-        project, label_ids = _linear_target(client, args.project, labels, ctx.default_link())
+        project, label_ids = _linear_target(client, args.project, args.label, ctx.default_link())
     issue = writer.create(
         args.text, team=args.team, project=project, label_ids=label_ids,
-        column=args.column, ask=ctx.ask(), state_name=args.state,
+        column=args.column, ask=ctx.ask(), state_name=args.state, type_label=kind,
     )
     return {"card": ctx.linear_card(issue), "hint": None}
 

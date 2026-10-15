@@ -106,7 +106,7 @@ A card can have one type, such as bug or feature. The type is an Obsidian nested
 - JSON output has the type in `type`. `tags` leaves out the `type/` tag.
 - `start` puts the conventional commit type in front of the branch name: `fix/t3m9-fix-login-timeout` for a bug, `feat/` for a feature. Other types use their own name, such as `chore/`. A Linear issue keeps its own branch name.
 - The agent brief names the type and its commit type. The pull request title uses that commit type.
-- A Linear issue's type is its first label that names a type, in any letter case. `Bug` is the type bug. `add --linear --type bug` adds the label `bug`, and `promote` turns `#type/bug` into that label.
+- A Linear issue's type is its first label that names a type, in any letter case. `Bug` is the type bug. `add --linear --type bug` and `promote` of a `#type/bug` todo add the label `bug` of the issue's team, else the workspace label `bug`. Without such a label, `add --linear` creates no issue.
 
 ### Archive
 

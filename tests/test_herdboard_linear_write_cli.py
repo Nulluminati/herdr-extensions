@@ -258,6 +258,26 @@ class AddLinearTests(WriteCliCase):
         self.assertEqual(self.inputs("IssueCreate")[0]["labelIds"], ["l-api", "l-bug"])
         self.assertEqual((card["type"], card["tags"]), ("bug", ["repo:api"]))
 
+    def test_the_type_label_follows_the_project_team(self):
+        card = self.add("--project", "Platform", "--type", "bug", "x")["card"]
+        (inputs,) = self.inputs("IssueCreate")
+        self.assertEqual((inputs["teamId"], inputs["labelIds"]), ("t-eng", ["l-bug"]))
+        self.assertEqual(card["type"], "bug")
+
+    def test_the_type_label_of_the_chosen_team(self):
+        self.add("--team", "OPS", "--type", "bug", "x")
+        self.assertEqual(self.inputs("IssueCreate")[0]["labelIds"], ["l-bug-ops"])
+
+    def test_a_workspace_type_label_serves_a_team_without_one(self):
+        self.fixtures["labels"].append({"id": "l-chore", "name": "Chore", "team": None})
+        self.add("--team", "ENG", "--type", "chore", "x")
+        self.assertEqual(self.inputs("IssueCreate")[0]["labelIds"], ["l-chore"])
+
+    def test_a_type_without_a_label_creates_nothing(self):
+        error = self.add("--team", "ENG", "--type", "docs", "x", expect=1)["error"]
+        self.assertIn("docs", error["message"])
+        self.assertEqual(self.requests("IssueCreate"), [])
+
     def test_an_unknown_type_creates_nothing(self):
         error = self.add("--team", "ENG", "--type", "epic", "x", expect=1)["error"]
         self.assertEqual(error["code"], "unknown_type")

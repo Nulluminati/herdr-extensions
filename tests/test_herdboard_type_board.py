@@ -6,7 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard.board import AddScreen, DetailScreen, EditScreen  # noqa: E402
+from herdboard.board import AddScreen, DetailScreen, EditScreen, card_matches  # noqa: E402
+from herdboard.store import CardView  # noqa: E402
 from test_herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
 
 
@@ -54,6 +55,19 @@ class TypeLookTests(BoardTestCase):
             await pilot.pause()
             visible = [card.title for column in app.columns for card in column.cards]
             self.assertEqual(visible, ["Fix login #type/bug"])
+
+
+class TypeFilterTests(unittest.TestCase):
+    def issue(self):
+        return CardView(ref="ENG-2", board="Platform", path=None, column="Todo", title="Fix login",
+                        checked=False, due=None, tags=["auth"], body=[], source="linear", type="bug")
+
+    def test_a_plain_word_matches_a_linear_card_type(self):
+        self.assertTrue(card_matches(self.issue(), ["bug"]))
+
+    def test_hash_type_matches_a_linear_card_type(self):
+        self.assertTrue(card_matches(self.issue(), ["#type/bug"]))
+        self.assertFalse(card_matches(self.issue(), ["#type/feature"]))
 
 
 class TypeFormTests(BoardTestCase):

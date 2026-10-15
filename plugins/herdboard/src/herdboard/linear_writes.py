@@ -30,6 +30,14 @@ class TeamRequiredError(HerdboardError):
     code = "team_required"
 
 
+def pick_label(client, name: str, team: dict) -> dict | None:
+    """The label `name` (any letter case) of `team`, else the workspace label; None when neither exists."""
+    found = client.find_labels(name)
+    mine = [l for l in found if l.get("team") and l["team"]["id"] == team["id"]]
+    workspace = [l for l in found if not l.get("team")]
+    return (mine or workspace or [None])[0]
+
+
 class LinearWriter:
     def __init__(self, config: Config, source: LinearSource, wait=time.sleep):
         self.config = config
@@ -112,10 +120,21 @@ class LinearWriter:
         column: str | None = None,
         ask: Ask = refuse,
         state_name: str | None = None,
+        type_label: str | None = None,
     ) -> dict:
-        """Create an issue assigned to you. `project` is a Linear project with its `teams`."""
+        """Create an issue assigned to you. `project` is a Linear project with its `teams`.
+
+        `type_label` names a label that the issue's team or the workspace has.
+        """
         with self.online() as client:
             found = self.resolve_team(client, team, project)
+            if type_label:
+                label = pick_label(client, type_label, found)
+                if label is None:
+                    raise HerdboardError(
+                        f"No Linear label named {type_label!r} in team {found['key']} or the workspace"
+                    )
+                label_ids = list(dict.fromkeys([*label_ids, label["id"]]))
             states = client.team_states(found["id"])
             choices = StateChoices(self.source.account_dir())
             column = column or self.config.columns[0]

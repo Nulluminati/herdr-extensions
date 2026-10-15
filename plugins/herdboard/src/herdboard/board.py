@@ -303,7 +303,7 @@ def card_matches(card: CardView, terms: list[str]) -> bool:
     tags = [tag.casefold() for tag in card.tags]
     if card.type:
         tags.append(f"type/{card.type}".casefold())
-    text = " ".join([card.title, card.board or "", *card.tags, *card.body]).casefold()
+    text = " ".join([card.title, card.board or "", card.type or "", *card.tags, *card.body]).casefold()
     for term in terms:
         if term.startswith("^") and len(term) > 1:
             if term[1:] not in (card.ref.casefold(), (card.parent or "").casefold()):
