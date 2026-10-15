@@ -17,7 +17,7 @@ import time
 from . import activity, merge, start as start_module
 from .agent_review import _notify, _reviewer_status, reviewer_arguments, start_worker
 from .brief import _unindent
-from .model import HerdboardError, split_title
+from .model import HerdboardError, commit_type, split_title
 from .start import Starter, _lock, _read, _write, agent_live, find_record, herdr, safe_key, state_dir
 
 # Writing a description takes minutes; the worker gives up after this.
@@ -86,6 +86,7 @@ def request_text(card, data: dict, folder: Path, templates: list[Path], entries:
         template = f"Pick the template that fits, and follow it: the same headings in the same order.\n{listed}"
     else:
         template = f"The repository has no template. Use this format:\n\n{DEFAULT_FORMAT}"
+    kind = f"- The card is a {card.type}: the title type is `{commit_type(card.type)}`.\n" if card.type else ""
     return f"""# Pull request description
 
 Write the title and description of a pull request for this work.
@@ -105,7 +106,7 @@ Write `{folder / 'pr.md'}`. Its first line is the title. The rest is the descrip
 
 - The title follows this guide, whatever the style of the repository:
 
-{TITLE_GUIDE}
+{TITLE_GUIDE}{kind}
 - {template}
 - Keep it short. Write plain prose. Use the `humanizer` skill if you have it.
 - Explain why the change exists, not only what changed. Do not list the changed files.

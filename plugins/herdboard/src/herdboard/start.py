@@ -24,7 +24,7 @@ from .identity import _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_source import state_dir
 from .linear_states import StateChoices, refuse, resolve_state
-from .model import ConflictError, HerdboardError, IoError, NotFoundError
+from .model import ConflictError, HerdboardError, IoError, NotFoundError, commit_type
 from .store import TEMP_REF, CardView
 
 # A card's Hunk review pane stays open only while the card is in this column.
@@ -406,7 +406,9 @@ def todo_branch(card):
     text = re.sub(r"\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|https?://\S+", "", card.title)
     text = re.sub(r"#[\w/-]+|📅\s*\d{4}-\d{2}-\d{2}|\^\w+", "", text)
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return (card.ref + ("-" + slug if slug else ""))[:50].rstrip("-")
+    # A typed card's branch starts with its commit type, such as `fix/t3m9-login-timeout`.
+    prefix = f"{commit_type(card.type)}/" if card.type else ""
+    return (prefix + card.ref + ("-" + slug if slug else ""))[:50].rstrip("-")
 
 
 def validate_branch(branch):

@@ -46,6 +46,16 @@ class BriefTests(unittest.TestCase):
         ]:
             self.assertIn(part, text)
 
+    def test_a_typed_card_names_its_type_and_commit_type(self):
+        text = self.brief(todo(type="bug"))
+        self.assertIn("- Type: bug", text)
+        self.assertIn("The card is a bug: use `fix` as the conventional commit type of the main change.", text)
+
+    def test_a_card_without_a_type_names_none(self):
+        text = self.brief(todo())
+        self.assertNotIn("Type:", text)
+        self.assertNotIn("The card is a", text)
+
     def test_the_brief_names_the_base_branch(self):
         self.assertIn("- Base: `main`. herdboard merges the branch into it after the review.", self.brief(todo()))
 

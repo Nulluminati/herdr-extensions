@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard.model import (  # noqa: E402
-    HerdboardError, card_type, join_title, parse_tags, plain_tags, split_title, with_type,
+    HerdboardError, card_type, commit_type, join_title, parse_tags, plain_tags, split_title, with_type,
 )
 
 
@@ -60,6 +60,15 @@ class CardTypeTests(unittest.TestCase):
 
     def test_plain_tags_leave_out_type_tags(self):
         self.assertEqual(plain_tags(["auth", "type/bug", "web"]), ["auth", "web"])
+
+
+class CommitTypeTests(unittest.TestCase):
+    def test_bug_and_feature_map_to_fix_and_feat(self):
+        self.assertEqual((commit_type("bug"), commit_type("feature")), ("fix", "feat"))
+
+    def test_other_types_are_their_own_commit_type(self):
+        self.assertEqual((commit_type("chore"), commit_type("docs"), commit_type("Spike")),
+                         ("chore", "docs", "spike"))
 
 
 class WithTypeTests(unittest.TestCase):

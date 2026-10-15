@@ -258,6 +258,16 @@ def card_type(tags: list[str]) -> str | None:
     return None
 
 
+# Card types whose conventional commit type has another name. Other types are their own commit type.
+COMMIT_TYPES = {"bug": "fix", "feature": "feat"}
+
+
+def commit_type(kind: str) -> str:
+    """The conventional commit type of a card type, such as `fix` for `bug`."""
+    kind = kind.casefold()
+    return COMMIT_TYPES.get(kind, kind)
+
+
 def plain_tags(tags: list[str]) -> list[str]:
     """The tags without the `type/<name>` tags."""
     return [tag for tag in tags if not tag.startswith(TYPE_TAG_PREFIX)]

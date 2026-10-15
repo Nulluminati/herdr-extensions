@@ -207,6 +207,13 @@ class StartTests(unittest.TestCase):
         result = self.starter.start(card.ref, repo=self.board.stem, no_agent=True)
         self.assertEqual(result["workspace_id"], "w9")
 
+    def test_a_typed_todo_branch_starts_with_its_commit_type(self):
+        for kind, prefix in (("bug", "fix/"), ("feature", "feat/"), ("chore", "chore/"), ("spike", "spike/")):
+            with self.subTest(kind=kind):
+                card = self.store.add(self.board, f"Fix login #type/{kind} #auth")
+                self.assertEqual(start.todo_branch(card), f"{prefix}{card.ref}-fix-login")
+        self.assertLessEqual(len(start.todo_branch(self.store.add(self.board, "long " * 30 + "#type/refactor"))), 50)
+
     def test_invalid_branch_and_slug_limit(self):
         self.assertLessEqual(len(start.todo_branch(self.store.add(self.board, "long " * 30))), 50)
         with self.assertRaises(start.StartError) as raised:

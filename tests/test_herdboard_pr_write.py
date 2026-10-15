@@ -106,6 +106,16 @@ class RequestTests(PrWriteTestCase):
             self.assertIn(part, text)
         self.assertNotIn("git log", text)
 
+    def test_a_typed_card_sets_the_title_type(self):
+        self.store.edit(self.card.ref, title="Fix login timeout #type/bug")
+        self.request()
+        text = (self.folder / "request.md").read_text()
+        self.assertIn("The card is a bug: the title type is `fix`.", text)
+
+    def test_a_card_without_a_type_leaves_the_title_type_open(self):
+        self.request()
+        self.assertNotIn("The card is a", (self.folder / "request.md").read_text())
+
     def test_templates_replace_the_default_format(self):
         for name in (".github/pull_request_template.md", "docs/PULL_REQUEST_TEMPLATE.md",
                      ".github/PULL_REQUEST_TEMPLATE/bug.md", "notes.md"):

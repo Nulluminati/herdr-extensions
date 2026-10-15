@@ -6,7 +6,7 @@ from pathlib import Path
 import unicodedata
 
 from .attachments import PLAN_NAME
-from .model import split_title
+from .model import commit_type, split_title
 from .store import CardView
 
 # Longest sidebar token; Herdr's sidebar is narrow.
@@ -63,6 +63,8 @@ def brief_text(
     if linear:
         facts += [f"Link: {card.url}" if card.url else "", f"State: {card.state}" if card.state else "",
                   f"Team: {card.team}" if card.team else ""]
+    if card.type:
+        facts.append(f"Type: {card.type}")
     if card.tags:
         facts.append(("Labels: " if linear else "Tags: ") + ", ".join(card.tags))
     if card.due:
@@ -135,6 +137,8 @@ def brief_text(
         "## Finish the work",
         "",
         f"- Commit every change on the branch `{branch}`. Use conventional commit messages.",
+        *([f"- The card is a {card.type}: use `{commit_type(card.type)}` as the conventional commit type "
+           "of the main change."] if card.type else []),
         f"- When the work is ready for the user to check, commit it, then run `{command} --json move {ref} Review`",
         f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
         "Fix, commit, and move the card back to Review.",
