@@ -11,6 +11,7 @@ from .identity import IdentityError, _canonical_identity, repo_identity
 from . import linear_links, linear_source
 from .linear import LinearAuthError, LinearError, LinearNetworkError
 from .linear_links import parse_links
+from .linear_pins import parse_pins
 from .model import BLOCK_ID, Board, Card, Column, ConflictError, FormatError, HerdboardError, parent_of
 from .promotions import PromotionRecords
 from .start import _entries, _read
@@ -77,6 +78,16 @@ def check_board(store, path, board):
                                     "PyYAML is not installed; Linear links cannot be checked.", path, line))
         else:
             findings.append(finding("error", "linear_links_invalid", str(error), path, line))
+    try:
+        parse_pins(board.frontmatter)
+    except FormatError as error:
+        line = next((i for i, text in enumerate(board.frontmatter, 1)
+                     if text.startswith("linear-issues:")), 1)
+        if linear_links._yaml() is None:
+            findings.append(finding("warning", "pyyaml_missing",
+                                    "PyYAML is not installed; pinned Linear issues cannot be checked.", path, line))
+        else:
+            findings.append(finding("error", "linear_pins_invalid", str(error), path, line))
     try:
         store._done_column(board, path)
     except HerdboardError as error:
@@ -244,6 +255,27 @@ def check_linear(config, boards, offline):
                     if label.id not in found:
                         findings.append(finding("warning", "linear_label_missing",
                                                 f"Linear label {label.name!r} ({label.id}) is missing or inaccessible.", path, line))
+            try:
+                pins = parse_pins(board.frontmatter)
+            except FormatError:
+                continue
+            if not pins:
+                continue
+            line = next((i for i, text in enumerate(board.frontmatter, 1)
+                         if text.startswith("linear-issues:")), None)
+            try:
+                # Every state: a done pin still exists, and only a missing one is a finding.
+                found = {issue["id"] for issue in client.issues_by_ids([pin.id for pin in pins], done_days=None)}
+            except (LinearAuthError, LinearNetworkError):
+                raise
+            except LinearError as error:
+                findings.append(finding("warning", "linear_check_failed", str(error), path, line))
+                return findings
+            for pin in pins:
+                if pin.id not in found:
+                    findings.append(finding("warning", "linear_pin_missing",
+                                            f"Pinned Linear issue {pin.identifier} ({pin.id}) is missing or inaccessible.",
+                                            path, line))
     except LinearNetworkError as error:
         findings.append(finding("warning", "linear_unreachable", str(error)))
     except LinearAuthError as error:

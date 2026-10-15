@@ -106,6 +106,24 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(found[0]["path"], str(path))
         self.assertEqual(found[0]["line"], 3)
 
+    def test_invalid_linear_pins(self):
+        path = self.board(front="kanban-plugin: board\nrepo: github.com/acme/api\nlinear-issues:\n  - id: i1\n")
+        found = self.findings("linear_pins_invalid", expect=1)
+        self.assertEqual(found[0]["path"], str(path))
+        self.assertEqual(found[0]["line"], 4)
+        self.assertIn("identifier", found[0]["message"])
+
+    def test_missing_pinned_issue(self):
+        self.enable_linear()
+        self.board(front="kanban-plugin: board\nlinear-issues:\n  - {id: i1, identifier: ENG-1}\n"
+                         "  - {id: gone, identifier: ENG-404}\n  - {id: i6, identifier: ENG-6}\n")
+        with self.server() as fake:
+            found = self.findings("linear_pin_missing")
+            self.assertEqual([f["level"] for f in found], ["warning"])
+            self.assertIn("ENG-404", found[0]["message"])
+            self.assertEqual(found[0]["line"], 3)
+            self.assertEqual([r["operationName"] for r in fake.requests], ["Viewer", "PinnedIssues"])
+
     def test_invalid_config(self):
         for content in ("[", "columns = 1", "start_agent = 'wrong'"):
             with self.subTest(content=content):
