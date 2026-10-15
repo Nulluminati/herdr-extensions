@@ -384,12 +384,12 @@ class NavigationTests(BoardTestCase):
             await pilot.press("e")
             await pilot.pause()
             order = []
-            for _ in range(3):
+            for _ in range(4):
                 await pilot.press("tab")
                 order.append(app.focused.id)
-            self.assertEqual(order, ["card-tags", "card-due", "card-body"])
+            self.assertEqual(order, ["card-type", "card-tags", "card-due", "card-body"])
             await pilot.press(*"bat", "enter", *"fish")
-            await pilot.press("shift+tab", "shift+tab", "shift+tab")
+            await pilot.press("shift+tab", "shift+tab", "shift+tab", "shift+tab")
             self.assertEqual(app.focused.id, "card-title")
             await pilot.press("ctrl+s")
             await settle(pilot)

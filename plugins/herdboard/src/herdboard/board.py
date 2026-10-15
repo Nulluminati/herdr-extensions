@@ -25,7 +25,7 @@ from . import activity
 from .linear import LinearAuthError
 from .linear_links import ProjectLink, with_link
 from .linear_writes import LinearWriter
-from .model import HerdboardError, join_title, parse_tags, split_title
+from .model import HerdboardError, join_title, parse_tags, plain_tags, split_title
 from .store import KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS
@@ -58,12 +58,12 @@ HELP_KEYS = [
     ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
     ("shift+up, K", "move the todo up in its column"),
     ("shift+down, J", "move the todo down in its column"),
-    ("/", "filter: words match title, tags and details; #tag matches a tag; enter keeps it"),
+    ("/", "filter: words match title, tags and details; #tag matches a tag, #type/bug a type; enter keeps it"),
     ("escape", "clear the filter"),
     ("enter", "card detail"),
-    ("a", "add a card to the selected column: title, tags, due date, details, and the board"),
+    ("a", "add a card to the selected column: title, type, tags, due date, details, and the board"),
     ("d", "mark the card done (a Linear card moves to its completed state)"),
-    ("e", "edit the todo: title, tags, due date and details (ctrl+s saves)"),
+    ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
     ("b", "move the todo to another board, for example from the inbox to this repository"),
     ("x", "delete the todo, after you confirm"),
     ("A", "archive the todo; in the archive column, move it back to the done column (an archived parent too, after you confirm)"),
@@ -127,6 +127,15 @@ def due_label(due: str, today: date | None = None) -> Text:
     return Text(f"📅 {shown}", style=style)
 
 
+# Type badge colors: terminal palette names. Other types are bold in the default color.
+TYPE_STYLES = {"bug": "bold red", "feature": "bold green", "docs": "bold cyan", "refactor": "bold magenta"}
+
+
+def type_badge(kind: str) -> Text:
+    """A card type as bold text, colored for the default types."""
+    return Text(kind, style=TYPE_STYLES.get(kind.casefold(), "bold"))
+
+
 # Nerd Font half circles that round off a tag block.
 ROUND_LEFT, ROUND_RIGHT = "\ue0b6", "\ue0b4"
 
@@ -150,7 +159,9 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
         title, tags, due = split_title(card.title)
     text = Text(title or card.title)
     line = Text()
-    for tag in tags:
+    if card.type:
+        line.append_text(type_badge(card.type))
+    for tag in plain_tags(tags):
         if line:
             line.append(" ")
         line.append_text(tag_chip(tag, tag_style))
@@ -290,6 +301,8 @@ def card_matches(card: CardView, terms: list[str]) -> bool:
     """True when every term matches: `#tag` a tag by prefix, `^id` a card and its sub-cards,
     any other word the card's text."""
     tags = [tag.casefold() for tag in card.tags]
+    if card.type:
+        tags.append(f"type/{card.type}".casefold())
     text = " ".join([card.title, card.board or "", *card.tags, *card.body]).casefold()
     for term in terms:
         if term.startswith("^") and len(term) > 1:
@@ -377,11 +390,12 @@ class DetailScreen(ModalBase):
         card = self.card
         if card.source == "linear":
             return card.title, card.tags, card.due
-        return split_title(card.title)
+        title, tags, due = split_title(card.title)
+        return title, plain_tags(tags), due
 
     def _meta(self) -> Text:
         card = self.card
-        rows = [("Board", card.board), ("Column", card.column), ("ID", card.ref)]
+        rows = [("Board", card.board), ("Column", card.column), ("ID", card.ref), ("Type", card.type)]
         if card.source == "linear":
             rows += [("State", card.state), ("Team", card.team), ("Link", card.url)]
             if card.pr:
@@ -452,15 +466,19 @@ class HelpScreen(ModalBase):
 
 
 class CardFormScreen(ModalBase):
-    """The fields of a todo: title, tags, due date and details. ctrl+s or enter saves."""
+    """The fields of a todo: title, type, tags, due date and details. ctrl+s or enter saves."""
 
     BINDINGS = [Binding("ctrl+s", "save", "Save")]
     AUTO_FOCUS = "#card-title"
     heading = ""
 
-    def __init__(self, title: str = "", tags: list[str] = (), due: str | None = None, body: list[str] = ()):
+    def __init__(self, title: str = "", tags: list[str] = (), due: str | None = None, body: list[str] = (),
+                 kind: str | None = None, types: list[str] = ()):
         super().__init__()
         self.initial = (title, " ".join(tags), due or "", "\n".join(body))
+        self.kind = kind
+        # A type that the config no longer lists stays a choice, so an edit keeps it.
+        self.types = list(types) + ([kind] if kind and kind not in types else [])
 
     def destination(self) -> ComposeResult:
         return iter(())
@@ -477,6 +495,8 @@ class CardFormScreen(ModalBase):
             yield self._titled(Input(value=title, placeholder="What needs doing", id="card-title",
                                      select_on_focus=False), "Title")
             with Horizontal(classes="form-row"):
+                yield self._titled(Select([(kind, kind) for kind in self.types], prompt="none",
+                                          value=self.kind or Select.NULL, id="card-type"), "Type")
                 yield self._titled(Input(value=tags, placeholder="auth, web", id="card-tags",
                                          select_on_focus=False), "Tags")
                 yield self._titled(Input(value=due, placeholder="YYYY-MM-DD", id="card-due",
@@ -505,9 +525,11 @@ class CardFormScreen(ModalBase):
 
     def values(self) -> tuple[str, list[str]]:
         """The first-line text and the detail lines. Raises HerdboardError for bad input."""
+        kind = self.query_one("#card-type", Select)
+        tags = plain_tags(parse_tags(self.query_one("#card-tags", Input).value))
         line = join_title(
             self.query_one("#card-title", Input).value,
-            parse_tags(self.query_one("#card-tags", Input).value),
+            ([] if kind.is_blank() else [f"type/{kind.value}"]) + tags,
             self.query_one("#card-due", Input).value.strip() or None,
         )
         return line, self.query_one("#card-body", TextArea).text.split("\n")
@@ -538,8 +560,8 @@ class CardFormScreen(ModalBase):
 class AddScreen(CardFormScreen):
     """Add dialog. The column is fixed when the dialog opens; the board is a choice."""
 
-    def __init__(self, options: list[tuple[str, Path]], path: Path, column: str):
-        super().__init__()
+    def __init__(self, options: list[tuple[str, Path]], path: Path, column: str, types: list[str] = ()):
+        super().__init__(types=types)
         self.board_options = [(label, str(option)) for label, option in options]
         self.path = path
         self.column = column
@@ -554,6 +576,8 @@ class AddScreen(CardFormScreen):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         event.stop()
+        if event.select.id != "card-board":
+            return
         self.path = Path(str(event.value))
         self.set_heading(self._heading())
 
@@ -573,9 +597,10 @@ def _unindent(line: str) -> str:
 class EditScreen(CardFormScreen):
     """Edit a todo's fields. The checkbox and the ID stay."""
 
-    def __init__(self, card: CardView):
+    def __init__(self, card: CardView, types: list[str] = ()):
         title, tags, due = split_title(card.title)
-        super().__init__(title, tags, due, [_unindent(line) for line in card.body])
+        super().__init__(title, plain_tags(tags), due, [_unindent(line) for line in card.body],
+                         kind=card.type, types=types)
         self.card = card
         self.heading = f"Edit {card.ref} ({card.board} / {card.column})"
 
@@ -915,6 +940,9 @@ class HerdboardApp(App):
     .card-form Input, .card-form TextArea { border: round $surface-lighten-2; }
     .card-form Input:focus, .card-form TextArea:focus { border: round $primary; }
     .form-row { height: auto; }
+    #card-type { width: 1fr; border: round $surface-lighten-2; height: auto; }
+    #card-type > SelectCurrent { border: none; }
+    #card-type:focus-within { border: round $primary; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
     #config-merge { border: round $surface-lighten-2; height: auto; }
@@ -1569,7 +1597,7 @@ class HerdboardApp(App):
         if card.source == "linear":
             self.notify("Edit Linear issues in Linear.", severity="warning")
             return
-        self.push_screen(EditScreen(card))
+        self.push_screen(EditScreen(card, self.store.config.types))
 
     def submit_edit(self, screen: EditScreen, title: str, body: list[str]) -> None:
         """Save the dialog's text, if the card still matches what the dialog showed."""
@@ -1971,7 +1999,7 @@ class HerdboardApp(App):
             return
         path = self._add_path()
         column = self.columns[self.col].name
-        self.push_screen(AddScreen(self._add_options(path), path, column))
+        self.push_screen(AddScreen(self._add_options(path), path, column, self.store.config.types))
 
     def _add_options(self, path: Path) -> list[tuple[str, Path]]:
         """Boards the add dialog offers: this repository's board, the inbox, and `path`."""
