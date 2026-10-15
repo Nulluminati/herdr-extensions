@@ -52,7 +52,7 @@ LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
 LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
 # Shown in the top-right corner of a card that has attachments.
-ATTACHMENT_MARK = "📎"
+ATTACHMENT_MARK = "≡"
 
 HELP_KEYS = [
     ("left, h", "previous column"),
