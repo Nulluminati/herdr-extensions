@@ -72,6 +72,7 @@ HELP_KEYS = [
     ("s", "start work with the default agent"),
     ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
     ("P", "plan the card with an agent in a new tab; the plan goes to the work agent's brief"),
+    ("g", "go to the started card's Herdr workspace"),
     ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
     ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
     ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
@@ -997,6 +998,7 @@ class HerdboardApp(App):
         Binding("z", "toggle_archive", "Show archive", show=False),
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
+        Binding("g", "go", "Go to workspace"),
         Binding("R", "review", "Review"),
         Binding("P", "plan", "Plan"),
         Binding("p", "parent", "Parent", show=False),
@@ -1033,6 +1035,7 @@ class HerdboardApp(App):
         plan_card: Callable[..., dict] | None = None,
         merge_card: Callable[[str], dict] | None = None,
         finish_card: Callable[[str], dict] | None = None,
+        go_card: Callable[[str], dict] | None = None,
         directory: Path | None = None,
         init_board: Callable[[], Path] | None = None,
         config_file: Path | None = None,
@@ -1067,6 +1070,7 @@ class HerdboardApp(App):
         self.plan_card = plan_card
         self.merge_card = merge_card
         self.finish_card = finish_card
+        self.go_card = go_card
         self.directory = directory or Path.cwd()
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
@@ -1934,6 +1938,14 @@ class HerdboardApp(App):
                           "The worktree and the merged branch are removed, and the card moves to Done."),
             lambda answer: self._card_action(run, notice) if answer else None,
         )
+
+    def action_go(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        ref = card.ref
+        run = (lambda: self.go_card(ref)) if self.go_card else (lambda: start_module.go_to_workspace(ref))
+        self._card_action(run, lambda result: f"Went to the workspace {result['workspace_id']} of {result['ref']}")
 
     def action_start(self) -> None:
         card = self.current_card()

@@ -220,6 +220,22 @@ def find_record(ref):
     return None
 
 
+def go_to_workspace(ref):
+    """Focus the Herdr workspace of a started card's worktree. Stops when Herdr has none open."""
+    found = find_record(ref)
+    record = found[1] if found else {}
+    path = record.get("worktree_path")
+    if not path or not record.get("checkout") or not Path(path).exists():
+        raise StartError(f"{ref} has no worktree; start the card first", "not_started")
+    listed = herdr("worktree", "list", "--cwd", record["checkout"], "--trust-repository")
+    entry = next((w for w in listed.get("worktrees", []) if Path(w["path"]).resolve() == Path(path).resolve()), None)
+    workspace = entry.get("open_workspace_id") if entry else None
+    if not workspace:
+        raise StartError(f"Herdr has no open workspace for {ref}; start the card to open it", "workspace_closed")
+    herdr("workspace", "focus", workspace)
+    return {"ref": ref, "workspace_id": workspace}
+
+
 def safe_key(key):
     """A record key that is safe in a file name: for the per-card lock and the brief."""
     return key if re.fullmatch(r"[a-zA-Z0-9_-]+", key) else hashlib.sha256(key.encode()).hexdigest()

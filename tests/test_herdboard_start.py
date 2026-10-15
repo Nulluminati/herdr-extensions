@@ -99,6 +99,29 @@ class StartTests(unittest.TestCase):
         self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
         self.assertTrue(any(c[:2] == ["workspace", "focus"] for c in self.fake.calls))
 
+    def test_go_to_workspace_focuses_the_open_workspace(self):
+        self.starter.start(self.card.ref, no_agent=True)
+        self.fake.calls.clear()
+        result = start.go_to_workspace(self.card.ref)
+        self.assertEqual(result, {"ref": self.card.ref, "workspace_id": "w9"})
+        self.assertIn(["workspace", "focus", "w9"], self.fake.calls)
+
+    def test_go_to_workspace_stops_for_a_card_without_work(self):
+        with self.assertRaises(start.StartError) as caught:
+            start.go_to_workspace(self.card.ref)
+        self.assertEqual(caught.exception.code, "not_started")
+        self.assertEqual(self.fake.calls, [])
+
+    def test_go_to_workspace_stops_when_herdr_has_no_open_workspace(self):
+        self.starter.start(self.card.ref, no_agent=True)
+        for worktree in self.fake.worktrees:
+            worktree["open_workspace_id"] = None
+        self.fake.calls.clear()
+        with self.assertRaises(start.StartError) as caught:
+            start.go_to_workspace(self.card.ref)
+        self.assertEqual(caught.exception.code, "workspace_closed")
+        self.assertFalse(any(c[:2] == ["workspace", "focus"] for c in self.fake.calls))
+
     def git(self, *args):
         return subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True,
                               text=True).stdout.strip()

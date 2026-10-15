@@ -36,11 +36,12 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                                                "pane_id": "w1:p3", "folder": "/f", "then_hunk": False})
         self.plan = Mock(return_value={"ref": self.card.ref, "agent": "claude", "model": "opus", "pane_id": "w1:p7",
                                        "checkout": "/repo", "plan": "/plan.md"})
+        self.go = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1"})
         self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
     def app(self):
         app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
                            review_card=self.review, merge_card=self.merge, finish_card=self.finish,
-                           agent_review_card=self.agent_review, plan_card=self.plan)
+                           agent_review_card=self.agent_review, plan_card=self.plan, go_card=self.go)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -252,6 +253,16 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         notices = await self.run_keys("f", "y")
         self.finish.assert_called_once_with(self.card.ref)
         self.assertIn((f"Finished {self.card.ref}; branch kept", None), notices)
+
+    async def test_g_goes_to_the_card_workspace(self):
+        notices = await self.run_keys("g")
+        self.go.assert_called_once_with(self.card.ref)
+        self.assertIn((f"Went to the workspace w1 of {self.card.ref}", None), notices)
+
+    async def test_g_shows_why_there_is_no_workspace(self):
+        self.go.side_effect = StartError("No open workspace", "workspace_closed")
+        notices = await self.run_keys("g")
+        self.assertIn(("No open workspace", "error"), notices)
 
     async def test_a_merge_error_is_shown(self):
         self.merge.side_effect = StartError("Rebase conflict", "rebase_conflict")

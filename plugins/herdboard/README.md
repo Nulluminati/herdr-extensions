@@ -73,6 +73,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `s` | Start work with the default agent |
 | `S` | Choose claude or pi, the model and pi's thinking level, then start work |
 | `P` | Plan the card with an agent: choose claude or pi and the model |
+| `g` | Go to the started card's Herdr workspace, when Herdr has it open |
 | `R` | Review a started card: in Hunk, by another agent, or both |
 | `m` | Merge the card, after you confirm |
 | `f` | Finish a merged card, after you confirm |
