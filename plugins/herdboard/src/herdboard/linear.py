@@ -102,6 +102,13 @@ LABEL_FIELDS = "id name team { id key }"
 LABELS_QUERY = list_query("Labels", "issueLabels", "IssueLabelFilter", LABEL_FIELDS)
 LABELS_BY_ID_QUERY = list_query("LabelsById", "issueLabels", "IssueLabelFilter", LABEL_FIELDS)
 ISSUES_QUERY = list_query("ProjectIssues", "issues", "IssueFilter", ISSUE_FIELDS)
+PINNED_ISSUES_QUERY = list_query("PinnedIssues", "issues", "IssueFilter", ISSUE_FIELDS)
+# One page of search results; Linear limits `searchIssues` to 30 requests per minute.
+SEARCH_ISSUES_QUERY = """query SearchIssues($term: String!, $first: Int!, $filter: IssueFilter) {
+    searchIssues(term: $term, first: $first, filter: $filter) {
+        nodes { id identifier title state { name type } team { key } project { name } }
+    }
+}"""
 ISSUE_QUERY = f"""query Issue($id: String!) {{
     issue(id: $id) {{ {ISSUE_FIELDS} }}
 }}"""
@@ -477,6 +484,31 @@ class LinearClient:
         filters.update(recent_filter(done_days))
         issues = self._pages("ProjectIssues", ISSUES_QUERY, ("issues",), {"filter": filters})
         return [self._issue(issue) for issue in issues]
+
+    def issues_by_ids(self, ids: list[str], done_days: int | None = 14) -> list[dict]:
+        """The issues among ids that exist, are accessible and are open or recently done."""
+        if not ids:
+            return []
+        filters = {"id": {"in": list(ids)}}
+        filters.update(recent_filter(done_days))
+        issues = self._pages("PinnedIssues", PINNED_ISSUES_QUERY, ("issues",), {"filter": filters})
+        return [self._issue(issue) for issue in issues]
+
+    def search_issues(self, term: str, team_ids: list[str], first: int = 20) -> list[dict]:
+        """Open issues of the teams in team_ids that match term, best match first.
+
+        The result has only id, identifier, title, state, team and project fields.
+        """
+        if not team_ids:
+            return []
+        filters = {"team": {"id": {"in": list(team_ids)}},
+                   "state": {"type": {"nin": ["completed", "canceled"]}}}
+        data = self._request("SearchIssues", SEARCH_ISSUES_QUERY,
+                             {"term": term, "first": first, "filter": filters})
+        nodes = response_field(data, ("searchIssues", "nodes"))
+        if not isinstance(nodes, list):
+            raise LinearError("Linear returned an invalid search response")
+        return nodes
 
     def my_issues(self, done_days: int | None = 14) -> list[dict]:
         variables = {"filter": recent_filter(done_days)} if done_days is not None else {}

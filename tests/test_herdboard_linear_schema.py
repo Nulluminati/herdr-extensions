@@ -48,6 +48,12 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(validation_errors(linear.LABELS_BY_ID_QUERY,
                                            {"first": 10, "filter": {"id": {"in": ["a"]}}}), [])
         self.assertEqual(validation_errors(linear.ISSUE_QUERY, {"id": "ENG-1"}), [])
+        self.assertEqual(validation_errors(linear.PINNED_ISSUES_QUERY, {
+            "first": 10, "filter": {"id": {"in": ["a"]}, **linear.recent_filter(14)}}), [])
+        self.assertEqual(validation_errors(linear.SEARCH_ISSUES_QUERY, {
+            "term": "login", "first": 20,
+            "filter": {"team": {"id": {"in": ["t"]}},
+                       "state": {"type": {"nin": ["completed", "canceled"]}}}}), [])
 
     def test_validation_catches_a_bad_filter(self):
         bad = {"first": 10, "filter": {"completedAt": {"gte": 5, "bogus": True}}}

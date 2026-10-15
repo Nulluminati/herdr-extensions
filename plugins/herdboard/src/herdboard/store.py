@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import fcntl
 import os
 from pathlib import Path
@@ -18,6 +18,7 @@ from . import attachments, kanban_md
 from .activity import log_path
 from .migrate_convert import Item
 from .linear_links import ProjectLink, parse_links, replace_links
+from .linear_pins import IssuePin, parse_pins, replace_pins
 from .config import MERGE_MODES, Config
 from .identity import RepoIdentity, find_board, new_board_path, same_repo
 from .model import (
@@ -100,13 +101,14 @@ KEEP = object()
 
 @dataclass
 class BoardMeta:
-    """What Linear views need from a board: its repository and its project links."""
+    """What Linear views need from a board: its repository, project links and pinned issues."""
 
     repo: str | None
     links: list[ProjectLink]
     error: str | None = None
     # The board's `merge:` frontmatter: "local", "pr" or None for the config default.
     merge: str | None = None
+    pins: list[IssuePin] = field(default_factory=list)
 
 
 @dataclass
@@ -271,7 +273,8 @@ class Store:
         if merge not in (None, *MERGE_MODES):
             return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: merge must be local or pr")
         try:
-            return BoardMeta(board.frontmatter_value("repo"), parse_links(board.frontmatter), merge=merge)
+            return BoardMeta(board.frontmatter_value("repo"), parse_links(board.frontmatter), merge=merge,
+                             pins=parse_pins(board.frontmatter))
         except FormatError as error:
             return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: {error}", merge=merge)
 
@@ -291,6 +294,22 @@ class Store:
             self._write_file(path, replace_links(text, links).encode("utf-8"), mode)
         return links
 
+    def update_pins(
+        self, path: Path, change: Callable[[list[IssuePin]], list[IssuePin]]
+    ) -> list[IssuePin]:
+        """Rewrite the `linear-issues` frontmatter of a board with `change(pins)`."""
+        with self._lock():
+            try:
+                text = path.read_bytes().decode("utf-8")
+                mode = path.stat().st_mode & 0o7777
+            except (OSError, UnicodeDecodeError) as error:
+                raise IoError(f"{path}: cannot read board: {error}") from error
+            board = kanban_md.parse(text, tuple(self.config.archive_titles))
+            self._require_writable(path, board)
+            pins = change(parse_pins(board.frontmatter))
+            self._write_file(path, replace_pins(text, pins).encode("utf-8"), mode)
+        return pins
+
     def set_merge(self, path: Path, merge: str | None) -> None:
         """Set the `merge:` frontmatter of a board, or remove it for None (the config default)."""
         self.update_config(path, merge=merge)
@@ -300,11 +319,14 @@ class Store:
         path: Path,
         merge: str | None | object = KEEP,
         change_links: Callable[[list[ProjectLink]], list[ProjectLink]] | None = None,
+        change_pins: Callable[[list[IssuePin]], list[IssuePin]] | None = None,
     ) -> None:
-        """Set the `merge:` frontmatter (None removes it) and rewrite the links with `change_links`.
+        """Set the `merge:` frontmatter (None removes it) and rewrite the links with `change_links`
+        and the pinned issues with `change_pins`.
 
-        `KEEP` leaves the merge mode, and None for `change_links` leaves the links. Both changes
-        apply to the text in memory, then go to the file in one write, so a failed one writes nothing.
+        `KEEP` leaves the merge mode, and None for `change_links` or `change_pins` leaves the links
+        or the pins. All changes apply to the text in memory, then go to the file in one write, so
+        a failed one writes nothing.
         """
         if merge is not KEEP and merge not in (None, *MERGE_MODES):
             raise HerdboardError(f"merge must be local or pr, not {merge!r}")
@@ -318,9 +340,13 @@ class Store:
             self._require_writable(path, board)
             if change_links is not None:
                 text = replace_links(text, change_links(parse_links(board.frontmatter)))
+            if change_pins is not None:
+                text = replace_pins(text, change_pins(parse_pins(board.frontmatter)))
             if merge is not KEEP:
                 text = kanban_md.set_frontmatter_value(text, "merge", merge)
-            parse_links(kanban_md.parse(text, tuple(self.config.archive_titles)).frontmatter)
+            written = kanban_md.parse(text, tuple(self.config.archive_titles)).frontmatter
+            parse_links(written)
+            parse_pins(written)
             self._write_file(path, text.encode("utf-8"), mode)
 
     def import_target(
@@ -581,6 +607,7 @@ class Store:
             )
         try:
             parse_links(frontmatter)
+            parse_pins(frontmatter)
         except FormatError as error:
             raise FormatError(f"{path}: {error}. The board is read only") from error
 

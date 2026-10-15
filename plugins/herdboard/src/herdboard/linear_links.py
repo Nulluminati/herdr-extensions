@@ -17,7 +17,6 @@ import re
 from .model import FormatError
 
 KEY = "linear-projects"
-KEY_LINE = re.compile(rf"^{re.escape(KEY)}:(\s|$)")
 TOP_LEVEL_KEY = re.compile(r"^([^\s#\-][^:]*):(\s|$)")
 
 
@@ -47,11 +46,15 @@ def with_link(links: list[ProjectLink], link: ProjectLink) -> list[ProjectLink]:
     return kept[:position] + [link] + kept[position:]
 
 
-def _text(item: object, where: str, key: str) -> str:
+def _text(item: object, where: str, key: str, block: str = KEY) -> str:
     value = item.get(key) if isinstance(item, dict) else None
     if not isinstance(value, str) or not value:
-        raise FormatError(f"{KEY}: {where} needs a text value for {key!r}")
+        raise FormatError(f"{block}: {where} needs a text value for {key!r}")
     return value
+
+
+def _key_line(key: str) -> re.Pattern:
+    return re.compile(rf"^{re.escape(key)}:(\s|$)")
 
 
 def _yaml():
@@ -81,17 +84,23 @@ def _frontmatter_data(yaml, lines: list[str]) -> dict:
     return data
 
 
-def parse_links(lines: list[str]) -> list[ProjectLink]:
+def frontmatter_list(lines: list[str], key: str) -> list:
+    """The YAML list under `key` in frontmatter lines; empty when the key is not there."""
     yaml = _yaml()
     if yaml is None:
-        if any(KEY_LINE.match(line) for line in lines):
-            raise FormatError(f"PyYAML is needed to read {KEY}: install it with the plugin")
+        if any(_key_line(key).match(line) for line in lines):
+            raise FormatError(f"PyYAML is needed to read {key}: install it with the plugin")
         return []
-    raw = _frontmatter_data(yaml, lines).get(KEY)
+    raw = _frontmatter_data(yaml, lines).get(key)
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise FormatError(f"{KEY} must be a list")
+        raise FormatError(f"{key} must be a list")
+    return raw
+
+
+def parse_links(lines: list[str]) -> list[ProjectLink]:
+    raw = frontmatter_list(lines, KEY)
     links = []
     for index, item in enumerate(raw, start=1):
         where = f"entry {index}"
@@ -106,13 +115,14 @@ def parse_links(lines: list[str]) -> list[ProjectLink]:
     return links
 
 
-def _block_range(body: list[str]) -> tuple[int, int] | None:
-    """Where the `linear-projects` block sits in the frontmatter lines, or None.
+def _block_range(body: list[str], key: str) -> tuple[int, int] | None:
+    """Where the block of `key` sits in the frontmatter lines, or None.
 
     The block is the key line and the lines after it that are indented, blank or list
     items. Blank lines at its end belong to what follows.
     """
-    start = next((i for i, line in enumerate(body) if KEY_LINE.match(line)), None)
+    key_line = _key_line(key)
+    start = next((i for i, line in enumerate(body) if key_line.match(line)), None)
     if start is None:
         return None
     end = start + 1
@@ -137,14 +147,20 @@ def _require_unique_keys(body: list[str]) -> None:
 
 
 def replace_links(text: str, links: list[ProjectLink]) -> str:
-    """`text` with the `linear-projects` block of the frontmatter set to `links`.
+    """`text` with the `linear-projects` block of the frontmatter set to `links`."""
+    return replace_block(text, KEY, [link.to_yaml() for link in links])
+
+
+def replace_block(text: str, key: str, items: list[dict]) -> str:
+    """`text` with the block of `key` in the frontmatter set to the YAML list `items`.
 
     Every other line of the text keeps its bytes and its order. Without a block, the new
     one goes before the closing `---` (before a blank line that ends the frontmatter).
+    An empty list removes the block.
     """
     yaml = _yaml()
     if yaml is None:
-        raise FormatError(f"PyYAML is needed to write {KEY}: install it with the plugin")
+        raise FormatError(f"PyYAML is needed to write {key}: install it with the plugin")
     newline = "\r\n" if "\r\n" in text else "\n"
     lines = text.split(newline)
     end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
@@ -154,12 +170,10 @@ def replace_links(text: str, links: list[ProjectLink]) -> str:
     body = lines[1:end]
     _require_unique_keys(body)
     block: list[str] = []
-    if links:
-        dumped = yaml.safe_dump(
-            {KEY: [link.to_yaml() for link in links]}, sort_keys=False, allow_unicode=True
-        )
+    if items:
+        dumped = yaml.safe_dump({key: items}, sort_keys=False, allow_unicode=True)
         block = dumped.rstrip("\n").split("\n")
-    found = _block_range(body)
+    found = _block_range(body, key)
     if found is not None:
         start, stop = found
     else:

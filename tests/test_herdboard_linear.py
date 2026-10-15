@@ -481,6 +481,41 @@ class LinearTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.client.project_issues("p0", done_days=value)
 
+    def test_issues_by_ids(self):
+        old = {**issue(3), "completedAt": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()}
+        self.fixtures["issues"][3] = old
+        found = self.client.issues_by_ids(["i1", "i3", "i4", "missing"])
+        self.assertEqual([i["id"] for i in found], ["i1", "i4"])
+        self.assertEqual(found[0]["labels"], [{"id": "l1", "name": "repo:api"}])
+        self.assertEqual(found[0]["children"], ["T0-100"])
+        self.assertEqual(self.fake.requests[0]["variables"]["filter"],
+                         {"id": {"in": ["i1", "i3", "i4", "missing"]}, "or": RECENT_OR})
+        self.assertEqual(len(self.client.issues_by_ids(["i3"], done_days=60)), 1)
+        self.fake.requests.clear()
+        self.assertEqual(self.client.issues_by_ids([]), [])
+        self.assertEqual(self.fake.requests, [])
+
+    def test_search_issues_sends_teams_and_open_states_and_reads_one_page(self):
+        self.fake.page_size = 50
+        self.fixtures["issues"][2]["team"] = {"id": "t1", "key": "T1"}
+        self.fixtures["issues"][3]["state"] = {"id": "s9", "name": "Done", "type": "completed"}
+        found = self.client.search_issues("issue", ["t0"])
+        self.assertEqual([i["identifier"] for i in found], ["T0-0", "T0-1", "T0-4"])
+        self.assertEqual(found[0], {"id": "i0", "identifier": "T0-0", "title": "Issue 0",
+                                    "state": {"name": "Active", "type": "started"},
+                                    "team": {"key": "T0"}, "project": {"name": "PLATFORM"}})
+        request = self.fake.requests[0]
+        self.assertEqual(request["operationName"], "SearchIssues")
+        self.assertEqual(request["variables"], {
+            "term": "issue", "first": 20,
+            "filter": {"team": {"id": {"in": ["t0"]}},
+                       "state": {"type": {"nin": ["completed", "canceled"]}}}})
+        self.assertEqual(len(self.fake.requests), 1)
+
+    def test_search_issues_without_teams_sends_nothing(self):
+        self.assertEqual(self.client.search_issues("issue", []), [])
+        self.assertEqual(self.fake.requests, [])
+
     def test_broken_pagination_fails_without_loop(self):
         self.fake.responses = [(200, {"data": {"issueLabels": {
             "nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": None}}}}, {})]

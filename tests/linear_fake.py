@@ -167,6 +167,8 @@ class FakeLinear:
         for field in ("team", "state"):
             if field in filt and issue[field]["id"] != filt[field]["id"]["eq"]:
                 return False
+        if "id" in filt and issue["id"] not in filt["id"]["in"]:
+            return False
         if "project" in filt and (issue["project"] is None
                                   or issue["project"]["id"] != filt["project"]["id"]["eq"]):
             return False
@@ -232,7 +234,15 @@ class FakeLinear:
             if not nodes:
                 return {"issues": {"nodes": []}}
             return {"issues": {"nodes": [{field: page(nodes[0][field]["nodes"])}]}}
-        if op in ("ProjectIssues", "StateSortOrders"):
+        if op == "SearchIssues":
+            filt = variables["filter"]
+            term = variables["term"].casefold()
+            nodes = [i for i in fixtures["issues"]
+                     if term in f"{i['identifier']} {i['title']}".casefold()
+                     and i["team"]["id"] in filt["team"]["id"]["in"]
+                     and i["state"]["type"] not in filt["state"]["type"]["nin"]]
+            return {"searchIssues": {"nodes": nodes}}
+        if op in ("ProjectIssues", "StateSortOrders", "PinnedIssues"):
             return {"issues": page([i for i in fixtures["issues"]
                                     if self.matches(i, variables["filter"])])}
         if op == "MyIssues":
