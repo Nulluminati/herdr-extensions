@@ -335,7 +335,7 @@ class TextTests(LinearCliCase):
         out, _ = self.run_cli("show", "ENG-2", directory=self.repo)
         self.assertEqual(out.splitlines(), [
             "Issue 2", "Platform / Review", "ref: ENG-2", "state: In Review", "team: ENG",
-            "url: https://linear.app/workspace/issue/ENG-2", "labels: repo:api, bug", "due: 2026-10-20",
+            "url: https://linear.app/workspace/issue/ENG-2", "type: bug", "labels: repo:api", "due: 2026-10-20",
             "Line one", "Line two"])
 
     def test_show_json_and_other_places(self):

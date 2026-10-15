@@ -20,6 +20,15 @@ def column_for(config: Config, state: dict) -> str:
     return column or config.linear.columns.get(state["type"]) or state["name"]
 
 
+def type_and_labels(config: Config, labels: list[str]) -> tuple[str | None, list[str]]:
+    """The first label that names a configured type, as that type, and the other labels."""
+    types = {kind.casefold(): kind for kind in config.types}
+    for index, label in enumerate(labels):
+        if label.casefold() in types:
+            return types[label.casefold()], labels[:index] + labels[index + 1:]
+    return None, labels
+
+
 def has_pull_request(urls: list[str], identities: set[str]) -> bool:
     """True when a URL is a pull request of one of the `host/owner/repo` identities."""
     wanted = {i.lower() for i in identities if i.lower().startswith("github.com/")}
@@ -44,6 +53,7 @@ def issue_card(
         return None
     project = issue.get("project")
     parent = issue.get("parent")
+    kind, labels = type_and_labels(config, [label["name"] for label in issue["labels"]])
     return CardView(
         ref=issue["identifier"],
         board=project["name"] if project else DEFAULT_BOARD,
@@ -52,7 +62,8 @@ def issue_card(
         title=issue["title"],
         checked=state["type"] == "completed",
         due=issue.get("dueDate"),
-        tags=[label["name"] for label in issue["labels"]],
+        tags=labels,
+        type=kind,
         body=(issue.get("description") or "").splitlines(),
         source="linear",
         url=issue.get("url"),

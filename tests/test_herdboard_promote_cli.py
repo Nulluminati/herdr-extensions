@@ -42,7 +42,7 @@ class PromoteCommandTests(PromoteCliCase):
         card = data["card"]
         self.assertEqual((card["ref"], card["title"], card["column"], card["source"], card["due"]),
                          ("ENG-7", "Ship it", "Todo", "linear", "2026-12-01"))
-        self.assertEqual(card["tags"], ["bug"])
+        self.assertEqual((card["tags"], card["type"]), ([], "bug"))
         self.assertEqual(data["sub_issues"], ["ENG-8", "ENG-9"])
         self.assertEqual((data["todo"]["ref"], data["todo"]["column"]), (ref, "Done"))
         self.assertIn(f"- [x] Ship it #bug 📅 2026-12-01 → ENG-7 ^{ref}", self.board_text())

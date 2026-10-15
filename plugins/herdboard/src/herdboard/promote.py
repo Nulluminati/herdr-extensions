@@ -16,7 +16,7 @@ from .linear import LinearClient, LinearError
 from .linear_cards import LINEAR_REF
 from .linear_states import Ask, StateChoices, refuse, resolve_state
 from .linear_writes import LinearWriter
-from .model import ConflictError, HerdboardError
+from .model import ConflictError, HerdboardError, card_type
 from .promote_convert import Conversion, convert, promoted_identifier
 from .promotions import PromotionRecords
 from .store import TEMP_REF, CardView, Store, TodoSnapshot
@@ -257,7 +257,8 @@ class Promoter:
         """Label IDs for the tags, and the tags that have no label. A team label wins."""
         ids, unlabeled = [], []
         for tag in dict.fromkeys(tags):
-            found = client.find_labels(tag)
+            # A `type/<name>` tag becomes the label `<name>`.
+            found = client.find_labels(card_type([tag]) or tag)
             mine = [l for l in found if l.get("team") and l["team"]["id"] == team["id"]]
             workspace = [l for l in found if not l.get("team")]
             chosen = (mine or workspace or [None])[0]

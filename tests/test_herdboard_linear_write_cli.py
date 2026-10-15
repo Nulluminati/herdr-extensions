@@ -41,7 +41,7 @@ class MoveCommandTests(WriteCliCase):
         card = self.run_json("move", "eng-2", "Todo", directory=self.repo)["card"]
         self.assertEqual((card["ref"], card["column"], card["source"], card["state"]),
                          ("ENG-2", "Todo", "linear", "Todo"))
-        self.assertEqual(card["tags"], ["repo:api", "bug"])
+        self.assertEqual((card["tags"], card["type"]), (["repo:api"], "bug"))
         self.assertEqual(card["title"], "Issue 2")
         self.assertEqual(card["url"], "https://linear.app/workspace/issue/ENG-2")
 
@@ -248,10 +248,20 @@ class AddLinearTests(WriteCliCase):
 
     def test_labels_use_the_team_label_rule(self):
         card = self.add("--team", "ENG", "--label", "ENG/bug", "--label", "repo:api", "x")["card"]
-        self.assertEqual(sorted(card["tags"]), ["bug", "repo:api"])
+        self.assertEqual((card["type"], card["tags"]), ("bug", ["repo:api"]))
         self.assertEqual(self.inputs("IssueCreate")[0]["labelIds"], ["l-bug", "l-api"])
         error = self.add("--team", "ENG", "--label", "bug", "x", expect=1)["error"]
         self.assertIn("TEAM/label", error["message"])
+
+    def test_type_adds_the_label_of_that_name(self):
+        card = self.add("--team", "ENG", "--type", "Bug", "--label", "repo:api", "x")["card"]
+        self.assertEqual(self.inputs("IssueCreate")[0]["labelIds"], ["l-api", "l-bug"])
+        self.assertEqual((card["type"], card["tags"]), ("bug", ["repo:api"]))
+
+    def test_an_unknown_type_creates_nothing(self):
+        error = self.add("--team", "ENG", "--type", "epic", "x", expect=1)["error"]
+        self.assertEqual(error["code"], "unknown_type")
+        self.assertEqual(self.requests("IssueCreate"), [])
 
     def test_unknown_label_creates_nothing(self):
         self.add("--team", "ENG", "--label", "nope", "x", expect=1)

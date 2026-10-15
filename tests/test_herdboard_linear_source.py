@@ -306,7 +306,7 @@ class CardTests(unittest.TestCase):
         self.assertEqual((card.ref, card.board, card.column, card.title, card.state, card.team),
                          ("ENG-2", "Platform", "Review", "Issue 2", "In Review", "ENG"))
         self.assertEqual((card.source, card.read_only, card.path, card.checked), ("linear", True, None, False))
-        self.assertEqual(card.tags, ["repo:api", "bug"])
+        self.assertEqual((card.tags, card.type), (["repo:api"], "bug"))
         self.assertEqual(card.body, ["Line one", "Line two"])
         self.assertEqual(card.due, "2026-10-20")
         self.assertEqual(card.url, "https://linear.app/workspace/issue/ENG-2")

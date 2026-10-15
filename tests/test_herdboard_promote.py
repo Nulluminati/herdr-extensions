@@ -179,6 +179,14 @@ class LabelTests(PromoteCase):
     def test_labels_keep_tag_order_without_duplicates(self):
         self.assertEqual(self.labels_of("#repo:web #bug #repo:web"), ["l-web", "l-bug"])
 
+    def test_the_type_becomes_the_label_of_that_name(self):
+        self.assertEqual(self.labels_of("#type/bug #repo:web"), ["l-bug", "l-web"])
+        self.assertIsNone(self.creates()[0].get("description"))
+
+    def test_a_type_without_a_label_goes_into_the_description(self):
+        self.assertIsNone(self.labels_of("#type/spike"))
+        self.assertEqual(self.creates()[0]["description"], "#type/spike")
+
     def test_the_team_decides_which_label_wins(self):
         self.write_board("## Todo\n\n- [ ] Card #bug ^t0aa\n")
         self.promote("t0aa", team="OPS")
