@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 
-from .model import CARD_START, Board, Card, Column, NotFoundError
+from .model import CARD_START, Board, Card, Column, FormatError, NotFoundError
 
 SETTINGS_START = "%% kanban:settings"
 MARKER_LINE = re.compile(r"^\*\*.+\*\*\r?$")
@@ -157,3 +157,27 @@ def new_board(
     settings = json.dumps({"kanban-plugin": "board"}, separators=(",", ":"))
     parts.append(f"\n\n{SETTINGS_START}\n```\n{settings}\n```\n%%")
     return "".join(parts)
+
+
+def set_frontmatter_value(text: str, key: str, value: str | None) -> str:
+    """`text` with the top-level `key: value` line of the frontmatter set, or removed for None.
+
+    The line keeps its place. A new line goes before the closing `---` (before the blank
+    lines that end the frontmatter). Every other line keeps its bytes.
+    """
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(newline)
+    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
+    if not lines or lines[0] != "---" or end is None:
+        raise FormatError("frontmatter must be closed")
+    key_line = re.compile(rf"^{re.escape(key)}:(\s|$)")
+    found = next((i for i in range(1, end) if key_line.match(lines[i])), None)
+    new = [] if value is None else [f"{key}: {value}"]
+    if found is not None:
+        lines[found:found + 1] = new
+    else:
+        position = end
+        while position > 1 and not lines[position - 1].strip():
+            position -= 1
+        lines[position:position] = new
+    return newline.join(lines)

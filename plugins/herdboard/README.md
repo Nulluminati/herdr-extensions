@@ -76,6 +76,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `v` | Change the view: repo, inbox, all, mine |
 | `t` | Hide or show Linear cards |
 | `i` | Create the board for this repository |
+| `c` | Configure this repository's board: the merge mode and the linked Linear projects. ctrl+s saves |
 | `r` | Reload, and fetch Linear again |
 | `?` | Help |
 | `q` | Quit |
@@ -202,7 +203,7 @@ On the board, `R` asks for Human, Agent or Both. For an agent review, it then as
 
 ### merge
 
-The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config. The default is `local`.
+The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config. The default is `local`. On the board, `c` sets the board's mode.
 
 Both modes stop when the worktree has uncommitted or untracked files (`worktree_dirty`), or when the branch has no commits ahead of its base (`nothing_to_merge`).
 
@@ -254,6 +255,8 @@ Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal AP
 ### Link a repository to Linear projects
 
 `herdboard link "API Platform" [--label repo:api]` links the current repository board to a Linear project. The repository view then shows every issue of that project. With labels, it shows only the issues that have one of the labels. `link --remove` removes the link. A project can serve several repositories, and a repository can have several projects.
+
+On the board, `c` shows the linked projects. Press enter on a project to mark it for removal. Type a project name, and optional labels separated by commas, to link a project. ctrl+s writes the changes. A link needs a Linear connection, a removal does not.
 
 When Linear's GitHub integration attaches a pull request from this repository to an issue, the card shows `PR`.
 
@@ -378,7 +381,7 @@ canceled = "Done"
 "In Review" = "Review"
 ```
 
-To make pull requests the default for one repository, add `merge: pr` to the frontmatter of its board.
+To make pull requests the default for one repository, add `merge: pr` to the frontmatter of its board, or press `c` on the board and choose `pr`.
 
 ## Board files
 

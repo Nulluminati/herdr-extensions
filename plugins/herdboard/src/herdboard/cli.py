@@ -17,7 +17,7 @@ from .plan import Planner
 from .config import THINKING_LEVELS, config_path, load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
-from .linear_links import LabelLink, ProjectLink
+from .linear_links import LabelLink, ProjectLink, with_link
 from .linear_source import LinearSource
 from .linear_states import refuse
 from .linear_writes import LinearWriter
@@ -891,18 +891,15 @@ def _cmd_link(ctx: _Context) -> dict:
             return kept
 
         return {"board": board, "links": ctx.store.update_links(board, remove)}
+    link = _project_link(ctx, args.project, args.label)
+    return {"board": board, "links": ctx.store.update_links(board, lambda links: with_link(links, link))}
+
+
+def _project_link(ctx: _Context, name: str, labels: list[str]) -> ProjectLink:
+    """The link to the Linear project `name`, with the labels that `labels` name."""
     client = ctx.views.source.client
-    project = _resolve_project(client, args.project)
-    link = ProjectLink(
-        project["id"], project["name"], [_resolve_label(client, l) for l in args.label]
-    )
-
-    def add(links: list[ProjectLink]) -> list[ProjectLink]:
-        kept = [l for l in links if l.id != link.id]
-        position = next((i for i, l in enumerate(links) if l.id == link.id), len(kept))
-        return kept[:position] + [link] + kept[position:]
-
-    return {"board": board, "links": ctx.store.update_links(board, add)}
+    project = _resolve_project(client, name)
+    return ProjectLink(project["id"], project["name"], [_resolve_label(client, l) for l in labels])
 
 
 def _init_for_board(ctx: _Context) -> Callable[[], Path] | None:
@@ -933,6 +930,7 @@ def _cmd_board(ctx: _Context) -> dict:
         directory=ctx.directory,
         init_board=_init_for_board(ctx),
         config_file=config_path(ctx.args.config),
+        resolve_link=(lambda name, labels: _project_link(ctx, name, labels)) if views.source.active else None,
     ).run()
     return {}
 

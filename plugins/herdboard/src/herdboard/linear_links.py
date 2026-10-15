@@ -40,6 +40,13 @@ class ProjectLink:
         return data
 
 
+def with_link(links: list[ProjectLink], link: ProjectLink) -> list[ProjectLink]:
+    """`links` with `link` added last, or in the place of the link to the same project."""
+    kept = [l for l in links if l.id != link.id]
+    position = next((i for i, l in enumerate(links) if l.id == link.id), len(kept))
+    return kept[:position] + [link] + kept[position:]
+
+
 def _text(item: object, where: str, key: str) -> str:
     value = item.get(key) if isinstance(item, dict) else None
     if not isinstance(value, str) or not value:

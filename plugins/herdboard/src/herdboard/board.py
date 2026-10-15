@@ -23,9 +23,10 @@ from textual.worker import Worker, WorkerState
 
 from . import activity
 from .linear import LinearAuthError
+from .linear_links import ProjectLink, with_link
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, split_title
-from .store import TEMP_REF, CardView, Store
+from .store import TEMP_REF, BoardMeta, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS
 from . import merge as merge_module
@@ -75,6 +76,7 @@ HELP_KEYS = [
     ("v", "cycle view: repo, inbox, all, mine"),
     ("t", "hide or show Linear cards"),
     ("i", "create the board for this repository"),
+    ("c", "board config: the merge mode and the linked Linear projects (ctrl+s saves)"),
     ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
@@ -764,6 +766,89 @@ class ModelScreen(ModalBase):
         self.dismiss((self.models[event.option_index], None if thinking == "default" else thinking))
 
 
+class ConfigScreen(ModalBase):
+    """A board's frontmatter settings: the merge mode and the Linear project links.
+
+    Enter on a link marks it for removal, or keeps it again. ctrl+s writes every change.
+    """
+
+    BINDINGS = [Binding("ctrl+s", "save", "Save")]
+    AUTO_FOCUS = "#config-merge"
+
+    def __init__(self, path: Path, meta: BoardMeta, default_merge: str, can_link: bool):
+        super().__init__()
+        self.path = path
+        self.meta = meta
+        self.default_merge = default_merge
+        self.can_link = can_link
+        self.removed: set[str] = set()
+
+    def _link_label(self, link: ProjectLink) -> Text:
+        text = Text(link.name)
+        if link.labels:
+            text.append(" · labels: " + ", ".join(label.name for label in link.labels), style="dim")
+        if link.id in self.removed:
+            text.stylize("strike")
+            text.append("  remove", style="bold red")
+        return text
+
+    @staticmethod
+    def _titled(widget, title: str):
+        widget.border_title = title
+        return widget
+
+    def compose(self) -> ComposeResult:
+        modes = [(f"config default ({self.default_merge})", "default"),
+                 ("local: merge into the base branch", "local"),
+                 ("pr: open a draft pull request", "pr")]
+        with Vertical(classes="dialog card-form"):
+            yield RichStatic(Text(f"Config of {self.path.stem}", style="bold"), id="config-heading")
+            if self.meta.repo:
+                yield Label(f"repo: {self.meta.repo}", classes="dim")
+            yield self._titled(Select(modes, value=self.meta.merge or "default", allow_blank=False,
+                                      id="config-merge"), "Merge")
+            if self.meta.links:
+                yield self._titled(OptionList(*[self._link_label(link) for link in self.meta.links],
+                                              id="config-links"), "Linear projects")
+            else:
+                yield Label("No Linear projects are linked.", classes="dim")
+            if self.can_link:
+                with Horizontal(classes="form-row"):
+                    yield self._titled(Input(placeholder="API Platform", id="config-project",
+                                             select_on_focus=False), "Link a Linear project")
+                    yield self._titled(Input(placeholder="repo:api, bug", id="config-labels",
+                                             select_on_focus=False), "Labels")
+            yield RichStatic(Text(""), id="config-error", classes="error")
+            if self.meta.links:
+                yield Label("enter on a project: remove it, or keep it again", classes="dim")
+            yield Label("ctrl+s: save · tab: next field · escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        link = self.meta.links[event.option_index]
+        self.removed ^= {link.id}
+        event.option_list.replace_option_prompt_at_index(event.option_index, self._link_label(link))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.action_save()
+
+    def show_error(self, message: str) -> None:
+        error = self.query_one("#config-error", RichStatic)
+        error.rich_text = Text(message)
+        error.plain = message
+        error.update(error.rich_text)
+
+    def action_save(self) -> None:
+        merge = self.query_one("#config-merge", Select).value
+        project, labels = "", []
+        if self.can_link:
+            project = self.query_one("#config-project", Input).value.strip()
+            labels = [label.strip() for label in self.query_one("#config-labels", Input).value.split(",")]
+        self.app.submit_config(self, None if merge == "default" else merge, set(self.removed),
+                               project, [label for label in labels if label])
+
+
 class CellMouseDriver(LinuxDriver):
     """Textual's terminal driver without pixel mouse reports (mode 1016).
 
@@ -812,6 +897,13 @@ class HerdboardApp(App):
     .form-row { height: auto; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
+    #config-merge { border: round $surface-lighten-2; height: auto; }
+    #config-merge > SelectCurrent { border: none; }
+    #config-merge:focus-within { border: round $primary; }
+    #config-links { height: auto; max-height: 8; border: round $surface-lighten-2; }
+    #config-links:focus { border: round $primary; }
+    #config-project { width: 2fr; }
+    #config-labels { width: 1fr; }
     /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
     App:ansi .card { border: round ansi_bright_black; margin: 0; }
     App:ansi .column { border: round ansi_bright_black; }
@@ -857,6 +949,7 @@ class HerdboardApp(App):
         Binding("v", "cycle_view", "View"),
         Binding("t", "toggle_linear", "Linear", show=False),
         Binding("i", "init", "Init", show=False),
+        Binding("c", "config", "Config", show=False),
         Binding("r", "reload", "Reload"),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
@@ -887,6 +980,7 @@ class HerdboardApp(App):
         directory: Path | None = None,
         init_board: Callable[[], Path] | None = None,
         config_file: Path | None = None,
+        resolve_link: Callable[[str, list[str]], ProjectLink] | None = None,
     ):
         super().__init__()
         theme = store.config.theme
@@ -899,6 +993,8 @@ class HerdboardApp(App):
         self.paths_for = paths_for
         self.repo_board = repo_board
         self.init_board = init_board
+        # Finds a Linear project and its labels by name for the config dialog; None without Linear.
+        self.resolve_link = resolve_link
         self.hide_linear = False
         self.reload_interval = reload_interval
         self.linear_for = linear_for
@@ -1805,6 +1901,36 @@ class HerdboardApp(App):
         self.linear_state = "loading"
         await self.reload(select="")
         self.fetch_linear()
+
+    def action_config(self) -> None:
+        path = self.repo_board
+        if path is None:
+            self.notify("There is no repository board to configure. Press i in a repository to create one.",
+                        severity="warning")
+            return
+        meta = self.store.board_meta(path)
+        if meta.error:
+            self.notify(meta.error, severity="error")
+            return
+        self.push_screen(ConfigScreen(path, meta, self.store.config.merge, self.resolve_link is not None))
+
+    def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
+                      project: str, labels: list[str]) -> None:
+        """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing."""
+        path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
+
+        def write() -> None:
+            link = resolve(project, labels) if project and resolve else None
+            if merge != before:
+                self.store.set_merge(path, merge)
+            if removed or link:
+                def change(links: list[ProjectLink]) -> list[ProjectLink]:
+                    kept = [l for l in links if l.id not in removed]
+                    return with_link(kept, link) if link else kept
+
+                self.store.update_links(path, change)
+
+        self._start_write(write, add=screen, refetch=bool(removed or project))
 
     async def action_reload(self) -> None:
         await self.reload()

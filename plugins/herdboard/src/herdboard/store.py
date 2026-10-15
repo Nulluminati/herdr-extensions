@@ -271,6 +271,21 @@ class Store:
             self._write_file(path, replace_links(text, links).encode("utf-8"), mode)
         return links
 
+    def set_merge(self, path: Path, merge: str | None) -> None:
+        """Set the `merge:` frontmatter of a board, or remove it for None (the config default)."""
+        if merge not in (None, *MERGE_MODES):
+            raise HerdboardError(f"merge must be local or pr, not {merge!r}")
+        with self._lock():
+            try:
+                text = path.read_bytes().decode("utf-8")
+                mode = path.stat().st_mode & 0o7777
+            except (OSError, UnicodeDecodeError) as error:
+                raise IoError(f"{path}: cannot read board: {error}") from error
+            board = kanban_md.parse(text, tuple(self.config.archive_titles))
+            self._require_writable(path, board)
+            text = kanban_md.set_frontmatter_value(text, "merge", merge)
+            self._write_file(path, text.encode("utf-8"), mode)
+
     def import_target(
         self, identity: RepoIdentity | None = None, board: str | None = None
     ) -> ImportTarget:
