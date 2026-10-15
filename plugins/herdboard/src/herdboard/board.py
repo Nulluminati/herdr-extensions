@@ -493,12 +493,30 @@ class DetailScreen(ModalBase):
             return
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         try:
-            subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
+            process = subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.PIPE, start_new_session=True)
         except OSError as error:
             self.notify(f"Cannot open {entry['name']} with {opener}: {error}", severity="error")
             return
-        self.notify(f"Opened {entry['name']} with {opener}")
+        self.notify(f"Opening {entry['name']} with {opener}")
+        # A daemon thread, because xdg-open can wait until the viewer closes, and quitting the board must not wait.
+        threading.Thread(target=watch_opener, args=(self.app, entry["name"], opener, process), daemon=True).start()
+
+
+def watch_opener(app: App, name: str, opener: str, process: subprocess.Popen) -> None:
+    """Wait for the opener, and show an error notice when it fails, such as for a file type without an application."""
+    _, error = process.communicate()
+    if process.returncode == 0:
+        return
+    message = f"Cannot open {name} with {opener}: exit code {process.returncode}"
+    detail = error.decode("utf-8", errors="replace").strip()
+    if detail:
+        message += f": {detail}"
+    try:
+        app.call_from_thread(app.notify, message, severity="error")
+    except RuntimeError:
+        # The board has quit.
+        pass
 
 
 class AttachmentChoiceScreen(ModalBase):

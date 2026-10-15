@@ -17,6 +17,23 @@ from test_herdboard_board import BoardTestCase, settle  # noqa: E402
 SIZE = (120, 40)
 
 
+def fake_opener(returncode=0, stderr=b""):
+    """A Popen fake for xdg-open or open: the process exits with `returncode` and writes `stderr`."""
+    process = mock.Mock(returncode=returncode)
+    process.communicate.return_value = (None, stderr)
+    return mock.Mock(return_value=process)
+
+
+async def wait_for_notice(pilot, start):
+    """The notices that arrive after the opener thread ends."""
+    for _ in range(100):
+        await pilot.pause(0.01)
+        messages = [n.message for n in pilot.app._notifications]
+        if any(m.startswith(start) for m in messages):
+            return messages
+    return [n.message for n in pilot.app._notifications]
+
+
 class AttachmentDetailTests(BoardTestCase):
     def attach(self, ref, name, content):
         source = self.root / name
@@ -105,21 +122,41 @@ class AttachmentDetailTests(BoardTestCase):
         card = self.store.add(self.repo_path, "Ship it", "Todo")
         added = self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
         app = self.make_app()
-        with mock.patch.object(board.subprocess, "Popen") as popen, \
+        popen = fake_opener()
+        with mock.patch.object(board.subprocess, "Popen", popen), \
                 mock.patch.object(board.sys, "platform", "linux"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 await pilot.press("o")
                 await settle(pilot)
                 self.assertIsInstance(app.screen, DetailScreen)
+                messages = await wait_for_notice(pilot, "Opening shot.png")
+                popen.return_value.communicate.assert_called_once()
+                self.assertFalse(any(m.startswith("Cannot open") for m in messages), messages)
         self.assertEqual(popen.call_args.args[0], ["xdg-open", added["path"]])
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
+    async def test_an_opener_that_fails_is_an_error_notice(self):
+        card = self.store.add(self.repo_path, "Ship it", "Todo")
+        self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
+        app = self.make_app()
+        popen = fake_opener(4, b"xdg-open: no method available for opening 'shot.png'\n")
+        with mock.patch.object(board.subprocess, "Popen", popen), \
+                mock.patch.object(board.sys, "platform", "linux"):
+            async with app.run_test(size=SIZE) as pilot:
+                await self.open_detail(pilot)
+                await pilot.press("o")
+                await settle(pilot)
+                messages = await wait_for_notice(pilot, "Cannot open")
+        self.assertIn("Cannot open shot.png with xdg-open: exit code 4: "
+                      "xdg-open: no method available for opening 'shot.png'", messages)
 
     async def test_macos_uses_open(self):
         card = self.store.add(self.repo_path, "Ship it", "Todo")
         added = self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
         app = self.make_app()
-        with mock.patch.object(board.subprocess, "Popen") as popen, \
+        popen = fake_opener()
+        with mock.patch.object(board.subprocess, "Popen", popen), \
                 mock.patch.object(board.sys, "platform", "darwin"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
