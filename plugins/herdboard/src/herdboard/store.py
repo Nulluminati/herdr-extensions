@@ -41,6 +41,8 @@ from .model import (
 
 ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 TEMP_REF = re.compile(r"^(?P<board>.+):(?P<number>\d+)$")
+# An archive card without an ID: its board and its place in the archive.
+ARCHIVE_REF = re.compile(r"^(?P<board>.+):archive-(?P<number>\d+)$")
 NOTE_LINK = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 
 
@@ -506,11 +508,13 @@ class Store:
             notes.append({"name": name, "path": str(path), "content": content})
         return notes
 
-    def show(self, ref: str) -> CardView:
-        """A card, also from an archive. Only an ID finds an archived card."""
+    def show(self, ref: str, archived: bool = False) -> CardView:
+        """A card. With `archived`, also a card from an archive, found by its ID; else an archived card raises."""
         try:
             located = self._resolve(ref)
         except ArchivedError:
+            if not archived:
+                raise
             self._check_unique(ref)
             path = self._find_archived(ref)
             return next(view for view in self._archive_views(path, self._read(path)) if view.ref == ref)
@@ -795,7 +799,8 @@ class Store:
         exists, or returns None. It runs before the lock, because it can ask Herdr.
         """
         located = self._resolve(ref)
-        reason = blocked(located.block_id or ref) if blocked is not None else None
+        # A temporary reference has no block ID in `located`, but the card can have one.
+        reason = blocked(Card(located.lines).block_id or ref) if blocked is not None else None
         if reason:
             raise CardActiveError(f"Cannot archive {ref}: {reason}")
 
@@ -850,13 +855,24 @@ class Store:
             board = self._read(path)
             self._require_writable(path, board)
             done = self._done_column(board, path)
-            matches: list[Card] = []
+            pairs: list[tuple[CardView, Card]] = []
             for view, card in chosen:
                 match = next((c for c in done.cards if c.lines == card.lines
-                              and not any(c is m for m in matches)), None)
+                              and not any(c is m for _, m in pairs)), None)
                 if match is None:
                     raise ConflictError(f"{path}: {view.ref} changed on disk; retry")
-                matches.append(match)
+                pairs.append((view, match))
+            # A sub-card can have appeared since the first read: check the parents again.
+            moving = {id(card) for _, card in pairs}
+            staying = {parent_of(card.title) for _, card in board.all_cards() if id(card) not in moving}
+            matches: list[Card] = []
+            for view, card in pairs:
+                if card.block_id and card.block_id in staying:
+                    skipped.append((view, "it has sub-cards that stay on the board"))
+                else:
+                    matches.append(card)
+            if not matches:
+                return [], skipped
             for card in matches:
                 if card.block_id:
                     self._check_unique(card.block_id)
@@ -868,22 +884,73 @@ class Store:
             self._write(path, board)
         return [self._view(path, archive, card, card.block_id) for card in matches], skipped
 
-    def unarchive(self, ref: str) -> CardView:
-        """Move an archived todo to its board's done column. Only an ID finds an archived card."""
+    def _locate_archived(self, ref: str) -> tuple[Path, int | None, list[str] | None]:
+        """Find an archived card by its ID, or by an archive reference such as `p:archive-2`.
+
+        Returns its board, and for an archive reference its place and its lines.
+        """
+        temp = ARCHIVE_REF.match(ref)
+        if temp:
+            path = self.resolve_board(temp.group("board"))
+            board = self._read(path)
+            cards = board.archive.cards if board.archive is not None else []
+            number = int(temp.group("number"))
+            if not 1 <= number <= len(cards):
+                raise NotFoundError(f"No archived card {ref}")
+            return path, number, list(cards[number - 1].lines)
         path = self._find_archived(ref)
         if path is None:
             raise NotFoundError(f"No archived card {ref}")
+        return path, None, None
+
+    @staticmethod
+    def _archived_card(board: Board, path: Path, ref: str, number: int | None, lines: list[str] | None) -> Card:
+        """Find the card of `_locate_archived` again in a fresh parse; its lines must be unchanged."""
+        cards = board.archive.cards if board.archive is not None else []
+        if number is not None:
+            card = cards[number - 1] if number <= len(cards) else None
+            if card is not None and card.lines != lines:
+                card = None
+        else:
+            card = next((c for c in cards if c.block_id == ref), None)
+        if card is None:
+            raise ConflictError(f"{path}: card changed on disk; retry")
+        return card
+
+    def archived_parent(self, ref: str) -> CardView | None:
+        """The parent of an archived sub-card, when the parent is archived too."""
+        path, number, lines = self._locate_archived(ref)
+        board = self._read(path)
+        parent = parent_of(self._archived_card(board, path, ref, number, lines).title)
+        if parent is None:
+            return None
+        return next((view for view in self._archive_views(path, board) if view.ref == parent), None)
+
+    def unarchive(self, ref: str, with_parent: bool = False) -> CardView:
+        """Move an archived todo to its board's done column.
+
+        A card without an ID takes its archive reference, and gets an ID. A sub-card whose
+        parent is archived too needs `with_parent`, which moves the parent back first.
+        """
+        path, number, lines = self._locate_archived(ref)
         with self._lock():
             board = self._read(path)
             self._require_writable(path, board)
-            card = next((c for c in board.archive.cards if c.block_id == ref), None) if board.archive else None
-            if card is None:
-                raise ConflictError(f"{path}: card changed on disk; retry")
-            self._check_unique(ref)
+            card = self._archived_card(board, path, ref, number, lines)
+            if card.block_id:
+                self._check_unique(card.block_id)
+            parent_id = parent_of(card.title)
+            parent = next((c for c in board.archive.cards if c.block_id == parent_id), None) if parent_id else None
+            if parent is not None and not with_parent:
+                raise ParentError(f"The parent {parent_id} of {ref} is archived too. "
+                                  "Unarchive the parent with it", "parent_archived")
+            done = self._done_column(board, path)
+            if parent is not None:
+                self._move_card(board.archive, parent, done, "bottom", check=True)
+            target = self._move_card(board.archive, card, done, "bottom", check=True)
             self._assign_ids(path, board)
-            target = self._move_card(board.archive, card, self._done_column(board, path), "bottom", check=True)
             self._write(path, board)
-        return self._view(path, target, card, ref)
+        return self._view(path, target, card, card.block_id)
 
     def _check_parent(self, board: Board, path: Path, parent: str, child: str | None) -> None:
         """Refuse a parent that is not on this board, that has a parent, or whose child has children."""
@@ -915,9 +982,12 @@ class Store:
         card = self.show(ref)
         return [view for view in self.list_cards([card.path]) if view.parent == card.ref]
 
-    def ensure_id(self, ref: str) -> CardView:
-        """The card, with a block ID: a card without one gets IDs by the usual write rule."""
-        view = self.show(ref)
+    def ensure_id(self, ref: str, archived: bool = False) -> CardView:
+        """The card, with a block ID: a card without one gets IDs by the usual write rule.
+
+        With `archived`, an archived card is returned too; it always has an ID.
+        """
+        view = self.show(ref, archived)
         if TEMP_REF.match(view.ref):
             view = self._modify(ref, lambda board, path, column, card: column)
         return view

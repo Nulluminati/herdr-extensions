@@ -147,7 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--board", help="with --done: board name, inbox or a project name; default: this repository's")
 
     sub = command("unarchive", "move an archived todo to its board's done column")
-    sub.add_argument("ref")
+    sub.add_argument("ref", help="a todo ID, or an archive reference such as acme-api:archive-2")
+    sub.add_argument("--yes", action="store_true", help="also unarchive an archived parent without asking")
 
     sub = command("promote", "turn a todo into a Linear issue, its checklist into sub-issues")
     sub.add_argument("ref")
@@ -518,7 +519,7 @@ def _cmd_show(ctx: _Context) -> dict:
         card, result = _find_linear_card(ctx, ref)
         return {"card": card, "linear": result, "log": _card_log(ctx, card),
                 "attachments": _card_attachments(ctx, card)}
-    card = ctx.store.show(ref)
+    card = ctx.store.show(ref, archived=True)
     return {"card": card, "notes": ctx.store.notes_for(card), "log": _card_log(ctx, card),
             "attachments": _card_attachments(ctx, card)}
 
@@ -530,7 +531,7 @@ def _cmd_log(ctx: _Context) -> dict:
     if LINEAR_REF.match(args.ref):
         ref = args.ref.upper()
     else:
-        ref = ctx.store.ensure_id(args.ref).ref
+        ref = ctx.store.ensure_id(args.ref, archived=True).ref
     return {"ref": ref, "entry": activity.append(ctx.store, ref, args.message, activity.author())}
 
 
@@ -690,11 +691,23 @@ def _cmd_archive(ctx: _Context) -> dict:
 
 
 def _cmd_unarchive(ctx: _Context) -> dict:
-    if LINEAR_REF.match(ctx.args.ref):
+    args, store = ctx.args, ctx.store
+    if LINEAR_REF.match(args.ref):
         raise LinearArchiveError("herdboard archives only todos.")
-    card = ctx.store.unarchive(ctx.args.ref)
-    activity.append(ctx.store, card.ref, "Unarchived.", activity.author())
-    return {"card": card}
+    parent = store.archived_parent(args.ref)
+    if parent is not None and not args.yes:
+        question = f"The parent {parent.ref} of {args.ref} is archived too, and unarchives with it."
+        if args.json or not _interactive():
+            raise ConfirmationRequired(f"{question} Run again with --yes to unarchive both.")
+        if not _confirm(f"{question} Unarchive both? [y/N] "):
+            return {"card": None}
+    card = store.unarchive(args.ref, with_parent=parent is not None)
+    hint = None
+    if parent is not None:
+        activity.append(store, parent.ref, "Unarchived.", activity.author())
+        hint = f"Also unarchived the parent {parent.ref}."
+    activity.append(store, card.ref, "Unarchived.", activity.author())
+    return {"card": card, "hint": hint}
 
 
 def _prompt_checkout(identity: str) -> str | None:
@@ -1125,6 +1138,12 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"Archived {count} card{'' if count == 1 else 's'} from {result['board']}.")
             for card, reason in result["skipped"]:
                 print(f"Kept {card.ref}: {reason}")
+        return
+    if command == "unarchive" and result["card"] is None:
+        if as_json:
+            _emit_json({"card": None})
+        else:
+            print("Nothing unarchived.")
         return
     if command == "log":
         if as_json:

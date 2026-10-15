@@ -66,7 +66,7 @@ HELP_KEYS = [
     ("e", "edit the todo: title, tags, due date and details (ctrl+s saves)"),
     ("b", "move the todo to another board, for example from the inbox to this repository"),
     ("x", "delete the todo, after you confirm"),
-    ("A", "archive the todo; in the archive column, move it back to the done column"),
+    ("A", "archive the todo; in the archive column, move it back to the done column (an archived parent too, after you confirm)"),
     ("D", "archive every card in the done column, after you confirm"),
     ("z", "show or hide the archive column"),
     ("s", "start work with the default agent"),
@@ -1647,12 +1647,29 @@ class HerdboardApp(App):
             activity.append(self.store, changed.ref, "Archived.", activity.author())
             return changed
 
-        def unarchive() -> CardView:
-            changed = self.store.unarchive(ref)
+        def unarchive(parent: CardView | None = None) -> CardView:
+            changed = self.store.unarchive(ref, with_parent=parent is not None)
+            if parent is not None:
+                activity.append(self.store, parent.ref, "Unarchived.", activity.author())
             activity.append(self.store, changed.ref, "Unarchived.", activity.author())
             return changed
 
-        self._start_write(unarchive if card.archived else archive)
+        if not card.archived:
+            self._start_write(archive)
+            return
+        try:
+            parent = self.store.archived_parent(ref)
+        except HerdboardError as error:
+            self.notify(str(error), severity="error")
+            return
+        if parent is None:
+            self._start_write(unarchive)
+            return
+        self.push_screen(
+            ConfirmScreen(f"Unarchive {parent.ref}: {parent.title} too?",
+                          f"The parent of {ref} is archived. Both move back to the done column."),
+            lambda answer: self._start_write(lambda: unarchive(parent)) if answer else None,
+        )
 
     def action_archive_done(self) -> None:
         """Archive every card in the done column of each board in the view, after a confirmation."""

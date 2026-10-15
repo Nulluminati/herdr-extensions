@@ -59,6 +59,7 @@ herdboard --json edit tep3 --parent t5aa              # make a todo a sub-card
 herdboard --json edit tep3 --no-parent                # make it a plain todo again
 herdboard --json archive tep3                        # to the board's archive, hidden on the board
 herdboard --json unarchive tep3                      # back to the board's done column
+herdboard --json unarchive acme-api:archive-2        # an archived card without an ID, by its archive reference
 ```
 
 The archive keeps old todos out of the columns. Commands other than `show`, `log` and `unarchive` refuse an archived todo. Linear issues are not archived here.
@@ -127,7 +128,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `no_state` | No workflow state of the issue's team maps to that column. Ask the user for another column. |
 | `agent_edit_denied` | You are the card's agent, and the card text is the user's. Record the change with `log` instead. |
 | `linear_edit` | herdboard does not edit Linear issues. Tell the user to edit it in Linear. |
-| `confirmation_required` | `delete` needs `--yes`. Ask the user first, then run it with `--yes`. |
+| `confirmation_required` | `delete` needs `--yes`. `unarchive` needs it when the card's parent is archived too, because the parent comes back with it. Ask the user first, then run it with `--yes`. |
 | `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |

@@ -68,6 +68,32 @@ class ArchiveBoardTests(BoardTestCase):
             card = next(c for c in self.store.list_cards([self.repo_path]) if c.title == "open card")
             self.assertEqual(card.column, "Done")
 
+    async def test_A_on_a_sub_card_asks_before_it_unarchives_the_parent(self):
+        parent = self.store.add(self.repo_path, "parent card", "Todo")
+        child = self.store.add(self.repo_path, "child card", "Todo", parent=parent.ref)
+        self.store.archive(child.ref)
+        self.store.archive(parent.ref)
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("z")
+            await settle(pilot)
+            app.col = len(app.columns) - 1
+            app.row = [c.title for c in app.columns[app.col].cards].index(child.title)
+            await pilot.press("A")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ConfirmScreen)
+            self.assertIn(parent.ref, app.screen.query_one("#confirm-prompt").plain)
+            await pilot.press("n")
+            await settle(pilot)
+            self.assertIn("child card", "\n".join(self.archived(self.repo_path)))
+            await pilot.press("A")
+            await pilot.pause()
+            await pilot.press("y")
+            await settle(pilot)
+            self.assertNotIn("child card", "\n".join(self.archived(self.repo_path)))
+            self.assertNotIn("parent card", self.archived(self.repo_path))
+
     async def test_A_refuses_an_active_card(self):
         app = self.make_app()
         with mock.patch.object(start, "archive_blocker", return_value="its agent still runs") as blocker:
