@@ -129,6 +129,7 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 |---|---|
 | `↳ <parent>` | A sub-card. For a Linear sub-issue whose parent is not in the view, the marker shows the parent's identifier, such as `↳ ENG-12` |
 | `2/5 done` | A parent card and the progress of its sub-cards |
+| `📎` (top-right corner) | The card has attachments. Open the card detail to see them |
 | `planning: pi`, `planning: claude` | The card's planner runs. The card keeps its current column |
 | `agent review: pi` | An agent review runs |
 | `PR: writing` | An agent writes the pull request description |
@@ -137,6 +138,8 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 | `worktree still exists` | The card is in Done, but its worktree is still there. Run `finish` |
 
 The board checks planner panes every two seconds. If Herdr cannot answer, the marker keeps the recorded planner type. A missing or unreadable planning state file hides only the planning markers, not the cards.
+
+The board checks the attachments folder at the same interval. A folder that cannot be read hides only the `📎` markers.
 
 ## Work on a card
 

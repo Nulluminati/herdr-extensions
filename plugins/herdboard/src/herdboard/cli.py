@@ -244,7 +244,7 @@ def _card_dict(card: CardView) -> dict:
     del data["sort_order"]
     # Board-only status; preserve the CLI card schema.
     del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"], data["agent_review"]
-    del data["pr_writing"], data["planning"]
+    del data["pr_writing"], data["planning"], data["has_attachments"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 

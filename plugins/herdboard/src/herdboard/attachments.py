@@ -52,6 +52,36 @@ def listing(config: Config, ref: str) -> list[dict]:
         raise IoError(f"{base}: cannot read the attachments: {error}") from error
 
 
+def cards_with_files(config: Config) -> set[str]:
+    """The IDs of the cards that have at least one attachment, for the board's marker."""
+    base = config.todos_dir / ".herdboard" / "attachments"
+    try:
+        folders = [path for path in base.iterdir() if path.is_dir()]
+        return {path.name for path in folders if _has_file(path)}
+    except FileNotFoundError:
+        return set()
+    except OSError as error:
+        raise IoError(f"{base}: cannot read the attachments: {error}") from error
+
+
+def _has_file(card_folder: Path) -> bool:
+    try:
+        return any(path.is_file() and NAME.fullmatch(path.name) for path in card_folder.iterdir())
+    except FileNotFoundError:
+        # A folder removed while the board reads it has no attachments.
+        return False
+
+
+def mark(config: Config, cards) -> None:
+    """Set the board-only attachment status. A folder that cannot be read hides only the markers."""
+    try:
+        refs = cards_with_files(config)
+    except IoError:
+        refs = set()
+    for card in cards:
+        card.has_attachments = card.ref in refs
+
+
 def add(store, ref: str, source: Path, name: str | None = None) -> dict:
     """Copy a file into the card's attachments. An attachment with the same name is replaced."""
     target = folder(store.config, ref) / _name(source.name if name is None else name)

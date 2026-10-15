@@ -83,6 +83,8 @@ class CardView:
     pr_writing: bool = False
     # Board-only: the kind of agent that plans the card while its planner pane exists.
     planning: str | None = None
+    # Board-only: True when the card has at least one attachment.
+    has_attachments: bool = False
     # The card ID of a sub-card's parent, from its `[[#^id]]` link.
     parent: str | None = None
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.

@@ -132,6 +132,26 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(attachments.size_label(2048), "2.0 KB")
         self.assertEqual(attachments.size_label(5 * 1024 * 1024 + 1), "5.0 MB")
 
+    def test_cards_with_files_names_the_cards_that_have_an_attachment(self):
+        attachments.add(self.store, "t3m9", self.doc)
+        attachments.add(self.store, "ENG-12", self.doc)
+        (self.folder / "tempt").mkdir()
+        (self.folder / "tempt" / ".spec.md.x1y2").write_text("partial")
+        (self.folder / "tgon").mkdir()
+        self.assertEqual(attachments.cards_with_files(self.store.config), {"t3m9", "ENG-12"})
+
+    def test_cards_with_files_is_empty_without_an_attachments_folder(self):
+        self.assertEqual(attachments.cards_with_files(self.store.config), set())
+
+    def test_mark_sets_the_board_status_and_survives_an_unreadable_folder(self):
+        attachments.add(self.store, "t3m9", self.doc)
+        cards = [mock.Mock(ref="t3m9", has_attachments=False), mock.Mock(ref="tabc", has_attachments=True)]
+        attachments.mark(self.store.config, cards)
+        self.assertEqual([card.has_attachments for card in cards], [True, False])
+        with mock.patch.object(attachments, "cards_with_files", side_effect=attachments.IoError("denied")):
+            attachments.mark(self.store.config, cards)
+        self.assertEqual([card.has_attachments for card in cards], [False, False])
+
 
 class AttachCliTests(CliTestCase):
     def setUp(self):

@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
+from rich.cells import cell_len  # noqa: E402
 from textual.widgets import Markdown, OptionList  # noqa: E402
 
 from herdboard import attachments, board  # noqa: E402
@@ -176,6 +177,47 @@ class AttachmentDetailTests(BoardTestCase):
                 await settle(pilot)
                 messages = [n.message for n in app._notifications]
         self.assertTrue(any(m.startswith("Cannot open shot.png with xdg-open") for m in messages), messages)
+
+
+class AttachmentIconTests(BoardTestCase):
+    def attach(self, ref, name="spec.md"):
+        source = self.root / name
+        source.write_text("# Spec\n", encoding="utf-8")
+        return attachments.add(self.store, ref, source)
+
+    def first_lines(self, app):
+        """The first line of each card as the board draws it, and the card width."""
+        return [(widget.render_line(0).text.rstrip(), widget.size.width) for widget in app.query(".card")]
+
+    async def test_a_card_with_attachments_shows_the_icon_in_its_top_right_corner(self):
+        card = self.store.add(self.repo_path, "Ship it", "Todo")
+        self.store.add(self.repo_path, "Plain card", "Todo")
+        self.attach(card.ref)
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            (first, width), (second, _) = self.first_lines(app)
+            self.assertRegex(first, rf"^Ship it +{board.ATTACHMENT_MARK}$")
+            # The mark ends at the right edge of the card text.
+            self.assertEqual(cell_len(first), width, first)
+            self.assertNotIn(board.ATTACHMENT_MARK, second)
+            self.assertIn(board.ATTACHMENT_MARK, self.cards(app)[0])
+            self.assertNotIn(board.ATTACHMENT_MARK, self.cards(app)[1])
+
+    async def test_an_attachment_added_elsewhere_appears_on_the_next_check(self):
+        card = self.store.add(self.repo_path, "Ship it", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertNotIn(board.ATTACHMENT_MARK, self.cards(app)[0])
+            added = self.attach(card.ref)
+            await app.check_files()
+            await pilot.pause()
+            self.assertIn(board.ATTACHMENT_MARK, self.cards(app)[0])
+            Path(added["path"]).unlink()
+            await app.check_files()
+            await pilot.pause()
+            self.assertNotIn(board.ATTACHMENT_MARK, self.cards(app)[0])
 
 
 if __name__ == "__main__":

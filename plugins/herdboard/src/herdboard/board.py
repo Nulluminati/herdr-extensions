@@ -13,6 +13,7 @@ import threading
 import zlib
 from typing import Callable
 
+from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -50,6 +51,8 @@ PR_STYLES = {"merged": "bold green", "closed": "bold yellow"}
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
 LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
+# Shown in the top-right corner of a card that has attachments.
+ATTACHMENT_MARK = "📎"
 
 HELP_KEYS = [
     ("left, h", "previous column"),
@@ -212,7 +215,14 @@ class CardWidget(Static):
         self.card = card
         self.rich_text = card_text(card, show_board, tag_style)
         self.plain = self.rich_text.plain
-        super().__init__(self.rich_text, classes="card")
+        content = self.rich_text
+        if card.has_attachments:
+            content = Table.grid(expand=True)
+            content.add_column(ratio=1)
+            content.add_column(justify="right", no_wrap=True)
+            content.add_row(self.rich_text, Text(ATTACHMENT_MARK))
+            self.plain += f" {ATTACHMENT_MARK}"
+        super().__init__(content, classes="card")
 
 
 class ColumnHeader(Static):
@@ -1273,6 +1283,7 @@ class HerdboardApp(App):
         if self.show_archive:
             ordered.append(archive)
         mark_planning([card for data in ordered for card in data.cards])
+        attachments.mark(self.store.config, [card for data in ordered for card in data.cards])
         return ordered
 
     def current_card(self) -> CardView | None:
@@ -1472,7 +1483,7 @@ class HerdboardApp(App):
 
         def status():
             return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review, card.pr_writing,
-                     card.planning)
+                     card.planning, card.has_attachments)
                     for card in cards]
 
         old = status()
@@ -1480,6 +1491,7 @@ class HerdboardApp(App):
             await asyncio.to_thread(merge_module.refresh_pr_states)
             await asyncio.to_thread(mark_removed, cards)
             await asyncio.to_thread(mark_planning, cards)
+            await asyncio.to_thread(attachments.mark, self.store.config, cards)
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return
