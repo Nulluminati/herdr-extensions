@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--column")
     sub.add_argument("--board", help="board name: inbox or a project name")
     sub.add_argument("--source", choices=["todo", "linear"])
+    sub.add_argument("--archived", action="store_true", help="list the archived todos instead")
 
     def write_options(sub: argparse.ArgumentParser) -> None:
         sub.add_argument("--state", help="Linear workflow state, when several match the column")
@@ -139,6 +140,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
     sub.add_argument("--yes", action="store_true", help="delete without asking")
+
+    sub = command("archive", "move a todo to its board's archive, or with --done every card in the done column")
+    sub.add_argument("ref", nargs="?")
+    sub.add_argument("--done", action="store_true", help="archive every card in the board's done column")
+    sub.add_argument("--board", help="with --done: board name, inbox or a project name; default: this repository's")
+
+    sub = command("unarchive", "move an archived todo to its board's done column")
+    sub.add_argument("ref")
 
     sub = command("promote", "turn a todo into a Linear issue, its checklist into sub-issues")
     sub.add_argument("ref")
@@ -418,6 +427,11 @@ class _Context:
 def _cmd_list(ctx: _Context) -> dict:
     args, store = ctx.args, ctx.store
     result = LinearResult()
+    if args.archived:
+        if args.source == "linear" or args.column:
+            raise UsageError("--archived lists todos: it does not work with --source linear or --column")
+        paths = [store.resolve_board(args.board)] if args.board else ctx.views.paths(ctx.chosen_view())
+        return {"cards": store.archived_cards(paths), "linear": result, "boards": []}
     if args.board:
         paths = [store.resolve_board(args.board)]
         cards = store.list_cards(paths)
@@ -643,6 +657,44 @@ def _cmd_delete(ctx: _Context) -> dict:
     if not _confirm(f"Delete {card.ref}: {card.title} ({card.board} / {card.column})? [y/N] "):
         return {"deleted": None}
     return {"deleted": ctx.store.delete(args.ref)}
+
+
+class LinearArchiveError(HerdboardError):
+    code = "linear_archive"
+
+
+def _cmd_archive(ctx: _Context) -> dict:
+    from . import start as start_module
+
+    args, store = ctx.args, ctx.store
+    if args.done == (args.ref is not None):
+        raise UsageError("Give a card to archive, or --done")
+    if args.board and not args.done:
+        raise UsageError("--board works only with --done")
+    if args.done:
+        if args.board == "inbox":
+            path = store.ensure_inbox()
+        elif args.board:
+            path = store.resolve_board(args.board)
+        else:
+            path = ctx.repo_board() or store.ensure_inbox()
+        archived, skipped = store.archive_done(path, blocked=start_module.archive_blocker)
+        for card in archived:
+            activity.append(store, card.ref, "Archived.", activity.author())
+        return {"board": store.board_name(path), "archived": archived, "skipped": skipped}
+    if LINEAR_REF.match(args.ref):
+        raise LinearArchiveError("herdboard archives only todos. Linear hides completed issues after done_days.")
+    card = store.archive(args.ref, blocked=start_module.archive_blocker)
+    activity.append(store, card.ref, "Archived.", activity.author())
+    return {"card": card}
+
+
+def _cmd_unarchive(ctx: _Context) -> dict:
+    if LINEAR_REF.match(ctx.args.ref):
+        raise LinearArchiveError("herdboard archives only todos.")
+    card = ctx.store.unarchive(ctx.args.ref)
+    activity.append(ctx.store, card.ref, "Unarchived.", activity.author())
+    return {"card": card}
 
 
 def _prompt_checkout(identity: str) -> str | None:
@@ -944,6 +996,8 @@ COMMANDS = {
     "move": _cmd_move,
     "done": _cmd_done,
     "delete": _cmd_delete,
+    "archive": _cmd_archive,
+    "unarchive": _cmd_unarchive,
     "edit": _cmd_edit,
     "log": _cmd_log,
     "attach": _cmd_attach,
@@ -1061,6 +1115,16 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"{result['ref']}: removed {result['removed']['name']}")
         else:
             print(f"{result['ref']}: attached {result['attachment']['name']}")
+        return
+    if command == "archive" and "archived" in result:
+        if as_json:
+            _emit_json({"board": result["board"], "archived": [_card_dict(card) for card in result["archived"]],
+                        "skipped": [{"ref": card.ref, "reason": reason} for card, reason in result["skipped"]]})
+        else:
+            count = len(result["archived"])
+            print(f"Archived {count} card{'' if count == 1 else 's'} from {result['board']}.")
+            for card, reason in result["skipped"]:
+                print(f"Kept {card.ref}: {reason}")
         return
     if command == "log":
         if as_json:

@@ -23,8 +23,10 @@ from .identity import RepoIdentity, find_board, new_board_path, same_repo
 from .model import (
     BLOCK_ID,
     PARENT_LINK,
+    ArchivedError,
     Board,
     Card,
+    CardActiveError,
     Column,
     ConflictError,
     DuplicateIdError,
@@ -78,6 +80,8 @@ class CardView:
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.
     parent_title: str | None = None
     sub_cards: tuple[int, int] | None = None
+    # True for a card in the board's archive section.
+    archived: bool = False
 
 
 # `Store.update_config` leaves the merge mode as it is.
@@ -110,6 +114,8 @@ class BoardSnapshot:
     name: str
     path: Path
     columns: list[ColumnSnapshot]
+    # The archive section, or None when the board has none.
+    archive: ColumnSnapshot | None = None
 
 
 @dataclass
@@ -386,7 +392,16 @@ class Store:
             body=list(card.body),
             column_limit=column.limit,
             parent=parent_of(card.title),
+            archived=column.archive,
         )
+
+    def _archive_views(self, path: Path, board: Board) -> list[CardView]:
+        """The archive cards of a board. A card without an ID gets a reference that no command takes."""
+        if board.archive is None:
+            return []
+        name = self.board_name(path)
+        return [self._view(path, board.archive, card, card.block_id or f"{name}:archive-{number}")
+                for number, card in enumerate(board.archive.cards, start=1)]
 
     def list_cards(self, paths: list[Path] | None = None) -> list[CardView]:
         views = []
@@ -394,6 +409,13 @@ class Store:
             name = self.board_name(path)
             for number, (column, card) in enumerate(self._read(path).all_cards(), start=1):
                 views.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
+        return views
+
+    def archived_cards(self, paths: list[Path] | None = None) -> list[CardView]:
+        """The cards in the archive sections of the boards, in file order."""
+        views = []
+        for path in self.board_paths() if paths is None else paths:
+            views.extend(self._archive_views(path, self._read(path)))
         return views
 
     def snapshot(self, path: Path) -> BoardSnapshot:
@@ -409,7 +431,10 @@ class Store:
             columns.append(
                 ColumnSnapshot(column.title, column.limit, self._is_completed(column), cards)
             )
-        return BoardSnapshot(name, path, columns)
+        archive = None
+        if board.archive is not None:
+            archive = ColumnSnapshot(board.archive.title, None, False, self._archive_views(path, board))
+        return BoardSnapshot(name, path, columns, archive)
 
     def _check_unique(self, block_id: str) -> None:
         """Raise when a block ID is on more than one card, archive cards included."""
@@ -443,10 +468,20 @@ class Store:
                 if card.block_id == ref:
                     found.append((path, column, card))
         if not found:
+            if self._find_archived(ref) is not None:
+                raise ArchivedError(f"{ref} is archived. Run `herdboard unarchive {ref}` first")
             raise NotFoundError(f"No card {ref}")
         self._check_unique(ref)
         path, column, card = found[0]
         return _Located(path, ref, None, column.title, list(card.lines))
+
+    def _find_archived(self, ref: str) -> Path | None:
+        """The board whose archive has the card with block ID `ref`, or None."""
+        for path in self.board_paths():
+            board = self._read(path)
+            if board.archive is not None and any(card.block_id == ref for card in board.archive.cards):
+                return path
+        return None
 
     def notes_for(self, card: CardView) -> list[dict] | None:
         """Notes that `[[name]]` links in a card point to; None without `vault_root`."""
@@ -472,7 +507,13 @@ class Store:
         return notes
 
     def show(self, ref: str) -> CardView:
-        located = self._resolve(ref)
+        """A card, also from an archive. Only an ID finds an archived card."""
+        try:
+            located = self._resolve(ref)
+        except ArchivedError:
+            self._check_unique(ref)
+            path = self._find_archived(ref)
+            return next(view for view in self._archive_views(path, self._read(path)) if view.ref == ref)
         column, card = self._find(self._read(located.path), located)
         return self._view(located.path, column, card, card.block_id or ref)
 
@@ -737,6 +778,106 @@ class Store:
             return column
 
         return self._modify(ref, change)
+
+    def _archive_column(self, board: Board) -> Column:
+        """The board's archive section. A missing one is added after the last column, as Obsidian writes it."""
+        if board.archive is None:
+            last = board.columns[-1].items[-1] if board.columns and board.columns[-1].items else ""
+            blank = isinstance(last, str) and not last.strip()
+            board.archive_lines = ([] if blank else [""]) + ["***", ""]
+            board.archive = Column(f"## {self.config.archive_titles[0]}", ["", ""], archive=True)
+        return board.archive
+
+    def archive(self, ref: str, blocked: Callable[[str], str | None] | None = None) -> CardView:
+        """Move a todo to its board's archive section.
+
+        `blocked` names why a card must stay on the board, such as a worktree that still
+        exists, or returns None. It runs before the lock, because it can ask Herdr.
+        """
+        located = self._resolve(ref)
+        reason = blocked(located.block_id or ref) if blocked is not None else None
+        if reason:
+            raise CardActiveError(f"Cannot archive {ref}: {reason}")
+
+        def change(board, path, column, card):
+            if card.block_id and any(parent_of(other.title) == card.block_id for _, other in board.all_cards()):
+                raise ParentError(f"Cannot archive {card.block_id}: it has sub-cards on the board. "
+                                  "Archive them first", "has_sub_cards")
+            kanban_md.remove_card(column, card)
+            archive = self._archive_column(board)
+            kanban_md.insert_card(archive, card, "bottom")
+            return archive
+
+        return self._modify(ref, change, located)
+
+    def archive_done(
+        self, path: Path, blocked: Callable[[str], str | None] | None = None,
+    ) -> tuple[list[CardView], list[tuple[CardView, str]]]:
+        """Archive every card in the board's done column, in one write.
+
+        A card stays when `blocked` gives a reason, or when it is a parent whose sub-cards
+        stay on the board. Returns the archived cards, and the cards that stay with the reason.
+        """
+        board = self._read(path)
+        done = self._done_column(board, path)
+        name = self.board_name(path)
+        numbers = {id(card): number for number, (_, card) in enumerate(board.all_cards(), start=1)}
+        skipped: list[tuple[CardView, str]] = []
+        chosen: list[tuple[CardView, Card]] = []
+        for card in done.cards:
+            view = self._view(path, done, card, card.block_id or f"{name}:{numbers[id(card)]}")
+            # A card without an ID was never started, so nothing can block it.
+            reason = blocked(card.block_id) if blocked is not None and card.block_id else None
+            if reason:
+                skipped.append((view, reason))
+            else:
+                chosen.append((view, card))
+        moving = {id(card) for _, card in chosen}
+        staying = {parent_of(card.title) for _, card in board.all_cards() if id(card) not in moving}
+        for view, card in list(chosen):
+            if card.block_id and card.block_id in staying:
+                chosen.remove((view, card))
+                skipped.append((view, "it has sub-cards that stay on the board"))
+        if not chosen:
+            return [], skipped
+        with self._lock():
+            board = self._read(path)
+            self._require_writable(path, board)
+            done = self._done_column(board, path)
+            matches: list[Card] = []
+            for view, card in chosen:
+                match = next((c for c in done.cards if c.lines == card.lines
+                              and not any(c is m for m in matches)), None)
+                if match is None:
+                    raise ConflictError(f"{path}: {view.ref} changed on disk; retry")
+                matches.append(match)
+            for card in matches:
+                if card.block_id:
+                    self._check_unique(card.block_id)
+            self._assign_ids(path, board)
+            archive = self._archive_column(board)
+            for card in matches:
+                kanban_md.remove_card(done, card)
+                kanban_md.insert_card(archive, card, "bottom")
+            self._write(path, board)
+        return [self._view(path, archive, card, card.block_id) for card in matches], skipped
+
+    def unarchive(self, ref: str) -> CardView:
+        """Move an archived todo to its board's done column. Only an ID finds an archived card."""
+        path = self._find_archived(ref)
+        if path is None:
+            raise NotFoundError(f"No archived card {ref}")
+        with self._lock():
+            board = self._read(path)
+            self._require_writable(path, board)
+            card = next((c for c in board.archive.cards if c.block_id == ref), None) if board.archive else None
+            if card is None:
+                raise ConflictError(f"{path}: card changed on disk; retry")
+            self._check_unique(ref)
+            self._assign_ids(path, board)
+            target = self._move_card(board.archive, card, self._done_column(board, path), "bottom", check=True)
+            self._write(path, board)
+        return self._view(path, target, card, ref)
 
     def _check_parent(self, board: Board, path: Path, parent: str, child: str | None) -> None:
         """Refuse a parent that is not on this board, that has a parent, or whose child has children."""

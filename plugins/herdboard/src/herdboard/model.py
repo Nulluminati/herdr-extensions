@@ -46,6 +46,18 @@ class NotFoundError(HerdboardError):
     code = "not_found"
 
 
+class ArchivedError(NotFoundError):
+    """The card is in the board's archive, where commands do not change it."""
+
+    code = "archived"
+
+
+class CardActiveError(HerdboardError):
+    """The card still has work in progress, such as a worktree or a running agent."""
+
+    code = "card_active"
+
+
 class ParentError(HerdboardError):
     def __init__(self, message: str, code: str):
         super().__init__(message)

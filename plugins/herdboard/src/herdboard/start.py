@@ -275,6 +275,20 @@ def agent_live(record) -> bool:
     return bool(live and live.get("agent"))
 
 
+def archive_blocker(ref) -> str | None:
+    """Why a started card must stay on the board: its worktree still exists, or its agent still runs."""
+    found = find_record(ref)
+    if found is None:
+        return None
+    record = found[1]
+    path = record.get("worktree_path")
+    if path and Path(path).exists():
+        return f"its worktree still exists at {path}. Finish the card first"
+    if agent_live(record):
+        return "its agent still runs"
+    return None
+
+
 def card_agent_panes() -> set[str]:
     """The panes where `start` started an agent for a card."""
     try:

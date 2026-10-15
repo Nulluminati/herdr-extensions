@@ -98,7 +98,7 @@ class CommandTests(CliTestCase):
             {
                 "ref", "board", "path", "column", "title", "checked", "due", "tags", "body",
                 "column_limit", "source", "url", "state", "team", "pr", "read_only", "fetched_at",
-                "stale", "parent",
+                "stale", "parent", "archived",
             },
         )
         self.assertEqual(data["cards"][0]["source"], "todo")
