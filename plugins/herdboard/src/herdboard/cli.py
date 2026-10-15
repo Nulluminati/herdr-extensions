@@ -18,6 +18,7 @@ from .config import THINKING_LEVELS, config_path, load_config
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_links import LabelLink, ProjectLink, with_link
+from .linear_pins import pin_issue, unpin_issue
 from .linear_source import LinearSource
 from .linear_states import refuse
 from .linear_writes import LinearWriter
@@ -233,6 +234,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("project")
     sub.add_argument("--label", action="append", default=[], help="label name or TEAM/label")
     sub.add_argument("--remove", action="store_true", help="remove the link")
+    sub = command("pin", "pin a Linear issue to a repository board")
+    sub.add_argument("issue", help="Linear issue identifier, such as ENG-123")
+    sub.add_argument("--repo", help="repository board name or checkout path; default: this repository")
+    sub.add_argument("--remove", action="store_true", help="remove the pin (works offline)")
+    sub = command("search", "search the open Linear issues of your teams")
+    sub.add_argument("term", help="search text, or an identifier such as ENG-123 for any team")
     sub = command("board", "show the board view")
     view_options(sub)
     return parser
@@ -984,6 +991,42 @@ def _cmd_link(ctx: _Context) -> dict:
     return {"board": board, "links": ctx.store.update_links(board, lambda links: with_link(links, link))}
 
 
+def _pin_board(ctx: _Context, repo: str | None) -> Path:
+    """The repository board that `pin` changes: `repo` (a board name or a path), else this one."""
+    if repo is None:
+        if ctx.identity is None:
+            raise HerdboardError("Not in a Git repository.")
+        board = ctx.repo_board()
+        if board is None:
+            raise HerdboardError(INIT_MESSAGE)
+    elif "/" not in repo and not repo.startswith(("~", ".")):
+        board = ctx.store.resolve_board(repo)
+    else:
+        path = ctx.directory / Path(repo).expanduser()
+        identity = repo_identity(path) if path.is_dir() else None
+        board = path if path.is_file() else ctx.store.board_for_repo(identity) if identity else None
+        if board is None:
+            raise NotFoundError(f"{repo}: no repository board")
+    if not ctx.store.board_meta(board).repo:
+        raise HerdboardError(f"{board}: Linear issues pin only to a repository board")
+    return board
+
+
+def _cmd_pin(ctx: _Context) -> dict:
+    args = ctx.args
+    board = _pin_board(ctx, args.repo)
+    if args.remove:
+        pin, change = unpin_issue(ctx.store, board, args.issue), "removed"
+    else:
+        pin, added = pin_issue(ctx.store, ctx.views.source, board, args.issue)
+        change = "added" if added else "already_pinned"
+    return {"board": board, "pin": pin, "change": change, "pins": ctx.store.board_meta(board).pins}
+
+
+def _cmd_search(ctx: _Context) -> dict:
+    return {"issues": ctx.views.source.search(ctx.args.term)}
+
+
 def _project_link(ctx: _Context, name: str, labels: list[str]) -> ProjectLink:
     """The link to the Linear project `name`, with the labels that `labels` name."""
     client = ctx.views.source.client
@@ -1050,6 +1093,8 @@ COMMANDS = {
     "init": _cmd_init,
     "migrate": _cmd_migrate,
     "link": _cmd_link,
+    "pin": _cmd_pin,
+    "search": _cmd_search,
     "board": _cmd_board,
 }
 
@@ -1203,6 +1248,11 @@ def _render(command: str, result: dict, as_json: bool) -> None:
         elif command == "link":
             _emit_json({"board": str(result["board"]),
                         "links": [link.to_yaml() for link in result["links"]]})
+        elif command == "pin":
+            _emit_json({"board": str(result["board"]), "pin": result["pin"].to_yaml(),
+                        "change": result["change"], "pins": [pin.to_yaml() for pin in result["pins"]]})
+        elif command == "search":
+            _emit_json({"issues": result["issues"]})
         else:
             data = {"card": _card_dict(result["card"])}
             if result.get("notes") is not None:
@@ -1235,6 +1285,15 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     elif command == "link":
         names = ", ".join(link.name for link in result["links"]) or "none"
         print(f"{result['board']}: linked projects: {names}")
+    elif command == "pin":
+        identifier, board = result["pin"].identifier, result["board"]
+        print({"added": f"{identifier} pinned to {board}",
+               "already_pinned": f"{identifier} is already pinned to {board}",
+               "removed": f"{identifier} unpinned from {board}"}[result["change"]])
+    elif command == "search":
+        lines = [f"{i['identifier']}\t{i['state']['name']}\t{i['team']['key']}\t{i['title']}"
+                 for i in result["issues"]]
+        print("\n".join(lines) if lines else "No open issues match.")
     elif command == "edit":
         card = result["card"]
         print(f"{card.ref} edited ({card.board} / {card.column})")

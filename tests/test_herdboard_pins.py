@@ -9,8 +9,9 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 from herdboard.config import Config  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear_links import ProjectLink, parse_links, replace_links  # noqa: E402
-from herdboard.linear_pins import IssuePin, parse_pins, replace_pins  # noqa: E402
-from herdboard.model import FormatError  # noqa: E402
+from herdboard.linear import LinearError  # noqa: E402
+from herdboard.linear_pins import IssuePin, add_pin, parse_pins, pin_issue, replace_pins, unpin_issue  # noqa: E402
+from herdboard.model import FormatError, NotFoundError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
 BODY = "## Backlog\n\n- [ ] keep\tme  \n\n\n## Done\n\n**Complete**\n\n\n\n%% kanban:settings\n```\n{}\n```\n%%"
@@ -86,13 +87,16 @@ class ReplacePinTests(unittest.TestCase):
             replace_pins(board_text(front), PINS)
 
 
-class StorePinTests(unittest.TestCase):
+class StoreCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.store = Store(Config(todos_dir=Path(self.tmp.name) / "todos"))
         identity = RepoIdentity("github.com/acme/api", "github.com", ("acme", "api"))
         self.path = self.store.init_board(identity)
+
+
+class StorePinTests(StoreCase):
 
     def test_add_and_remove_round_trip(self):
         before = self.path.read_text()
@@ -118,6 +122,59 @@ class StorePinTests(unittest.TestCase):
         with self.assertRaisesRegex(FormatError, "read only"):
             self.store.add(self.path, "card")
         self.assertEqual(self.path.read_text(), text)
+
+
+class FakeClient:
+    def __init__(self, issues):
+        self.issues = issues
+        self.asked = []
+
+    def issue(self, ref):
+        self.asked.append(ref)
+        return next((i for i in self.issues if ref in (i["identifier"], i["id"])), None)
+
+
+class FakeSource:
+    def __init__(self, issues, offline=False):
+        self.client = FakeClient(issues)
+        self.offline = offline
+
+    def require_active(self):
+        pass
+
+
+class PinCoreTests(StoreCase):
+    ISSUES = [{"id": "u1", "identifier": "ENG-1"}, {"id": "u2", "identifier": "OPS-7"}]
+
+    def test_pin_issue_adds_a_pin_once(self):
+        source = FakeSource(self.ISSUES)
+        self.assertEqual(pin_issue(self.store, source, self.path, "eng-1"), (PINS[0], True))
+        self.assertEqual(source.client.asked, ["ENG-1"])
+        self.assertEqual(pin_issue(self.store, source, self.path, "OPS-7"), (PINS[1], True))
+        self.assertEqual(pin_issue(self.store, source, self.path, "ENG-1"), (PINS[0], False))
+        self.assertEqual(self.store.board_meta(self.path).pins, PINS)
+
+    def test_pin_of_an_unknown_issue_is_not_found(self):
+        with self.assertRaises(NotFoundError):
+            pin_issue(self.store, FakeSource(self.ISSUES), self.path, "ENG-404")
+        self.assertEqual(self.store.board_meta(self.path).pins, [])
+
+    def test_pin_needs_a_connection(self):
+        with self.assertRaisesRegex(LinearError, "connection"):
+            pin_issue(self.store, FakeSource(self.ISSUES, offline=True), self.path, "ENG-1")
+
+    def test_add_pin_updates_the_identifier_of_a_moved_issue(self):
+        add_pin(self.store, self.path, {"id": "u1", "identifier": "OLD-1"})
+        self.assertEqual(add_pin(self.store, self.path, self.ISSUES[0]), (PINS[0], False))
+        self.assertEqual(self.store.board_meta(self.path).pins, [PINS[0]])
+
+    def test_unpin_by_identifier_or_id(self):
+        self.store.update_pins(self.path, lambda pins: PINS)
+        self.assertEqual(unpin_issue(self.store, self.path, "eng-1"), PINS[0])
+        self.assertEqual(unpin_issue(self.store, self.path, "u2"), PINS[1])
+        self.assertEqual(self.store.board_meta(self.path).pins, [])
+        with self.assertRaises(NotFoundError):
+            unpin_issue(self.store, self.path, "ENG-1")
 
 
 if __name__ == "__main__":

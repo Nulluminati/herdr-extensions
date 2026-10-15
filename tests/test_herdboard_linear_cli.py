@@ -466,5 +466,84 @@ class LinkTests(LinearCliCase):
         self.assertRegex(out, r"acme-api.md: linked projects: Platform\n$")
 
 
+class PinTests(LinearCliCase):
+    def pins(self):
+        return self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").pins
+
+    def test_pin_and_pin_again(self):
+        self.board()
+        data = self.run_json("pin", "eng-5", directory=self.repo)
+        self.assertEqual(data["change"], "added")
+        self.assertEqual(data["pin"], {"id": "i5", "identifier": "ENG-5"})
+        self.assertTrue(data["board"].endswith("acme-api.md"))
+        self.assertEqual(self.pins(), [IssuePin("i5", "ENG-5")])
+        out, _ = self.run_cli("pin", "ENG-5", directory=self.repo)
+        self.assertRegex(out, r"^ENG-5 is already pinned to .*acme-api.md\n$")
+        self.assertEqual(self.pins(), [IssuePin("i5", "ENG-5")])
+        self.assertIn("ENG-5", self.refs(self.listing()))
+
+    def test_remove_works_offline(self):
+        self.board()
+        self.run_json("pin", "ENG-5", directory=self.repo)
+        self.endpoint = DEAD
+        del os.environ["LINEAR_API_KEY"]
+        data = self.run_json("pin", "eng-5", "--remove", directory=self.repo)
+        self.assertEqual((data["change"], data["pins"]), ("removed", []))
+        self.assertEqual(self.pins(), [])
+        error = self.run_json("pin", "ENG-5", "--remove", directory=self.repo, expect=1)["error"]
+        self.assertEqual(error["code"], "not_found")
+
+    def test_repo_option_takes_a_board_name_or_a_checkout(self):
+        self.board()
+        self.run_json("pin", "ENG-1", "--repo", "acme-api", directory=self.plain)
+        self.run_json("pin", "ENG-2", "--repo", str(self.repo), directory=self.plain)
+        self.assertEqual([p.identifier for p in self.pins()], ["ENG-1", "ENG-2"])
+        self.run_cli("add", "inbox todo", directory=self.plain)
+        error = self.run_json("pin", "ENG-1", "--repo", "inbox", directory=self.plain, expect=1)["error"]
+        self.assertIn("repository board", error["message"])
+        error = self.run_json("pin", "ENG-1", "--repo", "nope", directory=self.plain, expect=1)["error"]
+        self.assertEqual(error["code"], "not_found")
+
+    def test_needs_a_repository_board(self):
+        self.assertIn("herdboard init", self.run_json("pin", "ENG-1", directory=self.repo, expect=1)["error"]["message"])
+        self.assertIn("Not in a Git repository",
+                      self.run_json("pin", "ENG-1", directory=self.plain, expect=1)["error"]["message"])
+
+    def test_unknown_issue_and_linear_off(self):
+        self.board()
+        self.assertEqual(self.run_json("pin", "ENG-404", directory=self.repo, expect=1)["error"]["code"],
+                         "not_found")
+        del os.environ["LINEAR_API_KEY"]
+        self.assertEqual(self.run_json("pin", "ENG-1", directory=self.repo, expect=1)["error"]["code"],
+                         "linear_disabled")
+        self.assertEqual(self.pins(), [])
+
+    def test_network_failure_exits_3(self):
+        self.board()
+        self.endpoint = DEAD
+        self.run_cli("pin", "ENG-1", directory=self.repo, expect=3)
+
+
+class SearchTests(LinearCliCase):
+    def test_search_json_and_text(self):
+        data = self.run_json("search", "issue 2", directory=self.plain)
+        self.assertEqual(data["issues"], [{"id": "i2", "identifier": "ENG-2", "title": "Issue 2",
+                                           "state": {"name": "In Review", "type": "started"},
+                                           "team": {"key": "ENG"}, "project": {"name": "Platform"}}])
+        out, _ = self.run_cli("search", "issue 2", directory=self.plain)
+        self.assertEqual(out, "ENG-2\tIn Review\tENG\tIssue 2\n")
+        out, _ = self.run_cli("search", "nothing like it", directory=self.plain)
+        self.assertEqual(out, "No open issues match.\n")
+
+    def test_search_by_identifier(self):
+        self.assertEqual([i["identifier"] for i in self.run_json("search", "ENG-4", directory=self.plain)["issues"]],
+                         ["ENG-4"])
+
+    def test_linear_off(self):
+        del os.environ["LINEAR_API_KEY"]
+        self.assertEqual(self.run_json("search", "x", directory=self.plain, expect=1)["error"]["code"],
+                         "linear_disabled")
+
+
 if __name__ == "__main__":
     unittest.main()
