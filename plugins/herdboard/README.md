@@ -80,7 +80,9 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `v` | Change the view: repo, inbox, all, mine |
 | `t` | Hide or show Linear cards |
 | `i` | Create the board for this repository |
-| `c` | Configure this repository's board: the merge mode and the linked Linear projects. ctrl+s saves |
+| `I` | Search Linear and pin an issue to this repository's board. The search runs when you press enter |
+| `u` | Remove the pin of a pinned Linear issue (repo view) |
+| `c` | Configure this repository's board: the merge mode, the linked Linear projects and the pinned issues. ctrl+s saves |
 | `r` | Reload, and fetch Linear again |
 | `?` | Help |
 | `q` | Quit |
@@ -89,7 +91,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 | View | Shows |
 |---|---|
-| repo (default inside a repository) | The repository's todos and the issues of its linked Linear projects |
+| repo (default inside a repository) | The repository's todos, the issues of its linked Linear projects and its pinned Linear issues |
 | inbox (default outside a repository) | `inbox.md`: todos that belong to no repository |
 | all | Every board and your Linear issues |
 | mine | Linear issues assigned to you, from every team |
@@ -297,6 +299,18 @@ Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal AP
 
 On the board, `c` shows the linked projects. Press enter on a project to mark it for removal. Type a project name, and optional labels separated by commas, to link a project. Enter in the project field moves to the labels. ctrl+s, or enter in the labels field, writes the changes. A label name with a comma needs `herdboard link --label`. A link needs a Linear connection, so an offline board (`--offline`) cannot add one. A removal works offline.
 
+### Pin single Linear issues
+
+A Linear project can hold issues for many repositories, and a team can hold thousands. To show only the issues you work on, pin them one by one to the repository board. The board fetches pinned issues by ID, so a pin costs no team-wide fetch.
+
+- `herdboard pin ENG-123` pins an issue to the current repository board. `--repo BOARD_OR_PATH` names another board. `pin --remove` removes the pin, also offline.
+- `herdboard search "login timeout"` lists the open issues of your teams that match. An identifier such as `ENG-123` finds that issue in any team and any state.
+- On the board, `I` opens a search. Type words and press enter: Linear allows only 30 searches per minute, so typing does not search. Press enter on a result to pin it. Outside a repository, the board first asks which repository board to pin to.
+- `u` on a pinned card removes its pin. `c` lists the pinned issues: press enter on one to mark it for removal.
+- `start` on a Linear issue pins it to the board of the repository it starts in. It does not pin an issue that a linked project of that board already shows.
+
+A pinned issue goes off the board like other done issues, after `linear.done_days`. A canceled issue does not show. The pin stays in the board file until you remove it. A pin does not bring the issue's sub-issues: pin each one by itself. The pins live in the `linear-issues:` frontmatter of the board.
+
 When Linear's GitHub integration attaches a pull request from this repository to an issue, the card shows `PR`.
 
 ### Workflow states
@@ -354,6 +368,8 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move it to Done |
 | `herdboard promote <id> [--team] [--project] [--state]` | Turn a todo into a Linear issue |
 | `herdboard link <project> [--label NAME] [--remove]` | Link the repository board to a Linear project |
+| `herdboard pin <ENG-123> [--repo BOARD\|PATH] [--remove]` | Pin a Linear issue to a repository board, or remove the pin |
+| `herdboard search <term>` | List the open Linear issues of your teams that match, or one issue by identifier |
 | `herdboard init` | Create the board for the current repository |
 | `herdboard migrate <TODO.md> [--board] [--yes]` | Convert a free-form `TODO.md` into cards |
 | `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear and the state files |
@@ -379,7 +395,7 @@ herdboard shows the result and asks before it writes. The original file does not
 `herdboard doctor` reports problems with a level, a code and a fix when there is one. It checks:
 
 - Boards that do not parse, duplicate card IDs, and two boards with the same repository
-- The config file, and Linear links, labels and the API key
+- The config file, and Linear links, labels, pinned issues and the API key
 - Sub-cards whose parent is missing
 - Unfinished `promote` records, old start records and old checkout paths
 - Whether `herdr` and `gh` are on the path

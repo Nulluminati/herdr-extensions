@@ -82,6 +82,19 @@ Expected output: `True True`. Delete the issue afterwards.
 
 Not covered live: an unknown write result (timeout after the write). The unit tests cover delayed commits with the fake server. To test this manually, set `timeout` very low in `LinearClient` for one `hb move` run. Check that `hb` reports success or `linear_unknown` after up to three verification reads. An old state or missing issue does not prove rejection. For create, an unknown result includes the generated ID in the message and the `--json` error (`issue_id`). Check that ID before another create.
 
+## Pin checks
+
+These checks change only the board file of the repository from check 3. Pick an issue of your team that the linked project does not show, and write its identifier as `<ENG-P>`.
+
+| # | Command | Expected | Confirms |
+|---|---|---|---|
+| P1 | `hb search <word>` | Only open issues of teams that you are a member of. Exit 0. | `searchIssues` with the team and state filter |
+| P2 | `hb search <ENG-P>`, and an identifier of a team that you are not a member of | Each gives that one issue | The identifier skips the search |
+| P3 | `hb board`, press `I`, search, press enter on `<ENG-P>`. Then press `r`. | The card shows on the board. The board file has `linear-issues` with its ID and identifier. | The search dialog and the pinned fetch (`issues` with `id: {in: ...}`) |
+| P4 | Select the card from P3 and press `u` | The card goes away. The board file has no `linear-issues`. | Unpin |
+| P5 | Start `<ENG-P>` from the `mine` view inside the repository, with `s` | The board file gets the pin | Auto-pin in `start` |
+| P6 | `hb doctor` after you change the ID of a pin in the board file to a wrong value | A `linear_pin_missing` warning | The doctor check |
+
 ## Cleanup
 
 ```bash

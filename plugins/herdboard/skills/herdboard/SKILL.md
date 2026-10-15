@@ -29,13 +29,14 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 ## Read
 
 ```bash
-herdboard --json list                      # this repository: todos and linked Linear issues
+herdboard --json list                      # this repository: todos, linked and pinned Linear issues
 herdboard --json list --view inbox         # todos that belong to no repository
 herdboard --json list --view all           # every board and your Linear issues
 herdboard --json list --view mine          # Linear issues assigned to the user
 herdboard --json list --column "In progress"
 herdboard --json show tep3                 # also the last 10 activity log entries; --log shows all
 herdboard --json list --archived           # the archived todos of this repository's board
+herdboard --json search "login timeout"    # open Linear issues of the user's teams; ENG-123 finds one issue
 ```
 
 ## Write
@@ -80,11 +81,13 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `archive --done` (archives every card in the board's done column).
-- `link`, `init`, `migrate --yes`, `doctor --fix-ids`.
+- `link`, `pin`, `init`, `migrate --yes`, `doctor --fix-ids`.
 
 ```bash
 herdboard --json start tep3 --agent pi        # worktree, workspace, card to In progress, pi with the card
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
+herdboard --json pin ENG-123                  # show the issue on this repository's board
+herdboard --json pin ENG-123 --remove         # remove the pin
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json plan tep3 --agent claude --model opus   # a planner asks the user questions, then writes plan.md
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
