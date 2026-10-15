@@ -12,7 +12,7 @@ SRC = ROOT / "plugins/herdboard/src"
 sys.path.insert(0, str(SRC))
 
 from herdboard import cli  # noqa: E402
-from herdboard.board import AddScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp  # noqa: E402
+from herdboard.board import AddScreen, ConfirmScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp  # noqa: E402
 from textual.widgets import Markdown  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
@@ -850,6 +850,22 @@ class ReloadTests(BoardTestCase):
             await app.check_files()
             await pilot.pause()
             self.assertIn("a", self.selected(app)[0].split("\n")[0])
+
+
+class DialogWrapTests(BoardTestCase):
+    async def test_long_dialog_text_wraps_inside_the_dialog(self):
+        detail = ("Local: rebase onto the base, move the base forward, remove the worktree. "
+                  "PR: an agent writes the description, then a draft pull request opens.")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            app.push_screen(ConfirmScreen("Merge abcd: a card with a long title into its base?", detail))
+            await pilot.pause()
+            dialog = app.screen.query_one(".dialog")
+            labels = list(app.screen.query("Label"))
+            for label in labels:
+                self.assertTrue(dialog.content_region.contains_region(label.region), str(label.render()))
+            self.assertGreater(labels[0].region.height, 1, "the detail wraps onto several lines")
 
 
 class ScrollTests(BoardTestCase):

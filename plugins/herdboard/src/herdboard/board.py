@@ -1045,6 +1045,8 @@ class HerdboardApp(App):
     .column.current { border: round $accent; }
     .dialog { width: 70; max-width: 90%; height: auto; max-height: 80%; padding: 1 2;
               border: round $accent; background: $surface; }
+    /* A Label is as wide as its text by default, so a long line runs past the dialog edge. */
+    .dialog Label { width: 100%; }
     .help { width: 90; max-width: 95%; }
     .help-grid { layout: grid; grid-size: 2; grid-columns: 16 1fr; grid-rows: auto;
                  grid-gutter: 0 1; width: 100%; height: auto; }
