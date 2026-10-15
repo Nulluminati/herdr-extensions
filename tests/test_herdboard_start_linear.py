@@ -1,4 +1,5 @@
 """Linear start uses the server branch and the normal write path."""
+import json
 from unittest.mock import patch
 from pathlib import Path
 import subprocess
@@ -8,6 +9,7 @@ from test_herdboard_linear_write_cli import WriteCliCase
 from test_herdboard_start import FakeHerdr
 from test_herdboard_cli import git
 from herdboard import start
+from herdboard.linear_pins import IssuePin
 
 
 class StartLinearTests(WriteCliCase):
@@ -98,6 +100,45 @@ class StartLinearTests(WriteCliCase):
         self.assertEqual(error["code"], "repo_required")
         self.assertIn("github.com/acme/web", error["message"])
         self.assertIn("github.com/acme/frontend", error["message"])
+
+    def pins(self):
+        store = self.store_for()
+        return [pin.identifier for pin in store.board_meta(store.projects_dir / "acme-api.md").pins]
+
+    def test_start_pins_the_issue_to_the_repository_board(self):
+        self.run_json("start", "ENG-3", "--repo", "acme-api", "--no-agent", directory=self.plain)
+        self.assertEqual(self.pins(), ["ENG-3"])
+        self.run_json("start", "ENG-3", "--repo", "acme-api", "--no-agent", directory=self.plain)
+        self.assertEqual(self.pins(), ["ENG-3"])
+
+    def test_no_pin_when_a_linked_project_shows_the_issue(self):
+        self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)
+        self.assertEqual(self.pins(), [])
+
+    def test_a_pinned_issue_starts_in_its_board_repository(self):
+        self.repin(IssuePin("i5", "ENG-5"))
+        result = self.run_json("start", "ENG-5", "--no-agent", directory=self.repo)
+        self.assertEqual(result["branch"], "nate/eng-5")
+
+    def test_no_board_means_no_pin_and_no_error(self):
+        other = self.repo.parent / "web"
+        other.mkdir()
+        git(other, "init", "-q")
+        git(other, "remote", "add", "origin", "https://github.com/acme/web.git")
+        git(other, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "--allow-empty", "-qm", "init")
+        _, err = self.run_cli("--json", "start", "ENG-5", "--repo", str(other), "--no-agent",
+                              directory=self.plain)
+        self.assertEqual(err, "")
+        self.assertEqual(self.pins(), [])
+
+    def test_a_pin_failure_warns_and_the_start_goes_on(self):
+        board = self.store_for().projects_dir / "acme-api.md"
+        board.write_text(board.read_text().replace("repo:", "linear-issues: nope\nrepo:", 1))
+        out, err = self.run_cli("--json", "start", "ENG-3", "--repo", "acme-api", "--no-agent",
+                                directory=self.plain)
+        self.assertEqual(json.loads(out)["branch"], "nate/eng-3")
+        self.assertRegex(err, r"herdboard: warning: cannot pin ENG-3 to .*acme-api.md: .*linear-issues")
 
     def test_missing_state_precedes_worktree(self):
         self.config.write_text(self.config.read_text() + '\nstart_column = "Missing"\n')

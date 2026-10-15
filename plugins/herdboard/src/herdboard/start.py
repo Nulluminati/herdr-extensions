@@ -22,6 +22,7 @@ from .brief import agent_message, brief_text, card_token
 from .config import THINKING_LEVELS, default_config_path
 from .identity import _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
+from .linear_pins import add_pin
 from .linear_source import state_dir
 from .linear_states import StateChoices, refuse, resolve_state
 from .model import ConflictError, HerdboardError, IoError, NotFoundError, commit_type
@@ -386,6 +387,15 @@ def _main_checkout(directory):
     return Path(current) if current else None
 
 
+def _links_show(meta, issue) -> bool:
+    """Whether a linked project of a board shows the Linear issue (with a label of the link, if any)."""
+    project = (issue or {}).get("project") or {}
+    labels = {label["id"] for label in (issue or {}).get("labels", [])}
+    return any(link.id == project.get("id") and
+               (not link.labels or any(label.id in labels for label in link.labels))
+               for link in meta.links)
+
+
 def _remember(directory, expected=None):
     identity = repo_identity(Path(directory))
     if identity is None or (expected is not None and identity.identity != expected):
@@ -497,13 +507,10 @@ class Starter:
                 return value
         matches = []
         if card.source == "linear":
+            issue_id = (issue or {}).get("id")
             for path in self.store.board_paths():
                 meta = self.store.board_meta(path)
-                project = (issue or {}).get("project") or {}
-                labels = {label["id"] for label in (issue or {}).get("labels", [])}
-                if meta.repo and any(link.id == project.get("id") and
-                                     (not link.labels or any(label.id in labels for label in link.labels))
-                                     for link in meta.links):
+                if meta.repo and (_links_show(meta, issue) or any(pin.id == issue_id for pin in meta.pins)):
                     matches.append(meta.repo)
             if not repo and self.repository_view:
                 identity = repo_identity(self.directory)
@@ -511,6 +518,20 @@ class Starter:
                     return identity.identity
         listing = f" Linked repositories: {', '.join(sorted(set(matches)))}." if matches else ""
         raise StartError("Choose a repository with --repo BOARD_OR_PATH." + listing, "repo_required")
+
+    def _pin(self, identity, issue):
+        """Pin a started Linear issue to the board of its repository.
+
+        Nothing happens when the repository has no board or a linked project of the board
+        already shows the issue. A failure is only a warning: the start goes on.
+        """
+        board = next((p for p in self.store.board_paths() if self.store.board_meta(p).repo == identity), None)
+        if board is None or _links_show(self.store.board_meta(board), issue):
+            return
+        try:
+            add_pin(self.store, board, issue)
+        except HerdboardError as error:
+            print(f"herdboard: warning: cannot pin {issue['identifier']} to {board}: {error}", file=sys.stderr)
 
     def _checkout(self, identity, explicit, record=None):
         if explicit:
@@ -690,6 +711,8 @@ class Starter:
                     record = {"steps_done": [], "ref": card.ref}
                 record["repository"] = identity
                 save("repository")
+                if issue:
+                    self._pin(identity, issue)
                 local = self._checkout(identity, checkout, record)
                 record["checkout"] = str(local)
                 save("checkout")
