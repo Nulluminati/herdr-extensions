@@ -96,7 +96,7 @@ class CommandTests(CliTestCase):
         self.assertEqual(
             set(data["cards"][0]),
             {
-                "ref", "board", "path", "column", "title", "checked", "due", "tags", "body",
+                "ref", "board", "path", "column", "title", "checked", "due", "tags", "body", "type",
                 "column_limit", "source", "url", "state", "team", "pr", "read_only", "fetched_at",
                 "stale", "parent", "archived",
             },
@@ -153,6 +153,54 @@ class CommandTests(CliTestCase):
         card = self.run_json("add", "notes", directory=self.plain)["card"]
         data = self.run_json("edit", card["ref"], directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "usage")
+
+    def test_add_with_a_type(self):
+        card = self.run_json("add", "fix login #auth", "--type", "Bug", directory=self.plain)["card"]
+        self.assertEqual(card["title"], "fix login #type/bug #auth")
+        self.assertEqual(card["type"], "bug")
+        self.assertEqual(card["tags"], ["auth"])
+
+    def test_a_type_tag_in_the_text_is_the_type(self):
+        card = self.run_json("add", "fix login #type/chore", directory=self.plain)["card"]
+        self.assertEqual((card["type"], card["tags"]), ("chore", []))
+
+    def test_add_refuses_an_unknown_type(self):
+        data = self.run_json("add", "fix login", "--type", "epic", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "unknown_type")
+        self.assertIn("bug, feature, chore, docs, refactor", data["error"]["message"])
+
+    def test_types_come_from_the_config(self):
+        self.config.write_text(f'todos_dir = "{self.todos}"\ntypes = ["spike"]\n')
+        card = self.run_json("add", "try it", "--type", "spike", directory=self.plain)["card"]
+        self.assertEqual(card["type"], "spike")
+        data = self.run_json("add", "fix", "--type", "bug", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "unknown_type")
+
+    def test_edit_the_type(self):
+        card = self.run_json("add", "fix login #auth", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], "--type", "feature", directory=self.plain)
+        self.assertEqual(data["card"]["title"], "fix login #type/feature #auth")
+        data = self.run_json("edit", card["ref"], "--type", "bug", "--body", "detail", directory=self.plain)
+        self.assertEqual((data["card"]["title"], data["card"]["body"]), ("fix login #type/bug #auth", ["\tdetail"]))
+        data = self.run_json("edit", card["ref"], "--no-type", directory=self.plain)
+        self.assertEqual((data["card"]["title"], data["card"]["type"]), ("fix login #auth", None))
+
+    def test_edit_title_and_type(self):
+        card = self.run_json("add", "fix login", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], "--title", "fix logout #web", "--type", "bug",
+                             directory=self.plain)
+        self.assertEqual(data["card"]["title"], "fix logout #type/bug #web")
+
+    def test_edit_refuses_an_unknown_type(self):
+        card = self.run_json("add", "fix login", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], "--type", "epic", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "unknown_type")
+
+    def test_show_the_type(self):
+        card = self.run_json("add", "fix login", "--type", "bug", directory=self.plain)["card"]
+        out, _ = self.run_cli("show", card["ref"], directory=self.plain)
+        self.assertIn("type: bug", out.splitlines())
+        self.assertNotIn("tags: type/bug", out)
 
     def test_edit_refuses_a_linear_issue(self):
         data = self.run_json("edit", "ENG-12", "--title", "x", directory=self.plain, expect=1)

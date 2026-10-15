@@ -60,6 +60,20 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(HerdboardError):
             load_config(path)
 
+    def test_types_default(self):
+        self.assertEqual(load_config().types, ["bug", "feature", "chore", "docs", "refactor"])
+
+    def test_types_from_file(self):
+        path = self.write(self.dir / "a.toml", 'types = ["bug", "spike"]\n')
+        self.assertEqual(load_config(path).types, ["bug", "spike"])
+
+    def test_types_must_be_single_words(self):
+        for text in ('types = ["two words"]', 'types = [""]', 'types = ["a/b"]', 'types = ["#bug"]'):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "a.toml", text + "\n")
+                with self.assertRaises(HerdboardError):
+                    load_config(path)
+
     def test_argument_path(self):
         path = self.write(self.dir / "a.toml", 'columns = ["A", "B"]\n')
         self.assertEqual(load_config(path).columns, ["A", "B"])

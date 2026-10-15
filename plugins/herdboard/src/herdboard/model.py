@@ -16,6 +16,9 @@ CARD_START = re.compile(r"^- \[(?P<check>.)\] ")
 BLOCK_ID = re.compile(r" \^(?P<id>[A-Za-z0-9-]+)$")
 DUE_DATE = re.compile(r"📅 (?P<date>\d{4}-\d{2}-\d{2})")
 TAG = re.compile(r"(?<!\S)#(?P<tag>[^\s#]+)")
+# A card's type is an Obsidian nested tag, such as `#type/bug`.
+TYPE_TAG_PREFIX = "type/"
+TYPE_TAG = re.compile(r"(?<!\S)#type/[^\s#]*")
 # A sub-card's link to its parent card on the same board: an Obsidian block link.
 PARENT_LINK = re.compile(r"\[\[#\^(?P<id>t[0-9a-z]{3})\]\]")
 
@@ -62,6 +65,12 @@ class ParentError(HerdboardError):
     def __init__(self, message: str, code: str):
         super().__init__(message)
         self.code = code
+
+
+class UnknownTypeError(HerdboardError):
+    """A card type that is not in the config's `types`."""
+
+    code = "unknown_type"
 
 
 class IoError(HerdboardError):
@@ -239,6 +248,32 @@ def join_title(text: str, tags: list[str], due: str | None) -> str:
             raise HerdboardError(f"Due date {due!r} is not a real date") from error
         parts.append(f"📅 {due}")
     return " ".join(parts)
+
+
+def card_type(tags: list[str]) -> str | None:
+    """The name in the first `type/<name>` tag, or None."""
+    for tag in tags:
+        if tag.startswith(TYPE_TAG_PREFIX) and len(tag) > len(TYPE_TAG_PREFIX):
+            return tag[len(TYPE_TAG_PREFIX):]
+    return None
+
+
+def plain_tags(tags: list[str]) -> list[str]:
+    """The tags without the `type/<name>` tags."""
+    return [tag for tag in tags if not tag.startswith(TYPE_TAG_PREFIX)]
+
+
+def with_type(title: str, kind: str | None) -> str:
+    """The first-line text with its type tags removed, then `#type/<kind>` added before the other tags."""
+    text = " ".join(TYPE_TAG.sub("", title).split())
+    if not kind:
+        return text
+    tag = f"#{TYPE_TAG_PREFIX}{kind}"
+    starts = [m.start() for p in (TAG, DUE_DATE, PARENT_LINK) if (m := p.search(text))]
+    if not starts:
+        return f"{text} {tag}"
+    at = min(starts)
+    return f"{text[:at]}{tag} {text[at:]}"
 
 
 def parse_tags(text: str) -> list[str]:

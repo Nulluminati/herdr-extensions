@@ -35,7 +35,9 @@ from .model import (
     IoError,
     NotFoundError,
     ParentError,
+    card_type,
     parent_of,
+    plain_tags,
     with_parent,
 )
 
@@ -58,6 +60,8 @@ class CardView:
     tags: list[str]
     body: list[str]
     column_limit: int | None = None
+    # The card's type: a todo's `#type/<name>` tag, or a Linear label that names a configured type.
+    type: str | None = None
     # Linear cards fill the fields below; todos keep the defaults.
     source: str = "todo"
     url: str | None = None
@@ -390,9 +394,10 @@ class Store:
             title=card.title,
             checked=card.checked,
             due=card.due,
-            tags=card.tags,
+            tags=plain_tags(card.tags),
             body=list(card.body),
             column_limit=column.limit,
+            type=card_type(card.tags),
             parent=parent_of(card.title),
             archived=column.archive,
         )

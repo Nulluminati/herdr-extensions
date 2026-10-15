@@ -5,7 +5,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard.model import HerdboardError, join_title, parse_tags, split_title  # noqa: E402
+from herdboard.model import (  # noqa: E402
+    HerdboardError, card_type, join_title, parse_tags, plain_tags, split_title, with_type,
+)
 
 
 class SplitTitleTests(unittest.TestCase):
@@ -44,6 +46,38 @@ class JoinTitleTests(unittest.TestCase):
     def test_rejects_empty_text(self):
         with self.assertRaises(HerdboardError):
             join_title("  ", ["auth"], None)
+
+
+class CardTypeTests(unittest.TestCase):
+    def test_type_from_a_type_tag(self):
+        self.assertEqual(card_type(["auth", "type/bug"]), "bug")
+
+    def test_no_type(self):
+        self.assertIsNone(card_type(["auth"]))
+
+    def test_the_first_type_tag_wins(self):
+        self.assertEqual(card_type(["type/bug", "type/chore"]), "bug")
+
+    def test_plain_tags_leave_out_type_tags(self):
+        self.assertEqual(plain_tags(["auth", "type/bug", "web"]), ["auth", "web"])
+
+
+class WithTypeTests(unittest.TestCase):
+    def test_adds_the_type_before_the_tags(self):
+        self.assertEqual(with_type("Fix login #auth 📅 2026-11-01", "bug"),
+                         "Fix login #type/bug #auth 📅 2026-11-01")
+
+    def test_adds_the_type_at_the_end(self):
+        self.assertEqual(with_type("Fix login", "bug"), "Fix login #type/bug")
+
+    def test_adds_the_type_before_a_parent_link(self):
+        self.assertEqual(with_type("Fix login [[#^t5aa]]", "bug"), "Fix login #type/bug [[#^t5aa]]")
+
+    def test_replaces_the_type(self):
+        self.assertEqual(with_type("Fix login #type/feature #auth", "bug"), "Fix login #type/bug #auth")
+
+    def test_removes_the_type(self):
+        self.assertEqual(with_type("Fix login #type/bug #auth", None), "Fix login #auth")
 
 
 class ParseTagsTests(unittest.TestCase):

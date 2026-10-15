@@ -23,7 +23,7 @@ from .linear_states import refuse
 from .linear_writes import LinearWriter
 from .migrate import build_preview, preview_text
 from .migrate_convert import convert
-from .model import HerdboardError, IoError, NotFoundError, with_parent
+from .model import HerdboardError, IoError, NotFoundError, with_parent, with_type
 from .merge import Merger
 from .promote import Promoter
 from .review import Reviewer
@@ -85,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("add", "add a card, or with --linear a Linear issue assigned to you")
     sub.add_argument("text")
     sub.add_argument("--parent", help="make the todo a sub-card of this todo, on its board")
+    sub.add_argument("--type", help="the card's type, such as bug or feature (the `types` setting)")
     sub.add_argument("--column")
     sub.add_argument("--position", choices=["top", "bottom"], default="bottom")
     sub.add_argument("--board", help="board name: inbox or a project name")
@@ -126,6 +127,9 @@ def build_parser() -> argparse.ArgumentParser:
     parent = sub.add_mutually_exclusive_group()
     parent.add_argument("--parent", help="make the todo a sub-card of this todo, on the same board")
     parent.add_argument("--no-parent", action="store_true", help="make the sub-card a plain todo again")
+    kind = sub.add_mutually_exclusive_group()
+    kind.add_argument("--type", help="set the card's type, such as bug or feature (the `types` setting)")
+    kind.add_argument("--no-type", action="store_true", help="remove the card's type")
 
     sub = command("log", "add an entry to a card's activity log")
     sub.add_argument("ref")
@@ -326,6 +330,8 @@ def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] 
     lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
     if card.parent:
         lines.append(f"parent: {card.parent}")
+    if card.type:
+        lines.append(f"type: {card.type}")
     if card.due:
         lines.append(f"due: {card.due}")
     if card.tags:
@@ -461,6 +467,8 @@ def _cmd_add(ctx: _Context) -> dict:
         return _cmd_add_linear(ctx)
     if args.team or args.project or args.label or args.state:
         raise UsageError("--team, --project, --label and --state work only with --linear")
+    if args.type is not None:
+        args.text = with_type(args.text, ctx.config.type_named(args.type))
     hint = None
     if args.parent is not None:
         if LINEAR_REF.match(args.parent):
@@ -607,8 +615,12 @@ def _cmd_edit(ctx: _Context) -> dict:
     if args.body_file is not None:
         path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
         body = _read_todo_file(path)
-    if args.title is None and body is None and args.parent is None and not args.no_parent:
-        raise UsageError("Nothing to change: give --title, --body, --body-file, --parent or --no-parent")
+    if (args.title is None and body is None and args.parent is None and not args.no_parent
+            and args.type is None and not args.no_type):
+        raise UsageError(
+            "Nothing to change: give --title, --body, --body-file, --parent, --no-parent, --type or --no-type"
+        )
+    kind = ctx.config.type_named(args.type) if args.type is not None else None
     # A guard against mistakes, not a security boundary: the card text is the user's.
     pane = os.environ.get("HERDR_PANE_ID")
     if pane and pane in card_agent_panes():
@@ -617,9 +629,12 @@ def _cmd_edit(ctx: _Context) -> dict:
             f'Record progress with `herdboard log {args.ref} "..."` instead.'
         )
     lines = body.splitlines() if body is not None else None
+    title = args.title
+    if args.type is not None or args.no_type:
+        title = with_type(title if title is not None else ctx.store.show(args.ref).title, kind)
     card = None
-    if args.title is not None or lines is not None:
-        card = ctx.store.edit(args.ref, title=args.title, body=lines)
+    if title is not None or lines is not None:
+        card = ctx.store.edit(args.ref, title=title, body=lines)
     if args.parent is not None or args.no_parent:
         if args.parent is not None and LINEAR_REF.match(args.parent):
             raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+import re
 from pathlib import Path
 import tomllib
 
-from .model import HerdboardError, IoError
+from .model import HerdboardError, IoError, UnknownTypeError
 
 DEFAULT_COLUMNS = ["Backlog", "Todo", "In progress", "Review", "Done"]
 DEFAULT_LINEAR_COLUMNS = {
@@ -24,6 +25,8 @@ DEFAULT_DONE_DAYS = 14
 # pi's thinking levels (`pi --thinking`).
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 MERGE_MODES = ("local", "pr")
+# The names that a card's `#type/<name>` tag takes in `add --type`, `edit --type` and the board.
+DEFAULT_TYPES = ["bug", "feature", "chore", "docs", "refactor"]
 
 
 @dataclass
@@ -70,10 +73,18 @@ class Config:
     theme: str = "ansi-dark"
     # "round" draws tag ends with Nerd Font half circles; "block" needs no special font.
     tag_style: str = "round"
+    types: list[str] = field(default_factory=lambda: list(DEFAULT_TYPES))
 
     def __post_init__(self):
         if self.start_column is None:
             self.start_column = self.linear.columns["started"]
+
+    def type_named(self, name: str) -> str:
+        """The configured type that `name` names, in any letter case."""
+        for kind in self.types:
+            if kind.casefold() == name.strip().casefold():
+                return kind
+        raise UnknownTypeError(f"Unknown type {name!r}: use one of {', '.join(self.types)}")
 
 
 def config_path(path: Path | None = None) -> Path:
@@ -213,4 +224,9 @@ def load_config(path: Path | None = None) -> Config:
         if tag_style not in ("round", "block"):
             raise HerdboardError(f"{path}: tag_style must be round or block")
         config.tag_style = tag_style
+    types = _string_list(path, data, "types")
+    if types is not None:
+        if not all(re.fullmatch(r"[A-Za-z0-9_-]+", kind) for kind in types):
+            raise HerdboardError(f"{path}: types must be single words, such as bug or feature")
+        config.types = types
     return config
