@@ -136,6 +136,8 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 | `worktree removed` | The card's worktree folder is gone |
 | `worktree still exists` | The card is in Done, but its worktree is still there. Run `finish` |
 
+The board checks planner panes every two seconds. If Herdr cannot answer, the marker keeps the recorded planner type. A missing or unreadable planning state file hides only the planning markers, not the cards.
+
 ## Work on a card
 
 ### Plan before the work

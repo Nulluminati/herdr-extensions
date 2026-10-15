@@ -1,4 +1,5 @@
 """The board shows a planner without moving its card to another column."""
+import fcntl
 import sys
 import threading
 from pathlib import Path
@@ -8,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard import cli, plan, start  # noqa: E402
-from herdboard.board import card_text  # noqa: E402
+from herdboard.board import RELOAD_SECONDS, card_text  # noqa: E402
+from herdboard.model import IoError  # noqa: E402
 from test_herdboard_board import BoardTestCase, SIZE  # noqa: E402
 
 
@@ -66,6 +68,94 @@ class PlanningBoardTests(BoardTestCase):
             await pilot.pause()
             self.assertNotIn("planning:", self.cards(app)[0])
 
+    def test_the_refresh_interval_stays_at_two_seconds(self):
+        self.assertEqual(RELOAD_SECONDS, 2.0)
+
+    async def test_bad_planning_json_does_not_hide_the_cards(self):
+        self.record()
+        plan._plans_path().write_text("{", encoding="utf-8")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertEqual(self.cards(app), ["Plan login"])
+            self.assertFalse(app._notifications)
+
+    async def test_a_planning_read_error_does_not_hide_the_cards(self):
+        self.record()
+        app = self.make_app()
+        with patch.object(plan, "_read", side_effect=IoError("Cannot read planning state")):
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause()
+                self.assertEqual(self.cards(app), ["Plan login"])
+                self.assertFalse(app._notifications)
+
+    async def test_a_busy_start_lock_does_not_hide_the_cards(self):
+        self.record()
+        with (start.state_dir() / ".starts.lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            app = self.make_app()
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause()
+                self.assertIn("planning: pi", self.cards(app)[0])
+                self.assertFalse(app._notifications)
+
+    async def test_a_herdr_failure_during_load_keeps_the_cards_and_recorded_marker(self):
+        self.record()
+        self.pane_exists.side_effect = start.StartError("Herdr is not reachable", "herdr_unavailable")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertIn("Plan login", self.cards(app)[0])
+            self.assertIn("planning: pi", self.cards(app)[0])
+            self.assertFalse(app._notifications)
+            self.pane_exists.side_effect = None
+            self.pane_exists.return_value = False
+            await app.check_files()
+            await pilot.pause()
+            self.assertEqual(self.cards(app), ["Plan login"])
+
+    async def test_a_broken_state_file_clears_the_marker_without_blocking_other_changes(self):
+        self.record()
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertIn("planning: pi", self.cards(app)[0])
+            plan._plans_path().write_text("{", encoding="utf-8")
+            self.store.add(self.repo_path, "Another card", "Todo")
+            await app.check_files()
+            await pilot.pause()
+            self.assertEqual(self.cards(app), ["Plan login", "Another card"])
+            self.assertFalse(app._notifications)
+
+    async def test_archive_markers_show_on_load_and_survive_reload(self):
+        # An external board edit can archive a card without the CLI's active-planner guard.
+        self.store.archive(self.card.ref)
+        self.record()
+        app = self.make_app()
+        app.show_archive = True
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertIn("planning: pi", self.cards(app)[0])
+            await app.reload()
+            await pilot.pause()
+            self.assertIn("planning: pi", self.cards(app)[0])
+            self.pane_exists.return_value = False
+            await app.check_files()
+            await pilot.pause()
+            self.assertNotIn("planning:", self.cards(app)[0])
+
+    async def test_a_new_archive_marker_appears_on_the_next_check(self):
+        self.store.archive(self.card.ref)
+        app = self.make_app()
+        app.show_archive = True
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertNotIn("planning:", self.cards(app)[0])
+            self.record()
+            await app.check_files()
+            await pilot.pause()
+            self.assertIn("planning: pi", self.cards(app)[0])
+
     async def test_pane_checks_run_outside_the_event_loop(self):
         self.record()
         threads = []
@@ -113,6 +203,30 @@ class PlanningStatusTests(BoardTestCase):
         self.pane_exists.side_effect = start.StartError("Herdr is not reachable", "herdr_unavailable")
         plan.mark_planning([self.card])
         self.assertEqual(self.card.planning, "pi")
+
+    def test_an_unreadable_state_clears_a_previous_marker(self):
+        self.card.planning = "pi"
+        with patch.object(plan, "_read", side_effect=IoError("Cannot read planning state")):
+            plan.mark_planning([self.card])
+        self.assertIsNone(self.card.planning)
+        self.pane_exists.assert_not_called()
+
+    def test_the_running_guard_ignores_malformed_pane_records(self):
+        for record in (None, [], {}, {"pane_id": 7}, {"pane_id": ""}):
+            with self.subTest(record=record):
+                start._write(start.state_dir() / "plans.json", {self.card.ref: record})
+                self.assertIsNone(plan.running_planner(self.card.ref))
+        self.pane_exists.assert_not_called()
+
+    def test_the_running_guard_still_blocks_if_the_planner_kind_is_missing(self):
+        start._write(start.state_dir() / "plans.json", {self.card.ref: {"pane_id": "w1:p7"}})
+        self.assertEqual(plan.running_planner(self.card.ref), "w1:p7")
+
+    def test_the_running_guard_keeps_errors_visible(self):
+        start._write(start.state_dir() / "plans.json", {self.card.ref: {"pane_id": "w1:p7"}})
+        self.pane_exists.side_effect = start.StartError("Herdr is not reachable", "herdr_unavailable")
+        with self.assertRaises(start.StartError):
+            plan.running_planner(self.card.ref)
 
     def test_a_linear_card_shows_the_marker_too(self):
         self.card.ref = "ENG-12"

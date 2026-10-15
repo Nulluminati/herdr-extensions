@@ -1262,7 +1262,6 @@ class HerdboardApp(App):
             data = by_key.setdefault(card.column.casefold(), ColumnData(card.column))
             data.cards.append(card)
         mark_removed([card for data in by_key.values() for card in data.cards])
-        mark_planning([card for data in by_key.values() for card in data.cards])
         mark_family([card for data in by_key.values() for card in data.cards])
         if len(paths) == 1 and not linear:
             ordered = list(by_key.values())
@@ -1271,7 +1270,10 @@ class HerdboardApp(App):
             ordered = [by_key[key] for key in wanted if key in by_key]
             ordered += [data for key, data in by_key.items() if key not in wanted]
         # The archive column is last, apart from a column with the same name.
-        return ordered + [archive] if self.show_archive else ordered
+        if self.show_archive:
+            ordered.append(archive)
+        mark_planning([card for data in ordered for card in data.cards])
+        return ordered
 
     def current_card(self) -> CardView | None:
         if not self.columns:

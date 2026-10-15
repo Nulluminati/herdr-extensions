@@ -187,7 +187,7 @@ class Planner:
                 running = _read(_plans_path()).get(ref)
             # A planner whose pane is gone, after a worker that died, does not block a new one. The pane
             # counts, not the agent: Herdr can show no agent while Claude waits at its folder trust prompt.
-            if isinstance(running, dict) and _pane_exists(running["pane_id"]):
+            if _planner_pane(running) is not None:
                 raise PlanError(f"A planner for {ref} still runs in pane {running['pane_id']}", "plan_running")
             plan_file = attachments.plan_path(self.config, ref)
             notes = []
@@ -237,29 +237,37 @@ def _pane_exists(pane: str) -> bool:
     return herdr("pane", "get", pane, tolerated=("pane_not_found",)) is not None
 
 
+def _planner_pane(record) -> str | None:
+    """The live pane in a planner record. Herdr errors stay visible to the caller."""
+    if not isinstance(record, dict):
+        return None
+    pane = record.get("pane_id")
+    if not isinstance(pane, str) or not pane:
+        return None
+    return pane if _pane_exists(pane) else None
+
+
 def running_planner(ref: str) -> str | None:
     """The pane of the card's planner while it still runs, else None."""
     with _lock(wait=2):
         running = _read(_plans_path()).get(ref)
-    if isinstance(running, dict) and isinstance(running.get("pane_id"), str) and _pane_exists(running["pane_id"]):
-        return running["pane_id"]
-    return None
+    return _planner_pane(running)
 
 
 def mark_planning(cards) -> None:
-    """Set the board-only planner kind for cards whose recorded planner pane still exists."""
-    with _lock(wait=2):
+    """Set optional board-only planner status without letting state-file errors hide the cards."""
+    try:
+        # Writers replace the file atomically; this optional status needs no read lock.
         records = _read(_plans_path())
+    except HerdboardError:
+        records = {}
     for card in cards:
         card.planning = None
         record = records.get(card.ref)
         if not isinstance(record, dict) or record.get("kind") not in ("claude", "pi"):
             continue
-        pane = record.get("pane_id")
-        if not isinstance(pane, str) or not pane:
-            continue
         try:
-            exists = _pane_exists(pane)
+            exists = _planner_pane(record) is not None
         except HerdboardError:
             # A failed Herdr check does not mean that planning ended; keep the recorded kind.
             exists = True
