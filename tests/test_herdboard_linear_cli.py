@@ -504,6 +504,12 @@ class PinTests(LinearCliCase):
         error = self.run_json("pin", "ENG-1", "--repo", "nope", directory=self.plain, expect=1)["error"]
         self.assertEqual(error["code"], "not_found")
 
+    def test_repo_option_falls_back_to_a_relative_checkout(self):
+        self.board()
+        # The checkout folder is `api`; its board is `acme-api`.
+        self.run_json("pin", "ENG-1", "--repo", "api", directory=self.repo.parent)
+        self.assertEqual([p.identifier for p in self.pins()], ["ENG-1"])
+
     def test_needs_a_repository_board(self):
         self.assertIn("herdboard init", self.run_json("pin", "ENG-1", directory=self.repo, expect=1)["error"]["message"])
         self.assertIn("Not in a Git repository",

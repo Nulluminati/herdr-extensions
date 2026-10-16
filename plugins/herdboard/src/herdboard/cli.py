@@ -999,14 +999,20 @@ def _pin_board(ctx: _Context, repo: str | None) -> Path:
         board = ctx.repo_board()
         if board is None:
             raise HerdboardError(INIT_MESSAGE)
-    elif "/" not in repo and not repo.startswith(("~", ".")):
-        board = ctx.store.resolve_board(repo)
     else:
-        path = ctx.directory / Path(repo).expanduser()
-        identity = repo_identity(path) if path.is_dir() else None
-        board = path if path.is_file() else ctx.store.board_for_repo(identity) if identity else None
+        board = None
+        if "/" not in repo and not repo.startswith(("~", ".")):
+            try:
+                board = ctx.store.resolve_board(repo)
+            except NotFoundError:
+                pass
         if board is None:
-            raise NotFoundError(f"{repo}: no repository board")
+            # Like `start --repo`: a name that no board has can still be a checkout.
+            path = ctx.directory / Path(repo).expanduser()
+            identity = repo_identity(path) if path.is_dir() else None
+            board = path if path.is_file() else ctx.store.board_for_repo(identity) if identity else None
+        if board is None:
+            raise NotFoundError(f"{repo}: no board and no checkout with a board")
     if not ctx.store.board_meta(board).repo:
         raise HerdboardError(f"{board}: Linear issues pin only to a repository board")
     return board
