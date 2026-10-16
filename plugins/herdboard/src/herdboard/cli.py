@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity, agent_review, attachments, plan, pr_write
+from . import activity, agent_review, attachments, plan, pr_reviews, pr_write
 from .agent_review import AgentReviewer
 from .plan import Planner
 from .config import THINKING_LEVELS, config_path, load_config
@@ -29,7 +29,7 @@ from .merge import Merger
 from .promote import Promoter
 from .review import Reviewer
 from .store import CardView, Store
-from .start import Starter, card_agent_panes, register_checkout
+from .start import Starter, _main_checkout, card_agent_panes, register_checkout
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
 
 INIT_HINT = "Run `herdboard init` to create a board for this repository."
@@ -221,6 +221,28 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--force", action="store_true",
                      help="finish an unmerged card; its branch is kept, and uncommitted work still stops it")
 
+    command("prs", "list the open GitHub pull requests of this repository, with review markers")
+
+    sub = command("pr-review", "have an agent review a pull request in its own workspace, with notes in Hunk")
+    sub.add_argument("number", type=int)
+    sub.add_argument("--agent", choices=["claude", "pi"], help="the reviewer; default: start_agent")
+    sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi reviewer's thinking level")
+
+    sub = command("pr-review-wait", "wait for a pull request reviewer and notify (run by pr-review)")
+    sub.add_argument("key", help="owner/repo#N")
+
+    sub = command("pr-review-refresh", "fetch a reviewed pull request's new commits and open Hunk again")
+    sub.add_argument("number", type=int)
+
+    sub = command("pr-review-go", "go to a pull request review's Herdr workspace")
+    sub.add_argument("number", type=int)
+
+    sub = command("pr-review-finish", "close a pull request review: its workspace, worktree and branch")
+    sub.add_argument("number", type=int)
+    sub.add_argument("--force", action="store_true",
+                     help="also with notes of yours that are not submitted, or changes in the worktree")
+
     sub = command("doctor", "check boards, configuration, Linear links and state")
     sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
     sub.add_argument("--offline", action="store_true", help="skip Linear checks")
@@ -242,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("term", help="search text, or an identifier such as ENG-123 for any team")
     sub = command("board", "show the board view")
     view_options(sub)
+    sub.add_argument("--prs", action="store_true", help="open on the pull request list")
     return parser
 
 
@@ -821,6 +844,71 @@ def _finish_line(result: dict) -> str:
     return f"{result['ref']}: finished; {worktree}; {branch}"
 
 
+def _pr_target(ctx: _Context) -> tuple[Path, str]:
+    """The main checkout of this repository, and its GitHub `owner/repo`."""
+    checkout = _main_checkout(ctx.directory)
+    if checkout is None:
+        raise HerdboardError("Not in a Git repository.")
+    return checkout, pr_reviews.base_repository(checkout)
+
+
+def _pr_key(ctx: _Context) -> str:
+    return pr_reviews.review_key(_pr_target(ctx)[1], ctx.args.number)
+
+
+def _cmd_prs(ctx: _Context) -> dict:
+    checkout, repo = _pr_target(ctx)
+    prs = pr_reviews.list_prs(checkout, repo)
+    pr_reviews.annotate(prs, repo, pr_reviews.records())
+    return {"repo": repo, "prs": [pr.to_dict() for pr in prs], "marks": [pr.marks() for pr in prs]}
+
+
+def _cmd_pr_review(ctx: _Context) -> dict:
+    args, config = ctx.args, ctx.config
+    kind = args.agent or config.start_agent
+    model = args.model or (config.start_model if kind == config.start_agent else None)
+    thinking = args.thinking or (config.start_thinking if kind == "pi" else None)
+    checkout, repo = _pr_target(ctx)
+    return pr_reviews.request(checkout, repo, args.number, kind, model, thinking)
+
+
+def _cmd_pr_review_wait(ctx: _Context) -> dict:
+    return {"key": ctx.args.key, "exit_code": pr_reviews.wait(ctx.args.key)}
+
+
+def _cmd_pr_review_refresh(ctx: _Context) -> dict:
+    return pr_reviews.refresh(_pr_key(ctx))
+
+
+def _cmd_pr_review_go(ctx: _Context) -> dict:
+    return pr_reviews.go(_pr_key(ctx))
+
+
+def _cmd_pr_review_finish(ctx: _Context) -> dict:
+    return pr_reviews.finish(_pr_key(ctx), force=ctx.args.force)
+
+
+def _pr_text(command: str, result: dict) -> str:
+    if command == "prs":
+        if not result["prs"]:
+            return f"No open pull requests in {result['repo']}."
+        return "\n".join(f"#{pr['number']}\t{pr['title']}\t{pr['author']}\t{', '.join(marks)}".rstrip()
+                         for pr, marks in zip(result["prs"], result["marks"]))
+    number = result.get("number")
+    if command == "pr-review":
+        model = f" ({result['model']})" if result["model"] else ""
+        return (f"PR #{number}: {result['agent']}{model} reviews in workspace {result['workspace_id']}; "
+                f"Hunk in {result['hunk_pane']}.")
+    if command == "pr-review-refresh":
+        lines = [f"PR #{number}: Hunk opened again in {result['hunk_pane']}; {result['kept']} notes kept."]
+        lines += [f"Note on no diff line any more: {note}" for note in result["dropped"]]
+        return "\n".join(lines)
+    if command == "pr-review-go":
+        return f"{result['key']}: workspace {result['workspace_id']}"
+    branch = "branch deleted" if result["branch_deleted"] else "branch kept"
+    return f"PR #{number}: finished; worktree removed; {branch}"
+
+
 def _cmd_init(ctx: _Context) -> dict:
     if ctx.identity is None:
         raise HerdboardError("Not in a Git repository.")
@@ -1103,6 +1191,12 @@ COMMANDS = {
     "pin": _cmd_pin,
     "search": _cmd_search,
     "board": _cmd_board,
+    "prs": _cmd_prs,
+    "pr-review": _cmd_pr_review,
+    "pr-review-wait": _cmd_pr_review_wait,
+    "pr-review-refresh": _cmd_pr_review_refresh,
+    "pr-review-go": _cmd_pr_review_go,
+    "pr-review-finish": _cmd_pr_review_finish,
 }
 
 
@@ -1148,7 +1242,13 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command in ("review-wait", "pr-wait", "plan-wait"):
+    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait"):
+        return
+    if command in ("prs", "pr-review", "pr-review-refresh", "pr-review-go", "pr-review-finish"):
+        if as_json:
+            _emit_json({k: v for k, v in result.items() if k != "marks"})
+        else:
+            print(_pr_text(command, result))
         return
     if command == "plan":
         if as_json:
@@ -1329,7 +1429,7 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](_Context(args))
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json)
-        if args.command in ("review-wait", "pr-wait", "plan-wait"):
+        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait"):
             return result["exit_code"]
     except HerdboardError as error:
         if as_json:

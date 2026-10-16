@@ -535,6 +535,88 @@ class NoteTests(CliTestCase):
         self.assertNotIn("---", out)
 
 
+class PullRequestReviewTests(CliTestCase):
+    """The pull request review commands. `pr_reviews` is replaced, so nothing calls gh, Hunk or Herdr."""
+
+    def setUp(self):
+        super().setUp()
+        from herdboard import pr_reviews
+        self.pr_reviews = pr_reviews
+        self.enterContext(mock.patch.object(pr_reviews, "base_repository", return_value="acme/api"))
+
+    def patch(self, name, **options):
+        return self.enterContext(mock.patch.object(self.pr_reviews, name, **options))
+
+    def test_prs_lists_the_open_prs_with_markers(self):
+        pr = self.pr_reviews.PullRequest(7, "Fix login", "https://github.com/acme/api/pull/7", "octo", True,
+                                         "a" * 40, "fix", True, False)
+        self.patch("list_prs", return_value=[pr])
+        self.patch("records", return_value={"acme/api#7": {"status": "reviewed", "reviewed_sha": "b" * 40}})
+        data = self.run_json("prs", directory=self.repo)
+        self.assertEqual(data["repo"], "acme/api")
+        self.assertEqual(data["prs"][0]["number"], 7)
+        self.assertTrue(data["prs"][0]["new_commits"])
+        out, _ = self.run_cli("prs", directory=self.repo)
+        self.assertIn("#7", out)
+        self.assertIn("draft, review requested, reviewed, new commits", out)
+
+    def test_prs_without_any(self):
+        self.patch("list_prs", return_value=[])
+        self.patch("records", return_value={})
+        out, _ = self.run_cli("prs", directory=self.repo)
+        self.assertEqual(out, "No open pull requests in acme/api.\n")
+
+    def test_pr_review_uses_the_main_checkout_and_the_options(self):
+        request = self.patch("request", return_value={
+            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
+            "hunk_session": "s1", "agent": "pi", "agent_name": "pr-api-7", "model": "zai/glm-5.3",
+            "thinking": "high", "prompted": False})
+        data = self.run_json("pr-review", "7", "--agent", "pi", "--model", "zai/glm-5.3", "--thinking", "high",
+                             directory=self.repo)
+        self.assertEqual(data["workspace_id"], "w9")
+        checkout, repo, number, kind, model, thinking = request.call_args.args
+        self.assertEqual(Path(checkout).resolve(), self.repo.resolve())
+        self.assertEqual((repo, number, kind, model, thinking), ("acme/api", 7, "pi", "zai/glm-5.3", "high"))
+
+    def test_pr_review_defaults_to_the_start_agent(self):
+        self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "claude"\nstart_model = "opus"\n')
+        request = self.patch("request", return_value={
+            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
+            "hunk_session": "s1", "agent": "claude", "agent_name": "pr-api-7", "model": "opus",
+            "thinking": None, "prompted": False})
+        out, _ = self.run_cli("pr-review", "7", directory=self.repo)
+        self.assertEqual(request.call_args.args[3:], ("claude", "opus", None))
+        self.assertIn("PR #7: claude (opus) reviews in workspace w9", out)
+
+    def test_pr_review_wait_returns_the_worker_code(self):
+        wait = self.patch("wait", return_value=1)
+        self.run_cli("pr-review-wait", "acme/api#7", directory=self.plain, expect=1)
+        wait.assert_called_once_with("acme/api#7")
+
+    def test_refresh_go_and_finish_take_the_number(self):
+        self.patch("refresh", return_value={"key": "acme/api#7", "number": 7, "hunk_pane": "w9:p3",
+                                            "hunk_session": "s2", "kept": 2, "dropped": ["a.py:1: old"],
+                                            "agent": "claude", "model": None, "thinking": None})
+        self.patch("go", return_value={"key": "acme/api#7", "workspace_id": "w9"})
+        finish = self.patch("finish", return_value={"key": "acme/api#7", "number": 7, "worktree_removed": True,
+                                                    "branch_deleted": True})
+        out, _ = self.run_cli("pr-review-refresh", "7", directory=self.repo)
+        self.assertIn("2 notes kept", out)
+        self.assertIn("a.py:1: old", out)
+        self.assertEqual(self.run_json("pr-review-go", "7", directory=self.repo)["workspace_id"], "w9")
+        self.assertTrue(self.run_json("pr-review-finish", "7", "--force", directory=self.repo)["branch_deleted"])
+        finish.assert_called_with("acme/api#7", force=True)
+
+    def test_an_error_has_its_code(self):
+        self.patch("finish", side_effect=self.pr_reviews.PrReviewError("notes left", "unsent_notes"))
+        data = self.run_json("pr-review-finish", "7", directory=self.repo, expect=1)
+        self.assertEqual(data["error"]["code"], "unsent_notes")
+
+    def test_outside_a_repository(self):
+        data = self.run_json("prs", directory=self.plain, expect=1)
+        self.assertIn("Git repository", data["error"]["message"])
+
+
 class ModuleTests(unittest.TestCase):
     def test_python_m_help(self):
         env = {**os.environ, "PYTHONPATH": str(SRC)}
