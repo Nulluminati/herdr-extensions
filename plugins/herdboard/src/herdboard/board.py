@@ -259,9 +259,10 @@ class CardWidget(Static):
             app.open_card_menu(self.card)
         elif event.button == 1 and event.chain == 1:
             app.select_card(self.card)
-        elif event.button == 1 and event.chain == 2:
-            app.select_card(self.card)
-            app.action_detail()
+        elif event.button == 1 and event.chain == 2 and app.select_card(self.card):
+            # From the app's own message pump: a reload can replace this widget while the detail is open,
+            # and the detail's result goes to the pump that opened it.
+            app.call_next(app.action_detail)
 
 
 class ColumnHeader(Static):
@@ -513,6 +514,8 @@ class DetailScreen(ModalBase):
             if any(line.strip() for line in body):
                 block = RichStatic(detail_lines(body, self._selected(), self.card.source != "linear"),
                                    id="detail-body", classes="detail-block")
+                # A text drag that ends on a checklist line would also check it.
+                block.ALLOW_SELECT = not self.items
                 block.border_title = "Details"
                 yield block
             for note in self.notes:
@@ -1056,7 +1059,7 @@ class CardMenuScreen(ModalBase):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(self.title_text)
+            yield RichStatic(Text(self.title_text), id="card-menu-title")
             yield OptionList(*(label for label, _ in self.actions), id="card-menu")
             yield Label("enter or click: run, escape: cancel", classes="dim")
 
@@ -1809,7 +1812,8 @@ class HerdboardApp(App):
                 await self.run_action(action)
 
         title = split_title(card.title)[0] if card.source != "linear" else card.title
-        self.push_screen(CardMenuScreen(title or card.title, card_actions(card)), chosen)
+        # From the app's own message pump, so the choice still runs when a reload replaces the card widget.
+        self.call_next(self.push_screen, CardMenuScreen(title or card.title, card_actions(card)), chosen)
 
     def _column_at(self, x: int, y: int) -> int | None:
         """The index of the board column at a screen position, or None."""

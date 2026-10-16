@@ -108,6 +108,15 @@ class DetailClickTests(MouseTestCase):
             self.assertEqual([line.strip() for line in self.store.show(card.ref).body], ["Intro", "- [ ] step one", "- [x] step two"])
             self.assertIsInstance(app.screen, DetailScreen)
 
+    async def test_the_checklist_block_selects_no_text(self):
+        # A text drag that ends on a checklist line would also check it.
+        card = self.store.add(self.repo_path, "list card", "Backlog", body=["- [ ] step one"])
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await self.open_detail(pilot, card.ref)
+            self.assertFalse(app.screen.query_one("#detail-body").allow_select)
+            self.assertTrue(app.screen.query_one("#detail-meta").allow_select)
+
     async def test_a_click_on_another_line_changes_nothing(self):
         card = self.store.add(self.repo_path, "list card", "Backlog", body=["Intro", "- [ ] step one"])
         app = self.make_app()
@@ -336,6 +345,64 @@ class MenuTests(MouseTestCase):
             await pilot.press("escape")
             await settle(pilot)
             self.assertNotIsInstance(app.screen, CardMenuScreen)
+            self.assertNotIsInstance(app.screen, DetailScreen)
+
+    async def remount_todo_column(self, pilot):
+        """A change to another card of the column: the reload replaces every card widget there."""
+        old = list(self.column(pilot.app, "Todo").query(CardWidget))
+        self.store.edit(self.first.ref, title="first todo, changed elsewhere")
+        await pilot.app.reload()
+        await pilot.pause()
+        self.assertFalse(any(widget.is_attached for widget in old))
+
+    async def test_a_menu_choice_runs_after_a_reload_replaced_the_card(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, self.second.ref)
+            await pilot.click(widget, offset=self.marker_offset(widget))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, CardMenuScreen)
+            await self.remount_todo_column(pilot)
+            await self.choose(pilot, "edit")
+            self.assertIsInstance(app.screen, EditScreen)
+
+    async def test_e_in_a_double_clicked_detail_works_after_a_reload_replaced_the_card(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, self.second.ref)
+            await pilot.click(widget, offset=content_offset(widget), times=2)
+            await pilot.pause()
+            self.assertIsInstance(app.screen, DetailScreen)
+            await self.remount_todo_column(pilot)
+            await pilot.press("e")
+            await settle(pilot)
+            self.assertIsInstance(app.screen, EditScreen)
+            self.assertEqual(app.screen.card.ref, self.second.ref)
+
+    async def test_the_menu_shows_a_title_with_brackets_as_text(self):
+        card = self.store.add(self.repo_path, "Fix the [/auth] bug", "Review")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, card.ref)
+            await pilot.click(widget, offset=self.marker_offset(widget))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, CardMenuScreen)
+            self.assertIn("Fix the [/auth] bug", app.screen.query_one("#card-menu-title").render().plain)
+
+    async def test_a_double_click_on_a_card_that_a_reload_removed_opens_no_detail(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, self.waiting.ref)
+            self.store.delete(self.waiting.ref)
+            await app.reload()
+            await pilot.pause()
+            self.assertTrue(app.select_card(self.widget(app, self.first.ref).card))
+            widget.on_click(mock.Mock(button=1, chain=2, style=mock.Mock(meta={})))
+            await pilot.pause()
             self.assertNotIsInstance(app.screen, DetailScreen)
 
     def test_help_lists_the_mouse(self):
