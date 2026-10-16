@@ -30,9 +30,9 @@ class OpenBoardTests(unittest.TestCase):
         self.calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, "{}", "")
 
-    def run_script(self):
+    def run_script(self, *argv):
         with patch.object(open_board.subprocess, "run", self.fake_run):
-            return open_board.main()
+            return open_board.main(list(argv))
 
     def test_opens_the_board_tab_in_the_focused_pane_directory(self):
         os.environ["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"focused_pane_cwd": "/work/api"})
@@ -56,13 +56,22 @@ class OpenBoardTests(unittest.TestCase):
 
         self.assertNotIn("--cwd", self.calls[0])
 
-    def test_manifest_declares_the_action_and_the_pane(self):
+    def test_prs_opens_the_pull_request_entrypoint(self):
+        os.environ["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"focused_pane_cwd": "/work/api"})
+
+        self.assertEqual(self.run_script("prs"), 0)
+
+        self.assertEqual(self.calls[0][self.calls[0].index("--entrypoint") + 1], "prs")
+
+    def test_manifest_declares_the_actions_and_the_panes(self):
         manifest = tomllib.loads((PLUGIN / "herdr-plugin.toml").read_text())
 
         self.assertEqual(manifest["id"], "nulluminati.herdboard")
-        self.assertEqual([action["id"] for action in manifest["actions"]], ["board"])
+        self.assertEqual([action["id"] for action in manifest["actions"]], ["board", "prs"])
         self.assertEqual(manifest["actions"][0]["command"], ["python3", "bin/open_board.py"])
-        self.assertEqual([pane["id"] for pane in manifest["panes"]], ["board"])
+        self.assertEqual(manifest["actions"][1]["command"], ["python3", "bin/open_board.py", "prs"])
+        self.assertEqual([pane["id"] for pane in manifest["panes"]], ["board", "prs"])
+        self.assertIn("herdboard board --prs", manifest["panes"][1]["command"][-1])
 
 
 if __name__ == "__main__":

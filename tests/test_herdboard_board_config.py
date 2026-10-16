@@ -614,6 +614,11 @@ class BoardCommandTests(CliTestCase):
         self.init_repo_board()
         self.assertIsNone(board_arguments(self)["resolve_link"])
 
+    def test_prs_opens_the_board_on_the_pull_request_list(self):
+        self.init_repo_board()
+        self.assertFalse(board_arguments(self)["open_prs"])
+        self.assertTrue(board_arguments(self, "--prs")["open_prs"])
+
 
 class BoardCommandLinearTests(LinearCliCase):
     def test_the_board_looks_up_a_project_and_its_labels(self):

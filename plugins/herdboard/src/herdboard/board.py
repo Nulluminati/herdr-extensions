@@ -23,11 +23,11 @@ from textual.containers import Container, Horizontal, HorizontalScroll, Vertical
 from textual.driver import Driver
 from textual.errors import NoWidget
 from textual.drivers.linux_driver import LinuxDriver
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
-from . import activity, attachments
+from . import activity, attachments, pr_reviews
 from .linear import LinearAuthError
 from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
@@ -51,6 +51,11 @@ LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
 START_GROUP = "card-start"
+PR_GROUP = "pull-requests"
+# How often the pull request list reads GitHub again, the same as the PR state check of the board.
+PR_SECONDS = 60.0
+PR_MARK_STYLES = {"draft": "dim", "review requested": "bold yellow", "mine": "cyan", "reviewing": "bold cyan",
+                  "reviewed": "bold green", "failed": "bold red", "new commits": "bold magenta"}
 DETAIL_LOG_ENTRIES = 10
 PR_STYLES = {"merged": "bold green", "closed": "bold yellow"}
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
@@ -110,6 +115,13 @@ HELP_KEYS = [
     ("u", "remove the pin of a pinned Linear issue"),
     ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
     ("r", "reload, and fetch Linear again"),
+    ("G", "the open GitHub pull requests of this repository; G or escape goes back to the board"),
+    ("G, enter or s", "on a pull request: choose an agent and its model; it reviews the PR with notes in Hunk"),
+    ("G, g", "on a pull request: go to its review workspace"),
+    ("G, u", "on a pull request: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
+    ("G, f", "on a pull request: finish the review: close the workspace, remove the worktree and pr/N branch"),
+    ("G, o", "on a pull request: open it in the browser"),
+    ("G, r", "on the pull request list: read GitHub again"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
     ("q", "quit"),
@@ -1301,6 +1313,278 @@ class ConfigScreen(ModalBase):
                                project, [label for label in labels if label], set(self.removed_pins), display=display)
 
 
+class PullRequestService:
+    """The pull request list's calls into `pr_reviews`, for the main checkout of the board's directory."""
+
+    def __init__(self, directory: Path):
+        self.directory = Path(directory)
+        self._target: tuple[Path, str] | None = None
+
+    def target(self) -> tuple[Path, str]:
+        if self._target is None:
+            checkout = start_module._main_checkout(self.directory)
+            if checkout is None:
+                raise HerdboardError(f"{self.directory} is not in a Git repository")
+            self._target = (checkout, pr_reviews.base_repository(checkout))
+        return self._target
+
+    def key(self, number: int) -> str:
+        return pr_reviews.review_key(self.target()[1], number)
+
+    def list(self) -> tuple[str, list[pr_reviews.PullRequest]]:
+        checkout, repo = self.target()
+        prs = pr_reviews.list_prs(checkout, repo)
+        pr_reviews.annotate(prs, repo, pr_reviews.records())
+        return repo, prs
+
+    def review(self, number: int, kind: str, model: str | None, thinking: str | None) -> dict:
+        checkout, repo = self.target()
+        return pr_reviews.request(checkout, repo, number, kind, model, thinking)
+
+    def refresh(self, number: int) -> dict:
+        return pr_reviews.refresh(self.key(number))
+
+    def go(self, number: int) -> dict:
+        return pr_reviews.go(self.key(number))
+
+    def finish(self, number: int, force: bool) -> dict:
+        return pr_reviews.finish(self.key(number), force=force)
+
+
+def pr_row(pr: pr_reviews.PullRequest) -> Text:
+    text = Text(f"#{pr.number} ", style="bold")
+    text.append(pr.title)
+    text.append(f" · {pr.author}", style="dim")
+    marks = pr.marks()
+    if marks:
+        text.append(" · ", style="dim")
+        for index, mark in enumerate(marks):
+            if index:
+                text.append(", ")
+            label = f"{mark} ({pr.notes} notes)" if mark == "reviewed" and pr.notes is not None else mark
+            text.append(label, style=PR_MARK_STYLES.get(mark, ""))
+    return text
+
+
+class PullRequestsScreen(Screen):
+    """The open pull requests of the board's repository. An agent reviews one in its own workspace."""
+
+    BINDINGS = [
+        Binding("escape,G", "close", "Board"),
+        Binding("s", "review", "Review"),
+        Binding("g", "go", "Go to workspace"),
+        Binding("u", "refresh", "New commits"),
+        Binding("f", "finish", "Finish"),
+        Binding("o", "open", "Open in browser"),
+        Binding("r", "load", "Reload"),
+        Binding("down,j", "cursor(1)", "Next", show=False),
+        Binding("up,k", "cursor(-1)", "Previous", show=False),
+        Binding("question_mark", "help", "Help"),
+    ]
+
+    def __init__(self, service):
+        super().__init__()
+        self.service = service
+        self.repo = ""
+        self.prs: list[pr_reviews.PullRequest] = []
+        # One review, refresh or finish runs at a time.
+        self.busy = False
+
+    def compose(self) -> ComposeResult:
+        title = Static("Pull requests", id="pr-title")
+        title.plain = "Pull requests"
+        yield title
+        yield OptionList(id="pr-list")
+        status = Static("Reading GitHub…", id="pr-status", classes="dim")
+        yield status
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.action_load()
+        self.set_interval(PR_SECONDS, self.action_load)
+        self.query_one("#pr-list", OptionList).focus()
+
+    def rows(self) -> list[str]:
+        return [pr_row(pr).plain for pr in self.prs]
+
+    def current(self) -> pr_reviews.PullRequest | None:
+        index = self.query_one("#pr-list", OptionList).highlighted
+        return self.prs[index] if index is not None and 0 <= index < len(self.prs) else None
+
+    def _status(self, text: str) -> None:
+        status = self.query_one("#pr-status", Static)
+        status.plain = text
+        status.update(text)
+
+    def _show(self, repo: str, prs: list[pr_reviews.PullRequest]) -> None:
+        selected = self.current()
+        self.repo, self.prs = repo, prs
+        title = self.query_one("#pr-title", Static)
+        title.plain = f"Pull requests · {repo}"
+        title.update(title.plain)
+        options = self.query_one("#pr-list", OptionList)
+        options.clear_options()
+        options.add_options([pr_row(pr) for pr in prs])
+        if prs:
+            numbers = [pr.number for pr in prs]
+            options.highlighted = numbers.index(selected.number) if selected and selected.number in numbers else 0
+        self._status(f"{len(prs)} open pull request{'' if len(prs) == 1 else 's'}" if prs
+                     else f"No open pull requests in {repo}")
+
+    def _call(self, function, *args, **options) -> None:
+        """Run a function on the event loop from a worker thread. Nothing runs once the board quits."""
+        try:
+            self.app.call_from_thread(function, *args, **options)
+        except RuntimeError:
+            pass
+
+    def action_load(self) -> None:
+        def load() -> None:
+            try:
+                repo, prs = self.service.list()
+            except HerdboardError as error:
+                self._call(self._status, f"Cannot read the pull requests: {error}")
+                self._call(self.app.notify, str(error), severity="error")
+                return
+            self._call(self._show, repo, prs)
+
+        self.run_worker(load, thread=True, group=PR_GROUP, exit_on_error=False)
+
+    def _run(self, work: Callable[[], dict], notice: Callable[[dict], str],
+             then: Callable[[dict], None] | None = None,
+             failed: Callable[[HerdboardError], bool] | None = None) -> None:
+        """Run one PR action in a thread. `failed` handles an error itself when it returns True."""
+        if self.busy:
+            self.app.notify("Busy: a pull request action is in progress", severity="warning")
+            return
+        self.busy = True
+
+        def done(result: dict | None, error: HerdboardError | None) -> None:
+            self.busy = False
+            if error is not None:
+                if not (failed and failed(error)):
+                    self.app.notify(str(error), severity="error")
+            else:
+                self.app.notify(notice(result))
+                if then:
+                    then(result)
+            self.action_load()
+
+        def guarded() -> None:
+            try:
+                result, error = work(), None
+            except HerdboardError as error_:
+                result, error = None, error_
+            self._call(done, result, error)
+
+        self.run_worker(guarded, thread=True, group=PR_GROUP, exit_on_error=False)
+
+    def action_close(self) -> None:
+        self.app.pop_screen()
+
+    def action_cursor(self, step: int) -> None:
+        options = self.query_one("#pr-list", OptionList)
+        if self.prs:
+            current = options.highlighted if options.highlighted is not None else 0
+            options.highlighted = max(0, min(current + step, len(self.prs) - 1))
+
+    def action_help(self) -> None:
+        self.app.push_screen(HelpScreen())
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.action_review()
+
+    def action_review(self) -> None:
+        pr = self.current()
+        if pr is None:
+            return
+
+        def chosen(kind: str | None) -> None:
+            if kind == "claude":
+                self.app.push_screen(ClaudeModelScreen(),
+                                     lambda choice: choice and self._review(pr.number, kind, choice[0], None))
+            elif kind == "pi":
+                self.app.push_screen(ModelScreen(*pi_model_choices(self.app.store.config)),
+                                     lambda choice: choice and self._review(pr.number, kind, *choice))
+
+        self.app.push_screen(AgentScreen(f"Choose the reviewer of PR #{pr.number}"), chosen)
+
+    def _review(self, number: int, kind: str, model: str | None, thinking: str | None) -> None:
+        def notice(result: dict) -> str:
+            model_text = f" ({result['model']})" if result.get("model") else ""
+            verb = "has the new request" if result.get("prompted") else "reviews"
+            return f"PR #{number}: {result['agent']}{model_text} {verb} in workspace {result['workspace_id']}"
+
+        self._run(lambda: self.service.review(number, kind, model, thinking), notice)
+
+    def action_go(self) -> None:
+        pr = self.current()
+        if pr is not None:
+            self._run(lambda: self.service.go(pr.number),
+                      lambda result: f"Went to the review workspace {result['workspace_id']} of PR #{pr.number}")
+
+    def action_refresh(self) -> None:
+        pr = self.current()
+        if pr is None:
+            return
+        number = pr.number
+
+        def notice(result: dict) -> str:
+            text = f"PR #{number}: Hunk shows the new commits; {result['kept']} notes kept"
+            if result["dropped"]:
+                text += ". On no diff line any more: " + "; ".join(result["dropped"])
+            return text
+
+        def offer(result: dict) -> None:
+            kind = result.get("agent")
+            if kind not in ("claude", "pi"):
+                return
+            model = f" ({result['model']})" if result.get("model") else ""
+            self.app.push_screen(
+                ConfirmScreen(f"Start a new agent review of PR #{number}?", f"The reviewer: {kind}{model}."),
+                lambda answer: answer and self._review(number, kind, result.get("model"), result.get("thinking")))
+
+        self._run(lambda: self.service.refresh(number), notice, then=offer)
+
+    def action_finish(self) -> None:
+        pr = self.current()
+        if pr is None:
+            return
+        number = pr.number
+
+        def finish(force: bool) -> None:
+            def unsent(error: HerdboardError) -> bool:
+                if getattr(error, "code", None) != "unsent_notes":
+                    return False
+                self.app.push_screen(ConfirmScreen(f"Finish PR #{number} anyway?", f"{error} Their notes are lost."),
+                                     lambda answer: answer and finish(True))
+                return True
+
+            self._run(lambda: self.service.finish(number, force),
+                      lambda result: f"PR #{number}: review finished; worktree removed"
+                                     + ("; branch deleted" if result.get("branch_deleted") else ""),
+                      failed=None if force else unsent)
+
+        self.app.push_screen(
+            ConfirmScreen(f"Finish the review of PR #{number}?",
+                          f"Closes its workspace, removes the worktree and deletes the branch pr/{number}."),
+            lambda answer: answer and finish(False))
+
+    def action_open(self) -> None:
+        pr = self.current()
+        if pr is None or not pr.url:
+            return
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        try:
+            process = subprocess.Popen([opener, pr.url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.PIPE, start_new_session=True)
+        except OSError as error:
+            self.app.notify(f"Cannot open {pr.url} with {opener}: {error}", severity="error")
+            return
+        threading.Thread(target=watch_opener, args=(self.app, pr.url, opener, process), daemon=True).start()
+
+
 class CellMouseDriver(LinuxDriver):
     """Textual's terminal driver without pixel mouse reports (mode 1016).
 
@@ -1378,6 +1662,10 @@ class HerdboardApp(App):
     #issue-results { height: auto; max-height: 12; border: round $surface-lighten-2; }
     #issue-results:focus { border: round $primary; }
     #config-project { width: 2fr; }
+    #pr-title { height: 1; padding: 0 1; background: $primary; color: $text; }
+    #pr-list { height: 1fr; border: round $surface-lighten-2; }
+    #pr-status { height: 1; padding: 0 1; }
+    App:ansi #pr-title { color: ansi_black; }
     #config-labels { width: 1fr; }
     /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
     App:ansi .card { border: round ansi_bright_black; margin: 0; }
@@ -1439,6 +1727,7 @@ class HerdboardApp(App):
         Binding("I", "import_issue", "Pin issue", show=False),
         Binding("u", "unpin", "Unpin", show=False),
         Binding("r", "reload", "Reload"),
+        Binding("G", "pull_requests", "PRs"),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
@@ -1471,6 +1760,8 @@ class HerdboardApp(App):
         config_file: Path | None = None,
         resolve_link: Callable[[str, list[str]], ProjectLink] | None = None,
         search_issues: Callable[[str], list[dict]] | None = None,
+        pr_service=None,
+        open_prs: bool = False,
     ):
         super().__init__()
         theme = store.config.theme
@@ -1505,6 +1796,9 @@ class HerdboardApp(App):
         self.finish_card = finish_card
         self.go_card = go_card
         self.directory = directory or Path.cwd()
+        # The pull request list's calls into `pr_reviews`; `open_prs` opens the board on that list.
+        self.pr_service = pr_service or PullRequestService(self.directory)
+        self.open_prs = open_prs
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
         self.starting = False
@@ -1550,6 +1844,8 @@ class HerdboardApp(App):
     async def on_mount(self) -> None:
         await self.reload()
         self.set_interval(self.reload_interval, self.check_files)
+        if self.open_prs:
+            self.action_pull_requests()
         if self.linear_active:
             self.fetch_linear()
             self.set_interval(self.linear_interval, self.fetch_linear)
@@ -1824,7 +2120,8 @@ class HerdboardApp(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         # Modal screens handle their own keys: the board's own key actions stop
         # behind a dialog. Textual's actions, such as tab to the next field, stay.
-        if isinstance(self.screen, ModalScreen) and action in BOARD_ACTIONS:
+        # The pull request list is a full screen with its own keys, so the board's stop there too.
+        if isinstance(self.screen, (ModalScreen, PullRequestsScreen)) and action in BOARD_ACTIONS:
             return False
         return True
 
@@ -2778,6 +3075,9 @@ class HerdboardApp(App):
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
+
+    def action_pull_requests(self) -> None:
+        self.push_screen(PullRequestsScreen(self.pr_service))
 
 
 # The board's own key actions, without parameters. Quit stays available in dialogs.

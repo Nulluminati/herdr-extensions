@@ -1160,6 +1160,7 @@ def _cmd_board(ctx: _Context) -> dict:
         resolve_link=(lambda name, labels: _project_link(ctx, name, labels))
         if views.source.active and not views.source.offline else None,
         search_issues=views.source.search if views.source.active and not views.source.offline else None,
+        open_prs=ctx.args.prs,
     ).run()
     return {}
 
