@@ -60,6 +60,25 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(HerdboardError):
             load_config(path)
 
+    def test_icon_style_defaults_to_plain(self):
+        self.assertEqual(load_config().icon_style, "plain")
+
+    def test_icon_style_modes_and_tag_style_are_independent(self):
+        for mode in ("plain", "nerd"):
+            for tags in ("round", "block"):
+                with self.subTest(mode=mode, tags=tags):
+                    path = self.write(self.dir / "a.toml", f'icon_style = "{mode}"\ntag_style = "{tags}"\n')
+                    config = load_config(path)
+                    self.assertEqual(config.icon_style, mode)
+                    self.assertEqual(config.tag_style, tags)
+
+    def test_icon_style_must_be_a_known_nonempty_string(self):
+        for value in ('"current"', '"auto"', '"NERD"', '""', '3', 'true', '[]'):
+            with self.subTest(value=value):
+                path = self.write(self.dir / "a.toml", f"icon_style = {value}\n")
+                with self.assertRaisesRegex(HerdboardError, "icon_style"):
+                    load_config(path)
+
     def test_types_default(self):
         self.assertEqual(load_config().types, ["bug", "feature", "chore", "docs", "refactor"])
 

@@ -231,7 +231,7 @@ class LinearBoardTests(LinearBoardCase):
                          "https://linear.app/workspace/issue/ENG-2", "Type", "bug"]:
                 self.assertIn(part, meta)
             chips = screen.query_one("#detail-chips").plain
-            for part in ["repo:api", "📅 Oct 20"]:
+            for part in ["repo:api", "Due Oct 20"]:
                 self.assertIn(part, chips)
             body = screen.query_one("#detail-body").plain
             self.assertIn("Line one", body)

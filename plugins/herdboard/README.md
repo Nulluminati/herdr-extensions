@@ -440,6 +440,7 @@ start_agent = "claude"     # or "pi"
 merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
 tag_style = "round"        # tag ends in Nerd Font half circles; "block" for other fonts
+icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
 types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
 
 [linear]
@@ -460,6 +461,18 @@ canceled = "Done"
 ```
 
 To make pull requests the default for one repository, add `merge: pr` to the frontmatter of its board, or press `c` on the board and choose `pr`.
+
+### Display icons
+
+`icon_style = "plain"` is the default. Dates use a `Due` label, and cards with attachments show `files` at the right edge.
+
+Set `icon_style = "nerd"` to add icons beside text labels on board cards and detail screens. Icons identify default card types, dates, attachments, worktree status and pull requests. Custom types keep their text when no icon exists.
+
+Use a **Nerd Font Mono** font in your terminal for `nerd` mode. Other Nerd Font variants can draw wider icons and disrupt spacing. Herdboard does not detect font support. See the [Nerd Fonts troubleshooting guide](https://github.com/ryanoasis/nerd-fonts/wiki/FAQ-and-Troubleshooting).
+
+To disable these icons, set `icon_style = "plain"` and restart Herdboard. The separate `tag_style` setting still controls tag shapes. Set `tag_style = "block"` to remove Nerd Font tag ends too. Existing structural symbols, such as checklist marks, remain in both modes.
+
+These settings affect display only. Stored Markdown, filters and command-line output do not change.
 
 ## Board files
 

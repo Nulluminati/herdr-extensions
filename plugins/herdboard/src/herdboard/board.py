@@ -57,9 +57,23 @@ LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
 LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
 # Shown in the top-right corner of a card that has attachments.
-ATTACHMENT_MARK = "≡"
+ATTACHMENT_MARK = "files"
 # Ends a card's title. A click on it opens the card menu, also where Herdr keeps right-click for itself.
 MENU_MARK = "⋯"
+
+# Nerd Font glyphs shared by board cards and detail screens. Labels remain readable without them.
+ICONS = {
+    "type/bug": "\uf188",
+    "type/feature": "\uf0eb",
+    "type/chore": "\uf0ad",
+    "type/docs": "\uf02d",
+    "type/refactor": "\uf021",
+    "date": "\uf073",
+    "attachment": "\uf0c6",
+    "branch": "\ue0a0",
+    "pr": "\uf407",
+}
+
 
 HELP_KEYS = [
     ("left, h", "previous column"),
@@ -129,13 +143,19 @@ def chip_color(tag: str) -> str:
     return CHIP_COLORS[zlib.crc32(tag.casefold().encode()) % len(CHIP_COLORS)]
 
 
-def due_label(due: str, today: date | None = None) -> Text:
-    """`📅 Nov 1`, red when past, yellow within two days."""
+def icon_label(key: str, label: str, icon_style: str) -> str:
+    """Add an optional icon without replacing the label or inventing unknown icons."""
+    icon = ICONS.get(key) if icon_style == "nerd" else None
+    return f"{icon} {label}" if icon else label
+
+
+def due_label(due: str, today: date | None = None, icon_style: str = "plain") -> Text:
+    """`Due Nov 1`, red when past, yellow within two days, with an optional calendar icon."""
     today = today or date.today()
     try:
         day = date.fromisoformat(due)
     except ValueError:
-        return Text(f"📅 {due}", style="dim")
+        return Text(icon_label("date", f"Due {due}", icon_style), style="dim")
     shown = f"{day:%b} {day.day}" + ("" if day.year == today.year else f" {day.year}")
     if day < today:
         style = "bold red"
@@ -143,16 +163,17 @@ def due_label(due: str, today: date | None = None) -> Text:
         style = "yellow"
     else:
         style = "dim"
-    return Text(f"📅 {shown}", style=style)
+    return Text(icon_label("date", f"Due {shown}", icon_style), style=style)
 
 
 # Type badge colors: terminal palette names. Other types are bold in the default color.
 TYPE_STYLES = {"bug": "bold red", "feature": "bold green", "docs": "bold cyan", "refactor": "bold magenta"}
 
 
-def type_badge(kind: str) -> Text:
+def type_badge(kind: str, icon_style: str = "plain") -> Text:
     """A card type as bold text, colored for the default types."""
-    return Text(kind, style=TYPE_STYLES.get(kind.casefold(), "bold"))
+    return Text(icon_label(f"type/{kind.casefold()}", kind, icon_style),
+                style=TYPE_STYLES.get(kind.casefold(), "bold"))
 
 
 # Nerd Font half circles that round off a tag block.
@@ -170,7 +191,7 @@ def tag_chip(tag: str, style: str) -> Text:
     return Text(f" {tag} ", style=f"black on {color}")
 
 
-def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Text:
+def card_text(card: CardView, show_board: bool, tag_style: str = "round", icon_style: str = "plain") -> Text:
     """A card as the board shows it: the title, then tag chips, the due date and notes."""
     if card.source == "linear":
         title, tags, due = card.title, card.tags, card.due
@@ -181,7 +202,7 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
     text.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
     line = Text()
     if card.type:
-        line.append_text(type_badge(card.type))
+        line.append_text(type_badge(card.type, icon_style))
     for tag in plain_tags(tags):
         if line:
             line.append(" ")
@@ -189,26 +210,27 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
     if due:
         if line:
             line.append(" ")
-        line.append_text(due_label(due))
+        line.append_text(due_label(due, icon_style=icon_style))
     info = []
     if card.source == "linear":
         info.append(Text(f"{LINEAR_MARK} {card.ref}", style="dim"))
         if card.pr:
-            info.append(Text("PR", style="bold"))
+            info.append(Text(icon_label("pr", "PR", icon_style), style="bold"))
     if show_board:
         info.append(Text(card.board, style="dim"))
     if card.body:
         info.append(Text(f"+{len(card.body)}", style="dim"))
     if card.worktree_removed:
-        info.append(Text("worktree removed", style="bold yellow"))
+        info.append(Text(icon_label("branch", "worktree removed", icon_style), style="bold yellow"))
     if card.pr_state:
-        info.append(Text(f"PR {card.pr_state}", style=PR_STYLES.get(card.pr_state, "dim")))
+        info.append(Text(icon_label("pr", f"PR {card.pr_state}", icon_style),
+                         style=PR_STYLES.get(card.pr_state, "dim")))
     if card.worktree_left:
-        info.append(Text("worktree still exists", style="bold yellow"))
+        info.append(Text(icon_label("branch", "worktree still exists", icon_style), style="bold yellow"))
     if card.agent_review:
         info.append(Text(f"agent review: {card.agent_review}", style="bold"))
     if card.pr_writing:
-        info.append(Text("PR: writing", style="bold"))
+        info.append(Text(icon_label("pr", "PR: writing", icon_style), style="bold"))
     if card.planning:
         info.append(Text(f"planning: {card.planning}", style="bold cyan"))
     if card.parent_title:
@@ -229,9 +251,9 @@ class CardWidget(Static):
     # A drag moves the card, so it must not also select text.
     ALLOW_SELECT = False
 
-    def __init__(self, card: CardView, show_board: bool, tag_style: str = "round"):
+    def __init__(self, card: CardView, show_board: bool, tag_style: str = "round", icon_style: str = "plain"):
         self.card = card
-        self.rich_text = card_text(card, show_board, tag_style)
+        self.rich_text = card_text(card, show_board, tag_style, icon_style)
         # The menu marker is not card text: `plain` keeps the title line without it.
         title, newline, rest = self.rich_text.plain.partition("\n")
         self.plain = title.removesuffix(f" {MENU_MARK}") + newline + rest
@@ -240,8 +262,9 @@ class CardWidget(Static):
             content = Table.grid(expand=True)
             content.add_column(ratio=1)
             content.add_column(justify="right", no_wrap=True)
-            content.add_row(self.rich_text, Text(ATTACHMENT_MARK))
-            self.plain += f" {ATTACHMENT_MARK}"
+            mark = icon_label("attachment", ATTACHMENT_MARK, icon_style)
+            content.add_row(self.rich_text, Text(mark))
+            self.plain += f" {mark}"
         super().__init__(content, classes="card")
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
@@ -409,12 +432,13 @@ class DetailScreen(ModalBase):
     ]
 
     def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round",
-                 log: list[dict] | None = None, files: list[dict] | None = None):
+                 log: list[dict] | None = None, files: list[dict] | None = None, icon_style: str = "plain"):
         super().__init__()
         self.notes = notes or []
         self.entries = log or []
         self.files = files or []
         self.tag_style = tag_style
+        self.icon_style = icon_style
         self.cursor = 0
         self._set_card(card)
 
@@ -483,15 +507,23 @@ class DetailScreen(ModalBase):
         rows = [("Board", card.board), ("Column", card.column), ("ID", card.ref), ("Type", card.type)]
         if card.source == "linear":
             rows += [("State", card.state), ("Team", card.team), ("Link", card.url)]
-            if card.pr:
-                rows.append(("Pull request", "yes"))
+        if card.pr or card.pr_state or card.pr_writing:
+            state = "writing" if card.pr_writing else card.pr_state or "yes"
+            rows.append(("Pull request", icon_label("pr", state, self.icon_style)))
+        if card.worktree_removed:
+            rows.append(("Worktree", icon_label("branch", "removed", self.icon_style)))
+        elif card.worktree_left:
+            rows.append(("Worktree", icon_label("branch", "still exists", self.icon_style)))
         text = Text()
         for label, value in rows:
             if value:
                 if text:
                     text.append("\n")
                 text.append(f"{label:<13}", style="dim")
-                text.append(str(value))
+                if label == "Type":
+                    text.append_text(type_badge(value, self.icon_style))
+                else:
+                    text.append(str(value))
         return text
 
     def compose(self) -> ComposeResult:
@@ -504,7 +536,7 @@ class DetailScreen(ModalBase):
         if due:
             if chips:
                 chips.append("  ")
-            chips.append_text(due_label(due))
+            chips.append_text(due_label(due, icon_style=self.icon_style))
         body = self.body
         with VerticalScroll(classes="dialog detail", can_focus=False):
             yield RichStatic(Text(title or self.card.title, style="bold"), id="detail-title")
@@ -528,7 +560,7 @@ class DetailScreen(ModalBase):
                         yield Markdown(content)
             if self.files:
                 block = RichStatic(attachment_lines(self.files), id="detail-files", classes="detail-block")
-                block.border_title = "Attachments"
+                block.border_title = icon_label("attachment", "Attachments", self.icon_style)
                 # A text drag that ends on an attachment line would also open it.
                 block.ALLOW_SELECT = False
                 yield block
@@ -1699,7 +1731,8 @@ class HerdboardApp(App):
     def _column_widget(self, column: ColumnData, show_board: bool) -> Vertical:
         classes = "column" + (" completed" if column.completed else "") + (" archive" if column.archive else "")
         cards = VerticalScroll(
-            *[CardWidget(card, show_board, self.store.config.tag_style) for card in column.cards], classes="cards", can_focus=False
+            *[CardWidget(card, show_board, self.store.config.tag_style, self.store.config.icon_style)
+              for card in column.cards], classes="cards", can_focus=False
         )
         widget = Vertical(ColumnHeader(column), cards, classes=classes)
         widget.column_name = column.name
@@ -1714,7 +1747,8 @@ class HerdboardApp(App):
             header.update(Text(column.header))
         holder = widget.query_one(".cards", VerticalScroll)
         old = list(holder.query(CardWidget))
-        new = [CardWidget(card, show_board, self.store.config.tag_style) for card in column.cards]
+        new = [CardWidget(card, show_board, self.store.config.tag_style, self.store.config.icon_style)
+               for card in column.cards]
         if [w.plain for w in old] == [w.plain for w in new]:
             for widget_, card in zip(old, column.cards):
                 widget_.card = card
@@ -2510,7 +2544,7 @@ class HerdboardApp(App):
             except HerdboardError as error:
                 self.notify(str(error), severity="error")
         self.push_screen(
-            DetailScreen(card, notes, self.store.config.tag_style, log, files),
+            DetailScreen(card, notes, self.store.config.tag_style, log, files, self.store.config.icon_style),
             lambda result: self.action_edit() if result == "edit" else None,
         )
 

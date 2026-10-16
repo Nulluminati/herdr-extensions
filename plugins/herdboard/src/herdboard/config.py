@@ -73,6 +73,8 @@ class Config:
     theme: str = "ansi-dark"
     # "round" draws tag ends with Nerd Font half circles; "block" needs no special font.
     tag_style: str = "round"
+    # "plain" uses text labels; "nerd" adds Nerd Font icons beside them.
+    icon_style: str = "plain"
     types: list[str] = field(default_factory=lambda: list(DEFAULT_TYPES))
 
     def __post_init__(self):
@@ -224,6 +226,11 @@ def load_config(path: Path | None = None) -> Config:
         if tag_style not in ("round", "block"):
             raise HerdboardError(f"{path}: tag_style must be round or block")
         config.tag_style = tag_style
+    icon_style = _string(path, data, "icon_style")
+    if icon_style is not None:
+        if icon_style not in ("plain", "nerd"):
+            raise HerdboardError(f"{path}: icon_style must be plain or nerd")
+        config.icon_style = icon_style
     types = _string_list(path, data, "types")
     if types is not None:
         if not all(re.fullmatch(r"[A-Za-z0-9_-]+", kind) for kind in types):

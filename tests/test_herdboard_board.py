@@ -182,7 +182,7 @@ class CardLookTests(BoardTestCase):
                      if " on " in str(span.style)]
             self.assertEqual(chips, ["auth", "web"])
             self.assertIn("\ue0b6auth\ue0b4 \ue0b6web\ue0b4", widget.plain)
-            self.assertIn("📅 Nov 1", widget.plain)
+            self.assertIn("Due Nov 1", widget.plain)
 
     async def test_block_tags_for_fonts_without_round_ends(self):
         self.config.tag_style = "block"
@@ -631,7 +631,7 @@ class ActionTests(BoardTestCase):
                 self.assertIn(part, meta)
             chips = screen.query_one("#detail-chips")
             self.assertIn("docs", chips.plain)
-            self.assertIn("📅 Oct 20", chips.plain)
+            self.assertIn("Due Oct 20", chips.plain)
             self.assertTrue(any(" on " in str(span.style) for span in chips.rich_text.spans))
             note = screen.query_one(".detail-note")
             self.assertEqual(note.border_title, "Tile notes")
