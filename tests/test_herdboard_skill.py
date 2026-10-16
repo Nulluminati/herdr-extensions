@@ -103,7 +103,7 @@ class SkillTests(unittest.TestCase):
         known |= {ArchivedError.code, CardActiveError.code, cli.LinearArchiveError.code, "has_sub_cards"}
         known.add(UnknownTypeError.code)
         known |= {"remote_unknown", "branch_exists", "agent_running", "workspace_closed", "worktree_missing",
-                  "unsent_notes", "gh_failed", "git_failed", "hunk_failed"}
+                  "unsent_notes", "gh_failed", "git_failed", "hunk_failed", "new_commits"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

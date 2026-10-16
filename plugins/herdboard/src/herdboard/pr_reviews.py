@@ -538,16 +538,28 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
     # Herdr rejects line breaks in agent arguments, so the request is a file and the message names it.
     message = (f"Read {path} and do the pull request review it asks for. "
                "Add notes only with hunk session comment add. Never submit anything to GitHub.")
+    # The notes in the session now are not this review's: old reviews and refreshes left them.
+    try:
+        known = [note.get("noteId") for note in _comments(record["hunk_session"], "agent")]
+    except PrReviewError:
+        known = []
     # The worker of an older request watches the same agent name, and ends once the ID changes.
     record.update(agent=kind, agent_name=name, model=model, thinking=thinking, reviewed_sha=pr.head_sha,
-                  status="reviewing", notes=None, error=None, review_id=time.time_ns(), prompted=running)
+                  status="reviewing", notes=None, error=None, review_id=time.time_ns(), prompted=running,
+                  known_notes=known)
     # Record intent before Herdr can return an unknown startup result.
     save(key, record)
-    if running:
-        herdr("agent", "prompt", record["pane_id"], message)
-    else:
-        herdr("agent", "start", name, "--kind", kind, "--pane", record["pane_id"], "--",
-              *reviewer_arguments(kind, message, model, thinking), tolerated=("timeout", "agent_not_ready"))
+    try:
+        if running:
+            herdr("agent", "prompt", record["pane_id"], message)
+        else:
+            herdr("agent", "start", name, "--kind", kind, "--pane", record["pane_id"], "--",
+                  *reviewer_arguments(kind, message, model, thinking), tolerated=("timeout", "agent_not_ready"))
+    except HerdboardError as error:
+        # No worker starts, so without this the PR would show `reviewing` for good.
+        record.update(status="failed", error=f"The reviewer did not start: {error}")
+        save(key, record)
+        raise
     try:
         agent_review.start_worker(["pr-review-wait", key], _request_path(key, ".log"))
     except OSError as error:
@@ -580,11 +592,18 @@ def request(checkout, repo: str, number: int, kind: str, model: str | None = Non
     key = review_key(repo, number)
     pr = view_pr(checkout, repo, number)
     with _lock(".pr-review-" + safe_key(key) + ".lock"):
+        kept = key in records()
         record = open_workspace(checkout, repo, number, pr.title)
+        # A kept worktree stays at the head it had. The agent must not review old code as the new head.
+        if kept and _git(record["worktree_path"], "rev-parse", "HEAD").strip() != pr.head_sha:
+            raise PrReviewError(f"PR #{number} has new commits since its worktree was made. Fetch them first: "
+                                f"run pr-review-refresh {number}, or press u on the list", "new_commits")
         if not _session_live(record.get("hunk_session")):
             if record.get("hunk_pane"):
                 herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
             record = open_hunk(record)
+            # A refresh that failed after it closed Hunk left its notes in a file.
+            _restore_notes(key, record)
         return start_reviewer(key, record, pr, kind, model, thinking)
 
 
@@ -634,7 +653,8 @@ def wait(key: str) -> int:
     notes = None
     if error is None and record.get("hunk_session"):
         try:
-            notes = len(_comments(record["hunk_session"], "agent"))
+            known = set(record.get("known_notes") or [])
+            notes = sum(note.get("noteId") not in known for note in _comments(record["hunk_session"], "agent"))
         except PrReviewError as failure:
             print(f"herdboard: cannot count the notes: {failure}", file=sys.stderr)
     with _lock(LOCK, wait=2):
@@ -647,7 +667,7 @@ def wait(key: str) -> int:
         _write(path, data)
     if error is None:
         count = "an unknown number of" if notes is None else str(notes)
-        agent_review._notify(f"PR #{number} reviewed", f"{count} notes from {kind}")
+        agent_review._notify(f"PR #{number} reviewed", f"{count} new notes from {kind}")
         return 0
     print(f"herdboard: {error}", file=sys.stderr)
     agent_review._notify(f"PR #{number} review failed", str(error))
@@ -669,6 +689,35 @@ def _note_entry(note: dict) -> dict | None:
     if note.get("author"):
         entry["author"] = note["author"]
     return entry if entry["filePath"] and entry["summary"] else None
+
+
+def _saved_notes(key: str) -> list[dict] | None:
+    """The notes that a refresh saved before it closed Hunk, None when there are none."""
+    try:
+        return json.loads(_request_path(key, ".notes.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        raise PrReviewError(f"Cannot read the saved notes of {key}: {error}", "io") from error
+
+
+def _save_notes(key: str, entries: list[dict]) -> None:
+    path = _request_path(key, ".notes.json")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(entries), encoding="utf-8")
+        temp.replace(path)
+    except OSError as error:
+        raise PrReviewError(f"{path}: cannot save the notes: {error}", "io") from error
+
+
+def _restore_notes(key: str, record: dict) -> tuple[int, list[dict]]:
+    """Apply the saved notes to the record's new session, then delete them. Returns (kept, dropped)."""
+    entries = _saved_notes(key) or []
+    dropped = _apply(record["hunk_session"], entries)
+    _request_path(key, ".notes.json").unlink(missing_ok=True)
+    return len(entries) - len(dropped), dropped
 
 
 def _apply(session_id: str, entries: list[dict]) -> list[dict]:
@@ -698,15 +747,19 @@ def refresh(key: str) -> dict:
                 notes = _comments(record["hunk_session"], "all")
             except PrReviewError:
                 notes = []  # The session is gone, and its notes with it.
+        # The notes go to a file before Hunk closes, so a new Hunk that fails to open loses none.
+        # A refresh that failed before left its notes there too.
+        entries = _saved_notes(key) or []
+        entries += [entry for entry in map(_note_entry, notes) if entry and entry not in entries]
+        _save_notes(key, entries)
         if record.get("hunk_pane"):
             herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
         # Hunk reloads only `diff` and `show` sessions, so a new pane loads the PR's new diff.
         record = open_hunk(record)
-        entries = [entry for entry in map(_note_entry, notes) if entry]
-        dropped = _apply(record["hunk_session"], entries)
+        kept, dropped = _restore_notes(key, record)
         line = lambda e: f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary'].splitlines()[0][:80]}"
         return {"key": key, "number": record["number"], "hunk_pane": record["hunk_pane"],
-                "hunk_session": record["hunk_session"], "kept": len(entries) - len(dropped),
+                "hunk_session": record["hunk_session"], "kept": kept,
                 "dropped": [line(e) for e in dropped], "agent": record.get("agent"), "model": record.get("model"),
                 "thinking": record.get("thinking")}
 
@@ -730,17 +783,18 @@ def finish(key: str, force: bool = False) -> dict:
             if unsent:
                 raise PrReviewError(f"{key} has {len(unsent)} notes of yours that are not submitted. "
                                     "Submit them with S in Hunk, or finish with force", "unsent_notes")
-        if record.get("hunk_pane"):
-            herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
+        # The worktree goes first: when Herdr or Git refuses it, Hunk and its notes are still there.
         removed = False
         if record.get("workspace_id"):
             removed = herdr("worktree", "remove", "--workspace", record["workspace_id"], "--trust-repository",
                             *(["--force"] if force else []), tolerated=("workspace_not_found",)) is not None
         if not removed and worktree and Path(worktree).exists():
             _git(checkout, "worktree", "remove", *(["--force"] if force else []), worktree)
+        if record.get("hunk_pane"):
+            herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
         run(["git", "-C", checkout, "worktree", "prune"])
         deleted = run(["git", "-C", checkout, "branch", "-D", record["branch"]]).returncode == 0
         forget(key)
-        for suffix in (".md", ".log"):
+        for suffix in (".md", ".log", ".notes.json"):
             _request_path(key, suffix).unlink(missing_ok=True)
     return {"key": key, "number": record["number"], "worktree_removed": True, "branch_deleted": deleted}

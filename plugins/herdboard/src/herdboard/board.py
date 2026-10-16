@@ -2127,7 +2127,16 @@ class PullRequestsScreen(Screen):
             verb = "has the new request" if result.get("prompted") else "reviews"
             return f"PR #{number}: {result['agent']}{model_text} {verb} in workspace {result['workspace_id']}"
 
-        self._run(lambda: self.service.review(number, kind, model, thinking), notice)
+        def new_commits(error: HerdboardError) -> bool:
+            if getattr(error, "code", None) != "new_commits":
+                return False
+            self.app.push_screen(
+                ConfirmScreen(f"PR #{number} has new commits since its worktree was made. Fetch them first?",
+                              "Then herdboard offers the review again."),
+                lambda answer: answer and self._refresh(number))
+            return True
+
+        self._run(lambda: self.service.review(number, kind, model, thinking), notice, failed=new_commits)
 
     def action_go(self) -> None:
         pr = self.current()
@@ -2137,9 +2146,10 @@ class PullRequestsScreen(Screen):
 
     def action_refresh(self) -> None:
         pr = self.current()
-        if pr is None:
-            return
-        number = pr.number
+        if pr is not None:
+            self._refresh(pr.number)
+
+    def _refresh(self, number: int) -> None:
 
         def notice(result: dict) -> str:
             text = f"PR #{number}: Hunk shows the new commits; {result['kept']} notes kept"

@@ -170,6 +170,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `agent_running` | A reviewer with another agent kind, model or thinking level still runs for the PR. Tell the user to close it, or to review with the same agent and model. |
 | `workspace_closed` | The PR's review workspace is not open in Herdr. Run `pr-review <N>` again to open it, after you ask the user. |
 | `worktree_missing` | The PR's worktree is gone. Tell the user to run `pr-review-finish <N>` and review again. |
+| `new_commits` | The PR has commits that its review worktree does not have. Ask the user, then run `pr-review-refresh <N>` before `pr-review <N>`. |
 | `unsent_notes` | Hunk still has notes of the user that are not submitted. Tell the user. Use `--force` only when they say so. |
 | `gh_failed`, `git_failed`, `hunk_failed` | A `gh`, `git` or `hunk` command failed. Tell the user the message. |
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |

@@ -202,6 +202,24 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
         self.assertEqual(self.service.finish.call_args_list[-1].args, (7, True))
 
+    async def test_a_review_with_new_commits_offers_to_fetch_them_first(self):
+        self.service.review.side_effect = PrReviewError("PR #7 has new commits", "new_commits")
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            await pilot.press("s")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await self.settle(app, pilot)
+            self.assertIsInstance(app.screen, ConfirmScreen)
+            self.assertIn("new commits", app.screen.question)
+            await pilot.press("y")
+            await self.settle(app, pilot)
+        self.service.refresh.assert_called_once_with(7)
+        self.assertNotIn(("PR #7 has new commits", "error"), self.notices)
+
     async def test_u_refreshes_then_offers_a_new_review_with_the_same_agent(self):
         app = self.app()
         async with app.run_test() as pilot:

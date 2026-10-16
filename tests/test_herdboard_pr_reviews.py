@@ -366,6 +366,24 @@ class ReviewerTests(PrReviewTestCase):
         self.assertEqual(self.workers[0][0], ["pr-review-wait", KEY])
         self.assertEqual(result["agent_name"], "pr-api-7")
 
+    def test_a_failed_agent_start_saves_failed(self):
+        record = self.record(status=None)
+        self.fake.on("herdr", "agent", "start", error="agent_start_failed")
+        with self.assertRaises(start.StartError):
+            pr_reviews.start_reviewer(KEY, record, self.pr(), "claude", "sonnet", None)
+        saved = pr_reviews.records()[KEY]
+        self.assertEqual(saved["status"], "failed")
+        self.assertIn("agent_start_failed", saved["error"])
+        self.assertEqual(self.workers, [])
+
+    def test_the_request_remembers_the_notes_that_were_there_before(self):
+        record = self.record(status=None)
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": [{"noteId": "old-1"}, {"noteId": "old-2"}]})
+        pr_reviews.start_reviewer(KEY, record, self.pr(), "claude", "sonnet", None)
+        self.assertEqual(pr_reviews.records()[KEY]["known_notes"], ["old-1", "old-2"])
+        listing = self.fake.made("hunk", "session", "comment", "list")[0]
+        self.assertEqual(listing[4:7], ["s-new", "--type", "agent"])
+
     def test_a_running_agent_of_the_same_kind_gets_the_new_request(self):
         record = self.record(status="reviewed")
         self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "idle"}})
@@ -411,6 +429,44 @@ class RequestTests(PrReviewTestCase):
         agent = self.fake.made("herdr", "agent", "start")[0]
         self.assertIn("--thinking", agent)
 
+    def test_a_kept_worktree_behind_the_pr_head_is_refused(self):
+        self.worktree.mkdir(parents=True)
+        self.record(status="reviewed", reviewed_sha="b" * 40)
+        self.fake.on("gh", "pr", "view", out=pr_json())
+        self.fake.on("herdr", "workspace", "get", result={"workspace_id": "w9", "root_pane": {"pane_id": "w9:p1"}})
+        self.fake.on("git", "-C", str(self.worktree), "rev-parse", "HEAD", out="b" * 40 + "\n")
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.request(self.checkout, REPO, 7, "claude", "sonnet", None)
+        self.assertEqual(raised.exception.code, "new_commits")
+        self.assertIn("pr-review-refresh 7", str(raised.exception))
+        self.assertEqual(self.fake.made("herdr", "agent", "start"), [])
+        self.assertEqual(pr_reviews.records()[KEY]["reviewed_sha"], "b" * 40)
+
+    def test_a_kept_worktree_at_the_pr_head_is_reviewed_again(self):
+        self.worktree.mkdir(parents=True)
+        self.record(status="reviewed")
+        self.fake.on("gh", "pr", "view", out=pr_json())
+        self.fake.on("herdr", "workspace", "get", result={"workspace_id": "w9", "root_pane": {"pane_id": "w9:p1"}})
+        self.fake.on("git", "-C", str(self.worktree), "rev-parse", "HEAD", out=HEAD + "\n")
+        self.fake.on("hunk", "session", "list", out={"sessions": [session("s-new", self.worktree)]})
+        self.fake.on("herdr", "agent", "get", error="agent_not_found")
+        self.assertEqual(pr_reviews.request(self.checkout, REPO, 7, "claude", "sonnet", None)["key"], KEY)
+
+    def test_saved_notes_come_back_when_a_review_opens_hunk_again(self):
+        self.worktree.mkdir(parents=True)
+        self.record(status="failed", hunk_pane=None, hunk_session=None)
+        pr_reviews._save_notes(KEY, [{"filePath": "a.py", "newLine": 3, "summary": "Bug"}])
+        self.fake.on("gh", "pr", "view", out=pr_json())
+        self.fake.on("herdr", "workspace", "get", result={"workspace_id": "w9", "root_pane": {"pane_id": "w9:p1"}})
+        self.fake.on("git", "-C", str(self.worktree), "rev-parse", "HEAD", out=HEAD + "\n")
+        self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p2"}})
+        self.new_session()
+        self.fake.on("herdr", "agent", "get", error="agent_not_found")
+        pr_reviews.request(self.checkout, REPO, 7, "claude", "sonnet", None)
+        apply = self.fake.options("hunk", "session", "comment", "apply")
+        self.assertEqual(json.loads(apply[0]["input"])["comments"][0]["summary"], "Bug")
+        self.assertIsNone(pr_reviews._saved_notes(KEY))
+
     def test_thinking_works_only_with_pi(self):
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
             pr_reviews.request(self.checkout, REPO, 7, "claude", None, "high")
@@ -435,7 +491,7 @@ class WaitTests(PrReviewTestCase):
         self.assertEqual(listing[4:7], ["s-new", "--type", "agent"])
         notice = self.fake.made("herdr", "notification", "show")[0]
         self.assertEqual(notice[3], "PR #7 reviewed")
-        self.assertIn("2 notes from claude", notice[notice.index("--body") + 1])
+        self.assertIn("2 new notes from claude", notice[notice.index("--body") + 1])
 
     def test_a_replaced_request_ends_the_worker_quietly(self):
         self.record(review_id=1)
@@ -477,6 +533,16 @@ class WaitTests(PrReviewTestCase):
         self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
         self.assertEqual(self.wait(), 0)
         self.assertEqual(len(self.fake.made("herdr", "agent", "get")), 3)
+
+    def test_only_the_notes_of_this_review_count(self):
+        self.record(known_notes=["old-1"])
+        for state in ("working", "idle"):
+            self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": state}})
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": [{"noteId": "old-1"}, {"noteId": "n1"}]})
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(pr_reviews.records()[KEY]["notes"], 1)
+        notice = self.fake.made("herdr", "notification", "show")[0]
+        self.assertIn("1 new notes from claude", notice[notice.index("--body") + 1])
 
     def test_a_timeout_fails(self):
         self.record()
@@ -570,6 +636,44 @@ class RefreshTests(PrReviewTestCase):
         self.assertEqual(self.fake.made("hunk", "session", "comment", "apply")[0][4], "s-two")
 
 
+class RefreshFailureTests(PrReviewTestCase):
+    def setUp(self):
+        super().setUp()
+        self.worktree.mkdir(parents=True)
+        self.notes = [{"noteId": "1", "source": "user", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"}]
+
+    def test_a_failed_hunk_keeps_the_notes_for_the_next_refresh(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": self.notes})
+        self.fake.on("hunk", "session", "list", out={"sessions": []})
+        self.fake.on("herdr", "pane", "split", error="pane_not_found")
+        with self.assertRaises(start.StartError):
+            pr_reviews.refresh(KEY)
+        self.assertEqual(pr_reviews._saved_notes(KEY), [{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
+        # The old session is gone now, so only the saved file holds the notes.
+        self.fake.replies.pop(("hunk", "session", "comment", "list"))
+        self.fake.on("hunk", "session", "comment", "list", code=1, err="no session")
+        self.fake.replies.pop(("herdr", "pane", "split"))
+        self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p3"}})
+        self.new_session("s-two")
+        result = pr_reviews.refresh(KEY)
+        self.assertEqual(result["kept"], 1)
+        apply = self.fake.options("hunk", "session", "comment", "apply")
+        self.assertEqual(json.loads(apply[0]["input"])["comments"][0]["summary"], "Mine")
+        self.assertIsNone(pr_reviews._saved_notes(KEY))
+
+    def test_the_notes_are_saved_before_the_pane_closes(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": self.notes})
+        saved_at_close = []
+        self.fake.on("herdr", "pane", "close", result={"type": "ok"},
+                     then=lambda argv, options: saved_at_close.append(pr_reviews._saved_notes(KEY)))
+        self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p3"}})
+        self.new_session("s-two")
+        pr_reviews.refresh(KEY)
+        self.assertEqual(saved_at_close, [[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}]])
+
+
 class FinishTests(PrReviewTestCase):
     def setUp(self):
         super().setUp()
@@ -594,6 +698,22 @@ class FinishTests(PrReviewTestCase):
         self.assertIn(["git", "-C", str(self.checkout), "branch", "-D", "pr/7"], self.fake.made("git"))
         self.assertNotIn(KEY, pr_reviews.records())
         self.assertEqual(result["key"], KEY)
+
+    def test_a_refused_removal_keeps_hunk_and_the_review(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        self.fake.on("herdr", "worktree", "remove", error="worktree_dirty")
+        with self.assertRaises(start.StartError):
+            pr_reviews.finish(KEY)
+        self.assertEqual(self.fake.made("herdr", "pane", "close"), [])
+        self.assertIn(KEY, pr_reviews.records())
+
+    def test_hunk_closes_after_the_worktree_is_removed(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        pr_reviews.finish(KEY)
+        herdr = [argv[1:3] for argv, _ in self.fake.calls if argv[0] == "herdr"]
+        self.assertLess(herdr.index(["worktree", "remove"]), herdr.index(["pane", "close"]))
 
     def test_force_removes_with_notes(self):
         self.record()

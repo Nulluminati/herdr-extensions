@@ -321,7 +321,7 @@ The flow:
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
 5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
-6. A background worker waits up to 30 minutes for the agent to go idle. Then it marks the PR `reviewed` and shows a Herdr notification with the note count.
+6. A background worker waits up to 30 minutes for the agent to go idle. Then it marks the PR `reviewed` and shows a Herdr notification with the count of notes that this review added.
 7. Press `g` to go to the workspace. Read the chat and the notes, add your own, and press `S` in Hunk to submit one GitHub review. Hunk's notes keep GitHub's diff positions, so the submit targets the right lines.
 8. Press `f` when you are done. herdboard closes the workspace, removes the worktree and deletes `pr/<N>`. When Hunk still has notes of yours that you did not submit, it asks again before it removes them.
 
@@ -365,6 +365,9 @@ Limits:
 
 - One reviewer agent per PR. A review with another agent kind, model or thinking level stops with `agent_running` while the first agent still runs. Close it first, or press `f` and review again.
 - Old notes come back after `u` as agent notes, with their author kept. `f` checks only the notes that you wrote in the current Hunk session.
+- `u` saves the notes to `pr-reviews/<PR>.notes.json` in the state folder before it closes Hunk. When the new Hunk does not open, the next `u` or review puts them back.
+- A review (`s`) of a PR whose worktree is behind the PR head stops with `new_commits`. On the list, herdboard then offers to fetch the new commits first.
+- `f` removes the worktree first. When Herdr or Git refuses, Hunk and its notes stay open.
 - Only github.com, and only PRs of the current repository.
 - herdboard does not remove the workspaces of merged or closed PRs by itself. Use `f`.
 
