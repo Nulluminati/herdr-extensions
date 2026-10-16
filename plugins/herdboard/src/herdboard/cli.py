@@ -897,7 +897,8 @@ def _pr_text(command: str, result: dict) -> str:
     number = result.get("number")
     if command == "pr-review":
         model = f" ({result['model']})" if result["model"] else ""
-        return (f"PR #{number}: {result['agent']}{model} reviews in workspace {result['workspace_id']}; "
+        verb = "has the new request" if result.get("prompted") else "reviews"
+        return (f"PR #{number}: {result['agent']}{model} {verb} in workspace {result['workspace_id']}; "
                 f"Hunk in {result['hunk_pane']}.")
     if command == "pr-review-refresh":
         lines = [f"PR #{number}: Hunk opened again in {result['hunk_pane']}; {result['kept']} notes kept."]

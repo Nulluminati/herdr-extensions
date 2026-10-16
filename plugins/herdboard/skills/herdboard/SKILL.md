@@ -166,7 +166,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`), and `pr-review` needs `hunk gh pr` to start a session. Tell the user the message. |
 | `remote_unknown` | No Git remote of the checkout points to the PR's base repository. Tell the user. |
 | `branch_exists` | A local branch `pr/<N>` exists that no PR review owns. Tell the user to delete or rename it. |
-| `agent_running` | A reviewer of the other kind still runs for the PR. Tell the user to close it, or to review with the same agent. |
+| `agent_running` | A reviewer with another agent kind, model or thinking level still runs for the PR. Tell the user to close it, or to review with the same agent and model. |
 | `workspace_closed` | The PR's review workspace is not open in Herdr. Run `pr-review <N>` again to open it, after you ask the user. |
 | `worktree_missing` | The PR's worktree is gone. Tell the user to run `pr-review-finish <N>` and review again. |
 | `unsent_notes` | Hunk still has notes of the user that are not submitted. Tell the user. Use `--force` only when they say so. |

@@ -348,7 +348,7 @@ What the reviewer can do:
 
 Limits:
 
-- One reviewer agent per PR. A review with the other agent kind stops with `agent_running` while the first agent still runs. Close it first.
+- One reviewer agent per PR. A review with another agent kind, model or thinking level stops with `agent_running` while the first agent still runs. Close it first, or press `f` and review again.
 - Old notes come back after `u` as agent notes, with their author kept. `f` checks only the notes that you wrote in the current Hunk session.
 - Only github.com, and only PRs of the current repository.
 - herdboard does not remove the workspaces of merged or closed PRs by itself. Use `f`.

@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from . import agent_review
+from . import agent_review, start
 from .model import HerdboardError
 from .start import _lock, _read, _write, herdr, safe_key, state_dir
 
@@ -232,9 +232,10 @@ def open_workspace(checkout, repo: str, number: int, title: str) -> dict:
     if exists.returncode == 0 and not record:
         raise PrReviewError(f"The branch {branch} exists, and no review owns it. Delete or rename it first",
                             "branch_exists")
-    if exists.returncode != 0:
-        _git(checkout, "fetch", base_remote(checkout, repo), f"pull/{number}/head:refs/heads/{branch}")
+    # Prune first: a removed worktree must not keep the branch checked out. The forced fetch then
+    # also moves a branch that the review kept to the PR's current head.
     _git(checkout, "worktree", "prune")
+    _git(checkout, "fetch", base_remote(checkout, repo), f"+pull/{number}/head:refs/heads/{branch}")
     label = f"PR #{number} {title[:TITLE_LENGTH]}".rstrip()
     result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch, "--label", label,
                    "--no-focus", "--trust-repository")
@@ -263,6 +264,17 @@ def _token() -> str | None:
     return result.stdout.strip() or None
 
 
+def _pane_run(pane: str, text: str) -> None:
+    """Type a command into a pane's shell. Herdr prints nothing for `pane run` when it works."""
+    try:
+        result = start.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "run", pane, text])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PrReviewError(f"Herdr is not reachable: {error}", "herdr_unavailable") from error
+    if result.returncode:
+        message = (result.stdout or result.stderr).strip()
+        raise PrReviewError(f"Hunk did not start in pane {pane}: {message}", "hunk_unavailable")
+
+
 def open_hunk(record: dict) -> dict:
     """Open `hunk gh pr` right of the agent, and record its pane and session."""
     key = review_key(record["repo"], record["number"])
@@ -279,7 +291,7 @@ def open_hunk(record: dict) -> dict:
     record["hunk_pane"] = pane
     record["hunk_session"] = None
     save(key, record)
-    herdr("pane", "run", pane, f"hunk gh pr '{target}'")
+    _pane_run(pane, f"hunk gh pr '{target}'")
     deadline = time.monotonic() + HUNK_WAIT_SECONDS
     while True:
         found = [s for s in _sessions() if s.get("sessionId") not in before and _is_pr_session(s, record)]
@@ -362,20 +374,28 @@ def _agent_name(repo: str, number: int) -> str:
     return f"pr-{name}-{number}"
 
 
-def _agent_status(name: str) -> str | None:
-    found = herdr("agent", "get", name, tolerated=("agent_not_found", "pane_not_found"))
-    agent = (found or {}).get("agent")
-    return agent.get("agent_status") if isinstance(agent, dict) else None
+def _agent_status(record: dict) -> str | None:
+    """The reviewer's Herdr status, None when it no longer runs. Herdr can drop a pi agent's name, so its pane counts too."""
+    for target in (record.get("agent_name"), record.get("pane_id")):
+        if not target:
+            continue
+        found = herdr("agent", "get", target, tolerated=("agent_not_found", "pane_not_found"))
+        agent = (found or {}).get("agent")
+        if isinstance(agent, dict):
+            return agent.get("agent_status")
+    return None
 
 
 def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: str | None,
                    thinking: str | None) -> dict:
     """Start the reviewer in the workspace's root pane, or give a running one the new request."""
     name = record.get("agent_name") or _agent_name(record["repo"], record["number"])
-    running = record.get("agent_name") and _agent_status(record["agent_name"]) is not None
-    if running and record.get("agent") != kind:
-        raise PrReviewError(f"A {record.get('agent')} reviewer still runs for {key}. "
-                            f"Close it, or review with {record.get('agent')}", "agent_running")
+    running = bool(record.get("agent_name")) and _agent_status(record) is not None
+    # A running agent keeps its kind, model and thinking level, so a request for others cannot reach it.
+    if running and (record.get("agent"), record.get("model"), record.get("thinking")) != (kind, model, thinking):
+        old = record.get("agent") + "".join(f" {part}" for part in (record.get("model"), record.get("thinking")) if part)
+        raise PrReviewError(f"A {old} reviewer still runs for {key}. Close it, or review with the same agent "
+                            "and model", "agent_running")
     path = _request_path(key, ".md")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -385,8 +405,9 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
     # Herdr rejects line breaks in agent arguments, so the request is a file and the message names it.
     message = (f"Read {path} and do the pull request review it asks for. "
                "Add notes only with hunk session comment add. Never submit anything to GitHub.")
+    # The worker of an older request watches the same agent name, and ends once the ID changes.
     record.update(agent=kind, agent_name=name, model=model, thinking=thinking, reviewed_sha=pr.head_sha,
-                  status="reviewing", notes=None, error=None)
+                  status="reviewing", notes=None, error=None, review_id=time.time_ns(), prompted=running)
     # Record intent before Herdr can return an unknown startup result.
     save(key, record)
     if running:
@@ -436,18 +457,29 @@ def request(checkout, repo: str, number: int, kind: str, model: str | None = Non
 
 # The worker
 
-def _wait_for_agent(name: str) -> None:
+def _current(key: str, review_id) -> bool:
+    """Whether the request that a worker waits for is still the PR's latest one."""
+    record = records().get(key)
+    return isinstance(record, dict) and record.get("review_id") == review_id
+
+
+def _wait_for_agent(record: dict, current) -> bool:
+    """Wait until the agent worked and went idle. False when a newer request replaced this one."""
     deadline = time.monotonic() + REVIEW_TIMEOUT_SECONDS
     seen = worked = False
     while True:
-        status = _agent_status(name)
+        status = _agent_status(record)
+        if not current():
+            return False
         # Herdr can take a moment to detect a new agent, so only an agent that was seen can stop.
         seen = seen or status is not None
         worked = worked or status == "working"
-        if worked and status in ("idle", "done"):
-            return
+        # Herdr shows `done` only after a turn, but `idle` also before the first one. A prompted
+        # agent can still show `done` from its last request, so it must work first.
+        if (status == "done" and not record.get("prompted")) or (worked and status in ("idle", "done")):
+            return True
         if seen and status is None:
-            raise PrReviewError(f"The reviewer {name} stopped before it finished", "review_failed")
+            raise PrReviewError(f"The reviewer {record['agent_name']} stopped before it finished", "review_failed")
         if time.monotonic() >= deadline:
             raise PrReviewError(f"The review did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes",
                                 "review_failed")
@@ -459,9 +491,10 @@ def wait(key: str) -> int:
     record = records().get(key)
     if not isinstance(record, dict) or not record.get("agent_name"):
         return 0
-    number, kind = record["number"], record.get("agent")
+    number, kind, review_id = record["number"], record.get("agent"), record.get("review_id")
     try:
-        _wait_for_agent(record["agent_name"])
+        if not _wait_for_agent(record, lambda: _current(key, review_id)):
+            return 0  # A newer request has its own worker.
         error = None
     except HerdboardError as failure:
         error = failure
@@ -475,8 +508,8 @@ def wait(key: str) -> int:
         path = state_dir() / STATE_FILE
         data = _read(path)
         current = data.get(key)
-        if not isinstance(current, dict):
-            return 0  # The review was finished meanwhile.
+        if not isinstance(current, dict) or current.get("review_id") != review_id:
+            return 0  # The review was finished or requested again meanwhile.
         current.update(status="failed" if error else "reviewed", notes=notes, error=str(error) if error else None)
         _write(path, data)
     if error is None:
@@ -538,7 +571,7 @@ def refresh(key: str) -> dict:
         record = open_hunk(record)
         entries = [entry for entry in map(_note_entry, notes) if entry]
         dropped = _apply(record["hunk_session"], entries)
-        line = lambda e: f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary']}"
+        line = lambda e: f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary'].splitlines()[0][:80]}"
         return {"key": key, "number": record["number"], "hunk_pane": record["hunk_pane"],
                 "hunk_session": record["hunk_session"], "kept": len(entries) - len(dropped),
                 "dropped": [line(e) for e in dropped], "agent": record.get("agent"), "model": record.get("model"),

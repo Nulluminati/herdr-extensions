@@ -90,6 +90,8 @@ class PrReviewTestCase(unittest.TestCase):
         self.fake.on("git", "-C", str(self.checkout), "remote", "-v",
                      out="origin\tgit@github.com:acme/api.git (fetch)\norigin\tgit@github.com:acme/api.git (push)\n")
         self.fake.on("gh", "auth", "token", out="secret-token\n")
+        # Herdr prints nothing for `pane run` when it works.
+        self.fake.on("herdr", "pane", "run", out="")
 
     def pr(self, **changes):
         return pr_reviews.PullRequest.from_json(pr_json(**changes), "me")
@@ -177,7 +179,7 @@ class WorkspaceTests(PrReviewTestCase):
     def test_a_new_review_fetches_the_pr_head_into_a_local_branch(self):
         self.new_workspace()
         record = pr_reviews.open_workspace(self.checkout, REPO, 7, "Fix login timeout " + "x" * 60)
-        self.assertIn(["git", "-C", str(self.checkout), "fetch", "origin", "pull/7/head:refs/heads/pr/7"],
+        self.assertIn(["git", "-C", str(self.checkout), "fetch", "origin", "+pull/7/head:refs/heads/pr/7"],
                       self.fake.made("git"))
         create = self.fake.made("herdr", "worktree", "create")[0]
         self.assertEqual(create[create.index("--branch") + 1], "pr/7")
@@ -195,6 +197,17 @@ class WorkspaceTests(PrReviewTestCase):
             pr_reviews.open_workspace(self.checkout, REPO, 7, "Fix")
         self.assertEqual(raised.exception.code, "branch_exists")
         self.assertEqual(self.fake.made("git", "-C", str(self.checkout), "fetch"), [])
+
+    def test_a_kept_branch_of_a_removed_worktree_gets_the_new_head(self):
+        self.record(worktree_path=str(self.root / "gone"))
+        self.fake.on("git", "-C", str(self.checkout), "rev-parse", "--verify", "--quiet", out="abc\n")
+        self.fake.on("herdr", "worktree", "create", result={
+            "workspace": {"workspace_id": "w9"}, "root_pane": {"pane_id": "w9:p1"},
+            "worktree": {"path": str(self.worktree)}})
+        pr_reviews.open_workspace(self.checkout, REPO, 7, "Fix")
+        git = self.fake.made("git", "-C", str(self.checkout))
+        fetch = git.index(["git", "-C", str(self.checkout), "fetch", "origin", "+pull/7/head:refs/heads/pr/7"])
+        self.assertLess(git.index(["git", "-C", str(self.checkout), "worktree", "prune"]), fetch)
 
     def test_a_live_workspace_is_reused(self):
         self.worktree.mkdir(parents=True)
@@ -233,6 +246,15 @@ class HunkTests(PrReviewTestCase):
         self.assertNotIn("secret-token", " ".join(run))
         self.assertEqual((record["hunk_pane"], record["hunk_session"]), ("w9:p2", "s-new"))
         self.assertEqual(pr_reviews.records()[KEY]["hunk_session"], "s-new")
+
+    def test_a_failed_pane_run_is_an_error(self):
+        self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p2"}})
+        self.fake.on("hunk", "session", "list", out={"sessions": []})
+        self.fake.replies.pop(("herdr", "pane", "run"))
+        self.fake.on("herdr", "pane", "run", error="pane_not_found")
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.open_hunk(self.record(hunk_pane=None, hunk_session=None))
+        self.assertEqual(raised.exception.code, "hunk_unavailable")
 
     def test_no_session_is_an_error(self):
         self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p2"}})
@@ -286,6 +308,23 @@ class ReviewerTests(PrReviewTestCase):
         prompt = self.fake.made("herdr", "agent", "prompt")[0]
         self.assertEqual(prompt[3], "w9:p1")
 
+    def test_a_running_pi_without_its_name_is_found_by_its_pane(self):
+        record = self.record(status="reviewed", agent="pi", model=None)
+        self.fake.on("herdr", "agent", "get", "pr-api-7", error="agent_not_found")
+        self.fake.on("herdr", "agent", "get", "w9:p1", result={"agent": {"agent_status": "done"}})
+        pr_reviews.start_reviewer(KEY, record, self.pr(), "pi", None, None)
+        self.assertEqual(self.fake.made("herdr", "agent", "start"), [])
+        self.assertEqual(len(self.fake.made("herdr", "agent", "prompt")), 1)
+
+    def test_a_running_agent_with_another_model_is_refused(self):
+        record = self.record(status="reviewed")
+        self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "idle"}})
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.start_reviewer(KEY, record, self.pr(), "claude", "opus", None)
+        self.assertEqual(raised.exception.code, "agent_running")
+        self.assertIn("sonnet", str(raised.exception))
+        self.assertEqual(self.fake.made("herdr", "agent", "prompt"), [])
+
     def test_a_running_agent_of_another_kind_is_refused(self):
         record = self.record(status="reviewed")
         self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "idle"}})
@@ -331,6 +370,47 @@ class WaitTests(PrReviewTestCase):
         notice = self.fake.made("herdr", "notification", "show")[0]
         self.assertEqual(notice[3], "PR #7 reviewed")
         self.assertIn("2 notes from claude", notice[notice.index("--body") + 1])
+
+    def test_a_replaced_request_ends_the_worker_quietly(self):
+        self.record(review_id=1)
+        replace = lambda argv, options: pr_reviews.save(KEY, {**pr_reviews.records()[KEY], "review_id": 2})
+        self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "working"}}, then=replace)
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(pr_reviews.records()[KEY]["status"], "reviewing")
+        self.assertEqual(self.fake.made("herdr", "notification", "show"), [])
+
+    def test_start_reviewer_gives_each_request_an_id(self):
+        record = self.record(status=None)
+        pr_reviews.start_reviewer(KEY, record, self.pr(), "claude", "sonnet", None)
+        first = pr_reviews.records()[KEY]["review_id"]
+        self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "idle"}})
+        pr_reviews.start_reviewer(KEY, pr_reviews.records()[KEY], self.pr(), "claude", "sonnet", None)
+        self.assertNotEqual(pr_reviews.records()[KEY]["review_id"], first)
+
+    def test_a_pi_agent_without_its_name_is_watched_in_its_pane(self):
+        self.record(agent="pi")
+        self.fake.on("herdr", "agent", "get", "pr-api-7", error="agent_not_found")
+        for state in ("working", "done"):
+            self.fake.on("herdr", "agent", "get", "w9:p1", result={"agent": {"agent_status": state}})
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": [{"noteId": "1"}]})
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(pr_reviews.records()[KEY]["status"], "reviewed")
+
+    def test_done_ends_the_wait_also_when_working_was_not_seen(self):
+        self.record()
+        self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "done"}})
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        with patch.object(pr_reviews, "REVIEW_TIMEOUT_SECONDS", 5):
+            self.assertEqual(self.wait(), 0)
+        self.assertEqual(pr_reviews.records()[KEY]["notes"], 0)
+
+    def test_a_prompted_agent_must_work_first(self):
+        self.record(prompted=True)
+        for state in ("done", "working", "done"):
+            self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": state}})
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(len(self.fake.made("herdr", "agent", "get")), 3)
 
     def test_a_timeout_fails(self):
         self.record()
@@ -393,7 +473,7 @@ class RefreshTests(PrReviewTestCase):
         notes = [{"noteId": "1", "source": "agent", "filePath": "a.py", "newRange": [3, 3], "body": "Bug here",
                   "author": "Claude"},
                  {"noteId": "2", "source": "user", "filePath": "b.py", "oldRange": [9, 9], "body": "Why?"},
-                 {"noteId": "3", "source": "user", "filePath": "gone.py", "newRange": [1, 1], "body": "Old"}]
+                 {"noteId": "3", "source": "user", "filePath": "gone.py", "newRange": [1, 1], "body": "Old\n\nThe rationale."}]
         self.fake.on("hunk", "session", "comment", "list", out={"comments": notes})
         self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p3"}})
         self.new_session("s-two")
