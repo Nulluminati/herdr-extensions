@@ -197,7 +197,7 @@ class AttachmentIconTests(BoardTestCase):
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             (first, width), (second, _) = self.first_lines(app)
-            self.assertRegex(first, rf"^Ship it +{board.ATTACHMENT_MARK}$")
+            self.assertRegex(first, rf"^Ship it {board.MENU_MARK} +{board.ATTACHMENT_MARK}$")
             # The mark ends at the right edge of the card text.
             self.assertEqual(cell_len(first), width, first)
             self.assertNotIn(board.ATTACHMENT_MARK, second)

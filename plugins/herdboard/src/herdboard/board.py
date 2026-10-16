@@ -13,12 +13,15 @@ import threading
 import zlib
 from typing import Callable
 
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, HorizontalScroll, Vertical, VerticalScroll
 from textual.driver import Driver
+from textual.errors import NoWidget
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
@@ -55,6 +58,8 @@ LINEAR_WRITER_MESSAGE = "Linear writes are not available"
 LINEAR_MARK = "◆"
 # Shown in the top-right corner of a card that has attachments.
 ATTACHMENT_MARK = "≡"
+# Ends a card's title. A click on it opens the card menu, also where Herdr keeps right-click for itself.
+MENU_MARK = "⋯"
 
 HELP_KEYS = [
     ("left, h", "previous column"),
@@ -94,6 +99,10 @@ HELP_KEYS = [
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
     ("q", "quit"),
+    ("click", "select a card, or a column on its header"),
+    ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
+    ("right-click, ⋯", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
+    ("drag", "move the card to the bottom of another column"),
 ]
 
 
@@ -168,6 +177,8 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
     else:
         title, tags, due = split_title(card.title)
     text = Text(title or card.title)
+    text.append(" ")
+    text.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
     line = Text()
     if card.type:
         line.append_text(type_badge(card.type))
@@ -215,10 +226,15 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round") -> Tex
 
 
 class CardWidget(Static):
+    # A drag moves the card, so it must not also select text.
+    ALLOW_SELECT = False
+
     def __init__(self, card: CardView, show_board: bool, tag_style: str = "round"):
         self.card = card
         self.rich_text = card_text(card, show_board, tag_style)
-        self.plain = self.rich_text.plain
+        # The menu marker is not card text: `plain` keeps the title line without it.
+        title, newline, rest = self.rich_text.plain.partition("\n")
+        self.plain = title.removesuffix(f" {MENU_MARK}") + newline + rest
         content = self.rich_text
         if card.has_attachments:
             content = Table.grid(expand=True)
@@ -227,6 +243,25 @@ class CardWidget(Static):
             content.add_row(self.rich_text, Text(ATTACHMENT_MARK))
             self.plain += f" {ATTACHMENT_MARK}"
         super().__init__(content, classes="card")
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 1:
+            self.app.start_drag(self.card)
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        app = self.app
+        if app.dropped:
+            # The click that ends a drag: the drop has already selected the card.
+            app.dropped = False
+            return
+        if event.button == 3 or (event.button == 1 and event.style.meta.get("card_menu")):
+            app.open_card_menu(self.card)
+        elif event.button == 1 and event.chain == 1:
+            app.select_card(self.card)
+        elif event.button == 1 and event.chain == 2:
+            app.select_card(self.card)
+            app.action_detail()
 
 
 class ColumnHeader(Static):
@@ -253,10 +288,11 @@ def _hold_indent(line: str) -> str:
     return "\u00a0" * len(indent) + stripped
 
 
-def detail_lines(lines: list[str], selected: int | None = None) -> Text:
+def detail_lines(lines: list[str], selected: int | None = None, checks: bool = False) -> Text:
     """Detail lines with checkboxes and bullets drawn as symbols. Done items are struck through.
 
-    `selected` is the index of the checklist line to highlight.
+    `selected` is the index of the checklist line to highlight. With `checks`, a click on a
+    checklist line checks or clears it.
     """
     text = Text()
     for number, line in enumerate(lines):
@@ -273,6 +309,8 @@ def detail_lines(lines: list[str], selected: int | None = None) -> Text:
             text.append(check.group("text"), style="dim strike" if done else "")
             if number == selected:
                 text.stylize("reverse", start, len(text))
+            if checks:
+                text.stylize(Style(meta={"@click": f"screen.toggle_line({number})"}), start, len(text))
         elif bullet:
             text.append(f"{bullet.group('indent')}• {bullet.group('text')}")
         else:
@@ -348,11 +386,13 @@ def attachment_lines(files: list[dict]) -> Text:
     """One line per attachment: its name, then its size in a dim column."""
     width = max((len(entry["name"]) for entry in files), default=0)
     text = Text()
-    for entry in files:
+    for index, entry in enumerate(files):
         if text:
             text.append("\n")
+        start = len(text)
         text.append(entry["name"].ljust(width + 2))
         text.append(attachments.size_label(entry["size"]), style="dim")
+        text.stylize(Style(meta={"@click": f"screen.open_file({index})"}), start, len(text))
     return text
 
 
@@ -391,7 +431,7 @@ class DetailScreen(ModalBase):
 
     def _show_body(self) -> None:
         block = self.query_one("#detail-body", RichStatic)
-        block.rich_text = detail_lines(self.body, self._selected())
+        block.rich_text = detail_lines(self.body, self._selected(), self.card.source != "linear")
         block.plain = block.rich_text.plain
         block.update(block.rich_text)
 
@@ -418,6 +458,17 @@ class DetailScreen(ModalBase):
         self._set_card(card)
         self._show_body()
         await app.reload(card.ref)
+
+    async def action_toggle_line(self, number: int) -> None:
+        """A click on a checklist line: select it, then check or clear it."""
+        if number in self.items:
+            self.cursor = self.items.index(number)
+            await self.action_toggle()
+
+    def action_open_file(self, index: int) -> None:
+        """A click on an attachment line opens that attachment."""
+        if 0 <= index < len(self.files):
+            self.open_attachment(self.files[index])
 
     def _title_parts(self) -> tuple[str, list[str], str | None]:
         card = self.card
@@ -460,7 +511,8 @@ class DetailScreen(ModalBase):
                 yield RichStatic(chips, id="detail-chips")
             yield RichStatic(self._meta(), id="detail-meta")
             if any(line.strip() for line in body):
-                block = RichStatic(detail_lines(body, self._selected()), id="detail-body", classes="detail-block")
+                block = RichStatic(detail_lines(body, self._selected(), self.card.source != "linear"),
+                                   id="detail-body", classes="detail-block")
                 block.border_title = "Details"
                 yield block
             for note in self.notes:
@@ -948,6 +1000,71 @@ class ParentScreen(ModalBase):
         self.dismiss(("parent", option.ref if option else None))
 
 
+# The card menu's entries, in the order of the board's key bindings: (action, key, label).
+MENU_ENTRIES = [
+    ("detail", "enter", "Detail"),
+    ("done", "d", "Done"),
+    ("edit", "e", "Edit"),
+    ("move_board", "b", "Board"),
+    ("delete", "x", "Delete"),
+    ("archive", "A", "Archive"),
+    ("start", "s", "Start"),
+    ("choose_agent", "S", "Choose agent"),
+    ("go", "g", "Go to workspace"),
+    ("review", "R", "Review"),
+    ("plan", "P", "Plan"),
+    ("parent", "p", "Parent"),
+    ("merge", "m", "Merge"),
+    ("finish", "f", "Finish"),
+]
+
+
+def card_actions(card: CardView) -> list[tuple[str, str]]:
+    """The card menu's (label, action) pairs: only the actions that apply to the card.
+
+    The rules use only what the board already knows. An action still makes its own checks.
+    """
+    todo = card.source != "linear"
+    wanted = {"detail"}
+    if card.archived and todo:
+        wanted |= {"archive", "delete"}
+    else:
+        if todo:
+            wanted |= {"edit", "parent", "move_board", "delete"}
+        if not card.checked:
+            wanted.add("done")
+        if card.worktree:
+            # `start` stays: it resumes a start that has steps left.
+            wanted |= {"go", "review", "merge", "finish", "start"}
+        else:
+            wanted |= {"start", "choose_agent", "plan"}
+            if todo:
+                wanted.add("archive")
+        if card.checked and card.worktree_left:
+            wanted.add("finish")
+    return [(f"{key}  {'Unarchive' if action == 'archive' and card.archived else label}", action)
+            for action, key, label in MENU_ENTRIES if action in wanted]
+
+
+class CardMenuScreen(ModalBase):
+    """The actions that apply to a card. It returns the chosen action's name, or None."""
+
+    def __init__(self, title: str, actions: list[tuple[str, str]]):
+        super().__init__()
+        self.title_text = title
+        self.actions = actions
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(self.title_text)
+            yield OptionList(*(label for label, _ in self.actions), id="card-menu")
+            yield Label("enter or click: run, escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.actions[event.option_index][1])
+
+
 class DeleteScreen(ModalBase):
     """Ask before a todo is deleted."""
 
@@ -1217,6 +1334,9 @@ class HerdboardApp(App):
     App:ansi .detail-block { border: round ansi_bright_black; }
     App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
     App:ansi .card-form Input:focus, App:ansi .card-form TextArea:focus { border: round $primary; }
+    /* The column under a dragged card. */
+    .column.drop-target { border: heavy $accent; }
+    App:ansi .column.drop-target { border: heavy ansi_yellow; }
     """
     BINDINGS = [
         Binding("left,h", "column(-1)", "Column", show=False),
@@ -1343,6 +1463,10 @@ class HerdboardApp(App):
         self.add_screen: AddScreen | None = None
         # True while a Linear write runs: Linear is fetched again when it ends.
         self.refetch = False
+        # The card that the mouse holds, and the index of its column, from mouse down to mouse up.
+        self.drag: tuple[CardView, int] | None = None
+        # True after a drop, so the click that ends the drag does not count.
+        self.dropped = False
 
     # Layout
 
@@ -1508,6 +1632,7 @@ class HerdboardApp(App):
             self.set_focus(None)
 
     async def action_clear_filter(self) -> None:
+        self._end_drag()
         search = self.base.query_one("#filter", Input)
         search.display = False
         search.disabled = True
@@ -1604,8 +1729,8 @@ class HerdboardApp(App):
         cards = [card for column in self.loaded for card in column.cards]
 
         def status():
-            return [(card.worktree_removed, card.worktree_left, card.pr_state, card.agent_review, card.pr_writing,
-                     card.planning, card.has_attachments)
+            return [(card.worktree_removed, card.worktree, card.worktree_left, card.pr_state, card.agent_review,
+                     card.pr_writing, card.planning, card.has_attachments)
                     for card in cards]
 
         old = status()
@@ -1647,6 +1772,96 @@ class HerdboardApp(App):
             count = len(self.columns[self.col].cards)
             self.row = max(0, min(self.row + step, max(count - 1, 0)))
             self._show_selection()
+
+    # Mouse
+
+    def select_card(self, card: CardView) -> bool:
+        """Select a card that the mouse points at. False when a dialog is open or the card is gone."""
+        if isinstance(self.screen, ModalScreen):
+            return False
+        identity = self._identity(card)
+        for col, data in enumerate(self.columns):
+            for row, shown in enumerate(data.cards):
+                if shown is card or self._identity(shown) == identity:
+                    self.col, self.row = col, row
+                    self._show_selection()
+                    return True
+        return False
+
+    def select_column(self, index: int) -> None:
+        if isinstance(self.screen, ModalScreen) or not 0 <= index < len(self.columns):
+            return
+        self.action_column(index - self.col)
+
+    def open_card_menu(self, card: CardView) -> None:
+        if not self.select_card(card):
+            return
+
+        async def chosen(action: str | None) -> None:
+            if action is not None:
+                await self.run_action(action)
+
+        title = split_title(card.title)[0] if card.source != "linear" else card.title
+        self.push_screen(CardMenuScreen(title or card.title, card_actions(card)), chosen)
+
+    def _column_at(self, x: int, y: int) -> int | None:
+        """The index of the board column at a screen position, or None."""
+        try:
+            widget, _ = self.get_widget_at(x, y)
+        except NoWidget:
+            return None
+        columns = list(self.base.query(".column"))
+        while widget is not None:
+            if widget in columns:
+                return columns.index(widget)
+            widget = widget.parent
+        return None
+
+    def start_drag(self, card: CardView) -> None:
+        self._end_drag()
+        if self.select_card(card):
+            self.drag = (card, self.col)
+
+    def _end_drag(self) -> None:
+        self.drag = None
+        for widget in self.base.query(".column.drop-target"):
+            widget.remove_class("drop-target")
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        # A new press: a click from now on is not the end of a drop.
+        self.dropped = False
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if self.drag is None:
+            return
+        target = self._column_at(event.screen_x, event.screen_y)
+        for index, widget in enumerate(self.base.query(".column")):
+            widget.set_class(index == target and target != self.drag[1], "drop-target")
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        drag = self.drag
+        self._end_drag()
+        if drag is None or isinstance(self.screen, ModalScreen):
+            return
+        card, source = drag
+        target = self._column_at(event.screen_x, event.screen_y)
+        if target is None or target == source:
+            return
+        self.dropped = True
+        # The card can be gone after a reload: then nothing moves.
+        if self.select_card(card):
+            self.action_move(target - self.col)
+
+    def on_click(self, event: events.Click) -> None:
+        """A click on a column outside its cards, such as on its header, selects the column."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self.dropped:
+            self.dropped = False
+            return
+        index = self._column_at(event.screen_x, event.screen_y)
+        if index is not None:
+            self.select_column(index)
 
     def _start_write(
         self,

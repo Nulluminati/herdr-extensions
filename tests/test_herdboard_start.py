@@ -256,6 +256,7 @@ class StartTests(unittest.TestCase):
         card = self.store.show(self.card.ref)
         start.mark_removed([card])
         self.assertTrue(card.worktree_removed)
+        self.assertFalse(card.worktree)
         self.assertEqual(card.column, "In progress")
 
     def test_resume_does_not_repeat_a_completed_move(self):
@@ -355,6 +356,7 @@ class StartTests(unittest.TestCase):
         card = self.store.show(self.card.ref)
         start.mark_removed([card])
         self.assertFalse(card.worktree_removed)
+        self.assertTrue(card.worktree)
 
     def test_agent_message_is_safe_for_herdr_shell_encoding(self):
         self.starter.start(self.card.ref)

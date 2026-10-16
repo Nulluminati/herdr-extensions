@@ -87,6 +87,26 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `?` | Help |
 | `q` | Quit |
 
+### Mouse
+
+The keys stay the main input. Each mouse action runs an action that a key also runs.
+
+| Mouse | Action |
+|---|---|
+| Click a card | Select the card |
+| Click a column header, or the empty part of a column | Select the column |
+| Double-click a card | Card detail (enter) |
+| Right-click a card, or click the `⋯` at the end of its title | A menu of the actions that apply to the card |
+| Drag a card to another column | Move the card to the bottom of that column (`H` / `L`) |
+| Click a checklist item in the card detail | Check or clear the item (space) |
+| Click an attachment in the card detail | Open the attachment (`o`) |
+| Wheel | Scroll a column, or the columns |
+
+- Herdr keeps right-click for its own menu. To send right-clicks to the board, turn on "send right clicks to pane" in Herdr's right-click menu. Without it, click the `⋯` marker.
+- The menu uses only what the board knows, such as a worktree that exists. An action still makes its own checks, so it can refuse with its usual notice.
+- A drop always puts the card at the bottom of the column. Use `K` / `J` to change the order.
+- The wheel only scrolls. It does not change the selected card.
+
 ### Views
 
 | View | Shows |
