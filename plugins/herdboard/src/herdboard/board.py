@@ -1248,9 +1248,16 @@ class CellMouseDriver(LinuxDriver):
     Textual turns pixel reports on when the terminal supports in-band resize.
     Herdr reads mouse positions as cells, so pixel reports stop clicks on its
     own tabs and sidebar while the board is in view.
+
+    It does not ask for in-band resize reports (mode 2048) either. After one,
+    Textual's parser reads every mouse position as pixels, so Herdr's cell
+    positions land near the top-left corner. Resizes then come by SIGWINCH.
     """
 
     def _enable_mouse_pixels(self) -> None:
+        return
+
+    def _query_in_band_window_resize(self) -> None:
         return
 
 

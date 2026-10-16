@@ -1251,6 +1251,13 @@ class TerminalModeTests(unittest.TestCase):
         self.assertNotIn("\x1b[?1016h", "".join(driver.written))
         self.assertFalse(driver._mouse_pixels)
 
+    def test_in_band_resize_stays_off(self):
+        # After an in-band resize report, Textual's parser reads every mouse position as pixels,
+        # so Herdr's cell positions would land near the top-left corner.
+        driver = self.driver()
+        driver._query_in_band_window_resize()
+        self.assertNotIn("\x1b[?2048$p", "".join(driver.written))
+
     def test_cell_mouse_reports_stay_on(self):
         driver = self.driver()
         driver._enable_mouse_support()
