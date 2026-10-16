@@ -85,6 +85,36 @@ class IconTextTests(unittest.TestCase):
             self.assertIn(f"{PULL_REQUEST} merged" if style == "nerd" else "merged", meta)
             self.assertIn(f"{BRANCH} still exists" if style == "nerd" else "still exists", meta)
 
+    def test_plain_local_detail_status_rows_match_approved_output(self):
+        base = "Board        api\nColumn       Todo\nID           t123\nType         bug"
+        cases = (
+            ({}, base),
+            ({"pr_state": "open", "worktree_left": True},
+             base + "\nPull request open\nWorktree     still exists"),
+            ({"pr_state": "merged", "worktree_removed": True},
+             base + "\nPull request merged\nWorktree     removed"),
+            ({"pr_state": "open", "pr_writing": True}, base + "\nPull request writing"),
+        )
+        for status, expected in cases:
+            with self.subTest(status=status):
+                item = card(type="bug", **status)
+                self.assertEqual(item.source, "todo")
+                self.assertEqual(board.DetailScreen(item, None)._meta().plain, expected)
+
+    def test_detail_type_values_are_unstyled_in_plain_mode_and_badges_in_nerd_mode(self):
+        for kind in ("bug", "spike"):
+            for mode in ("plain", "nerd"):
+                with self.subTest(kind=kind, mode=mode):
+                    meta = board.DetailScreen(card(type=kind), None, icon_style=mode)._meta()
+                    offset = meta.plain.rindex(kind)
+                    style = meta.get_style_at_offset(Console(), offset)
+                    if mode == "plain":
+                        self.assertFalse(style.bold)
+                        self.assertIsNone(style.color)
+                    else:
+                        self.assertTrue(style.bold)
+                        self.assertEqual(style.color.name if style.color else None, "red" if kind == "bug" else None)
+
     def test_rendering_does_not_change_data_or_filter_results(self):
         item = card(title="Ship it #type/bug #api 📅 2026-11-01", type="bug", tags=["api"],
                     due="2026-11-01", has_attachments=True)

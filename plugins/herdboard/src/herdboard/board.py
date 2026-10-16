@@ -520,7 +520,7 @@ class DetailScreen(ModalBase):
                 if text:
                     text.append("\n")
                 text.append(f"{label:<13}", style="dim")
-                if label == "Type":
+                if label == "Type" and self.icon_style == "nerd":
                     text.append_text(type_badge(value, self.icon_style))
                 else:
                     text.append(str(value))
@@ -2665,6 +2665,11 @@ class HerdboardApp(App):
                       display: dict[str, str] | None = None) -> None:
         """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing."""
         path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
+        display = dict(display or {})
+
+        def apply_display() -> None:
+            for key, value in display.items():
+                setattr(self.store.config, key, value)
 
         def write() -> None:
             link = resolve(project, labels) if project and resolve else None
@@ -2686,8 +2691,7 @@ class HerdboardApp(App):
                     if board_changed:
                         raise HerdboardError(f"Board settings saved; display settings not saved: {error}") from error
                     raise
-                for key, value in display.items():
-                    setattr(self.store.config, key, value)
+                self.call_from_thread(apply_display)
 
         self._start_write(write, add=screen, refetch=bool(removed or project or removed_pins))
 

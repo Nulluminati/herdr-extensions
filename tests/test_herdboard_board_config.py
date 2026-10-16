@@ -1,4 +1,5 @@
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -9,7 +10,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import kanban_md  # noqa: E402
 from herdboard.board import ConfigScreen, HerdboardApp  # noqa: E402
-from herdboard.config import load_config  # noqa: E402
+from herdboard.config import load_config, save_display_config  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink, with_link  # noqa: E402
 from herdboard.model import FormatError, HerdboardError  # noqa: E402
 from test_herdboard_board import BoardTestCase, settle  # noqa: E402
@@ -197,6 +198,35 @@ class ConfigScreenTests(BoardTestCase):
         config = load_config(app.config_file)
         self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
         self.assertEqual(self.repo_path.read_bytes(), original)
+
+    async def test_display_saves_run_in_the_worker_and_apply_on_the_event_loop(self):
+        app = self.make_app()
+        loop_thread = threading.get_ident()
+        writes, applied = [], []
+        original_setattr = type(self.config).__setattr__
+
+        def save(*args, **kwargs):
+            writes.append(threading.get_ident())
+            save_display_config(*args, **kwargs)
+
+        def assign(config, key, value):
+            if config is self.config and key in ("icon_style", "tag_style"):
+                applied.append((key, value, threading.get_ident()))
+            original_setattr(config, key, value)
+
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-icon-style").value = "nerd"
+            screen.query_one("#config-tag-style").value = "block"
+            with mock.patch("herdboard.board.save_display_config", side_effect=save), \
+                    mock.patch.object(type(self.config), "__setattr__", assign):
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+        self.assertTrue(writes)
+        self.assertTrue(all(thread != loop_thread for thread in writes))
+        self.assertEqual(applied, [("icon_style", "nerd", loop_thread), ("tag_style", "block", loop_thread)])
 
     async def test_cancel_does_not_write_or_apply_display_settings(self):
         app = self.make_app()
