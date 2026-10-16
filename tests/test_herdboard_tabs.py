@@ -112,6 +112,44 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             self.assertEqual(self.service.page.call_count, 2)
 
+    async def test_a_read_in_the_background_shows_no_loading_spinner(self):
+        import threading
+        from textual.widgets import LoadingIndicator
+        release = threading.Event()
+
+        def slow(text, after):
+            release.wait(5)
+            return "acme/api", Page([], 0, None)
+
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            screen = app.screen
+            self.service.page.side_effect = slow
+            screen.action_load()
+            await pilot.pause(0.2)
+            self.assertFalse(screen.loading)
+            self.assertEqual(list(screen.query(LoadingIndicator)), [])
+            release.set()
+            await self.settle(app, pilot)
+
+    async def test_the_same_data_keeps_the_table_and_its_selection(self):
+        from herdboard.pr_reviews import PullRequest
+        prs = [PullRequest(n, f"PR {n}", "u", "octo", False, "a" * 40, "b", False, False) for n in range(9, 0, -1)]
+        self.service.page.return_value = ("acme/api", Page(prs, 9, None))
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            screen = app.screen
+            await pilot.press("j", "j", "j")
+            table = screen.query_one("#pr-list")
+            screen.action_load()
+            await self.settle(app, pilot)
+            self.assertEqual(table.cursor_row, 3)
+            self.assertEqual(screen.current().number, 6)
+
     async def test_each_key_can_be_clicked(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:

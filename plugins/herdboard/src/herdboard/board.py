@@ -1831,9 +1831,13 @@ class PullRequestsScreen(Screen):
         self.cursors: list[str | None] = [None]
         self.page_index = 0
         self.page: pr_reviews.Page | None = None
-        self.loading = False
+        # True while a read of GitHub runs. Not `loading`: that Textual property covers the screen
+        # with a spinner, and the reads run in the background.
+        self.reading = False
         # When the list last read GitHub, as time.monotonic(); 0 before the first read.
         self.read_at = 0.0
+        # The cells of the rows on screen, to see whether a read changed anything.
+        self.shown_rows: list[list[Text]] = []
 
     def compose(self) -> ComposeResult:
         yield TabBar("prs")
@@ -1861,7 +1865,7 @@ class PullRequestsScreen(Screen):
 
     def on_screen_resume(self) -> None:
         self.timer.resume()
-        if not self.loading and time.monotonic() - self.read_at >= PR_SECONDS:
+        if not self.reading and time.monotonic() - self.read_at >= PR_SECONDS:
             self.action_load()
 
     @property
@@ -1946,13 +1950,21 @@ class PullRequestsScreen(Screen):
         title.plain = f"Pull requests · {repo}"
         title.update(title.plain)
         table = self.query_one("#pr-list", PullRequestTable)
-        table.clear()
         width = self._title_width(prs)
-        for pr in prs:
-            table.add_row(*pr_cells(pr, self.icon_style, width), key=str(pr.number))
-        if prs:
-            numbers = [pr.number for pr in prs]
-            table.move_cursor(row=numbers.index(selected.number) if selected and selected.number in numbers else 0)
+        rows = [pr_cells(pr, self.icon_style, width) for pr in prs]
+        # A read that changed nothing leaves the table alone, so the cursor and the scroll stay.
+        if rows != self.shown_rows:
+            self.shown_rows = rows
+            scroll = table.scroll_y
+            table.clear()
+            for pr, cells in zip(prs, rows):
+                table.add_row(*cells, key=str(pr.number))
+            if prs:
+                numbers = [pr.number for pr in prs]
+                table.move_cursor(row=numbers.index(selected.number) if selected and selected.number in numbers
+                                  else 0, scroll=False)
+                table.scroll_to(y=scroll, animate=False)
+                table.move_cursor(row=table.cursor_row)
         self._status(self._summary(repo, prs))
 
     def on_resize(self, event: events.Resize) -> None:
@@ -1968,10 +1980,10 @@ class PullRequestsScreen(Screen):
 
     def action_load(self) -> None:
         text, after = self.search, self.cursors[self.page_index]
-        self.loading = True
+        self.reading = True
 
         def done(repo: str | None, page: pr_reviews.Page | None) -> None:
-            self.loading = False
+            self.reading = False
             if page is not None:
                 self.read_at = time.monotonic()
                 self._show(repo, page.prs, page)
@@ -1989,7 +2001,7 @@ class PullRequestsScreen(Screen):
         self.run_worker(load, thread=True, group=PR_GROUP, exit_on_error=False)
 
     def action_page(self, step: int) -> None:
-        if self.loading or self.page is None:
+        if self.reading or self.page is None:
             return
         if step > 0:
             if self.page.next_cursor is None:
