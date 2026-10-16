@@ -143,6 +143,16 @@ class DetailClickTests(MouseTestCase):
             await pilot.pause()
             self.assertEqual(clicks(app.screen.query_one("#detail-body").rich_text), [])
 
+    async def test_the_attachments_block_selects_no_text(self):
+        # A text drag that ends on an attachment line would also open it.
+        card = self.store.add(self.repo_path, "file card", "Backlog")
+        (self.root / "a.md").write_text("# Text\n", encoding="utf-8")
+        attachments.add(self.store, card.ref, self.root / "a.md")
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await self.open_detail(pilot, card.ref)
+            self.assertFalse(app.screen.query_one("#detail-files").allow_select)
+
     async def test_a_click_on_an_attachment_opens_it(self):
         card = self.store.add(self.repo_path, "file card", "Backlog")
         for name in ("a.md", "b.md"):
@@ -230,6 +240,34 @@ class DragTests(MouseTestCase):
             await settle(pilot)
             self.assertEqual(self.titles("Review"), ["waiting card"])
             self.assertEqual(self.titles("Todo"), ["second todo"])
+
+    async def test_only_the_left_button_drops(self):
+        before = self.repo_path.read_text()
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, self.first.ref)
+            await pilot.mouse_down(widget, offset=content_offset(widget))
+            target = self.column(app, "Review").query_one(".column-header")
+            await pilot._post_mouse_events([events.MouseUp], target, button=3)
+            await settle(pilot)
+            self.assertEqual(self.repo_path.read_text(), before)
+            self.assertIsNone(app.drag)
+            self.assertFalse(app.dropped)
+
+    async def test_a_drop_on_the_own_column_after_the_columns_moved_writes_nothing(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, self.first.ref)
+            await pilot.mouse_down(widget, offset=content_offset(widget))
+            # Another program adds a column before Todo while the mouse holds the card.
+            self.repo_path.write_text(self.repo_path.read_text().replace("## Todo", "## Extra\n\n## Todo", 1))
+            await app.reload()
+            await pilot.pause()
+            await pilot.mouse_up(self.column(app, "Todo").query_one(".column-header"))
+            await settle(pilot)
+            self.assertEqual(self.titles("Todo"), ["first todo", "second todo"])
 
     async def test_a_drag_of_an_archived_card_warns(self):
         done = self.store.done(self.store.add(self.repo_path, "old card", "Todo").ref)
@@ -380,6 +418,21 @@ class MenuTests(MouseTestCase):
             await settle(pilot)
             self.assertIsInstance(app.screen, EditScreen)
             self.assertEqual(app.screen.card.ref, self.second.ref)
+
+    async def test_a_menu_choice_for_a_card_that_a_reload_removed_changes_no_other_card(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            widget = self.widget(app, self.second.ref)
+            await pilot.click(widget, offset=self.marker_offset(widget))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, CardMenuScreen)
+            self.store.delete(self.second.ref)
+            await app.reload()
+            await pilot.pause()
+            await self.choose(pilot, "done")
+            self.assertFalse(self.store.show(self.first.ref).checked)
+            self.assertIn("The card is no longer on the board.", [n.message for n in app._notifications])
 
     async def test_the_menu_shows_a_title_with_brackets_as_text(self):
         card = self.store.add(self.repo_path, "Fix the [/auth] bug", "Review")

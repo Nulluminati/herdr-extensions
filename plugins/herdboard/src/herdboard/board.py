@@ -529,6 +529,8 @@ class DetailScreen(ModalBase):
             if self.files:
                 block = RichStatic(attachment_lines(self.files), id="detail-files", classes="detail-block")
                 block.border_title = "Attachments"
+                # A text drag that ends on an attachment line would also open it.
+                block.ALLOW_SELECT = False
                 yield block
             if self.entries:
                 block = RichStatic(log_lines(self.entries), id="detail-log", classes="detail-block")
@@ -1808,8 +1810,13 @@ class HerdboardApp(App):
             return
 
         async def chosen(action: str | None) -> None:
-            if action is not None:
-                await self.run_action(action)
+            if action is None:
+                return
+            # A reload while the menu was open can remove the card: then the action must not run on another one.
+            if not self.select_card(card):
+                self.notify("The card is no longer on the board.", severity="warning")
+                return
+            await self.run_action(action)
 
         title = split_title(card.title)[0] if card.source != "linear" else card.title
         # From the app's own message pump, so the choice still runs when a reload replaces the card widget.
@@ -1852,16 +1859,16 @@ class HerdboardApp(App):
     def on_mouse_up(self, event: events.MouseUp) -> None:
         drag = self.drag
         self._end_drag()
-        if drag is None or isinstance(self.screen, ModalScreen):
+        if drag is None or event.button != 1 or isinstance(self.screen, ModalScreen):
             return
-        card, source = drag
+        card = drag[0]
         target = self._column_at(event.screen_x, event.screen_y)
-        if target is None or target == source:
+        # The card can be gone after a reload: then nothing moves. Its column is read again,
+        # because a reload during the drag can change the order of the columns.
+        if target is None or not self.select_card(card) or target == self.col:
             return
         self.dropped = True
-        # The card can be gone after a reload: then nothing moves.
-        if self.select_card(card):
-            self.action_move(target - self.col)
+        self.action_move(target - self.col)
 
     def on_click(self, event: events.Click) -> None:
         """A click on a column outside its cards, such as on its header, selects the column."""
