@@ -79,6 +79,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `plan` (opens a Herdr tab and starts a planner agent).
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
+- `pr-review` (opens a workspace and Hunk, and starts a reviewer agent), `pr-review-refresh` (moves `pr/<N>` and reopens Hunk) and `pr-review-finish` (removes the PR's worktree and branch).
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `archive --done` (archives every card in the board's done column).
 - `link`, `pin`, `init`, `migrate --yes`, `doctor --fix-ids`.
@@ -97,6 +98,11 @@ herdboard --json merge tep3                   # the repository's mode: local (re
 herdboard --json merge tep3 --pr              # an agent writes the description, then a draft PR opens; the card stays in Review
 herdboard --json merge tep3 --pr --rewrite    # an open PR: an agent rewrites its description (without --rewrite: push only)
 herdboard --json finish tep3                  # after a merge: remove the worktree and branch, card to Done
+herdboard --json prs                          # the open GitHub PRs of this repository, with review markers
+herdboard --json pr-review 42 --agent claude --model sonnet   # an agent reviews PR #42 with notes in Hunk; it never submits
+herdboard --json pr-review-refresh 42         # after new commits: move pr/42, open Hunk again with the old notes
+herdboard --json pr-review-go 42              # focus the review workspace of PR #42
+herdboard --json pr-review-finish 42          # close the workspace, remove the worktree and the pr/42 branch
 herdboard --json promote tep3                 # add --team ENG or --project NAME when the user names them
 herdboard --json add --linear "Fix the login timeout" --team ENG
 ```
@@ -104,6 +110,8 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 `start` without `--agent` starts the default agent (Claude, unless the user's config says otherwise). `--no-agent` still creates the worktree and moves the card. Without `--base`, the card starts from the branch of the main checkout.
 
 `doctor` without `--fix-ids` only reads, and you can run it to explain a problem.
+
+A pull request reviewer only adds notes to the Hunk session. The user submits the review from Hunk. Never submit, approve or comment on GitHub for them.
 
 ## When a card was handed to you
 
@@ -155,14 +163,21 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `base_unknown` | The base is not a local branch, or the checkout has no branch, or an old start record has no base. Ask the user which local branch to use, then run `start` with `--base BRANCH`. |
 | `upstream_failed` | Git could not set the base as the branch upstream. Tell the user the message. Running `start` again retries. |
 | `not_started` | The card has no worktree from `start`, or it was removed. Tell the user to run `start` first. |
-| `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`). Tell the user the message. |
+| `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`), and `pr-review` needs `hunk gh pr` to start a session. Tell the user the message. |
+| `remote_unknown` | No Git remote of the checkout points to the PR's base repository. Tell the user. |
+| `branch_exists` | A local branch `pr/<N>` exists that no PR review owns. Tell the user to delete or rename it. |
+| `agent_running` | A reviewer of the other kind still runs for the PR. Tell the user to close it, or to review with the same agent. |
+| `workspace_closed` | The PR's review workspace is not open in Herdr. Run `pr-review <N>` again to open it, after you ask the user. |
+| `worktree_missing` | The PR's worktree is gone. Tell the user to run `pr-review-finish <N>` and review again. |
+| `unsent_notes` | Hunk still has notes of the user that are not submitted. Tell the user. Use `--force` only when they say so. |
+| `gh_failed`, `git_failed`, `hunk_failed` | A `gh`, `git` or `hunk` command failed. Tell the user the message. |
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
 | `plan_running` | A planner for the card still runs in a Herdr tab. Tell the user to finish or close it. |
 | `review_running` | An agent review of the card still runs. Tell the user; its findings arrive by themselves. |
 | `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes. Tell the user. |
 | `worker_failed` | The agent review or pull request worker did not start, and its agent was closed. Tell the user the message. |
 | `pr_writing` | An agent still writes the card's pull request description. Wait; the PR opens when it is done. |
-| `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. |
+| `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. For `pr-review-refresh`, the PR worktree has changes: tell the user. |
 | `nothing_to_merge` | The card branch has no commits ahead of its base. Tell the user. |
 | `base_dirty` | The checkout of the base branch has uncommitted changes. Tell the user to commit or stash them. |
 | `rebase_conflict` | The rebase conflicted, and herdboard sent the conflict to the card's agent. Tell the user. Do not merge again until the card is back in Review. |

@@ -13,6 +13,7 @@ Requirements:
 - Claude Code or pi, to start work on a card
 - The hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`), for review in Hunk
 - The GitHub CLI (`gh`), signed in, for pull requests
+- Hunk 0.23 or later with the `hunk-gh-review` extension, for pull request reviews
 
 Install the Herdr plugin, the `herdboard` command and the agent skill:
 
@@ -84,6 +85,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `u` | Remove the pin of a pinned Linear issue (repo view) |
 | `c` | Configure global display styles and this board's merge mode, linked Linear projects and pinned issues. ctrl+s saves |
 | `r` | Reload, and fetch Linear again |
+| `G` | Open the list of the repository's open GitHub pull requests (see [Pull request reviews](#pull-request-reviews)) |
 | `?` | Help |
 | `q` | Quit |
 
@@ -299,6 +301,58 @@ A worktree with uncommitted or untracked files always stops `finish`. `--force` 
 
 The board never runs `finish` itself.
 
+## Pull request reviews
+
+herdboard can have an agent review an open GitHub pull request of the current repository. The agent leaves notes in a live Hunk session and never submits a review. You read its notes and its chat, add your own notes, and submit the review yourself from Hunk.
+
+The flow:
+
+1. Press `G` on the board. The list shows every open PR with its author and markers: `draft`, `review requested` (from you), `mine`, the review state (`reviewing`, `reviewed (N notes)`, `failed`), and `new commits`.
+2. Press `enter` or `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
+3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
+4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
+5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
+6. A background worker waits up to 30 minutes for the agent to go idle. Then it marks the PR `reviewed` and shows a Herdr notification with the note count.
+7. Press `g` to go to the workspace. Read the chat and the notes, add your own, and press `S` in Hunk to submit one GitHub review. Hunk's notes keep GitHub's diff positions, so the submit targets the right lines.
+8. Press `f` when you are done. herdboard closes the workspace, removes the worktree and deletes `pr/<N>`. When Hunk still has notes of yours that you did not submit, it asks again before it removes them.
+
+When the author pushes new commits, the list shows `new commits` within a minute. Press `u`. herdboard moves `pr/<N>` to the new head, opens Hunk again on the new diff, and adds the old notes back. A note whose line is no longer in the diff is dropped, and the notice names it. Then herdboard offers a new review by the same agent. A running agent gets the new request in its chat. `u` stops when the worktree has changes.
+
+Keys on the list:
+
+| Key | Action |
+|---|---|
+| `enter` or `s` | Choose an agent and a model, then review the PR |
+| `g` | Go to the PR's review workspace |
+| `u` | Fetch new commits, open Hunk again with the old notes, and offer a new agent review |
+| `f` | Finish the review, after you confirm |
+| `o` | Open the PR in the browser |
+| `r` | Read GitHub again. The list also reads it once a minute |
+| `G` or `escape` | Back to the board |
+
+The Herdr action `nulluminati.herdboard.prs` opens the board on this list. A suggested key:
+
+```toml
+[[keys.command]]
+key = "prefix+shift+r"
+type = "plugin_action"
+command = "nulluminati.herdboard.prs"
+description = "herdboard: review pull requests"
+```
+
+What the reviewer can do:
+
+- Claude runs with `--permission-mode dontAsk`. It can use `Read`, `Grep` and `Glob`, and Bash only for `hunk session`, `hunk skill path`, `gh pr view`, `gh pr diff` and `gh pr checks`.
+- pi cannot limit its bash tool to some commands. It gets `read`, `grep`, `find`, `ls` and `bash`, and only its prompt tells it not to edit files, run code, change Git or write to GitHub. Choose pi only for PRs whose code you trust that far.
+- No reviewer runs the tests or the code of the PR.
+
+Limits:
+
+- One reviewer agent per PR. A review with the other agent kind stops with `agent_running` while the first agent still runs. Close it first.
+- Old notes come back after `u` as agent notes, with their author kept. `f` checks only the notes that you wrote in the current Hunk session.
+- Only github.com, and only PRs of the current repository.
+- herdboard does not remove the workspaces of merged or closed PRs by itself. Use `f`.
+
 ## Linear
 
 Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal API key.
@@ -386,6 +440,12 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move it to Done |
+| `herdboard board --prs` | Open the board on its pull request list |
+| `herdboard prs` | List the open GitHub pull requests of the repository, with review markers |
+| `herdboard pr-review <N> [--agent claude\|pi] [--model] [--thinking]` | Have an agent review PR `N` in its own workspace, with notes in Hunk. The defaults are `start_agent` and `start_model` |
+| `herdboard pr-review-refresh <N>` | Fetch the PR's new commits, and open Hunk again with the old notes |
+| `herdboard pr-review-go <N>` | Go to the PR's review workspace |
+| `herdboard pr-review-finish <N> [--force]` | Close the review: the workspace, the worktree and `pr/<N>`. `--force` also drops your unsent notes and worktree changes |
 | `herdboard promote <id> [--team] [--project] [--state]` | Turn a todo into a Linear issue |
 | `herdboard link <project> [--label NAME] [--remove]` | Link the repository board to a Linear project |
 | `herdboard pin <ENG-123> [--repo BOARD\|PATH] [--remove]` | Pin a Linear issue to a repository board, or remove the pin |
@@ -419,6 +479,7 @@ herdboard shows the result and asks before it writes. The original file does not
 - Sub-cards whose parent is missing
 - Unfinished `promote` records, old start records and old checkout paths
 - Whether `herdr` and `gh` are on the path
+- Whether `hunk` is on the path and has the `hunk-gh-review` extension. These are warnings: the board works without them
 
 `--fix-ids` gives a new ID to each duplicate card except the first. `--offline` skips the Linear checks. `doctor` never changes Linear.
 
@@ -558,6 +619,8 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 | `plans.json`, `plans/<id>.log` | The running planner of each card, and the plan worker's output |
 | `reviews/<id>-<time>-<random>/` | Agent review requests and findings |
 | `prs/<id>-<time>-<random>/` | Pull request requests and the written description |
+| `pr_reviews.json` | The workspace, Hunk session, agent and review state of each pull request review, keyed `owner/repo#N` |
+| `pr-reviews/` | The request for each pull request reviewer, and its worker's output |
 | `<workspace>/<user>/` | The Linear cache, state choices and `promote` records, per Linear account |
 
 ## Known limits
