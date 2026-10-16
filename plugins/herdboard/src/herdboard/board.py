@@ -26,6 +26,7 @@ from textual.worker import Worker, WorkerState
 
 from . import activity, attachments
 from .linear import LinearAuthError
+from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
 from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_writes import LinearWriter
@@ -1321,6 +1322,8 @@ class HerdboardApp(App):
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
         self.starting = False
+        # The last start's arguments: (ref, agent, model, thinking, repository board).
+        self.start_request: tuple = ("", None, None, None, None)
         self.linear_results: dict[str, LinearResult] = {}
         self.linear_state = "loading" if self.linear_active else "off"
         # One Linear fetch runs at a time. A refresh asked meanwhile waits as one queued fetch.
@@ -1686,7 +1689,8 @@ class HerdboardApp(App):
             elif event.state == WorkerState.ERROR:
                 error = worker.error
             if error:
-                self.notify(str(error), severity="error")
+                if not self._ask_start_repository(error):
+                    self.notify(str(error), severity="error")
             elif result:
                 self.notify(result.get("notice") or
                             f"Started {result['ref']} in {result['workspace_id']} ({result['worktree_path']})")
@@ -2009,27 +2013,54 @@ class HerdboardApp(App):
         await self.reload()
 
     def _start_card(self, ref: str, agent: str | None, model: str | None = None,
-                    thinking: str | None = None) -> None:
+                    thinking: str | None = None, repo: Path | None = None) -> None:
+        """Start a card in a thread. `repo` is a board that names the card's repository."""
         if self.starting or self.writing:
             self.notify("Busy: a card change is in progress", severity="warning")
             return
+        self.start_request = (ref, agent, model, thinking, repo)
 
         def guarded():
             try:
                 if self.start_card:
-                    if model or thinking:
-                        return self.start_card(ref, agent, model=model, thinking=thinking), None
-                    return self.start_card(ref, agent), None
+                    options = {"model": model, "thinking": thinking} if model or thinking else {}
+                    if repo is not None:
+                        options["repo"] = repo
+                    return self.start_card(ref, agent, **options), None
                 starter = Starter(self.store, self.directory, writer=self.linear_writer,
                                   ask_state=self.ask_state, repository_view=self.view == "repo",
                                   config_file=self.config_file)
-                repo = self.repo_board if self.view == "repo" else None
-                return starter.start(ref, agent=agent, repo=repo, model=model, thinking=thinking), None
+                board = repo or (self.repo_board if self.view == "repo" else None)
+                return starter.start(ref, agent=agent, repo=board, model=model, thinking=thinking), None
             except HerdboardError as error:
                 return None, error
 
         self.starting = True
         self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+
+    def _ask_start_repository(self, error: HerdboardError) -> bool:
+        """After a Linear start failed for want of a repository, ask for a repository board.
+
+        The start then runs again with the chosen board. False when there is nothing to ask:
+        another error, a todo, a start that had a board already, or no repository board.
+        """
+        ref, agent, model, thinking, repo = self.start_request
+        if getattr(error, "code", None) != "repo_required" or repo is not None or not LINEAR_REF.match(ref):
+            return False
+        try:
+            boards = [path for path in self.store.board_paths() if self.store.board_meta(path).repo]
+        except HerdboardError:
+            return False
+        if not boards:
+            return False
+        options = [(self.store.board_name(path), path) for path in sorted(boards, key=self.store.board_name)]
+
+        def chosen(path: Path | None) -> None:
+            if path is not None:
+                self._start_card(ref, agent, model, thinking, repo=path)
+
+        self.push_screen(BoardChoiceScreen(None, options, prompt=f"Start {ref} in the repository of"), chosen)
+        return True
 
     def _card_action(self, run: Callable[[], dict], notice: Callable[[dict], str]) -> None:
         """Run a review, merge or finish in a thread worker, like a start: one at a time."""

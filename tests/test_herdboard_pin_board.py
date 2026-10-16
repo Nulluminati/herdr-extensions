@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
@@ -10,6 +11,7 @@ from herdboard.board import BoardChoiceScreen, ConfigScreen, IssueSearchScreen  
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear import LinearError  # noqa: E402
 from herdboard.linear_pins import IssuePin  # noqa: E402
+from herdboard.start import StartError  # noqa: E402
 from test_herdboard_board import SIZE, settle  # noqa: E402
 from test_herdboard_linear_board import LinearBoardCase  # noqa: E402
 
@@ -171,6 +173,66 @@ class UnpinTests(PinBoardCase):
             await pilot.press("u")
             await settle(pilot)
             self.assertIn("Linear issue", self.notifications(app)[-1][0])
+
+
+class StartRepositoryTests(PinBoardCase):
+    STARTED = {"ref": "ENG-5", "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work",
+               "branch": "nate/eng-5", "agent_name": None, "steps_done": []}
+
+    def start_app(self, *errors):
+        app = self.make_pin_app(view="mine")
+        app.start_card = Mock(side_effect=[*errors, self.STARTED])
+        return app
+
+    async def test_a_linear_start_without_a_repository_asks_for_the_board(self):
+        other = self.store.init_board(RepoIdentity("github.com/acme/web", "github.com", ("acme", "web")))
+        app = self.start_app(StartError("Choose a repository with --repo BOARD_OR_PATH.", "repo_required"))
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-5")
+            await pilot.press("s")
+            await settle(pilot)
+            self.assertIsInstance(app.screen, BoardChoiceScreen)
+            self.assertEqual([path for _, path in app.screen.options], sorted([self.repo_path, other]))
+            await pilot.press("enter")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, BoardChoiceScreen)
+        self.assertEqual([c.args for c in app.start_card.call_args_list], [("ENG-5", None), ("ENG-5", None)])
+        self.assertEqual(app.start_card.call_args_list[1].kwargs, {"repo": self.repo_path})
+
+    async def test_escape_starts_nothing(self):
+        app = self.start_app(StartError("Choose a repository.", "repo_required"))
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-5")
+            await pilot.press("s")
+            await settle(pilot)
+            await pilot.press("escape")
+            await settle(pilot)
+        self.assertEqual(app.start_card.call_count, 1)
+
+    async def test_other_start_errors_only_notify(self):
+        app = self.start_app(StartError("No checkout", "checkout_unknown"))
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-5")
+            await pilot.press("s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, BoardChoiceScreen)
+            self.assertIn(("No checkout", "error"), self.notifications(app))
+
+    async def test_a_repository_still_required_after_the_choice_only_notifies(self):
+        app = self.start_app(*[StartError("Choose a repository.", "repo_required")] * 2)
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-5")
+            await pilot.press("s")
+            await settle(pilot)
+            await pilot.press("enter")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, BoardChoiceScreen)
+            self.assertIn(("Choose a repository.", "error"), self.notifications(app))
+        self.assertEqual(app.start_card.call_count, 2)
 
 
 class ConfigPinTests(PinBoardCase):

@@ -92,7 +92,7 @@ These checks change only the board file of the repository from check 3. Pick an 
 | P2 | `hb search <ENG-P>`, and an identifier of a team that you are not a member of | Each gives that one issue | The identifier skips the search |
 | P3 | `hb board`, press `I`, search, press enter on `<ENG-P>`. Then press `r`. | The card shows on the board. The board file has `linear-issues` with its ID and identifier. | The search dialog and the pinned fetch (`issues` with `id: {in: ...}`) |
 | P4 | Select the card from P3 and press `u` | The card goes away. The board file has no `linear-issues`. | Unpin |
-| P5 | Start `<ENG-P>` from the `mine` view inside the repository, with `s` | The board file gets the pin | Auto-pin in `start` |
+| P5 | Remove the pin from P4. Start `<ENG-P>` from the `mine` view with `s`, and choose the repository board | The board asks for the board. The board file gets the pin. | The repository question and auto-pin in `start` |
 | P6 | `hb doctor` after you change the ID of a pin in the board file to a wrong value | A `linear_pin_missing` warning | The doctor check |
 
 ## Cleanup
