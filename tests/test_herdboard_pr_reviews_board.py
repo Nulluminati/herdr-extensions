@@ -37,9 +37,15 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.card = self.store.add(self.path, "Board card")
         self.service = Mock()
         self.service.page.return_value = ("acme/api", Page([
-            pull_request(7, "Fix login timeout", draft=True, requested=True),
-            pull_request(8, "Add cache", status="reviewed", new_commits=True, notes=3)], 2, None))
-        self.service.body.return_value = "Sessions **end** too soon."
+            pull_request(7, "Fix login timeout", draft=True, requested=True, additions=12, deletions=3,
+                         labels=[{"name": "bug", "color": "d73a4a"}]),
+            pull_request(8, "Add cache", status="reviewed", new_commits=True, notes=3, ci="failed",
+                         decision="approved")], 2, None))
+        self.service.details.return_value = {
+            "body": "Sessions **end** too soon.",
+            "issues": [{"number": 3, "title": "Logout fails", "url": "u3", "state": "OPEN"}],
+            "reviews": [{"author": "octo", "state": "approved", "at": "2026-10-16T18:00:00Z"}],
+            "checks": [{"name": "lint", "state": "passed"}, {"name": "unit tests", "state": "failed"}]}
         self.service.review.return_value = {"key": "acme/api#7", "number": 7, "workspace_id": "w9",
                                             "agent": "claude", "model": "sonnet", "prompted": False}
         self.service.refresh.return_value = {"key": "acme/api#8", "number": 8, "kept": 3, "dropped": [],
@@ -70,9 +76,14 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         app = self.app()
         async with app.run_test() as pilot:
             screen = await self.open(app, pilot)
-            self.assertEqual(screen.rows(), [
-                ("◌", "#7", "Fix login timeout", "octo", "◆ review requested", ""),
-                ("●", "#8", "Add cache", "octo", "✓ reviewed  ↑ new commits", "3 ✎")])
+            rows = screen.rows()
+            self.assertEqual([row[:2] + row[3:] for row in rows], [
+                ("◌", "#7", "octo", "+12 −3", "", "◆ your review", "", ""),
+                ("●", "#8", "octo", "+0 −0", "✗ failed", "✔ approved", "✓ reviewed  ↑ new commits", "3 ✎")])
+            self.assertTrue(rows[0][2].startswith("Fix login timeout"))
+            self.assertIn(" bug ", rows[0][2])
+            self.assertEqual(screen.headers(), ["", "PR", "Title", "Author", "Size", "CI", "GitHub review",
+                                                "Agent review (local)", "Notes"])
             await pilot.press("G")
             await pilot.pause()
             self.assertIs(app.screen, app.screen_stack[0])
@@ -88,7 +99,9 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             screen = await self.open(app, pilot)
             row = screen.rows()[1]
         self.assertEqual(row[0], "\uf407")
-        self.assertEqual(row[4], "\uf00c reviewed  \uf062 new commits")
+        self.assertEqual(row[5], "\uf00d failed")
+        self.assertEqual(row[6], "\uf058 approved")
+        self.assertEqual(row[7], "\uf086 reviewed  \uf062 new commits")
 
     async def test_board_keys_do_not_run_behind_the_list(self):
         app = self.app()
@@ -225,8 +238,12 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await self.open(app, pilot)
             await pilot.press("enter")
             await self.settle(app, pilot)
-            self.service.body.assert_called_once_with(7)
-            self.assertIn("Sessions **end** too soon.", app.screen.text())
+            self.service.details.assert_called_once_with(7)
+            text = app.screen.text()
+            for part in ("Sessions **end** too soon.", "#3 Logout fails", "octo approved", "unit tests",
+                         "1 failed, 1 passed", "GitHub review", "Agent review (local)"):
+                self.assertIn(part, text)
+            self.assertLess(text.index("unit tests"), text.index("lint"))
         self.service.page.assert_called_with("", None)
 
     async def test_n_and_p_move_between_pages(self):

@@ -13,6 +13,7 @@ import threading
 import zlib
 from typing import Callable
 
+from rich.cells import cell_len
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
@@ -54,23 +55,38 @@ START_GROUP = "card-start"
 PR_GROUP = "pull-requests"
 # How often the pull request list reads GitHub again, the same as the PR state check of the board.
 PR_SECONDS = 60.0
-# Each pull request state: its Nerd Font icon, its plain icon, and its style.
+# Each pull request state: its Nerd Font icon, its plain icon, and its style. The prefix names where
+# the state comes from: `ci:` GitHub checks, `gh:` GitHub reviews, `agent:` the local agent review.
 PR_STATES = {
-    "open": ("\uf407", "●", "green"),
-    "draft": ("\uf040", "◌", "dim"),
-    "review requested": ("\uf0f3", "◆", "bold yellow"),
-    "reviewing": ("\uf110", "…", "bold cyan"),
-    "reviewed": ("\uf00c", "✓", "bold green"),
-    "failed": ("\uf00d", "✗", "bold red"),
-    "new commits": ("\uf062", "↑", "bold magenta"),
-    "notes": ("\uf075", "✎", ""),
-    "author": ("\uf007", "", ""),
-    "branch": ("\ue0a0", "", ""),
-    "agent": ("\uf120", "", ""),
-    "commit": ("\uf126", "", ""),
-    "workspace": ("\uf108", "", ""),
+    "open": ("", "●", "green"),
+    "draft": ("", "◌", "dim"),
+    "ci:passed": ("", "✓", "green"),
+    "ci:failed": ("", "✗", "bold red"),
+    "ci:pending": ("", "•", "yellow"),
+    "ci:skipped": ("", "-", "dim"),
+    "gh:approved": ("", "✔", "bold green"),
+    "gh:changes requested": ("", "✖", "bold red"),
+    "gh:review required": ("", "○", "yellow"),
+    "gh:commented": ("", "✎", ""),
+    "gh:dismissed": ("", "-", "dim"),
+    "gh:pending": ("", "○", "dim"),
+    "gh:requested": ("", "◆", "bold yellow"),
+    "agent:reviewing": ("", "…", "bold cyan"),
+    "agent:reviewed": ("", "✓", "bold cyan"),
+    "agent:failed": ("", "✗", "bold red"),
+    "agent:new commits": ("", "↑", "bold magenta"),
+    "notes": ("", "✎", ""),
+    "author": ("", "", ""),
+    "branch": ("", "", ""),
+    "agent": ("", "", ""),
+    "commit": ("", "", ""),
+    "workspace": ("", "", ""),
+    "issue": ("", "#", ""),
+    "github": ("", "", "bold"),
 }
 PR_TITLE_MIN = 24
+# At most this many labels follow a title in the list; the details show them all.
+PR_LIST_LABELS = 2
 DETAIL_LOG_ENTRIES = 10
 PR_STYLES = {"merged": "bold green", "closed": "bold yellow"}
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
@@ -1355,9 +1371,9 @@ class PullRequestService:
         pr_reviews.annotate(page.prs, repo, pr_reviews.records())
         return repo, page
 
-    def body(self, number: int) -> str:
+    def details(self, number: int) -> dict:
         checkout, repo = self.target()
-        return pr_reviews.pr_body(checkout, repo, number)
+        return pr_reviews.pr_details(checkout, repo, number)
 
     def review(self, number: int, kind: str, model: str | None, thinking: str | None) -> dict:
         checkout, repo = self.target()
@@ -1384,28 +1400,79 @@ def pr_label(state: str, label: str, icon_style: str) -> Text:
     return Text(f"{icon} {label}" if icon else label, style=PR_STATES[state][2])
 
 
-def pr_review_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
-    """What the user should know about the review: the request, the agent review and new commits."""
+def label_chip(label: dict) -> Text:
+    """A GitHub label in its own color, with black or white text, whichever reads better."""
+    color = label.get("color") or ""
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", color):
+        return Text(f" {label['name']} ", style="reverse")
+    red, green, blue = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+    text = "black" if 0.299 * red + 0.587 * green + 0.114 * blue > 150 else "white"
+    return Text(f" {label['name']} ", style=f"{text} on #{color}")
+
+
+def pr_ci_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
+    return pr_label(f"ci:{pr.ci}", pr.ci, icon_style) if pr.ci else Text("")
+
+
+def pr_github_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
+    """GitHub's side of the review: a request for your review, and GitHub's review decision."""
     parts = []
-    if pr.requested and pr.status is None:
-        parts.append(pr_label("review requested", "review requested", icon_style))
-    if pr.status:
-        parts.append(pr_label(pr.status, pr.status, icon_style))
-    if pr.new_commits:
-        parts.append(pr_label("new commits", "new commits", icon_style))
+    if pr.requested:
+        parts.append(pr_label("gh:requested", "your review", icon_style))
+    # A request for your review already says that a review is required.
+    if pr.decision and not (pr.requested and pr.decision == "review required"):
+        parts.append(pr_label(f"gh:{pr.decision}", pr.decision, icon_style))
     return Text("  ").join(parts)
+
+
+def pr_agent_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
+    """The local agent review that herdboard ran, and new commits since then."""
+    parts = []
+    if pr.status:
+        parts.append(pr_label(f"agent:{pr.status}", pr.status, icon_style))
+    if pr.new_commits:
+        parts.append(pr_label("agent:new commits", "new commits", icon_style))
+    return Text("  ").join(parts)
+
+
+def pr_size_cell(pr: pr_reviews.PullRequest) -> Text:
+    text = Text(justify="right")
+    text.append(f"+{pr.additions}", style="green")
+    text.append(" ")
+    text.append(f"−{pr.deletions}", style="red")
+    return text
+
+
+def pr_title_cell(pr: pr_reviews.PullRequest, width: int) -> Text:
+    """The title, cut to fit beside its first labels."""
+    chips = [label_chip(label) for label in pr.labels[:PR_LIST_LABELS]]
+    if len(pr.labels) > PR_LIST_LABELS:
+        chips.append(Text(f"+{len(pr.labels) - PR_LIST_LABELS}", style="dim"))
+    room = width - sum(len(chip.plain) + 1 for chip in chips)
+    room = max(room, min(width, PR_TITLE_MIN // 2))
+    title = pr.title if len(pr.title) <= room else pr.title[:room - 1] + "…"
+    text = Text(title, style="dim" if pr.draft else "")
+    for chip in chips:
+        text.append(" ")
+        text.append_text(chip)
+    return text
+
+
+PR_COLUMNS = ["", "PR", "Title", "Author", "Size", "CI", "GitHub review", "Agent review (local)", "Notes"]
 
 
 def pr_cells(pr: pr_reviews.PullRequest, icon_style: str, title_width: int) -> list[Text]:
     state = "draft" if pr.draft else "open"
-    title = pr.title if len(pr.title) <= title_width else pr.title[:title_width - 1] + "…"
     notes = Text(f"{pr.notes} {pr_icon('notes', icon_style)}".rstrip(), justify="right") \
         if pr.notes else Text("")
     return [Text(pr_icon(state, icon_style), style=PR_STATES[state][2]),
             Text(f"#{pr.number}", style="dim"),
-            Text(title, style="dim" if pr.draft else ""),
+            pr_title_cell(pr, title_width),
             Text(pr.author, style="bold cyan" if pr.mine else ""),
-            pr_review_cell(pr, icon_style),
+            pr_size_cell(pr),
+            pr_ci_cell(pr, icon_style),
+            pr_github_cell(pr, icon_style),
+            pr_agent_cell(pr, icon_style),
             notes]
 
 
@@ -1421,10 +1488,18 @@ class PullRequestTable(DataTable):
             self._post_selected_message()
 
 
-class PullRequestDetailScreen(ModalBase):
-    """One pull request: where it comes from, its size, the agent review and the description.
+def check_order(check: dict) -> int:
+    """Failed checks first, then running, passed and skipped ones."""
+    return ["failed", "pending", "passed", "skipped"].index(check["state"]) \
+        if check["state"] in ("failed", "pending", "passed", "skipped") else 0
 
-    The action keys close the screen and return the action, which the list then runs."""
+
+class PullRequestDetailScreen(ModalBase):
+    """One pull request: where it comes from, its size and labels, its checks, the issues it closes,
+    the GitHub review, the local agent review and the description.
+
+    The list does not hold the checks, issues, GitHub reviews and description; they are read when the
+    screen opens. The action keys close the screen and return the action, which the list then runs."""
 
     BINDINGS = [
         Binding("s", "act('review')", "Review"),
@@ -1435,30 +1510,45 @@ class PullRequestDetailScreen(ModalBase):
     ]
 
     def __init__(self, pr: pr_reviews.PullRequest, repo: str, icon_style: str = "plain",
-                 load_body: Callable[[], str] | None = None):
+                 load_details: Callable[[], dict] | None = None):
         super().__init__()
         self.pr = pr
         self.repo = repo
         self.icon_style = icon_style
-        # Reads the description, which the list does not hold. None when the PR has it already.
-        self.load_body = load_body if not pr.body else None
+        self.load_details = load_details
+        self.details: dict | None = None
 
     def _static(self, text: Text, **options) -> Static:
         widget = Static(text, **options)
         widget.plain = text.plain
         return widget
 
-    def _review_text(self) -> Text:
+    def _set(self, selector: str, text: Text) -> None:
+        widget = self.query_one(selector, Static)
+        widget.plain = text.plain
+        widget.update(text)
+
+    def _line(self, key: str, text: str | Text) -> Text:
+        """A line with the icon of `key` in the Nerd Font style."""
+        icon = PR_STATES[key][0] if self.icon_style == "nerd" else ""
+        line = Text(f"{icon} " if icon else "")
+        line.append_text(text if isinstance(text, Text) else Text(text))
+        return line
+
+    def _agent_text(self) -> Text:
         pr, style = self.pr, self.icon_style
         review = pr.review or {}
+        # Each line has its own style: a style of the whole Text would carry over to the lines after it.
         text = Text()
+        text.append("herdboard's reviewer agent, in a workspace on this machine. Its notes are in Hunk.\n",
+                    style="dim")
         if not pr.status:
             text.append("No agent review yet. Press s to start one.", style="dim")
             return text
-        text.append_text(pr_label(pr.status, pr.status, style))
+        text.append_text(pr_label(f"agent:{pr.status}", pr.status, style))
         if pr.new_commits:
             text.append("  ")
-            text.append_text(pr_label("new commits", "new commits since the review", style))
+            text.append_text(pr_label("agent:new commits", "new commits since the review", style))
         agent = " ".join(part for part in (review.get("agent"), review.get("model"), review.get("thinking")) if part)
         lines = [("agent", agent or "unknown"),
                  ("notes", f"{pr.notes} notes" if pr.notes is not None else "notes not counted yet")]
@@ -1466,11 +1556,70 @@ class PullRequestDetailScreen(ModalBase):
             lines.append(("commit", f"reviewed at {review['reviewed_sha'][:8]}"))
         if review.get("workspace_id"):
             lines.append(("workspace", f"workspace {review['workspace_id']}"))
-        for state, line in lines:
-            icon = PR_STATES[state][0] if style == "nerd" else ""
-            text.append("\n" + (f"{icon} " if icon else "") + line)
+        for key, line in lines:
+            text.append("\n")
+            text.append_text(self._line(key, line))
         if review.get("error"):
             text.append("\n" + review["error"], style="red")
+        return text
+
+    def _github_text(self) -> Text:
+        pr, style = self.pr, self.icon_style
+        text = Text()
+        text.append("Reviews on GitHub. You submit yours with S in Hunk.\n", style="dim")
+        head = [part for part in (pr_github_cell(pr, style),) if part.plain]
+        text.append_text(head[0] if head else Text("No review decision: the repository requires none.",
+                                                   style="dim"))
+        if self.details is None:
+            text.append("\nReading the reviews…", style="dim")
+            return text
+        reviews = self.details.get("reviews") or []
+        if not reviews:
+            text.append("\nNo reviews yet.", style="dim")
+        for review in reviews:
+            state = review["state"]
+            key = f"gh:{state}" if f"gh:{state}" in PR_STATES else "gh:commented"
+            line = Text("\n")
+            line.append_text(pr_label(key, f"{review['author']} {state}", style))
+            if review.get("at"):
+                line.append(f"  {review['at'][:16].replace('T', ' ')}", style="dim")
+            text.append_text(line)
+        return text
+
+    def _checks_text(self) -> Text:
+        pr, style = self.pr, self.icon_style
+        if self.details is None:
+            return Text("Reading the checks…", style="dim")
+        checks = sorted(self.details.get("checks") or [], key=check_order)
+        if not checks:
+            return Text("No checks on the last commit.", style="dim")
+        counts = {}
+        for check in checks:
+            counts[check["state"]] = counts.get(check["state"], 0) + 1
+        summary = ", ".join(f"{counts[state]} {state}" for state in ("failed", "pending", "passed", "skipped")
+                            if state in counts)
+        text = Text()
+        text.append_text(pr_label(f"ci:{pr.ci}", summary, style) if pr.ci else Text(summary))
+        for check in checks:
+            text.append("\n")
+            text.append_text(pr_label(f"ci:{check['state']}", check["name"], style))
+        return text
+
+    def _issues_text(self) -> Text:
+        if self.details is None:
+            return Text("Reading the linked issues…", style="dim")
+        issues = self.details.get("issues") or []
+        if not issues:
+            return Text("This pull request closes no issues.", style="dim")
+        text = Text()
+        for index, issue in enumerate(issues):
+            if index:
+                text.append("\n")
+            text.append_text(self._line("issue", Text(f"#{issue['number']} ", style="bold")))
+            text.append(issue.get("title") or "")
+            state = (issue.get("state") or "").lower()
+            if state:
+                text.append(f"  {state}", style="green" if state == "open" else "dim")
         return text
 
     def compose(self) -> ComposeResult:
@@ -1491,52 +1640,76 @@ class PullRequestDetailScreen(ModalBase):
             meta.append(" → ", style="dim")
             meta.append(pr.base_branch)
         meta.append("\n")
-        meta.append(f"+{pr.additions}", style="bold green")
-        meta.append("  ")
-        meta.append(f"−{pr.deletions}", style="bold red")
+        meta.append_text(pr_size_cell(pr))
         meta.append(f"  in {pr.files} file{'' if pr.files == 1 else 's'}")
         if pr.updated:
             meta.append(f" · updated {pr.updated[:16].replace('T', ' ')}", style="dim")
-        marks = [pr_label(m, m, style) for m in ("draft", "review requested") if
-                 (m == "draft" and pr.draft) or (m == "review requested" and pr.requested)]
+        if pr.draft:
+            meta.append("  ")
+            meta.append_text(pr_label("draft", "draft", style))
+        if pr.labels:
+            meta.append("\n")
+            meta.append_text(Text(" ").join(label_chip(label) for label in pr.labels))
         dialog = VerticalScroll(classes="dialog detail pr-detail")
         # In the border, so the keys stay in view when the description scrolls.
         dialog.border_subtitle = "s review · g go · u new commits · f finish · o browser · esc close"
         with dialog:
             yield self._static(title, id="pr-detail-title")
             yield self._static(meta, id="pr-detail-meta")
-            if marks:
-                yield self._static(Text("  ").join(marks), id="pr-detail-marks")
-            review = self._static(self._review_text(), id="pr-detail-review", classes="detail-block")
-            review.border_title = "Agent review"
-            yield review
-            text = "*Reading the description…*" if self.load_body else pr.body.strip() or "*No description.*"
-            body = Markdown(text, id="pr-detail-body", classes="detail-block")
+            blocks = [("pr-detail-checks", "CI checks", self._checks_text()),
+                      ("pr-detail-issues", "Closes issues", self._issues_text()),
+                      ("pr-detail-github", "GitHub review", self._github_text()),
+                      ("pr-detail-agent", "Agent review (local)", self._agent_text())]
+            for widget_id, name, text in blocks:
+                block = self._static(text, id=widget_id, classes="detail-block")
+                block.border_title = name
+                yield block
+            body = Markdown("*Reading the description…*" if self.load_details else pr.body.strip()
+                            or "*No description.*", id="pr-detail-body", classes="detail-block")
             body.border_title = "Description"
             yield body
 
     def on_mount(self) -> None:
-        if self.load_body is None:
+        if self.load_details is None:
             return
-        load = self.load_body
+        load = self.load_details
 
         def read() -> None:
             try:
-                text = load()
-                self.pr.body = text
-                shown = text.strip() or "*No description.*"
-            except HerdboardError as error:
-                shown = f"*Cannot read the description: {error}*"
+                details, error = load(), None
+            except HerdboardError as failure:
+                details, error = None, failure
             try:
-                self.app.call_from_thread(self.query_one("#pr-detail-body", Markdown).update, shown)
-            except (RuntimeError, NoWidget):
-                pass  # The board quit, or the screen closed.
+                self.app.call_from_thread(self._show_details, details, error)
+            except RuntimeError:
+                pass  # The board quit.
 
         self.run_worker(read, thread=True, group=PR_GROUP, exit_on_error=False)
 
+    def _show_details(self, details: dict | None, error: HerdboardError | None) -> None:
+        if not self.is_attached:
+            return  # The screen closed meanwhile.
+        if error is not None:
+            message = Text(f"Cannot read GitHub: {error}", style="red")
+            for widget_id in ("#pr-detail-checks", "#pr-detail-issues"):
+                self._set(widget_id, message)
+            self.query_one("#pr-detail-body", Markdown).update(f"*Cannot read the description: {error}*")
+            return
+        self.details = details
+        self.pr.body = details.get("body") or ""
+        self._set("#pr-detail-checks", self._checks_text())
+        self._set("#pr-detail-issues", self._issues_text())
+        self._set("#pr-detail-github", self._github_text())
+        self.query_one("#pr-detail-body", Markdown).update(self.pr.body.strip() or "*No description.*")
+
     def text(self) -> str:
-        """The screen's text, for tests."""
-        parts = [w.plain for w in self.query(Static) if hasattr(w, "plain")]
+        """The screen's text, with the block names, for tests."""
+        parts = []
+        for widget in self.query(Static):
+            if getattr(widget, "border_title", None):
+                parts.append(str(widget.border_title))
+            if hasattr(widget, "plain"):
+                parts.append(widget.plain)
         return "\n".join(parts + [self.pr.body])
 
     def action_act(self, action: str) -> None:
@@ -1583,7 +1756,7 @@ class PullRequestsScreen(Screen):
         title.plain = "Pull requests"
         yield title
         table = PullRequestTable(id="pr-list", cursor_type="row", zebra_stripes=True)
-        table.add_columns("", "PR", "Title", "Author", "Review", "Notes")
+        table.add_columns(*PR_COLUMNS)
         yield table
         status = Static("Reading GitHub…", id="pr-status")
         yield status
@@ -1607,6 +1780,9 @@ class PullRequestsScreen(Screen):
         table = self.query_one("#pr-list", PullRequestTable)
         return [tuple(cell.plain for cell in table.get_row_at(index)) for index in range(table.row_count)]
 
+    def headers(self) -> list[str]:
+        return [str(column.label) for column in self.query_one("#pr-list", PullRequestTable).ordered_columns]
+
     def current(self) -> pr_reviews.PullRequest | None:
         index = self.query_one("#pr-list", PullRequestTable).cursor_row
         return self.prs[index] if self.prs and 0 <= index < len(self.prs) else None
@@ -1621,12 +1797,12 @@ class PullRequestsScreen(Screen):
 
     def _title_width(self, prs: list[pr_reviews.PullRequest]) -> int:
         """The width left for titles, so a row fits the screen without a sideways scroll."""
-        style = self.icon_style
-        author = max([len("Author"), *(len(pr.author) for pr in prs)])
-        review = max([len("Review"), *(len(pr_review_cell(pr, style).plain) for pr in prs)])
-        number = max([len("PR"), *(len(f"#{pr.number}") for pr in prs)])
-        # Six columns with one cell of padding on each side, the icon, the notes, the border and the scrollbar.
-        fixed = 6 * 2 + 2 + number + author + review + 5 + 3
+        rows = [pr_cells(pr, self.icon_style, 0) for pr in prs]
+        title = PR_COLUMNS.index("Title")
+        others = sum(max([cell_len(header), *(cell_len(row[index].plain) for row in rows)])
+                     for index, header in enumerate(PR_COLUMNS) if index != title)
+        # One cell of padding on each side of each column, the border and the scrollbar.
+        fixed = others + 2 * len(PR_COLUMNS) + 3
         return max(PR_TITLE_MIN, self.size.width - fixed)
 
     def _summary(self, repo: str, prs: list[pr_reviews.PullRequest]) -> Text:
@@ -1646,15 +1822,22 @@ class PullRequestsScreen(Screen):
             text.append(f" · page {self.page_index + 1} of {pages}", style="bold")
         if self.search:
             text.append(f" · search: {self.search}", style="bold")
-        counts = [("review requested", sum(pr.requested for pr in prs), "request your review"),
-                  ("reviewing", sum(pr.status == "reviewing" for pr in prs), "reviewing"),
-                  ("reviewed", sum(pr.status == "reviewed" for pr in prs), "reviewed"),
-                  ("failed", sum(pr.status == "failed" for pr in prs), "failed"),
-                  ("new commits", sum(pr.new_commits for pr in prs), "with new commits")]
-        shown = [(state, count, label) for state, count, label in counts if count]
-        if shown:
-            text.append(" │ " + ("on this page: " if paged else ""), style="dim")
-            for index, (state, count, label) in enumerate(shown):
+        # What needs the user, by where it comes from: GitHub, its checks, and the local agent.
+        groups = [("GitHub", [("gh:requested", sum(pr.requested for pr in prs), "your review"),
+                              ("gh:changes requested", sum(pr.decision == "changes requested" for pr in prs),
+                               "changes requested")]),
+                  ("CI", [("ci:failed", sum(pr.ci == "failed" for pr in prs), "failed")]),
+                  ("agent", [("agent:reviewing", sum(pr.status == "reviewing" for pr in prs), "reviewing"),
+                             ("agent:reviewed", sum(pr.status == "reviewed" for pr in prs), "reviewed"),
+                             ("agent:failed", sum(pr.status == "failed" for pr in prs), "failed"),
+                             ("agent:new commits", sum(pr.new_commits for pr in prs), "new commits")])]
+        shown = [(name, [entry for entry in entries if entry[1]]) for name, entries in groups]
+        shown = [(name, entries) for name, entries in shown if entries]
+        if shown and paged:
+            text.append(" │ on this page", style="dim")
+        for name, entries in shown:
+            text.append(f" │ {name}: ", style="dim")
+            for index, (state, count, label) in enumerate(entries):
                 if index:
                     text.append("  ")
                 text.append_text(pr_label(state, f"{count} {label}", style))
@@ -1815,7 +1998,7 @@ class PullRequestsScreen(Screen):
                 getattr(self, f"action_{action}")()
 
         self.app.push_screen(PullRequestDetailScreen(pr, self.repo, self.icon_style,
-                                                     load_body=lambda: self.service.body(pr.number)), chosen)
+                                                     load_details=lambda: self.service.details(pr.number)), chosen)
 
     def action_review(self) -> None:
         pr = self.current()

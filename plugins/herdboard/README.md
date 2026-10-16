@@ -307,7 +307,14 @@ herdboard can have an agent review an open GitHub pull request of the current re
 
 The flow:
 
-1. Press `G` on the board. The list shows the open PRs in a table, 50 to a page, newest first: an open or draft icon, the number, the title, the author (yours in cyan), the review state and the agent's note count. The review states are `review requested` (from you), `reviewing`, `reviewed`, `failed` and `new commits`. The line under the table shows the total, the page and the search, then counts the states on the page.
+1. Press `G` on the board. The list shows the open PRs in a table, 50 to a page, newest first. The columns are:
+   - An open or draft icon, the number, and the title with its first two labels in their GitHub colors.
+   - The author (yours in cyan) and the size (`+84 −31`).
+   - **CI**: the state of the last commit's checks: `passed`, `failed` or `pending`.
+   - **GitHub review**: what GitHub says. `your review` when the PR asks you, and GitHub's review decision: `approved`, `changes requested` or `review required`.
+   - **Agent review (local)**: what herdboard's agent did on this machine: `reviewing`, `reviewed` or `failed`, and `new commits` since then. Then the agent's note count.
+
+   The line under the table shows the total, the page and the search, then counts what needs you on the page, by GitHub, CI and agent.
 2. Press `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
@@ -322,7 +329,7 @@ Keys on the list:
 
 | Key | Action |
 |---|---|
-| `enter` or a click | Show the PR's details: its branches, its size, the agent review and the description. herdboard reads the description only then. The action keys below also work there |
+| `enter` or a click | Show the PR's details: its branches, size and labels, each CI check (failed first), the issues it closes, the GitHub reviews by reviewer, the local agent review and the description. herdboard reads the checks, issues, reviews and description only then. The action keys below also work there |
 | `s` | Choose an agent and a model, then review the PR |
 | `g` | Go to the PR's review workspace |
 | `u` | Fetch new commits, open Hunk again with the old notes, and offer a new agent review |

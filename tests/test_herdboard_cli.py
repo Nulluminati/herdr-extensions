@@ -559,7 +559,7 @@ class PullRequestReviewTests(CliTestCase):
         self.assertEqual((data["page"], data["pages"], data["total"]), (1, 1, 1))
         out, _ = self.run_cli("prs", directory=self.repo)
         self.assertIn("#7", out)
-        self.assertIn("draft, review requested, reviewed, new commits", out)
+        self.assertIn("draft, review requested, agent: reviewed, new commits", out)
         self.assertNotIn("Page", out)
 
     def test_prs_pages_follow_the_cursors_and_take_a_search(self):

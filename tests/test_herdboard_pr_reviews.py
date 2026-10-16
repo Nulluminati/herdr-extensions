@@ -153,6 +153,24 @@ class ListTests(PrReviewTestCase):
         self.assertNotIn("after", query)
         self.assertNotIn("body", query["query"])
 
+    def test_a_page_has_labels_ci_and_the_github_review_decision(self):
+        nodes = [pr_json(7, labels={"nodes": [{"name": "bug", "color": "d73a4a"}]}, reviewDecision="APPROVED",
+                         commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}),
+                 pr_json(8, reviewDecision="CHANGES_REQUESTED",
+                         commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]}),
+                 pr_json(9, reviewDecision="REVIEW_REQUIRED",
+                         commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}),
+                 pr_json(10, commits={"nodes": [{"commit": {"statusCheckRollup": None}}]})]
+        self.fake.on("gh", "api", "graphql", out=search_json(nodes))
+        prs = pr_reviews.list_page(self.checkout, REPO).prs
+        self.assertEqual(prs[0].labels, [{"name": "bug", "color": "d73a4a"}])
+        self.assertEqual([p.ci for p in prs], ["failed", "pending", "passed", None])
+        self.assertEqual([p.decision for p in prs], ["approved", "changes requested", "review required", None])
+        query = self.query()["query"]
+        for field in ("labels", "reviewDecision", "statusCheckRollup { state }"):
+            self.assertIn(field, query)
+        self.assertNotIn("contexts", query)
+
     def test_the_search_text_and_the_cursor_go_to_github(self):
         self.fake.on("gh", "api", "graphql", out=search_json([], end=None))
         page = pr_reviews.list_page(self.checkout, REPO, "author:octo login", after="c2")
@@ -174,11 +192,30 @@ class ListTests(PrReviewTestCase):
             pr_reviews.list_page(self.checkout, REPO)
         self.assertIn("Bad search", str(raised.exception))
 
-    def test_the_description_is_read_on_its_own(self):
-        self.fake.on("gh", "pr", "view", out={"body": "Sessions end too soon."})
-        self.assertEqual(pr_reviews.pr_body(self.checkout, REPO, 7), "Sessions end too soon.")
-        view = self.fake.made("gh", "pr", "view")[0]
-        self.assertEqual(view[3:], ["7", "--repo", REPO, "--json", "body"])
+    def test_the_details_are_read_on_their_own(self):
+        checks = [{"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                  {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"},
+                  {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": None},
+                  {"__typename": "CheckRun", "name": "label", "status": "COMPLETED", "conclusion": "SKIPPED"},
+                  {"__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"}]
+        self.fake.on("gh", "api", "graphql", out={"data": {"repository": {"pullRequest": {
+            "body": "Sessions end too soon.",
+            "closingIssuesReferences": {"nodes": [{"number": 3, "title": "Logout", "url": "u3", "state": "OPEN"}]},
+            "latestReviews": {"nodes": [{"author": {"login": "octo"}, "state": "APPROVED",
+                                         "submittedAt": "2026-10-16T18:00:00Z"},
+                                        {"author": None, "state": "COMMENTED", "submittedAt": None}]},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE",
+                                                                    "contexts": {"nodes": checks}}}}]}}}}})
+        details = pr_reviews.pr_details(self.checkout, REPO, 7)
+        self.assertEqual(details["body"], "Sessions end too soon.")
+        self.assertEqual(details["issues"], [{"number": 3, "title": "Logout", "url": "u3", "state": "OPEN"}])
+        self.assertEqual(details["reviews"], [{"author": "octo", "state": "approved", "at": "2026-10-16T18:00:00Z"},
+                                              {"author": "ghost", "state": "commented", "at": ""}])
+        self.assertEqual(details["checks"], [{"name": "lint", "state": "passed"}, {"name": "test", "state": "failed"},
+                                             {"name": "e2e", "state": "pending"}, {"name": "label", "state": "skipped"},
+                                             {"name": "ci/legacy", "state": "failed"}])
+        query = self.query()
+        self.assertEqual((query["owner"], query["name"], query["number"]), ("acme", "api", "7"))
 
     def test_base_repository(self):
         self.fake.on("gh", "repo", "view", out={"nameWithOwner": REPO})
@@ -482,7 +519,9 @@ class AnnotateTests(PrReviewTestCase):
     def test_marks(self):
         pr = pr_reviews.PullRequest.from_json(pr_json(isDraft=True, reviewRequests=[{"login": "me"}]), "me")
         pr.status, pr.new_commits = "reviewed", True
-        self.assertEqual(pr.marks(), ["draft", "review requested", "reviewed", "new commits"])
+        pr.ci, pr.decision = "failed", "approved"
+        self.assertEqual(pr.marks(), ["draft", "review requested", "CI failed", "GitHub: approved",
+                                      "agent: reviewed", "new commits"])
 
 
 class RefreshTests(PrReviewTestCase):

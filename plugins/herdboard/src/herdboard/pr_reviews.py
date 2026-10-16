@@ -9,7 +9,7 @@ A background worker waits for the agent to go idle, counts its notes and shows a
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -43,9 +43,32 @@ SEARCH_QUERY = """query($q: String!, $first: Int!, $after: String) {
       number title url isDraft headRefOid headRefName baseRefName additions deletions changedFiles updatedAt
       author { login }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
+      reviewDecision
+      labels(first: 10) { nodes { name color } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     } }
   }
 }"""
+# What a PR's details add to the list: the description, the issues it closes, the latest review of
+# each reviewer, and each check of the last commit.
+DETAILS_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    body
+    closingIssuesReferences(first: 20) { nodes { number title url state } }
+    latestReviews(first: 30) { nodes { author { login } state submittedAt } }
+    commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
+      __typename
+      ... on CheckRun { name status conclusion }
+      ... on StatusContext { context state }
+    } } } } } }
+  } }
+}"""
+CI_STATES = {"SUCCESS": "passed", "FAILURE": "failed", "ERROR": "failed", "PENDING": "pending",
+             "EXPECTED": "pending"}
+DECISIONS = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes requested", "REVIEW_REQUIRED": "review required"}
+CHECK_CONCLUSIONS = {"SUCCESS": "passed", "NEUTRAL": "passed", "SKIPPED": "skipped", "FAILURE": "failed",
+                     "TIMED_OUT": "failed", "CANCELLED": "failed", "ACTION_REQUIRED": "failed",
+                     "STARTUP_FAILURE": "failed", "STALE": "skipped"}
 # The parts of a review record that the board's detail screen shows.
 REVIEW_FIELDS = ("agent", "model", "thinking", "workspace_id", "reviewed_sha", "error")
 GITHUB_URL = re.compile(r"github\.com[:/]+(?P<path>[^/\s]+/[^/\s]+?)(?:\.git)?/?$")
@@ -103,7 +126,13 @@ class PullRequest:
     files: int = 0
     updated: str = ""
     body: str = ""
-    # Set from the review record by `annotate`.
+    labels: list = field(default_factory=list)
+    # The state of the last commit's checks (passed, failed, pending), None without checks.
+    ci: str | None = None
+    # GitHub's review decision (approved, changes requested, review required), None when the
+    # repository does not require reviews.
+    decision: str | None = None
+    # Set from the local agent review record by `annotate`.
     status: str | None = None
     new_commits: bool = False
     notes: int | None = None
@@ -125,13 +154,18 @@ class PullRequest:
                    mine=bool(me) and author.casefold() == me, base_branch=data.get("baseRefName") or "",
                    additions=int(data.get("additions") or 0), deletions=int(data.get("deletions") or 0),
                    files=int(data.get("changedFiles") or 0), updated=data.get("updatedAt") or "",
-                   body=data.get("body") or "")
+                   body=data.get("body") or "", labels=_labels(data.get("labels")),
+                   ci=CI_STATES.get(_rollup(data).get("state")), decision=DECISIONS.get(data.get("reviewDecision")))
 
     def marks(self) -> list[str]:
         marks = [name for name, on in (("draft", self.draft), ("review requested", self.requested),
                                        ("mine", self.mine)) if on]
+        if self.ci:
+            marks.append(f"CI {self.ci}")
+        if self.decision:
+            marks.append(f"GitHub: {self.decision}")
         if self.status:
-            marks.append(self.status)
+            marks.append(f"agent: {self.status}")
         if self.new_commits:
             marks.append("new commits")
         return marks
@@ -141,8 +175,35 @@ class PullRequest:
                 "draft": self.draft, "head_sha": self.head_sha, "head_branch": self.head_branch,
                 "requested": self.requested, "mine": self.mine, "base_branch": self.base_branch,
                 "additions": self.additions, "deletions": self.deletions, "files": self.files,
-                "updated": self.updated, "status": self.status, "new_commits": self.new_commits,
+                "updated": self.updated, "labels": self.labels, "ci": self.ci, "decision": self.decision,
+                "status": self.status, "new_commits": self.new_commits,
                 "notes": self.notes, "review": self.review}
+
+
+def _nodes(value) -> list:
+    """GraphQL lists come as {"nodes": [...]}; `gh pr view` gives the list itself."""
+    if isinstance(value, dict):
+        value = value.get("nodes")
+    return [entry for entry in value if isinstance(entry, dict)] if isinstance(value, list) else []
+
+
+def _labels(value) -> list[dict]:
+    return [{"name": entry.get("name") or "", "color": entry.get("color") or ""} for entry in _nodes(value)]
+
+
+def _rollup(data: dict) -> dict:
+    """The check rollup of a PR's last commit, {} without checks."""
+    commits = _nodes(data.get("commits"))
+    commit = (commits[-1].get("commit") or {}) if commits else {}
+    return commit.get("statusCheckRollup") or {}
+
+
+def _check(node: dict) -> dict:
+    if node.get("__typename") == "StatusContext":
+        return {"name": node.get("context") or "", "state": CI_STATES.get(node.get("state"), "pending")}
+    if node.get("status") != "COMPLETED":
+        return {"name": node.get("name") or "", "state": "pending"}
+    return {"name": node.get("name") or "", "state": CHECK_CONCLUSIONS.get(node.get("conclusion"), "failed")}
 
 
 def review_key(repo: str, number: int) -> str:
@@ -199,9 +260,26 @@ def list_page(checkout, repo: str, text: str = "", after: str | None = None, siz
         raise PrReviewError(f"Unexpected GitHub search reply: {str(reply)[:200]}", "gh_failed") from error
 
 
-def pr_body(checkout, repo: str, number: int) -> str:
-    """A PR's description, read when its details open."""
-    return _json(["gh", "pr", "view", str(number), "--repo", repo, "--json", "body"], cwd=checkout).get("body") or ""
+def pr_details(checkout, repo: str, number: int) -> dict:
+    """What a PR's details show beyond the list, read when they open: the description, the issues
+    that the PR closes, the latest review of each reviewer on GitHub, and the checks of the last commit."""
+    owner, name = repo.split("/", 1)
+    reply = _json(["gh", "api", "graphql", "-f", f"query={DETAILS_QUERY}", "-f", f"owner={owner}",
+                   "-f", f"name={name}", "-F", f"number={number}"], cwd=checkout)
+    try:
+        data = reply["data"]["repository"]["pullRequest"]
+    except (KeyError, TypeError) as error:
+        messages = "; ".join(e.get("message", "") for e in reply.get("errors") or [] if isinstance(e, dict))
+        raise PrReviewError(f"GitHub has no details for {repo}#{number}: {messages or str(reply)[:200]}",
+                            "gh_failed") from error
+    reviews = [{"author": (node.get("author") or {}).get("login") or "ghost",
+                "state": (node.get("state") or "").lower().replace("_", " "), "at": node.get("submittedAt") or ""}
+               for node in _nodes(data.get("latestReviews"))]
+    return {"body": data.get("body") or "",
+            "issues": [{k: node.get(k) for k in ("number", "title", "url", "state")}
+                       for node in _nodes(data.get("closingIssuesReferences"))],
+            "reviews": reviews,
+            "checks": [_check(node) for node in _nodes(_rollup(data).get("contexts"))]}
 
 
 def view_pr(checkout, repo: str, number: int) -> PullRequest:
