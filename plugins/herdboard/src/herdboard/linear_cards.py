@@ -56,7 +56,7 @@ def issue_card(
     kind, labels = type_and_labels(config, [label["name"] for label in issue["labels"]])
     return CardView(
         ref=issue["identifier"],
-        issue_id=issue["id"],
+        issue_id=issue.get("id"),
         board=project["name"] if project else DEFAULT_BOARD,
         path=None,
         column=column_for(config, state),
