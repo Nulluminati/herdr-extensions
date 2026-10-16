@@ -307,7 +307,7 @@ herdboard can have an agent review an open GitHub pull request of the current re
 
 The flow:
 
-1. Press `G` on the board. The list shows every open PR in a table: an open or draft icon, the number, the title, the author (yours in cyan), the review state and the agent's note count. The review states are `review requested` (from you), `reviewing`, `reviewed`, `failed` and `new commits`. The line under the table counts them.
+1. Press `G` on the board. The list shows the open PRs in a table, 50 to a page, newest first: an open or draft icon, the number, the title, the author (yours in cyan), the review state and the agent's note count. The review states are `review requested` (from you), `reviewing`, `reviewed`, `failed` and `new commits`. The line under the table shows the total, the page and the search, then counts the states on the page.
 2. Press `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
@@ -322,14 +322,17 @@ Keys on the list:
 
 | Key | Action |
 |---|---|
-| `enter` or a click | Show the PR's details: its branches, its size, the agent review and the description. The action keys below also work there |
+| `enter` or a click | Show the PR's details: its branches, its size, the agent review and the description. herdboard reads the description only then. The action keys below also work there |
 | `s` | Choose an agent and a model, then review the PR |
 | `g` | Go to the PR's review workspace |
 | `u` | Fetch new commits, open Hunk again with the old notes, and offer a new agent review |
 | `f` | Finish the review, after you confirm |
 | `o` | Open the PR in the browser |
-| `r` | Read GitHub again. The list also reads it once a minute |
-| `G` or `escape` | Back to the board |
+| `n` / `p` | The next or previous page |
+| `/` | Search GitHub for open PRs: words match the title and the description, and GitHub qualifiers such as `author:octo`, `draft:true`, `label:bug` or `review-requested:@me` work. `enter` searches from page 1 |
+| `r` | Read GitHub again. The list also reads the current page once a minute |
+| `escape` | Close the search box, else clear the search, else go back to the board |
+| `G` | Back to the board |
 
 The icons follow `icon_style` in the config: Nerd Font icons with `nerd`, plain symbols (● ◌ ◆ … ✓ ✗ ↑) otherwise.
 
@@ -444,7 +447,7 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move it to Done |
 | `herdboard board --prs` | Open the board on its pull request list |
-| `herdboard prs` | List the open GitHub pull requests of the repository, with review markers |
+| `herdboard prs [--search TEXT] [--page N]` | List the open GitHub pull requests of the repository, 50 to a page, with review markers. `--search` takes GitHub search words and qualifiers |
 | `herdboard pr-review <N> [--agent claude\|pi] [--model] [--thinking]` | Have an agent review PR `N` in its own workspace, with notes in Hunk. The defaults are `start_agent` and `start_model` |
 | `herdboard pr-review-refresh <N>` | Fetch the PR's new commits, and open Hunk again with the old notes |
 | `herdboard pr-review-go <N>` | Go to the PR's review workspace |

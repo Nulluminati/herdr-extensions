@@ -87,7 +87,6 @@ class PrReviewTestCase(unittest.TestCase):
         self.workers = []
         self.enterContext(patch.object(agent_review, "start_worker",
                                        lambda arguments, log: self.workers.append((arguments, log))))
-        pr_reviews._logins.clear()
         self.fake.on("git", "-C", str(self.checkout), "remote", "-v",
                      out="origin\tgit@github.com:acme/api.git (fetch)\norigin\tgit@github.com:acme/api.git (push)\n")
         self.fake.on("gh", "auth", "token", out="secret-token\n")
@@ -121,38 +120,65 @@ class PrReviewTestCase(unittest.TestCase):
         return record
 
 
-class ListTests(PrReviewTestCase):
-    def test_list_prs_reads_gh_and_sets_the_markers(self):
-        prs = [pr_json(7), pr_json(8, isDraft=True, author={"login": "Me"}),
-               pr_json(9, reviewRequests=[{"__typename": "Team", "name": "core"}, {"login": "ME"}])]
-        self.fake.on("gh", "api", "user", out="me\n")
-        self.fake.on("gh", "pr", "list", out=prs)
-        found = pr_reviews.list_prs(self.checkout, REPO)
-        self.assertEqual([p.number for p in found], [7, 8, 9])
-        self.assertEqual([(p.draft, p.mine, p.requested) for p in found],
-                         [(False, False, False), (True, True, False), (False, False, True)])
-        self.assertEqual(found[0].head_sha, HEAD)
-        self.assertEqual(found[0].author, "octo")
-        self.assertEqual((found[0].base_branch, found[0].additions, found[0].files, found[0].body),
-                         ("main", 12, 2, "Sessions end too soon."))
-        listing = self.fake.made("gh", "pr", "list")[0]
-        self.assertIn("--repo", listing)
-        self.assertIn(REPO, listing)
+def search_json(nodes, total=None, end="c2", more=False, login="me"):
+    """A GraphQL search reply, with review requests in GraphQL's shape."""
+    for node in nodes:
+        requests = node.pop("reviewRequests", [])
+        node["reviewRequests"] = {"nodes": [{"requestedReviewer": r} for r in requests]}
+        node.pop("body", None)
+    return {"data": {"viewer": {"login": login}, "search": {
+        "issueCount": len(nodes) if total is None else total,
+        "pageInfo": {"hasNextPage": more, "endCursor": end}, "nodes": nodes}}}
 
-    def test_the_login_is_read_once(self):
-        self.fake.on("gh", "api", "user", out="me\n")
-        self.fake.on("gh", "pr", "list", out=[])
-        pr_reviews.list_prs(self.checkout, REPO)
-        pr_reviews.list_prs(self.checkout, REPO)
-        self.assertEqual(len(self.fake.made("gh", "api", "user")), 1)
+
+class ListTests(PrReviewTestCase):
+    def query(self):
+        call = self.fake.made("gh", "api", "graphql")[-1]
+        return {arg.split("=", 1)[0]: arg.split("=", 1)[1] for arg in call if "=" in arg}
+
+    def test_a_page_reads_github_search_and_sets_the_markers(self):
+        prs = [pr_json(7), pr_json(8, isDraft=True, author={"login": "Me"}),
+               pr_json(9, reviewRequests=[{"name": "core"}, {"login": "ME"}])]
+        self.fake.on("gh", "api", "graphql", out=search_json(prs, total=120, more=True, end="c3"))
+        page = pr_reviews.list_page(self.checkout, REPO)
+        self.assertEqual([p.number for p in page.prs], [7, 8, 9])
+        self.assertEqual([(p.draft, p.mine, p.requested) for p in page.prs],
+                         [(False, False, False), (True, True, False), (False, False, True)])
+        self.assertEqual((page.prs[0].head_sha, page.prs[0].author, page.prs[0].base_branch, page.prs[0].additions,
+                          page.prs[0].files, page.prs[0].body), (HEAD, "octo", "main", 12, 2, ""))
+        self.assertEqual((page.total, page.next_cursor), (120, "c3"))
+        query = self.query()
+        self.assertEqual(query["q"], f"repo:{REPO} is:pr is:open sort:created-desc")
+        self.assertEqual(query["first"], str(pr_reviews.PAGE_SIZE))
+        self.assertNotIn("after", query)
+        self.assertNotIn("body", query["query"])
+
+    def test_the_search_text_and_the_cursor_go_to_github(self):
+        self.fake.on("gh", "api", "graphql", out=search_json([], end=None))
+        page = pr_reviews.list_page(self.checkout, REPO, "author:octo login", after="c2")
+        query = self.query()
+        self.assertEqual(query["q"], f"repo:{REPO} is:pr is:open sort:created-desc author:octo login")
+        self.assertEqual(query["after"], "c2")
+        self.assertEqual((page.prs, page.total, page.next_cursor), ([], 0, None))
 
     def test_a_gh_failure_is_an_error(self):
-        self.fake.on("gh", "api", "user", out="me\n")
-        self.fake.on("gh", "pr", "list", code=1, err="HTTP 401")
+        self.fake.on("gh", "api", "graphql", code=1, err="HTTP 401")
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
-            pr_reviews.list_prs(self.checkout, REPO)
+            pr_reviews.list_page(self.checkout, REPO)
         self.assertEqual(raised.exception.code, "gh_failed")
         self.assertIn("HTTP 401", str(raised.exception))
+
+    def test_a_graphql_error_is_an_error(self):
+        self.fake.on("gh", "api", "graphql", out={"errors": [{"message": "Bad search"}]})
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.list_page(self.checkout, REPO)
+        self.assertIn("Bad search", str(raised.exception))
+
+    def test_the_description_is_read_on_its_own(self):
+        self.fake.on("gh", "pr", "view", out={"body": "Sessions end too soon."})
+        self.assertEqual(pr_reviews.pr_body(self.checkout, REPO, 7), "Sessions end too soon.")
+        view = self.fake.made("gh", "pr", "view")[0]
+        self.assertEqual(view[3:], ["7", "--repo", REPO, "--json", "body"])
 
     def test_base_repository(self):
         self.fake.on("gh", "repo", "view", out={"nameWithOwner": REPO})

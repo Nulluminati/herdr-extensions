@@ -550,18 +550,35 @@ class PullRequestReviewTests(CliTestCase):
     def test_prs_lists_the_open_prs_with_markers(self):
         pr = self.pr_reviews.PullRequest(7, "Fix login", "https://github.com/acme/api/pull/7", "octo", True,
                                          "a" * 40, "fix", True, False)
-        self.patch("list_prs", return_value=[pr])
+        self.patch("list_page", return_value=self.pr_reviews.Page([pr], 1, None))
         self.patch("records", return_value={"acme/api#7": {"status": "reviewed", "reviewed_sha": "b" * 40}})
         data = self.run_json("prs", directory=self.repo)
         self.assertEqual(data["repo"], "acme/api")
         self.assertEqual(data["prs"][0]["number"], 7)
         self.assertTrue(data["prs"][0]["new_commits"])
+        self.assertEqual((data["page"], data["pages"], data["total"]), (1, 1, 1))
         out, _ = self.run_cli("prs", directory=self.repo)
         self.assertIn("#7", out)
         self.assertIn("draft, review requested, reviewed, new commits", out)
+        self.assertNotIn("Page", out)
+
+    def test_prs_pages_follow_the_cursors_and_take_a_search(self):
+        pr = self.pr_reviews.PullRequest(9, "Old", "u", "octo", False, "a" * 40, "b", False, False)
+        pages = [self.pr_reviews.Page([], 120, "c1"), self.pr_reviews.Page([pr], 120, "c2")]
+        listing = self.patch("list_page", side_effect=pages)
+        self.patch("records", return_value={})
+        out, _ = self.run_cli("prs", "--search", "author:octo", "--page", "2", directory=self.repo)
+        self.assertEqual([c.kwargs["after"] for c in listing.call_args_list], [None, "c1"])
+        self.assertEqual({c.args[2] for c in listing.call_args_list}, {"author:octo"})
+        self.assertIn("Page 2 of 3 (120 open). Next: --page 3", out)
+
+    def test_a_page_past_the_end(self):
+        self.patch("list_page", return_value=self.pr_reviews.Page([], 3, None))
+        data = self.run_json("prs", "--page", "4", directory=self.repo, expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
 
     def test_prs_without_any(self):
-        self.patch("list_prs", return_value=[])
+        self.patch("list_page", return_value=self.pr_reviews.Page([], 0, None))
         self.patch("records", return_value={})
         out, _ = self.run_cli("prs", directory=self.repo)
         self.assertEqual(out, "No open pull requests in acme/api.\n")

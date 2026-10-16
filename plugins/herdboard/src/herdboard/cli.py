@@ -221,7 +221,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--force", action="store_true",
                      help="finish an unmerged card; its branch is kept, and uncommitted work still stops it")
 
-    command("prs", "list the open GitHub pull requests of this repository, with review markers")
+    sub = command("prs", "list the open GitHub pull requests of this repository, with review markers")
+    sub.add_argument("--search", default="", help="GitHub search words and qualifiers, such as author:octo")
+    sub.add_argument("--page", type=int, default=1, help=f"the page of {pr_reviews.PAGE_SIZE} pull requests")
 
     sub = command("pr-review", "have an agent review a pull request in its own workspace, with notes in Hunk")
     sub.add_argument("number", type=int)
@@ -857,10 +859,22 @@ def _pr_key(ctx: _Context) -> str:
 
 
 def _cmd_prs(ctx: _Context) -> dict:
+    args = ctx.args
+    if args.page < 1:
+        raise UsageError("--page starts at 1")
     checkout, repo = _pr_target(ctx)
-    prs = pr_reviews.list_prs(checkout, repo)
-    pr_reviews.annotate(prs, repo, pr_reviews.records())
-    return {"repo": repo, "prs": [pr.to_dict() for pr in prs], "marks": [pr.marks() for pr in prs]}
+    # GitHub pages by cursor, so a later page follows the cursors of the pages before it.
+    after = None
+    for number in range(1, args.page + 1):
+        page = pr_reviews.list_page(checkout, repo, args.search, after=after)
+        pages = max(1, -(-page.total // pr_reviews.PAGE_SIZE))
+        if number < args.page:
+            if page.next_cursor is None:
+                raise UsageError(f"There {'is only 1 page' if pages == 1 else f'are only {pages} pages'}")
+            after = page.next_cursor
+    pr_reviews.annotate(page.prs, repo, pr_reviews.records())
+    return {"repo": repo, "search": args.search, "page": args.page, "pages": pages, "total": page.total,
+            "prs": [pr.to_dict() for pr in page.prs], "marks": [pr.marks() for pr in page.prs]}
 
 
 def _cmd_pr_review(ctx: _Context) -> dict:
@@ -891,9 +905,17 @@ def _cmd_pr_review_finish(ctx: _Context) -> dict:
 def _pr_text(command: str, result: dict) -> str:
     if command == "prs":
         if not result["prs"]:
+            if result["search"]:
+                return f"No open pull requests in {result['repo']} match {result['search']!r}."
             return f"No open pull requests in {result['repo']}."
-        return "\n".join(f"#{pr['number']}\t{pr['title']}\t{pr['author']}\t{', '.join(marks)}".rstrip()
-                         for pr, marks in zip(result["prs"], result["marks"]))
+        lines = [f"#{pr['number']}\t{pr['title']}\t{pr['author']}\t{', '.join(marks)}".rstrip()
+                 for pr, marks in zip(result["prs"], result["marks"])]
+        if result["pages"] > 1:
+            page = f"Page {result['page']} of {result['pages']} ({result['total']} open)."
+            if result["page"] < result["pages"]:
+                page += f" Next: --page {result['page'] + 1}"
+            lines.append(page)
+        return "\n".join(lines)
     number = result.get("number")
     if command == "pr-review":
         model = f" ({result['model']})" if result["model"] else ""

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/
 from herdboard.board import (AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp, ModelScreen,  # noqa: E402
                              PullRequestDetailScreen, PullRequestsScreen)
 from herdboard.config import Config  # noqa: E402
-from herdboard.pr_reviews import PrReviewError, PullRequest  # noqa: E402
+from herdboard.pr_reviews import Page, PrReviewError, PullRequest  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
 
@@ -36,9 +36,10 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Board card")
         self.service = Mock()
-        self.service.list.return_value = ("acme/api", [
+        self.service.page.return_value = ("acme/api", Page([
             pull_request(7, "Fix login timeout", draft=True, requested=True),
-            pull_request(8, "Add cache", status="reviewed", new_commits=True, notes=3)])
+            pull_request(8, "Add cache", status="reviewed", new_commits=True, notes=3)], 2, None))
+        self.service.body.return_value = "Sessions **end** too soon."
         self.service.review.return_value = {"key": "acme/api#7", "number": 7, "workspace_id": "w9",
                                             "agent": "claude", "model": "sonnet", "prompted": False}
         self.service.refresh.return_value = {"key": "acme/api#8", "number": 8, "kept": 3, "dropped": [],
@@ -211,12 +212,76 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("Herdr has no open workspace", "error"), self.notices)
 
     async def test_a_list_failure_is_a_notice(self):
-        self.service.list.side_effect = PrReviewError("gh failed", "gh_failed")
+        self.service.page.side_effect = PrReviewError("gh failed", "gh_failed")
         app = self.app()
         async with app.run_test() as pilot:
             screen = await self.open(app, pilot)
             self.assertEqual(screen.rows(), [])
         self.assertIn(("gh failed", "error"), self.notices)
+
+    async def test_the_details_read_the_description_when_they_open(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            await pilot.press("enter")
+            await self.settle(app, pilot)
+            self.service.body.assert_called_once_with(7)
+            self.assertIn("Sessions **end** too soon.", app.screen.text())
+        self.service.page.assert_called_with("", None)
+
+    async def test_n_and_p_move_between_pages(self):
+        first = Page([pull_request(n, f"PR {n}") for n in (9, 8)], 5, "c1")
+        second = Page([pull_request(n, f"PR {n}") for n in (7, 6)], 5, "c2")
+        self.service.page.side_effect = lambda text, after: ("acme/api", {None: first, "c1": second}[after])
+        app = self.app()
+        with patch("herdboard.pr_reviews.PAGE_SIZE", 2):
+            async with app.run_test() as pilot:
+                await self.paging(app, pilot)
+        self.assertEqual([c.args[1] for c in self.service.page.call_args_list], [None, "c1", None])
+
+    async def paging(self, app, pilot):
+        """Page 1, then 2, then back to 1. A previous page on page 1 reads nothing."""
+        screen = await self.open(app, pilot)
+        self.assertIn("page 1 of 3", screen.status_text())
+        await pilot.press("n")
+        await self.settle(app, pilot)
+        self.assertEqual([row[1] for row in screen.rows()], ["#7", "#6"])
+        self.assertIn("page 2 of 3", screen.status_text())
+        await pilot.press("p")
+        await self.settle(app, pilot)
+        self.assertEqual([row[1] for row in screen.rows()], ["#9", "#8"])
+        await pilot.press("p")
+        await self.settle(app, pilot)
+
+    async def test_the_last_page_has_no_next(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            screen = await self.open(app, pilot)
+            await pilot.press("n")
+            await self.settle(app, pilot)
+            self.assertNotIn("page", screen.status_text())
+        self.assertEqual(self.service.page.call_count, 1)
+
+    async def test_slash_searches_github_and_escape_clears_it(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            screen = await self.open(app, pilot)
+            await pilot.press("slash")
+            await pilot.pause()
+            for key in "author:octo":
+                await pilot.press(key)
+            await pilot.press("enter")
+            await self.settle(app, pilot)
+            self.service.page.assert_called_with("author:octo", None)
+            self.assertIn("search: author:octo", screen.status_text())
+            self.assertIsInstance(app.screen, PullRequestsScreen)
+            await pilot.press("escape")
+            await self.settle(app, pilot)
+            self.service.page.assert_called_with("", None)
+            self.assertIsInstance(app.screen, PullRequestsScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertNotIsInstance(app.screen, PullRequestsScreen)
 
     async def test_the_board_can_open_on_the_list(self):
         app = self.app(open_prs=True)

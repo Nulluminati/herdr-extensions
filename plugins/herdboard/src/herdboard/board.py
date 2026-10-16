@@ -134,10 +134,12 @@ HELP_KEYS = [
     ("G, enter", "on a pull request, or a click: its details, the agent review and the description"),
     ("G, s", "on a pull request: choose an agent and its model; it reviews the PR with notes in Hunk"),
     ("G, g", "on a pull request: go to its review workspace"),
-    ("G, u", "on a pull request: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
+    ("G, u", "on a pull request (Update): fetch new commits, open Hunk again with the old notes, offer a new agent review"),
     ("G, f", "on a pull request: finish the review: close the workspace, remove the worktree and pr/N branch"),
     ("G, o", "on a pull request: open it in the browser"),
     ("G, r", "on the pull request list: read GitHub again"),
+    ("G, n / p", "on the pull request list: the next or previous page of 50"),
+    ("G, /", "on the pull request list: search GitHub (words, author:NAME, draft:true, review-requested:@me); escape clears it"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
     ("q", "quit"),
@@ -1347,11 +1349,15 @@ class PullRequestService:
     def key(self, number: int) -> str:
         return pr_reviews.review_key(self.target()[1], number)
 
-    def list(self) -> tuple[str, list[pr_reviews.PullRequest]]:
+    def page(self, text: str, after: str | None) -> tuple[str, pr_reviews.Page]:
         checkout, repo = self.target()
-        prs = pr_reviews.list_prs(checkout, repo)
-        pr_reviews.annotate(prs, repo, pr_reviews.records())
-        return repo, prs
+        page = pr_reviews.list_page(checkout, repo, text, after=after)
+        pr_reviews.annotate(page.prs, repo, pr_reviews.records())
+        return repo, page
+
+    def body(self, number: int) -> str:
+        checkout, repo = self.target()
+        return pr_reviews.pr_body(checkout, repo, number)
 
     def review(self, number: int, kind: str, model: str | None, thinking: str | None) -> dict:
         checkout, repo = self.target()
@@ -1428,11 +1434,14 @@ class PullRequestDetailScreen(ModalBase):
         Binding("o", "act('open')", "Open in browser"),
     ]
 
-    def __init__(self, pr: pr_reviews.PullRequest, repo: str, icon_style: str = "plain"):
+    def __init__(self, pr: pr_reviews.PullRequest, repo: str, icon_style: str = "plain",
+                 load_body: Callable[[], str] | None = None):
         super().__init__()
         self.pr = pr
         self.repo = repo
         self.icon_style = icon_style
+        # Reads the description, which the list does not hold. None when the PR has it already.
+        self.load_body = load_body if not pr.body else None
 
     def _static(self, text: Text, **options) -> Static:
         widget = Static(text, **options)
@@ -1501,9 +1510,29 @@ class PullRequestDetailScreen(ModalBase):
             review = self._static(self._review_text(), id="pr-detail-review", classes="detail-block")
             review.border_title = "Agent review"
             yield review
-            body = Markdown(pr.body.strip() or "*No description.*", id="pr-detail-body", classes="detail-block")
+            text = "*Reading the description…*" if self.load_body else pr.body.strip() or "*No description.*"
+            body = Markdown(text, id="pr-detail-body", classes="detail-block")
             body.border_title = "Description"
             yield body
+
+    def on_mount(self) -> None:
+        if self.load_body is None:
+            return
+        load = self.load_body
+
+        def read() -> None:
+            try:
+                text = load()
+                self.pr.body = text
+                shown = text.strip() or "*No description.*"
+            except HerdboardError as error:
+                shown = f"*Cannot read the description: {error}*"
+            try:
+                self.app.call_from_thread(self.query_one("#pr-detail-body", Markdown).update, shown)
+            except (RuntimeError, NoWidget):
+                pass  # The board quit, or the screen closed.
+
+        self.run_worker(read, thread=True, group=PR_GROUP, exit_on_error=False)
 
     def text(self) -> str:
         """The screen's text, for tests."""
@@ -1518,13 +1547,17 @@ class PullRequestsScreen(Screen):
     """The open pull requests of the board's repository. An agent reviews one in its own workspace."""
 
     BINDINGS = [
-        Binding("escape,G", "close", "Board"),
+        Binding("escape", "back", "Back"),
+        Binding("G", "close", "Board", show=False),
         Binding("enter", "detail", "Details"),
+        Binding("slash", "search", "Search"),
+        Binding("n", "page(1)", "Next"),
+        Binding("p", "page(-1)", "Prev"),
         Binding("s", "review", "Review"),
-        Binding("g", "go", "Go to workspace"),
-        Binding("u", "refresh", "New commits"),
+        Binding("g", "go", "Go"),
+        Binding("u", "refresh", "Update"),
         Binding("f", "finish", "Finish"),
-        Binding("o", "open", "Open in browser"),
+        Binding("o", "open", "Browser"),
         Binding("r", "load", "Reload"),
         Binding("down,j", "cursor(1)", "Next", show=False),
         Binding("up,k", "cursor(-1)", "Previous", show=False),
@@ -1538,6 +1571,12 @@ class PullRequestsScreen(Screen):
         self.prs: list[pr_reviews.PullRequest] = []
         # One review, refresh or finish runs at a time.
         self.busy = False
+        # The GitHub search text, and the cursor that starts each page seen so far: page 1 starts at None.
+        self.search = ""
+        self.cursors: list[str | None] = [None]
+        self.page_index = 0
+        self.page: pr_reviews.Page | None = None
+        self.loading = False
 
     def compose(self) -> ComposeResult:
         title = Static("Pull requests", id="pr-title")
@@ -1548,6 +1587,10 @@ class PullRequestsScreen(Screen):
         yield table
         status = Static("Reading GitHub…", id="pr-status")
         yield status
+        search = Input(placeholder="GitHub search: words, author:NAME, draft:true, review-requested:@me · "
+                                   "enter searches · escape cancels", id="pr-search")
+        search.display = False
+        yield search
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1568,6 +1611,9 @@ class PullRequestsScreen(Screen):
         index = self.query_one("#pr-list", PullRequestTable).cursor_row
         return self.prs[index] if self.prs and 0 <= index < len(self.prs) else None
 
+    def status_text(self) -> str:
+        return self.query_one("#pr-status", Static).plain
+
     def _status(self, text: str | Text) -> None:
         status = self.query_one("#pr-status", Static)
         status.plain = text if isinstance(text, str) else text.plain
@@ -1584,25 +1630,42 @@ class PullRequestsScreen(Screen):
         return max(PR_TITLE_MIN, self.size.width - fixed)
 
     def _summary(self, repo: str, prs: list[pr_reviews.PullRequest]) -> Text:
+        """Where the list is (the total, the page, the search), then what the shown PRs need."""
         if not prs:
+            if self.search:
+                return Text(f"No open pull requests in {repo} match {self.search!r}. Escape clears the search.",
+                            style="dim")
             return Text(f"No open pull requests in {repo}", style="dim")
         style = self.icon_style
-        text = Text(f"{len(prs)} open")
+        page = self.page
+        total = page.total if page is not None else len(prs)
+        paged = page is not None and (page.total > len(prs) or self.page_index > 0)
+        text = Text(f"{total} open" + (" that match" if self.search else ""), style="bold")
+        if paged:
+            pages = max(1, -(-page.total // pr_reviews.PAGE_SIZE))
+            text.append(f" · page {self.page_index + 1} of {pages}", style="bold")
+        if self.search:
+            text.append(f" · search: {self.search}", style="bold")
         counts = [("review requested", sum(pr.requested for pr in prs), "request your review"),
                   ("reviewing", sum(pr.status == "reviewing" for pr in prs), "reviewing"),
                   ("reviewed", sum(pr.status == "reviewed" for pr in prs), "reviewed"),
                   ("failed", sum(pr.status == "failed" for pr in prs), "failed"),
                   ("new commits", sum(pr.new_commits for pr in prs), "with new commits")]
-        for state, count, label in counts:
-            if count:
-                text.append(" · ", style="dim")
+        shown = [(state, count, label) for state, count, label in counts if count]
+        if shown:
+            text.append(" │ " + ("on this page: " if paged else ""), style="dim")
+            for index, (state, count, label) in enumerate(shown):
+                if index:
+                    text.append("  ")
                 text.append_text(pr_label(state, f"{count} {label}", style))
-        text.append(f" · read at {datetime.now().strftime('%H:%M')}", style="dim")
+        text.append(f" │ read at {datetime.now().strftime('%H:%M')}", style="dim")
         return text
 
-    def _show(self, repo: str, prs: list[pr_reviews.PullRequest]) -> None:
+    def _show(self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None) -> None:
         selected = self.current()
         self.repo, self.prs = repo, prs
+        if page is not None:
+            self.page = page
         title = self.query_one("#pr-title", Static)
         title.plain = f"Pull requests · {repo}"
         title.update(title.plain)
@@ -1628,16 +1691,75 @@ class PullRequestsScreen(Screen):
             pass
 
     def action_load(self) -> None:
+        text, after = self.search, self.cursors[self.page_index]
+        self.loading = True
+
+        def done(repo: str | None, page: pr_reviews.Page | None) -> None:
+            self.loading = False
+            if page is not None:
+                self._show(repo, page.prs, page)
+
         def load() -> None:
             try:
-                repo, prs = self.service.list()
+                repo, page = self.service.page(text, after)
             except HerdboardError as error:
+                self._call(done, None, None)
                 self._call(self._status, f"Cannot read the pull requests: {error}")
                 self._call(self.app.notify, str(error), severity="error")
                 return
-            self._call(self._show, repo, prs)
+            self._call(done, repo, page)
 
         self.run_worker(load, thread=True, group=PR_GROUP, exit_on_error=False)
+
+    def action_page(self, step: int) -> None:
+        if self.loading or self.page is None:
+            return
+        if step > 0:
+            if self.page.next_cursor is None:
+                self.app.notify("This is the last page")
+                return
+            del self.cursors[self.page_index + 1:]
+            self.cursors.append(self.page.next_cursor)
+            self.page_index += 1
+        else:
+            if self.page_index == 0:
+                self.app.notify("This is the first page")
+                return
+            self.page_index -= 1
+        self._status(f"Reading page {self.page_index + 1}…")
+        self.action_load()
+
+    def _set_search(self, text: str) -> None:
+        """Search again from page 1."""
+        self.search = text
+        self.cursors, self.page_index = [None], 0
+        self._status("Searching GitHub…" if text else "Reading GitHub…")
+        self.action_load()
+
+    def action_search(self) -> None:
+        search = self.query_one("#pr-search", Input)
+        search.value = self.search
+        search.display = True
+        search.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "pr-search":
+            return
+        event.stop()
+        event.input.display = False
+        self.query_one("#pr-list", PullRequestTable).focus()
+        self._set_search(event.value.strip())
+
+    def action_back(self) -> None:
+        """Escape: close the search box, else clear the search, else go back to the board."""
+        search = self.query_one("#pr-search", Input)
+        if search.display:
+            search.display = False
+            self.query_one("#pr-list", PullRequestTable).focus()
+        elif self.search:
+            self._set_search("")
+        else:
+            self.action_close()
 
     def _run(self, work: Callable[[], dict], notice: Callable[[dict], str],
              then: Callable[[dict], None] | None = None,
@@ -1692,7 +1814,8 @@ class PullRequestsScreen(Screen):
             if action:
                 getattr(self, f"action_{action}")()
 
-        self.app.push_screen(PullRequestDetailScreen(pr, self.repo, self.icon_style), chosen)
+        self.app.push_screen(PullRequestDetailScreen(pr, self.repo, self.icon_style,
+                                                     load_body=lambda: self.service.body(pr.number)), chosen)
 
     def action_review(self) -> None:
         pr = self.current()
@@ -1868,6 +1991,7 @@ class HerdboardApp(App):
     #pr-list > .datatable--header { text-style: bold; color: $text-muted; background: $surface; }
     #pr-list > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
     #pr-status { height: 1; padding: 0 1; }
+    #pr-search { dock: bottom; margin-bottom: 1; border: round $primary; }
     .pr-detail { width: 100; }
     #pr-detail-title, #pr-detail-meta, #pr-detail-marks { margin-bottom: 1; }
     #pr-detail-body { height: auto; margin: 0; }

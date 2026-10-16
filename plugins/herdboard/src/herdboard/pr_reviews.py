@@ -30,15 +30,25 @@ POLL_SECONDS = 5
 HUNK_WAIT_SECONDS = 15
 TITLE_LENGTH = 40
 AUTHORS = {"claude": "Claude", "pi": "pi"}
-PR_FIELDS = ("number,title,url,author,isDraft,headRefOid,headRefName,baseRefName,reviewRequests,"
-             "additions,deletions,changedFiles,updatedAt,body")
+PR_FIELDS = "number,title,url,author,isDraft,headRefOid,headRefName,baseRefName,reviewRequests"
+PAGE_SIZE = 50
+# One page of a GitHub search for open PRs, with the user's login. The description is read only when
+# a PR's details open, so the list stays small.
+SEARCH_QUERY = """query($q: String!, $first: Int!, $after: String) {
+  viewer { login }
+  search(query: $q, type: ISSUE, first: $first, after: $after) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on PullRequest {
+      number title url isDraft headRefOid headRefName baseRefName additions deletions changedFiles updatedAt
+      author { login }
+      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
+    } }
+  }
+}"""
 # The parts of a review record that the board's detail screen shows.
 REVIEW_FIELDS = ("agent", "model", "thinking", "workspace_id", "reviewed_sha", "error")
 GITHUB_URL = re.compile(r"github\.com[:/]+(?P<path>[^/\s]+/[^/\s]+?)(?:\.git)?/?$")
-
-# The GitHub login of the user, read once per process.
-_logins: dict[str, str] = {}
-
 
 class PrReviewError(HerdboardError):
     def __init__(self, message, code="pr_review_failed"):
@@ -104,6 +114,9 @@ class PullRequest:
         me = login.casefold()
         author = (data.get("author") or {}).get("login") or ""
         requests = data.get("reviewRequests") or []
+        if isinstance(requests, dict):
+            # GraphQL nests each request: {"nodes": [{"requestedReviewer": {"login": ...}}]}.
+            requests = [(node or {}).get("requestedReviewer") or {} for node in requests.get("nodes") or []]
         return cls(number=int(data["number"]), title=data.get("title") or "", url=data.get("url") or "",
                    author=author, draft=bool(data.get("isDraft")), head_sha=data.get("headRefOid") or "",
                    head_branch=data.get("headRefName") or "",
@@ -136,10 +149,12 @@ def review_key(repo: str, number: int) -> str:
     return f"{repo}#{number}"
 
 
-def viewer_login(checkout) -> str:
-    if "login" not in _logins:
-        _logins["login"] = _output(["gh", "api", "user", "--jq", ".login"], cwd=checkout).strip()
-    return _logins["login"]
+@dataclass
+class Page:
+    """One page of open PRs: `total` counts all that match, `next_cursor` is None on the last page."""
+    prs: list[PullRequest]
+    total: int
+    next_cursor: str | None
 
 
 def base_repository(checkout) -> str:
@@ -158,11 +173,35 @@ def base_remote(checkout, repo: str) -> str:
     raise PrReviewError(f"{checkout}: no Git remote points to github.com/{repo}", "remote_unknown")
 
 
-def list_prs(checkout, repo: str) -> list[PullRequest]:
-    login = viewer_login(checkout)
-    data = _json(["gh", "pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", PR_FIELDS],
-                 cwd=checkout)
-    return [PullRequest.from_json(entry, login) for entry in data]
+def search_text(repo: str, text: str = "") -> str:
+    """The GitHub search for the repository's open PRs, newest first. `text` takes words and qualifiers."""
+    return f"repo:{repo} is:pr is:open sort:created-desc {text}".strip()
+
+
+def list_page(checkout, repo: str, text: str = "", after: str | None = None, size: int = PAGE_SIZE) -> Page:
+    """One page of the repository's open PRs that match `text`, after the cursor of the page before."""
+    argv = ["gh", "api", "graphql", "-f", f"query={SEARCH_QUERY}", "-f", f"q={search_text(repo, text)}",
+            "-F", f"first={size}"]
+    if after:
+        argv += ["-f", f"after={after}"]
+    reply = _json(argv, cwd=checkout)
+    if reply.get("errors"):
+        messages = "; ".join(e.get("message", "") for e in reply["errors"] if isinstance(e, dict))
+        raise PrReviewError(f"GitHub refused the search: {messages}", "gh_failed")
+    try:
+        data = reply["data"]
+        login = (data.get("viewer") or {}).get("login") or ""
+        found = data["search"]
+        info = found.get("pageInfo") or {}
+        prs = [PullRequest.from_json(node, login) for node in found.get("nodes") or [] if node and "number" in node]
+        return Page(prs, int(found.get("issueCount") or 0), info.get("endCursor") if info.get("hasNextPage") else None)
+    except (KeyError, TypeError, ValueError) as error:
+        raise PrReviewError(f"Unexpected GitHub search reply: {str(reply)[:200]}", "gh_failed") from error
+
+
+def pr_body(checkout, repo: str, number: int) -> str:
+    """A PR's description, read when its details open."""
+    return _json(["gh", "pr", "view", str(number), "--repo", repo, "--json", "body"], cwd=checkout).get("body") or ""
 
 
 def view_pr(checkout, repo: str, number: int) -> PullRequest:

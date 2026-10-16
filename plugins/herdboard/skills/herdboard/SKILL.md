@@ -99,6 +99,7 @@ herdboard --json merge tep3 --pr              # an agent writes the description,
 herdboard --json merge tep3 --pr --rewrite    # an open PR: an agent rewrites its description (without --rewrite: push only)
 herdboard --json finish tep3                  # after a merge: remove the worktree and branch, card to Done
 herdboard --json prs                          # the open GitHub PRs of this repository, with review markers
+herdboard --json prs --search "author:octo" --page 2   # GitHub search qualifiers; 50 PRs to a page
 herdboard --json pr-review 42 --agent claude --model sonnet   # an agent reviews PR #42 with notes in Hunk; it never submits
 herdboard --json pr-review-refresh 42         # after new commits: move pr/42, open Hunk again with the old notes
 herdboard --json pr-review-go 42              # focus the review workspace of PR #42
