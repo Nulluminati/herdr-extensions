@@ -132,6 +132,23 @@ class StartLinearTests(WriteCliCase):
         self.assertEqual(err, "")
         self.assertEqual(self.pins(), [])
 
+    def mixed_case_board(self):
+        board = self.store_for().projects_dir / "acme-api.md"
+        board.write_text(board.read_text().replace("repo: github.com/acme/api", "repo: github.com/Acme/API", 1))
+
+    def test_a_checkout_start_pins_to_a_mixed_case_github_board(self):
+        self.mixed_case_board()
+        _, err = self.run_cli("--json", "start", "ENG-3", "--repo", str(self.repo), "--no-agent",
+                              directory=self.plain)
+        self.assertEqual(err, "")
+        self.assertEqual(self.pins(), ["ENG-3"])
+
+    def test_a_pinned_issue_of_a_mixed_case_github_board_starts_in_the_repo_view(self):
+        self.mixed_case_board()
+        self.repin(IssuePin("i5", "ENG-5"))
+        result = self.run_json("start", "ENG-5", "--no-agent", directory=self.repo)
+        self.assertEqual(result["branch"], "nate/eng-5")
+
     def test_a_pin_failure_warns_and_the_start_goes_on(self):
         board = self.store_for().projects_dir / "acme-api.md"
         board.write_text(board.read_text().replace("repo:", "linear-issues: nope\nrepo:", 1))

@@ -20,7 +20,7 @@ import time
 from . import attachments
 from .brief import agent_message, brief_text, card_token
 from .config import THINKING_LEVELS, default_config_path
-from .identity import _git, repo_identity
+from .identity import _canonical_identity, _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_pins import add_pin
 from .linear_source import state_dir
@@ -514,7 +514,8 @@ class Starter:
                     matches.append(meta.repo)
             if not repo and self.repository_view:
                 identity = repo_identity(self.directory)
-                if identity and identity.identity in matches:
+                # GitHub names ignore case, so a board's `repo:` can differ from the checkout's.
+                if identity and _canonical_identity(identity.identity) in {_canonical_identity(m) for m in matches}:
                     return identity.identity
         listing = f" Linked repositories: {', '.join(sorted(set(matches)))}." if matches else ""
         raise StartError("Choose a repository with --repo BOARD_OR_PATH." + listing, "repo_required")
@@ -527,7 +528,9 @@ class Starter:
         """
         board = None
         try:
-            board = next((p for p in self.store.board_paths() if self.store.board_meta(p).repo == identity), None)
+            wanted = _canonical_identity(identity)
+            board = next((p for p in self.store.board_paths()
+                          if (repo := self.store.board_meta(p).repo) and _canonical_identity(repo) == wanted), None)
             if board is None or _links_show(self.store.board_meta(board), issue):
                 return
             add_pin(self.store, board, issue)
