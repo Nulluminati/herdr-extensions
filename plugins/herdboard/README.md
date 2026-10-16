@@ -55,6 +55,8 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 ## The board
 
+The top row has two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The keys of the current tab follow the tabs on the same row, and the row wraps when they do not fit. A click on a key presses it. There is no footer.
+
 | Key | Action |
 |---|---|
 | `h` `j` `k` `l` or the arrow keys | Select a column or a card |
@@ -339,7 +341,7 @@ Keys on the list:
 | `/` | Search GitHub for open PRs: words match the title and the description, and GitHub qualifiers such as `author:octo`, `draft:true`, `label:bug` or `review-requested:@me` work. `enter` searches from page 1 |
 | `r` | Read GitHub again. The list also reads the current page once a minute |
 | `escape` | Close the search box, else clear the search, else go back to the board |
-| `G` | Back to the board |
+| `G` | Back to the board tab |
 
 The icons follow `icon_style` in the config: Nerd Font icons with `nerd`, plain symbols (● ◌ ◆ … ✓ ✗ ↑) otherwise.
 

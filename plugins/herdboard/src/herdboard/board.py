@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 import threading
+import time
 import zlib
 from typing import Callable
 
@@ -25,7 +26,7 @@ from textual.driver import Driver
 from textual.errors import NoWidget
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
-from textual.widgets import DataTable, Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
+from textual.widgets import DataTable, Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from . import activity, attachments, pr_reviews
@@ -53,6 +54,7 @@ WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
 START_GROUP = "card-start"
 PR_GROUP = "pull-requests"
+PR_SCREEN = "pull-requests"
 # How often the pull request list reads GitHub again, the same as the PR state check of the board.
 PR_SECONDS = 60.0
 # Each pull request state: its Nerd Font icon, its plain icon, and its style. The prefix names where
@@ -146,7 +148,7 @@ HELP_KEYS = [
     ("u", "remove the pin of a pinned Linear issue"),
     ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
     ("r", "reload, and fetch Linear again"),
-    ("G", "the open GitHub pull requests of this repository; G or escape goes back to the board"),
+    ("G", "switch between the Board and Pull requests tabs; a click on a tab or on a key in the top row works too"),
     ("G, enter", "on a pull request, or a click: its details, the agent review and the description"),
     ("G, s", "on a pull request: choose an agent and its model; it reviews the PR with notes in Hunk"),
     ("G, g", "on a pull request: go to its review workspace"),
@@ -1347,6 +1349,86 @@ class ConfigScreen(ModalBase):
                                project, [label for label in labels if label], set(self.removed_pins), display=display)
 
 
+# The two tabs at the top of the board: (tab, label). G switches between them.
+TABS = [("board", "Board"), ("prs", "Pull requests")]
+TAB_KEY = "G"
+# The actions that the tabs show, so the key list leaves them out.
+TAB_ACTIONS = {"pull_requests", "close"}
+
+
+class TabBar(Horizontal):
+    """The top row: the Board and Pull requests tabs, then the keys of the current tab.
+
+    It takes the place of a footer. The keys come from the screen's active bindings, as Textual's
+    footer finds them, and the row wraps when they do not fit. A click on a key presses it; a click
+    on the other tab switches to it."""
+
+    def __init__(self, active: str):
+        super().__init__(id="tab-bar")
+        self.active = active
+
+    def compose(self) -> ComposeResult:
+        for tab, label in TABS:
+            text = self._tab_text(tab, label)
+            widget = Static(text, id=f"tab-{tab}", classes="tab active" if tab == self.active else "tab")
+            widget.plain = text.plain
+            yield widget
+        keys = Static("", id="tab-keys")
+        keys.plain = ""
+        yield keys
+
+    def _tab_text(self, tab: str, label: str) -> Text:
+        text = Text(f" {label} ", style="bold" if tab == self.active else "")
+        if tab != self.active:
+            text.append(f"{TAB_KEY} ", style="bold yellow")
+        return text
+
+    def tab_labels(self) -> list[str]:
+        return [" ".join(widget.plain.split()) for widget in self.query(".tab")]
+
+    def on_mount(self) -> None:
+        self.screen.bindings_updated_signal.subscribe(self, self._bindings_changed)
+        self.call_after_refresh(self.show_keys)
+
+    def on_unmount(self) -> None:
+        self.screen.bindings_updated_signal.unsubscribe(self)
+
+    def _bindings_changed(self, screen) -> None:
+        if self.is_attached and screen is self.screen:
+            self.show_keys()
+
+    def keys_text(self) -> Text:
+        """Each key of the current tab once, in its binding order, as `key Description`."""
+        seen = set()
+        text = Text()
+        for _node, binding, enabled, _tooltip in self.screen.active_bindings.values():
+            if not binding.show or binding.action in seen or binding.action in TAB_ACTIONS:
+                continue
+            seen.add(binding.action)
+            if text:
+                text.append("   ")
+            click = Style(meta={"@click": f"app.simulate_key({binding.key!r})"})
+            # No-break spaces keep a key and its description on one line when the row wraps.
+            label = f"{self.app.get_key_display(binding)}\u00a0{binding.description.replace(' ', chr(0xa0))}"
+            key = len(self.app.get_key_display(binding))
+            text.append(label[:key], style=Style(bold=True, dim=not enabled) + click)
+            text.append(label[key:], style=click)
+        return text
+
+    def show_keys(self) -> None:
+        keys = self.query_one("#tab-keys", Static)
+        text = self.keys_text()
+        keys.plain = text.plain
+        keys.update(text)
+
+    def on_click(self, event: events.Click) -> None:
+        widget = event.widget
+        tab = (widget.id or "").removeprefix("tab-") if widget is not None else ""
+        if tab in dict(TABS) and tab != self.active:
+            event.stop()
+            self.app.simulate_key(TAB_KEY)
+
+
 class PullRequestService:
     """The pull request list's calls into `pr_reviews`, for the main checkout of the board's directory."""
 
@@ -1750,8 +1832,11 @@ class PullRequestsScreen(Screen):
         self.page_index = 0
         self.page: pr_reviews.Page | None = None
         self.loading = False
+        # When the list last read GitHub, as time.monotonic(); 0 before the first read.
+        self.read_at = 0.0
 
     def compose(self) -> ComposeResult:
+        yield TabBar("prs")
         title = Static("Pull requests", id="pr-title")
         title.plain = "Pull requests"
         yield title
@@ -1764,12 +1849,20 @@ class PullRequestsScreen(Screen):
                                    "enter searches · escape cancels", id="pr-search")
         search.display = False
         yield search
-        yield Footer()
 
     def on_mount(self) -> None:
         self.action_load()
-        self.set_interval(PR_SECONDS, self.action_load)
+        self.timer = self.set_interval(PR_SECONDS, self.action_load)
         self.query_one("#pr-list", PullRequestTable).focus()
+
+    def on_screen_suspend(self) -> None:
+        # The board shows: no GitHub reads in the background.
+        self.timer.pause()
+
+    def on_screen_resume(self) -> None:
+        self.timer.resume()
+        if not self.loading and time.monotonic() - self.read_at >= PR_SECONDS:
+            self.action_load()
 
     @property
     def icon_style(self) -> str:
@@ -1880,6 +1973,7 @@ class PullRequestsScreen(Screen):
         def done(repo: str | None, page: pr_reviews.Page | None) -> None:
             self.loading = False
             if page is not None:
+                self.read_at = time.monotonic()
                 self._show(repo, page.prs, page)
 
         def load() -> None:
@@ -2120,7 +2214,16 @@ class HerdboardApp(App):
     .column-header { text-style: bold; padding: 0 1; background: $surface; }
     .column.completed .column-header { color: $success; }
     .cards { height: 1fr; scrollbar-size-vertical: 1; }
-    #filter { dock: bottom; margin-bottom: 1; border: round $primary; }
+    #filter { dock: bottom; border: round $primary; }
+    #tab-bar { height: auto; background: $panel; }
+    #tab-bar .tab { width: auto; height: 1; padding: 0; margin-right: 1; background: transparent; color: $text; }
+    #tab-bar .tab.active { background: $accent; color: $text; }
+    #tab-bar .tab:hover { background: $primary 40%; }
+    #tab-keys { width: 1fr; height: auto; padding: 0 1; color: $text-muted;
+                link-style: none; link-color: $text-muted; link-background: transparent;
+                link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
+    App:ansi #tab-bar .tab { background: transparent; color: ansi_default; }
+    App:ansi #tab-bar .tab.active { background: ansi_magenta; color: ansi_black; }
     .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
     .card.selected { background: $accent; color: $text; }
     .column.current { border: round $accent; }
@@ -2174,7 +2277,7 @@ class HerdboardApp(App):
     #pr-list > .datatable--header { text-style: bold; color: $text-muted; background: $surface; }
     #pr-list > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
     #pr-status { height: 1; padding: 0 1; }
-    #pr-search { dock: bottom; margin-bottom: 1; border: round $primary; }
+    #pr-search { dock: bottom; border: round $primary; }
     .pr-detail { width: 100; }
     #pr-detail-title, #pr-detail-meta, #pr-detail-marks { margin-bottom: 1; }
     #pr-detail-body { height: auto; margin: 0; }
@@ -2348,6 +2451,7 @@ class HerdboardApp(App):
     # Layout
 
     def compose(self) -> ComposeResult:
+        yield TabBar("board")
         title = Static("", id="title-bar")
         title.plain = ""
         yield title
@@ -2356,7 +2460,6 @@ class HerdboardApp(App):
         search.display = False
         search.disabled = True
         yield search
-        yield Footer()
 
     async def on_mount(self) -> None:
         await self.reload()
@@ -3594,7 +3697,10 @@ class HerdboardApp(App):
         self.push_screen(HelpScreen())
 
     def action_pull_requests(self) -> None:
-        self.push_screen(PullRequestsScreen(self.pr_service))
+        # One installed screen keeps the list, its page, search and selection while the board shows.
+        if not self.is_screen_installed(PR_SCREEN):
+            self.install_screen(PullRequestsScreen(self.pr_service), name=PR_SCREEN)
+        self.push_screen(PR_SCREEN)
 
 
 # The board's own key actions, without parameters. Quit stays available in dialogs.
