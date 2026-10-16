@@ -23,7 +23,8 @@ HEAD = "a" * 40
 def pr_json(number=7, **changes):
     data = {"number": number, "title": "Fix login timeout", "url": f"https://github.com/acme/api/pull/{number}",
             "author": {"login": "octo"}, "isDraft": False, "headRefOid": HEAD, "headRefName": "fix-login",
-            "baseRefName": "main", "reviewRequests": []}
+            "baseRefName": "main", "reviewRequests": [], "additions": 12, "deletions": 3, "changedFiles": 2,
+            "updatedAt": "2026-10-16T18:00:00Z", "body": "Sessions end too soon."}
     data.update(changes)
     return data
 
@@ -132,6 +133,8 @@ class ListTests(PrReviewTestCase):
                          [(False, False, False), (True, True, False), (False, False, True)])
         self.assertEqual(found[0].head_sha, HEAD)
         self.assertEqual(found[0].author, "octo")
+        self.assertEqual((found[0].base_branch, found[0].additions, found[0].files, found[0].body),
+                         ("main", 12, 2, "Sessions end too soon."))
         listing = self.fake.made("gh", "pr", "list")[0]
         self.assertIn("--repo", listing)
         self.assertIn(REPO, listing)
@@ -441,6 +444,7 @@ class AnnotateTests(PrReviewTestCase):
         other = pr_reviews.PullRequest.from_json(pr_json(8), "me")
         pr_reviews.annotate([moved, other], REPO, pr_reviews.records())
         self.assertEqual((moved.status, moved.new_commits, moved.notes), ("reviewed", True, 3))
+        self.assertEqual((moved.review["agent"], moved.review["workspace_id"]), ("claude", "w9"))
         self.assertEqual((other.status, other.new_commits), (None, False))
 
     def test_the_same_head_has_no_new_commits(self):

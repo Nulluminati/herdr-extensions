@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import threading
 import zlib
@@ -24,7 +24,7 @@ from textual.driver import Driver
 from textual.errors import NoWidget
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
+from textual.widgets import DataTable, Footer, Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from . import activity, attachments, pr_reviews
@@ -54,8 +54,23 @@ START_GROUP = "card-start"
 PR_GROUP = "pull-requests"
 # How often the pull request list reads GitHub again, the same as the PR state check of the board.
 PR_SECONDS = 60.0
-PR_MARK_STYLES = {"draft": "dim", "review requested": "bold yellow", "mine": "cyan", "reviewing": "bold cyan",
-                  "reviewed": "bold green", "failed": "bold red", "new commits": "bold magenta"}
+# Each pull request state: its Nerd Font icon, its plain icon, and its style.
+PR_STATES = {
+    "open": ("\uf407", "●", "green"),
+    "draft": ("\uf040", "◌", "dim"),
+    "review requested": ("\uf0f3", "◆", "bold yellow"),
+    "reviewing": ("\uf110", "…", "bold cyan"),
+    "reviewed": ("\uf00c", "✓", "bold green"),
+    "failed": ("\uf00d", "✗", "bold red"),
+    "new commits": ("\uf062", "↑", "bold magenta"),
+    "notes": ("\uf075", "✎", ""),
+    "author": ("\uf007", "", ""),
+    "branch": ("\ue0a0", "", ""),
+    "agent": ("\uf120", "", ""),
+    "commit": ("\uf126", "", ""),
+    "workspace": ("\uf108", "", ""),
+}
+PR_TITLE_MIN = 24
 DETAIL_LOG_ENTRIES = 10
 PR_STYLES = {"merged": "bold green", "closed": "bold yellow"}
 LINEAR_OFFLINE_MESSAGE = "Linear cards are read only offline"
@@ -116,7 +131,8 @@ HELP_KEYS = [
     ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
     ("r", "reload, and fetch Linear again"),
     ("G", "the open GitHub pull requests of this repository; G or escape goes back to the board"),
-    ("G, enter or s", "on a pull request: choose an agent and its model; it reviews the PR with notes in Hunk"),
+    ("G, enter", "on a pull request, or a click: its details, the agent review and the description"),
+    ("G, s", "on a pull request: choose an agent and its model; it reviews the PR with notes in Hunk"),
     ("G, g", "on a pull request: go to its review workspace"),
     ("G, u", "on a pull request: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
     ("G, f", "on a pull request: finish the review: close the workspace, remove the worktree and pr/N branch"),
@@ -1351,19 +1367,151 @@ class PullRequestService:
         return pr_reviews.finish(self.key(number), force=force)
 
 
-def pr_row(pr: pr_reviews.PullRequest) -> Text:
-    text = Text(f"#{pr.number} ", style="bold")
-    text.append(pr.title)
-    text.append(f" · {pr.author}", style="dim")
-    marks = pr.marks()
-    if marks:
-        text.append(" · ", style="dim")
-        for index, mark in enumerate(marks):
-            if index:
-                text.append(", ")
-            label = f"{mark} ({pr.notes} notes)" if mark == "reviewed" and pr.notes is not None else mark
-            text.append(label, style=PR_MARK_STYLES.get(mark, ""))
-    return text
+def pr_icon(state: str, icon_style: str) -> str:
+    nerd, plain, _ = PR_STATES[state]
+    return nerd if icon_style == "nerd" else plain
+
+
+def pr_label(state: str, label: str, icon_style: str) -> Text:
+    """A state label with its icon, in the state's style."""
+    icon = pr_icon(state, icon_style)
+    return Text(f"{icon} {label}" if icon else label, style=PR_STATES[state][2])
+
+
+def pr_review_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
+    """What the user should know about the review: the request, the agent review and new commits."""
+    parts = []
+    if pr.requested and pr.status is None:
+        parts.append(pr_label("review requested", "review requested", icon_style))
+    if pr.status:
+        parts.append(pr_label(pr.status, pr.status, icon_style))
+    if pr.new_commits:
+        parts.append(pr_label("new commits", "new commits", icon_style))
+    return Text("  ").join(parts)
+
+
+def pr_cells(pr: pr_reviews.PullRequest, icon_style: str, title_width: int) -> list[Text]:
+    state = "draft" if pr.draft else "open"
+    title = pr.title if len(pr.title) <= title_width else pr.title[:title_width - 1] + "…"
+    notes = Text(f"{pr.notes} {pr_icon('notes', icon_style)}".rstrip(), justify="right") \
+        if pr.notes else Text("")
+    return [Text(pr_icon(state, icon_style), style=PR_STATES[state][2]),
+            Text(f"#{pr.number}", style="dim"),
+            Text(title, style="dim" if pr.draft else ""),
+            Text(pr.author, style="bold cyan" if pr.mine else ""),
+            pr_review_cell(pr, icon_style),
+            notes]
+
+
+class PullRequestTable(DataTable):
+    """The pull request list. One click on a row selects it, as enter does, so a click opens the details."""
+
+    async def _on_click(self, event: events.Click) -> None:
+        before = self.cursor_coordinate
+        await super()._on_click(event)
+        row = event.style.meta.get("row")
+        # DataTable selects only a click on the row that is already highlighted.
+        if isinstance(row, int) and row >= 0 and self.cursor_coordinate != before:
+            self._post_selected_message()
+
+
+class PullRequestDetailScreen(ModalBase):
+    """One pull request: where it comes from, its size, the agent review and the description.
+
+    The action keys close the screen and return the action, which the list then runs."""
+
+    BINDINGS = [
+        Binding("s", "act('review')", "Review"),
+        Binding("g", "act('go')", "Go to workspace"),
+        Binding("u", "act('refresh')", "New commits"),
+        Binding("f", "act('finish')", "Finish"),
+        Binding("o", "act('open')", "Open in browser"),
+    ]
+
+    def __init__(self, pr: pr_reviews.PullRequest, repo: str, icon_style: str = "plain"):
+        super().__init__()
+        self.pr = pr
+        self.repo = repo
+        self.icon_style = icon_style
+
+    def _static(self, text: Text, **options) -> Static:
+        widget = Static(text, **options)
+        widget.plain = text.plain
+        return widget
+
+    def _review_text(self) -> Text:
+        pr, style = self.pr, self.icon_style
+        review = pr.review or {}
+        text = Text()
+        if not pr.status:
+            text.append("No agent review yet. Press s to start one.", style="dim")
+            return text
+        text.append_text(pr_label(pr.status, pr.status, style))
+        if pr.new_commits:
+            text.append("  ")
+            text.append_text(pr_label("new commits", "new commits since the review", style))
+        agent = " ".join(part for part in (review.get("agent"), review.get("model"), review.get("thinking")) if part)
+        lines = [("agent", agent or "unknown"),
+                 ("notes", f"{pr.notes} notes" if pr.notes is not None else "notes not counted yet")]
+        if review.get("reviewed_sha"):
+            lines.append(("commit", f"reviewed at {review['reviewed_sha'][:8]}"))
+        if review.get("workspace_id"):
+            lines.append(("workspace", f"workspace {review['workspace_id']}"))
+        for state, line in lines:
+            icon = PR_STATES[state][0] if style == "nerd" else ""
+            text.append("\n" + (f"{icon} " if icon else "") + line)
+        if review.get("error"):
+            text.append("\n" + review["error"], style="red")
+        return text
+
+    def compose(self) -> ComposeResult:
+        pr, style = self.pr, self.icon_style
+        state = "draft" if pr.draft else "open"
+        title = Text()
+        title.append(f"{pr_icon(state, style)} ", style=PR_STATES[state][2])
+        title.append(f"#{pr.number} ", style="bold dim")
+        title.append(pr.title, style="bold")
+        meta = Text()
+        author_icon = PR_STATES["author"][0] if style == "nerd" else ""
+        meta.append(f"{author_icon} " if author_icon else "by ")
+        meta.append(pr.author, style="bold cyan" if pr.mine else "bold")
+        branch_icon = PR_STATES["branch"][0] if style == "nerd" else ""
+        meta.append(f"    {branch_icon} " if branch_icon else "    ")
+        meta.append(pr.head_branch)
+        if pr.base_branch:
+            meta.append(" → ", style="dim")
+            meta.append(pr.base_branch)
+        meta.append("\n")
+        meta.append(f"+{pr.additions}", style="bold green")
+        meta.append("  ")
+        meta.append(f"−{pr.deletions}", style="bold red")
+        meta.append(f"  in {pr.files} file{'' if pr.files == 1 else 's'}")
+        if pr.updated:
+            meta.append(f" · updated {pr.updated[:16].replace('T', ' ')}", style="dim")
+        marks = [pr_label(m, m, style) for m in ("draft", "review requested") if
+                 (m == "draft" and pr.draft) or (m == "review requested" and pr.requested)]
+        dialog = VerticalScroll(classes="dialog detail pr-detail")
+        # In the border, so the keys stay in view when the description scrolls.
+        dialog.border_subtitle = "s review · g go · u new commits · f finish · o browser · esc close"
+        with dialog:
+            yield self._static(title, id="pr-detail-title")
+            yield self._static(meta, id="pr-detail-meta")
+            if marks:
+                yield self._static(Text("  ").join(marks), id="pr-detail-marks")
+            review = self._static(self._review_text(), id="pr-detail-review", classes="detail-block")
+            review.border_title = "Agent review"
+            yield review
+            body = Markdown(pr.body.strip() or "*No description.*", id="pr-detail-body", classes="detail-block")
+            body.border_title = "Description"
+            yield body
+
+    def text(self) -> str:
+        """The screen's text, for tests."""
+        parts = [w.plain for w in self.query(Static) if hasattr(w, "plain")]
+        return "\n".join(parts + [self.pr.body])
+
+    def action_act(self, action: str) -> None:
+        self.dismiss(action)
 
 
 class PullRequestsScreen(Screen):
@@ -1371,6 +1519,7 @@ class PullRequestsScreen(Screen):
 
     BINDINGS = [
         Binding("escape,G", "close", "Board"),
+        Binding("enter", "detail", "Details"),
         Binding("s", "review", "Review"),
         Binding("g", "go", "Go to workspace"),
         Binding("u", "refresh", "New commits"),
@@ -1394,27 +1543,62 @@ class PullRequestsScreen(Screen):
         title = Static("Pull requests", id="pr-title")
         title.plain = "Pull requests"
         yield title
-        yield OptionList(id="pr-list")
-        status = Static("Reading GitHub…", id="pr-status", classes="dim")
+        table = PullRequestTable(id="pr-list", cursor_type="row", zebra_stripes=True)
+        table.add_columns("", "PR", "Title", "Author", "Review", "Notes")
+        yield table
+        status = Static("Reading GitHub…", id="pr-status")
         yield status
         yield Footer()
 
     def on_mount(self) -> None:
         self.action_load()
         self.set_interval(PR_SECONDS, self.action_load)
-        self.query_one("#pr-list", OptionList).focus()
+        self.query_one("#pr-list", PullRequestTable).focus()
 
-    def rows(self) -> list[str]:
-        return [pr_row(pr).plain for pr in self.prs]
+    @property
+    def icon_style(self) -> str:
+        return self.app.store.config.icon_style
+
+    def rows(self) -> list[tuple[str, ...]]:
+        """The rows as plain text, for tests."""
+        table = self.query_one("#pr-list", PullRequestTable)
+        return [tuple(cell.plain for cell in table.get_row_at(index)) for index in range(table.row_count)]
 
     def current(self) -> pr_reviews.PullRequest | None:
-        index = self.query_one("#pr-list", OptionList).highlighted
-        return self.prs[index] if index is not None and 0 <= index < len(self.prs) else None
+        index = self.query_one("#pr-list", PullRequestTable).cursor_row
+        return self.prs[index] if self.prs and 0 <= index < len(self.prs) else None
 
-    def _status(self, text: str) -> None:
+    def _status(self, text: str | Text) -> None:
         status = self.query_one("#pr-status", Static)
-        status.plain = text
+        status.plain = text if isinstance(text, str) else text.plain
         status.update(text)
+
+    def _title_width(self, prs: list[pr_reviews.PullRequest]) -> int:
+        """The width left for titles, so a row fits the screen without a sideways scroll."""
+        style = self.icon_style
+        author = max([len("Author"), *(len(pr.author) for pr in prs)])
+        review = max([len("Review"), *(len(pr_review_cell(pr, style).plain) for pr in prs)])
+        number = max([len("PR"), *(len(f"#{pr.number}") for pr in prs)])
+        # Six columns with one cell of padding on each side, the icon, the notes, the border and the scrollbar.
+        fixed = 6 * 2 + 2 + number + author + review + 5 + 3
+        return max(PR_TITLE_MIN, self.size.width - fixed)
+
+    def _summary(self, repo: str, prs: list[pr_reviews.PullRequest]) -> Text:
+        if not prs:
+            return Text(f"No open pull requests in {repo}", style="dim")
+        style = self.icon_style
+        text = Text(f"{len(prs)} open")
+        counts = [("review requested", sum(pr.requested for pr in prs), "request your review"),
+                  ("reviewing", sum(pr.status == "reviewing" for pr in prs), "reviewing"),
+                  ("reviewed", sum(pr.status == "reviewed" for pr in prs), "reviewed"),
+                  ("failed", sum(pr.status == "failed" for pr in prs), "failed"),
+                  ("new commits", sum(pr.new_commits for pr in prs), "with new commits")]
+        for state, count, label in counts:
+            if count:
+                text.append(" · ", style="dim")
+                text.append_text(pr_label(state, f"{count} {label}", style))
+        text.append(f" · read at {datetime.now().strftime('%H:%M')}", style="dim")
+        return text
 
     def _show(self, repo: str, prs: list[pr_reviews.PullRequest]) -> None:
         selected = self.current()
@@ -1422,14 +1606,19 @@ class PullRequestsScreen(Screen):
         title = self.query_one("#pr-title", Static)
         title.plain = f"Pull requests · {repo}"
         title.update(title.plain)
-        options = self.query_one("#pr-list", OptionList)
-        options.clear_options()
-        options.add_options([pr_row(pr) for pr in prs])
+        table = self.query_one("#pr-list", PullRequestTable)
+        table.clear()
+        width = self._title_width(prs)
+        for pr in prs:
+            table.add_row(*pr_cells(pr, self.icon_style, width), key=str(pr.number))
         if prs:
             numbers = [pr.number for pr in prs]
-            options.highlighted = numbers.index(selected.number) if selected and selected.number in numbers else 0
-        self._status(f"{len(prs)} open pull request{'' if len(prs) == 1 else 's'}" if prs
-                     else f"No open pull requests in {repo}")
+            table.move_cursor(row=numbers.index(selected.number) if selected and selected.number in numbers else 0)
+        self._status(self._summary(repo, prs))
+
+    def on_resize(self, event: events.Resize) -> None:
+        if self.prs:
+            self._show(self.repo, self.prs)
 
     def _call(self, function, *args, **options) -> None:
         """Run a function on the event loop from a worker thread. Nothing runs once the board quits."""
@@ -1483,17 +1672,27 @@ class PullRequestsScreen(Screen):
         self.app.pop_screen()
 
     def action_cursor(self, step: int) -> None:
-        options = self.query_one("#pr-list", OptionList)
+        table = self.query_one("#pr-list", PullRequestTable)
         if self.prs:
-            current = options.highlighted if options.highlighted is not None else 0
-            options.highlighted = max(0, min(current + step, len(self.prs) - 1))
+            table.move_cursor(row=max(0, min(table.cursor_row + step, len(self.prs) - 1)))
 
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen())
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         event.stop()
-        self.action_review()
+        self.action_detail()
+
+    def action_detail(self) -> None:
+        pr = self.current()
+        if pr is None:
+            return
+
+        def chosen(action: str | None) -> None:
+            if action:
+                getattr(self, f"action_{action}")()
+
+        self.app.push_screen(PullRequestDetailScreen(pr, self.repo, self.icon_style), chosen)
 
     def action_review(self) -> None:
         pr = self.current()
@@ -1663,8 +1862,19 @@ class HerdboardApp(App):
     #issue-results:focus { border: round $primary; }
     #config-project { width: 2fr; }
     #pr-title { height: 1; padding: 0 1; background: $primary; color: $text; }
-    #pr-list { height: 1fr; border: round $surface-lighten-2; }
+    #pr-title { text-style: bold; }
+    #pr-list { height: 1fr; border: round $surface-lighten-2; scrollbar-size-vertical: 1; }
+    #pr-list:focus { border: round $accent; }
+    #pr-list > .datatable--header { text-style: bold; color: $text-muted; background: $surface; }
+    #pr-list > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
     #pr-status { height: 1; padding: 0 1; }
+    .pr-detail { width: 100; }
+    #pr-detail-title, #pr-detail-meta, #pr-detail-marks { margin-bottom: 1; }
+    #pr-detail-body { height: auto; margin: 0; }
+    #pr-detail-body MarkdownH1, #pr-detail-body MarkdownH2, #pr-detail-body MarkdownH3 {
+        margin: 0; padding: 0; content-align: left middle; text-align: left; color: $text; text-style: bold;
+    }
+    App:ansi #pr-list > .datatable--cursor { background: ansi_default; text-style: bold reverse; }
     App:ansi #pr-title { color: ansi_black; }
     #config-labels { width: 1fr; }
     /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */

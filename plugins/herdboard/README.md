@@ -307,8 +307,8 @@ herdboard can have an agent review an open GitHub pull request of the current re
 
 The flow:
 
-1. Press `G` on the board. The list shows every open PR with its author and markers: `draft`, `review requested` (from you), `mine`, the review state (`reviewing`, `reviewed (N notes)`, `failed`), and `new commits`.
-2. Press `enter` or `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
+1. Press `G` on the board. The list shows every open PR in a table: an open or draft icon, the number, the title, the author (yours in cyan), the review state and the agent's note count. The review states are `review requested` (from you), `reviewing`, `reviewed`, `failed` and `new commits`. The line under the table counts them.
+2. Press `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
 5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
@@ -322,13 +322,16 @@ Keys on the list:
 
 | Key | Action |
 |---|---|
-| `enter` or `s` | Choose an agent and a model, then review the PR |
+| `enter` or a click | Show the PR's details: its branches, its size, the agent review and the description. The action keys below also work there |
+| `s` | Choose an agent and a model, then review the PR |
 | `g` | Go to the PR's review workspace |
 | `u` | Fetch new commits, open Hunk again with the old notes, and offer a new agent review |
 | `f` | Finish the review, after you confirm |
 | `o` | Open the PR in the browser |
 | `r` | Read GitHub again. The list also reads it once a minute |
 | `G` or `escape` | Back to the board |
+
+The icons follow `icon_style` in the config: Nerd Font icons with `nerd`, plain symbols (● ◌ ◆ … ✓ ✗ ↑) otherwise.
 
 The Herdr action `nulluminati.herdboard.prs` opens the board on this list. A suggested key:
 

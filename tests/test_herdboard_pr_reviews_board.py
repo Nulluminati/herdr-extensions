@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from herdboard.board import (AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp, ModelScreen,  # noqa: E402
-                             PullRequestsScreen)
+                             PullRequestDetailScreen, PullRequestsScreen)
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import PrReviewError, PullRequest  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -70,8 +70,8 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             screen = await self.open(app, pilot)
             self.assertEqual(screen.rows(), [
-                "#7 Fix login timeout · octo · draft, review requested",
-                "#8 Add cache · octo · reviewed (3 notes), new commits"])
+                ("◌", "#7", "Fix login timeout", "octo", "◆ review requested", ""),
+                ("●", "#8", "Add cache", "octo", "✓ reviewed  ↑ new commits", "3 ✎")])
             await pilot.press("G")
             await pilot.pause()
             self.assertIs(app.screen, app.screen_stack[0])
@@ -79,6 +79,15 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             await pilot.pause()
             self.assertNotIsInstance(app.screen, PullRequestsScreen)
+
+    async def test_nerd_icons(self):
+        self.store.config.icon_style = "nerd"
+        app = self.app()
+        async with app.run_test() as pilot:
+            screen = await self.open(app, pilot)
+            row = screen.rows()[1]
+        self.assertEqual(row[0], "\uf407")
+        self.assertEqual(row[4], "\uf00c reviewed  \uf062 new commits")
 
     async def test_board_keys_do_not_run_behind_the_list(self):
         app = self.app()
@@ -89,11 +98,40 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, PullRequestsScreen)
             self.assertEqual(self.store.show(self.card.ref).title, "Board card")
 
-    async def test_enter_chooses_claude_and_its_model_then_reviews(self):
+    async def test_enter_and_a_click_open_the_details(self):
+        self.store.config.icon_style = "plain"
+        app = self.app()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await self.open(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, PullRequestDetailScreen)
+            self.assertEqual(app.screen.pr.number, 7)
+            self.assertIn("Fix login timeout", app.screen.text())
+            await pilot.press("escape")
+            await pilot.pause()
+            # Line 1 of the table is its header, so PR #8 is on line 3.
+            await pilot.click("#pr-list", offset=(12, 3))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, PullRequestDetailScreen)
+            self.assertEqual(app.screen.pr.number, 8)
+            self.assertIn("3 notes", app.screen.text())
+
+    async def test_s_in_the_details_reviews(self):
         app = self.app()
         async with app.run_test() as pilot:
             await self.open(app, pilot)
             await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, AgentScreen)
+
+    async def test_s_chooses_claude_and_its_model_then_reviews(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            await pilot.press("s")
             await pilot.pause()
             self.assertIsInstance(app.screen, AgentScreen)
             await pilot.press("enter")

@@ -30,7 +30,10 @@ POLL_SECONDS = 5
 HUNK_WAIT_SECONDS = 15
 TITLE_LENGTH = 40
 AUTHORS = {"claude": "Claude", "pi": "pi"}
-PR_FIELDS = "number,title,url,author,isDraft,headRefOid,headRefName,baseRefName,reviewRequests"
+PR_FIELDS = ("number,title,url,author,isDraft,headRefOid,headRefName,baseRefName,reviewRequests,"
+             "additions,deletions,changedFiles,updatedAt,body")
+# The parts of a review record that the board's detail screen shows.
+REVIEW_FIELDS = ("agent", "model", "thinking", "workspace_id", "reviewed_sha", "error")
 GITHUB_URL = re.compile(r"github\.com[:/]+(?P<path>[^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
 # The GitHub login of the user, read once per process.
@@ -84,10 +87,17 @@ class PullRequest:
     head_branch: str
     requested: bool
     mine: bool
+    base_branch: str = ""
+    additions: int = 0
+    deletions: int = 0
+    files: int = 0
+    updated: str = ""
+    body: str = ""
     # Set from the review record by `annotate`.
     status: str | None = None
     new_commits: bool = False
     notes: int | None = None
+    review: dict | None = None
 
     @classmethod
     def from_json(cls, data: dict, login: str) -> "PullRequest":
@@ -99,7 +109,10 @@ class PullRequest:
                    head_branch=data.get("headRefName") or "",
                    requested=bool(me) and any((r.get("login") or "").casefold() == me for r in requests
                                               if isinstance(r, dict)),
-                   mine=bool(me) and author.casefold() == me)
+                   mine=bool(me) and author.casefold() == me, base_branch=data.get("baseRefName") or "",
+                   additions=int(data.get("additions") or 0), deletions=int(data.get("deletions") or 0),
+                   files=int(data.get("changedFiles") or 0), updated=data.get("updatedAt") or "",
+                   body=data.get("body") or "")
 
     def marks(self) -> list[str]:
         marks = [name for name, on in (("draft", self.draft), ("review requested", self.requested),
@@ -113,8 +126,10 @@ class PullRequest:
     def to_dict(self) -> dict:
         return {"number": self.number, "title": self.title, "url": self.url, "author": self.author,
                 "draft": self.draft, "head_sha": self.head_sha, "head_branch": self.head_branch,
-                "requested": self.requested, "mine": self.mine, "status": self.status,
-                "new_commits": self.new_commits, "notes": self.notes}
+                "requested": self.requested, "mine": self.mine, "base_branch": self.base_branch,
+                "additions": self.additions, "deletions": self.deletions, "files": self.files,
+                "updated": self.updated, "status": self.status, "new_commits": self.new_commits,
+                "notes": self.notes, "review": self.review}
 
 
 def review_key(repo: str, number: int) -> str:
@@ -192,6 +207,7 @@ def annotate(prs: list[PullRequest], repo: str, found: dict) -> None:
             continue
         pr.status = record.get("status")
         pr.notes = record.get("notes")
+        pr.review = {field: record.get(field) for field in REVIEW_FIELDS}
         reviewed = record.get("reviewed_sha")
         pr.new_commits = bool(reviewed) and pr.status != "reviewing" and pr.head_sha != reviewed
 
