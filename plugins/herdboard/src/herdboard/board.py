@@ -2422,14 +2422,15 @@ class HerdboardApp(App):
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return
-        ref = card.ref
-        if not any(pin.identifier.casefold() == ref.casefold() for pin in pins):
+        # The pin may keep an older identifier, from before the issue moved team: match the ID.
+        ref, issue_id = card.ref, card.issue_id
+        if not any(pin.id == issue_id for pin in pins):
             self.notify(f"{ref} is not pinned to this board: a linked Linear project shows it.",
                         severity="warning")
             return
 
         def write() -> None:
-            unpin_issue(self.store, board, ref)
+            unpin_issue(self.store, board, issue_id)
             self.call_from_thread(self.notify, f"Unpinned {ref}")
 
         self._start_write(write, refetch=True)

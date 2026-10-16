@@ -145,6 +145,19 @@ class UnpinTests(PinBoardCase):
             self.assertNotIn("ENG-5", self.card_refs(app))
             self.assertIn(("Unpinned ENG-5", "information"), self.notifications(app))
 
+    async def test_u_finds_the_pin_by_issue_id_after_a_team_move(self):
+        # The pin keeps the identifier from before the move; Linear now calls the issue ENG-5.
+        self.store.update_pins(self.repo_path, lambda _: [IssuePin("i5", "OPS-5")])
+        app = self.make_pin_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            self.select(app, "ENG-5")
+            await pilot.press("u")
+            await settle(pilot)
+            await settle(pilot)
+            self.assertEqual(self.pins(), [])
+            self.assertIn(("Unpinned ENG-5", "information"), self.notifications(app))
+
     async def test_u_on_a_project_card_or_a_todo_says_why(self):
         app = self.make_pin_app()
         async with app.run_test(size=SIZE) as pilot:

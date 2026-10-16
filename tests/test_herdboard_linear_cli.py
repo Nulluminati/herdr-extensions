@@ -350,6 +350,8 @@ class TextTests(LinearCliCase):
              "due": "2026-10-20", "tags": ["repo:api"], "body": ["Line one", "Line two"],
              "checked": False})
         self.assertIsNotNone(card["fetched_at"])
+        # The issue ID is board-only, so the CLI card schema stays as it is.
+        self.assertNotIn("issue_id", card)
 
     def test_pr_marker_needs_a_pull_request_of_this_repository(self):
         cards = {c["ref"]: c["pr"] for c in self.listing()["cards"]}

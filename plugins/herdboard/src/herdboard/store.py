@@ -88,6 +88,8 @@ class CardView:
     has_attachments: bool = False
     # The card ID of a sub-card's parent, from its `[[#^id]]` link.
     parent: str | None = None
+    # Board-only: a Linear card's issue ID, which stays when the identifier changes.
+    issue_id: str | None = None
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.
     parent_title: str | None = None
     sub_cards: tuple[int, int] | None = None

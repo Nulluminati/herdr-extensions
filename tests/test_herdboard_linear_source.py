@@ -386,6 +386,9 @@ class CardTests(unittest.TestCase):
         self.config.linear.state_names["Doing"] = "Todo"
         self.assertEqual(column_for(self.config, {"name": "Doing", "type": "started"}), "Todo")
 
+    def test_a_card_keeps_the_issue_id(self):
+        self.assertEqual(self.card(self.flat(linear_data.make_issue(2))).issue_id, "i2")
+
     def test_canceled_is_hidden_even_with_a_name_override(self):
         self.config.linear.state_names["Dropped"] = "Done"
         self.assertIsNone(self.card(self.flat(linear_data.make_issue(4, state=("Dropped", "canceled")))))
