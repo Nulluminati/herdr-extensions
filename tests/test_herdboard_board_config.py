@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import unittest
@@ -278,6 +279,75 @@ class ConfigScreenTests(BoardTestCase):
             self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
             self.assertEqual(self.config.icon_style, "plain")
 
+    async def test_partial_save_retry_can_restore_the_original_merge_mode(self):
+        for original in (None, "local"):
+            with self.subTest(original=original):
+                self.store.set_merge(self.repo_path, original)
+                self.config.icon_style = "plain"
+                app = self.make_app()
+                app.config_file.write_text("invalid = [")
+                async with app.run_test(size=(80, 24)) as pilot:
+                    await settle(pilot)
+                    screen = await self.open_config(pilot)
+                    screen.query_one("#config-merge").value = "pr"
+                    screen.query_one("#config-icon-style").value = "nerd"
+                    await pilot.press("ctrl+s")
+                    await settle(pilot)
+                    self.assertIs(app.screen, screen)
+                    self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
+                    app.config_file.write_text("")
+                    screen.query_one("#config-merge").value = original or "default"
+                    await pilot.press("ctrl+s")
+                    await settle(pilot)
+                    self.assertNotIsInstance(app.screen, ConfigScreen)
+                    self.assertEqual(self.store.board_meta(self.repo_path).merge, original)
+                    self.assertEqual(load_config(app.config_file).icon_style, "nerd")
+
+    async def test_unchanged_partial_save_retry_keeps_saved_merge_and_links(self):
+        self.link(ProjectLink("p1", "Old project"))
+        app = self.make_app(resolve_link=lambda name, labels: ProjectLink("p2", name))
+        app.config_file.write_text("invalid = [")
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-merge").value = "pr"
+            screen.query_one("#config-icon-style").value = "nerd"
+            screen.query_one("#config-links").focus()
+            await pilot.press("enter")
+            screen.query_one("#config-project").value = "Mobile"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertIs(app.screen, screen)
+            self.assertEqual(self.store.board_meta(self.repo_path).links, [ProjectLink("p2", "Mobile")])
+            self.assertEqual(screen.meta.merge, "pr")
+            app.config_file.write_text("")
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+        meta = self.store.board_meta(self.repo_path)
+        self.assertEqual(meta.merge, "pr")
+        self.assertEqual(meta.links, [ProjectLink("p2", "Mobile")])
+        self.assertEqual(load_config(app.config_file).icon_style, "nerd")
+
+    async def test_display_save_uses_the_environment_selected_config_path(self):
+        app = self.make_app()
+        app.config_file = None
+        path = self.root / "environment" / "settings.toml"
+        default_root = self.root / "xdg"
+        with mock.patch.dict(os.environ, {"HERDBOARD_CONFIG": str(path), "XDG_CONFIG_HOME": str(default_root)}):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-icon-style").value = "nerd"
+                screen.query_one("#config-tag-style").value = "block"
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+                self.assertNotIsInstance(app.screen, ConfigScreen)
+        config = load_config(path)
+        self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
+        self.assertFalse((default_root / "herdboard/config.toml").exists())
+        self.assertFalse((self.root / "config.toml").exists())
+
     async def test_menu_can_disable_icons_and_restore_round_tags(self):
         self.config.icon_style = "nerd"
         self.config.tag_style = "block"
@@ -399,6 +469,7 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
             self.assertIs(app.screen, screen)
             self.assertIn("duplicate key 'other'", screen.query_one("#config-error").plain)
+            self.assertIsNone(screen.meta.merge)
         self.assertEqual(self.repo_path.read_text(), text)
 
     async def test_enter_in_the_project_field_moves_to_the_labels(self):
@@ -519,6 +590,8 @@ class ConfigScreenTests(BoardTestCase):
             screen = await self.open_config(pilot)
             self.assertFalse(screen.query("#config-merge"))
             self.assertFalse(screen.query("#config-project"))
+            hint = screen.query_one("#config-board-hint").render().plain
+            self.assertEqual(hint, "No repository board. Press i in a repository to create one.")
             self.assertEqual(screen.query_one("#config-icon-style").value, "plain")
             screen.query_one("#config-icon-style").value = "nerd"
             await pilot.press("ctrl+s")

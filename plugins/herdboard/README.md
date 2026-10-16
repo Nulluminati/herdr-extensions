@@ -466,6 +466,8 @@ To make pull requests the default for one repository, add `merge: pr` to the fro
 
 Press `c` to open configuration. Use `Icons (all boards)` and `Tags (all boards)` to select display styles. Press `ctrl+s` to save. Changes apply immediately in this session. Herdboard saves them in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. The controls also work outside a repository. Press `escape` to cancel without saving.
 
+Display saves keep a `.<config name>.lock` file beside the configuration file (`.config.toml.lock` by default). Leave it in place; it coordinates concurrent saves.
+
 `icon_style = "plain"` is the default. Dates use a `Due` label, and cards with attachments show `files` at the right edge.
 
 Set `icon_style = "nerd"` to add icons beside text labels on board cards and detail screens. Icons identify default card types, dates, attachments, worktree status and pull requests. Custom types keep their text when no icon exists.

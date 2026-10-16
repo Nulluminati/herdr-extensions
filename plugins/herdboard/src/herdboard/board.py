@@ -1231,6 +1231,9 @@ class ConfigScreen(ModalBase):
                     yield Label(f"repo: {self.meta.repo}", classes="dim")
                 yield self._titled(Select(modes, value=self.meta.merge or "default", allow_blank=False,
                                           id="config-merge"), "Merge")
+            else:
+                yield Label("No repository board. Press i in a repository to create one.",
+                            id="config-board-hint", classes="dim")
             yield self._titled(Select([("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
                                       value=self.icon_style, allow_blank=False,
                                       id="config-icon-style"), "Icons (all boards)")
@@ -2684,6 +2687,9 @@ class HerdboardApp(App):
                     path, merge=KEEP if merge == before else merge,
                     change_links=change if removed or link else None,
                     change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None)
+                if merge != before:
+                    # A display-save failure leaves the dialog open; retries compare against the saved merge mode.
+                    self.call_from_thread(setattr, screen.meta, "merge", merge)
             if display:
                 try:
                     save_display_config(self.config_file, **display)
