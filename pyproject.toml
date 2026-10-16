@@ -10,4 +10,5 @@ dev = [
     "graphql-core>=3.3.0",
     "pyyaml>=6.0.3",
     "textual>=8.2.8",
+    "tomlkit>=0.15.1",
 ]

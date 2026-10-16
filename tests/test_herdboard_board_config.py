@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import kanban_md  # noqa: E402
 from herdboard.board import ConfigScreen, HerdboardApp  # noqa: E402
+from herdboard.config import load_config  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink, with_link  # noqa: E402
 from herdboard.model import FormatError, HerdboardError  # noqa: E402
 from test_herdboard_board import BoardTestCase, settle  # noqa: E402
@@ -133,6 +134,7 @@ class ConfigScreenTests(BoardTestCase):
     def make_app(self, *args, resolve_link=None, **kwargs):
         app = super().make_app(*args, **kwargs)
         app.resolve_link = resolve_link
+        app.config_file = self.root / "config.toml"
         return app
 
     def link(self, link):
@@ -143,6 +145,136 @@ class ConfigScreenTests(BoardTestCase):
         await settle(pilot)
         self.assertIsInstance(pilot.app.screen, ConfigScreen)
         return pilot.app.screen
+
+    async def test_c_shows_current_global_display_settings(self):
+        self.config.icon_style = "nerd"
+        self.config.tag_style = "block"
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            icons = screen.query_one("#config-icon-style")
+            tags = screen.query_one("#config-tag-style")
+            self.assertEqual(icons.value, "nerd")
+            self.assertEqual(tags.value, "block")
+            rendered = "\n".join(strip.text for strip in screen._compositor.render_strips())
+            self.assertIn("Icons (all boards)", rendered)
+            self.assertIn("Tags (all boards)", rendered)
+
+    async def test_keyboard_navigation_can_change_both_display_styles(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            await pilot.press("tab", "enter", "down", "enter")
+            self.assertEqual(screen.query_one("#config-icon-style").value, "nerd")
+            await pilot.press("tab", "enter", "down", "enter")
+            self.assertEqual(screen.query_one("#config-tag-style").value, "block")
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+        config = load_config(app.config_file)
+        self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
+
+    async def test_display_changes_persist_and_update_cards_and_details_immediately(self):
+        self.store.add(self.repo_path, "Ship it #type/bug #api", "Backlog")
+        original = self.repo_path.read_bytes()
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-icon-style").value = "nerd"
+            screen.query_one("#config-tag-style").value = "block"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+            self.assertEqual((self.config.icon_style, self.config.tag_style), ("nerd", "block"))
+            self.assertIn("\uf188 bug  api ", app.query_one(".card").plain)
+            await pilot.press("enter")
+            await settle(pilot)
+            self.assertIn("\uf188 bug", app.screen.query_one("#detail-meta").plain)
+            self.assertEqual(app.screen.query_one("#detail-chips").plain, " api ")
+        config = load_config(app.config_file)
+        self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
+        self.assertEqual(self.repo_path.read_bytes(), original)
+
+    async def test_cancel_does_not_write_or_apply_display_settings(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-icon-style").value = "nerd"
+            screen.query_one("#config-tag-style").value = "block"
+            await pilot.press("escape")
+            await settle(pilot)
+            self.assertEqual((self.config.icon_style, self.config.tag_style), ("plain", "round"))
+            self.assertFalse(app.config_file.exists())
+
+    async def test_unchanged_display_settings_do_not_create_a_config_file(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            await self.open_config(pilot)
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        self.assertFalse(app.config_file.exists())
+
+    async def test_display_write_failure_keeps_runtime_settings_and_shows_an_error(self):
+        app = self.make_app()
+        app.config_file.write_text("invalid = [")
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-icon-style").value = "nerd"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertIs(app.screen, screen)
+            self.assertIn("invalid TOML", screen.query_one("#config-error").plain)
+            self.assertEqual(self.config.icon_style, "plain")
+        self.assertEqual(app.config_file.read_text(), "invalid = [")
+
+    async def test_partial_save_error_identifies_the_saved_board_settings(self):
+        app = self.make_app()
+        app.config_file.write_text("invalid = [")
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-merge").value = "pr"
+            screen.query_one("#config-icon-style").value = "nerd"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertIs(app.screen, screen)
+            self.assertIn("Board settings saved; display settings not saved", screen.query_one("#config-error").plain)
+            self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
+            self.assertEqual(self.config.icon_style, "plain")
+
+    async def test_menu_can_disable_icons_and_restore_round_tags(self):
+        self.config.icon_style = "nerd"
+        self.config.tag_style = "block"
+        self.store.add(self.repo_path, "Ship it #type/bug #api", "Backlog")
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-icon-style").value = "plain"
+            screen.query_one("#config-tag-style").value = "round"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertEqual(app.query_one(".card").plain, "Ship it\nbug \ue0b6api\ue0b4")
+        config = load_config(app.config_file)
+        self.assertEqual((config.icon_style, config.tag_style), ("plain", "round"))
+
+    async def test_display_and_board_changes_save_together(self):
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-merge").value = "pr"
+            screen.query_one("#config-icon-style").value = "nerd"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
+        self.assertEqual(load_config(app.config_file).icon_style, "nerd")
 
     async def test_c_shows_the_board_merge_mode_and_links(self):
         self.store.set_merge(self.repo_path, "pr")
@@ -288,11 +420,14 @@ class ConfigScreenTests(BoardTestCase):
             screen = await self.open_config(pilot)
             screen.query_one("#config-merge").value = "pr"
             screen.query_one("#config-project").value = "Nope"
+            screen.query_one("#config-icon-style").value = "nerd"
             await pilot.press("ctrl+s")
             await settle(pilot)
             self.assertIs(app.screen, screen)
             self.assertIn("No Linear project named 'Nope'", screen.query_one("#config-error").plain)
+            self.assertEqual(self.config.icon_style, "plain")
         self.assertEqual(self.repo_path.read_text(), before)
+        self.assertFalse(app.config_file.exists())
 
     async def test_without_linear_the_add_fields_are_hidden(self):
         app = self.make_app()
@@ -347,15 +482,19 @@ class ConfigScreenTests(BoardTestCase):
             self.assertTrue(any("cannot read board" in m and level == "error" for m, level in messages), messages)
             self.assertTrue(app.is_running)
 
-    async def test_c_without_a_repository_board_explains(self):
+    async def test_c_without_a_repository_board_can_save_global_display_settings(self):
         app = self.make_app(view="inbox", repo=False)
-        async with app.run_test(size=(100, 40)) as pilot:
+        async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
-            await pilot.press("c")
+            screen = await self.open_config(pilot)
+            self.assertFalse(screen.query("#config-merge"))
+            self.assertFalse(screen.query("#config-project"))
+            self.assertEqual(screen.query_one("#config-icon-style").value, "plain")
+            screen.query_one("#config-icon-style").value = "nerd"
+            await pilot.press("ctrl+s")
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
-            messages = [n.message for n in app._notifications]
-            self.assertTrue(any("no repository board" in m for m in messages), messages)
+        self.assertEqual(load_config(app.config_file).icon_style, "nerd")
 
 
 def board_arguments(case, *args):

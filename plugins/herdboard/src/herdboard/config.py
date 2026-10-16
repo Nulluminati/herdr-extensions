@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import fcntl
 import os
 import re
 from pathlib import Path
+import tempfile
 import tomllib
 
 from .model import HerdboardError, IoError, UnknownTypeError
@@ -104,6 +106,54 @@ def default_config_path() -> Path:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
     return base / "herdboard" / "config.toml"
+
+
+def save_display_config(path: Path | None = None, *, icon_style: str | None = None,
+                        tag_style: str | None = None) -> None:
+    """Save only changed display settings, with comments, permissions and other values intact."""
+    changes = {}
+    for key, value, choices in (("icon_style", icon_style, ("plain", "nerd")),
+                                ("tag_style", tag_style, ("round", "block"))):
+        if value is not None:
+            if value not in choices:
+                raise HerdboardError(f"{key} must be {' or '.join(choices)}")
+            changes[key] = value
+    if not changes:
+        return
+
+    # Core config reads need only the standard library; the board installs its TOML writer.
+    import tomlkit
+    from tomlkit.exceptions import ParseError
+
+    path = config_path(path).resolve()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.with_name(f".{path.name}.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                text = path.read_bytes().decode("utf-8")
+                mode = path.stat().st_mode & 0o777
+            except FileNotFoundError:
+                text, mode = "", 0o600
+            document = tomlkit.parse(text)
+            for key, value in changes.items():
+                document[key] = value
+            temp = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
+                    temp = Path(handle.name)
+                    os.fchmod(handle.fileno(), mode)
+                    handle.write(tomlkit.dumps(document).encode("utf-8"))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp, path)
+            finally:
+                if temp is not None:
+                    temp.unlink(missing_ok=True)
+    except ParseError as error:
+        raise HerdboardError(f"{path}: invalid TOML: {error}") from error
+    except (OSError, UnicodeDecodeError) as error:
+        raise IoError(f"{path}: cannot save display settings: {error}") from error
 
 
 def _string(path: Path, data: dict, key: str) -> str | None:

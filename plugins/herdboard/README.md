@@ -82,7 +82,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 | `i` | Create the board for this repository |
 | `I` | Search Linear and pin an issue to this repository's board. The search runs when you press enter |
 | `u` | Remove the pin of a pinned Linear issue (repo view) |
-| `c` | Configure this repository's board: the merge mode, the linked Linear projects and the pinned issues. ctrl+s saves |
+| `c` | Configure global display styles and this board's merge mode, linked Linear projects and pinned issues. ctrl+s saves |
 | `r` | Reload, and fetch Linear again |
 | `?` | Help |
 | `q` | Quit |
@@ -464,13 +464,15 @@ To make pull requests the default for one repository, add `merge: pr` to the fro
 
 ### Display icons
 
+Press `c` to open configuration. Use `Icons (all boards)` and `Tags (all boards)` to select display styles. Press `ctrl+s` to save. Changes apply immediately in this session. Herdboard saves them in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. The controls also work outside a repository. Press `escape` to cancel without saving.
+
 `icon_style = "plain"` is the default. Dates use a `Due` label, and cards with attachments show `files` at the right edge.
 
 Set `icon_style = "nerd"` to add icons beside text labels on board cards and detail screens. Icons identify default card types, dates, attachments, worktree status and pull requests. Custom types keep their text when no icon exists.
 
 Use a **Nerd Font Mono** font in your terminal for `nerd` mode. Other Nerd Font variants can draw wider icons and disrupt spacing. Herdboard does not detect font support. See the [Nerd Fonts troubleshooting guide](https://github.com/ryanoasis/nerd-fonts/wiki/FAQ-and-Troubleshooting).
 
-To disable these icons, set `icon_style = "plain"` and restart Herdboard. The separate `tag_style` setting still controls tag shapes. Set `tag_style = "block"` to remove Nerd Font tag ends too. Existing structural symbols, such as checklist marks, remain in both modes.
+To disable these icons, select `plain` in the menu. Alternatively, set `icon_style = "plain"` in the file and restart Herdboard. The separate `tag_style` setting still controls tag shapes. Set `tag_style = "block"` to remove Nerd Font tag ends too. Existing structural symbols, such as checklist marks, remain in both modes.
 
 These settings affect display only. Stored Markdown, filters and command-line output do not change.
 

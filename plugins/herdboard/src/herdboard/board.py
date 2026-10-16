@@ -36,7 +36,7 @@ from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, plain_tags, split_title
 from .store import KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import start as start_module
-from .config import THINKING_LEVELS
+from .config import THINKING_LEVELS, save_display_config
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
@@ -108,7 +108,7 @@ HELP_KEYS = [
     ("i", "create the board for this repository"),
     ("I", "search Linear (on enter) and pin an issue to this repository's board"),
     ("u", "remove the pin of a pinned Linear issue"),
-    ("c", "board config: the merge mode, the linked Linear projects and the pinned issues (ctrl+s saves)"),
+    ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
     ("r", "reload, and fetch Linear again"),
     ("?", "this help"),
     ("escape", "close a screen or cancel input"),
@@ -1176,7 +1176,7 @@ class ModelScreen(ModalBase):
 
 
 class ConfigScreen(ModalBase):
-    """A board's frontmatter settings: the merge mode, the Linear project links and pinned issues.
+    """Global display settings and a board's merge mode, Linear project links and pinned issues.
 
     Enter on a link or a pin marks it for removal, or keeps it again. ctrl+s writes every change.
     """
@@ -1184,12 +1184,17 @@ class ConfigScreen(ModalBase):
     BINDINGS = [Binding("ctrl+s", "save", "Save")]
     AUTO_FOCUS = "#config-merge"
 
-    def __init__(self, path: Path, meta: BoardMeta, default_merge: str, can_link: bool):
+    def __init__(self, path: Path | None, meta: BoardMeta, default_merge: str, can_link: bool,
+                 icon_style: str = "plain", tag_style: str = "round"):
         super().__init__()
         self.path = path
         self.meta = meta
         self.default_merge = default_merge
         self.can_link = can_link
+        self.icon_style = icon_style
+        self.tag_style = tag_style
+        if path is None:
+            self.AUTO_FOCUS = "#config-icon-style"
         self.removed: set[str] = set()
         self.removed_pins: set[str] = set()
 
@@ -1219,15 +1224,24 @@ class ConfigScreen(ModalBase):
                  ("local: merge into the base branch", "local"),
                  ("pr: open a draft pull request", "pr")]
         with VerticalScroll(classes="dialog card-form config", can_focus=False):
-            yield RichStatic(Text(f"Config of {self.path.stem}", style="bold"), id="config-heading")
-            if self.meta.repo:
-                yield Label(f"repo: {self.meta.repo}", classes="dim")
-            yield self._titled(Select(modes, value=self.meta.merge or "default", allow_blank=False,
-                                      id="config-merge"), "Merge")
+            heading = f"Config of {self.path.stem}" if self.path else "Herdboard config"
+            yield RichStatic(Text(heading, style="bold"), id="config-heading")
+            if self.path:
+                if self.meta.repo:
+                    yield Label(f"repo: {self.meta.repo}", classes="dim")
+                yield self._titled(Select(modes, value=self.meta.merge or "default", allow_blank=False,
+                                          id="config-merge"), "Merge")
+            yield self._titled(Select([("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
+                                      value=self.icon_style, allow_blank=False,
+                                      id="config-icon-style"), "Icons (all boards)")
+            yield self._titled(Select([("round: Nerd Font ends", "round"), ("block: square ends", "block")],
+                                      value=self.tag_style, allow_blank=False,
+                                      id="config-tag-style"), "Tags (all boards)")
+            yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
             if self.meta.links:
                 yield self._titled(OptionList(*[self._link_label(link) for link in self.meta.links],
                                               id="config-links"), "Linear projects")
-            else:
+            elif self.path:
                 yield Label("No Linear projects are linked.", classes="dim")
             if self.meta.pins:
                 yield self._titled(OptionList(*[self._pin_label(pin) for pin in self.meta.pins],
@@ -1270,13 +1284,18 @@ class ConfigScreen(ModalBase):
         self.call_after_refresh(error.scroll_visible, animate=False)
 
     def action_save(self) -> None:
-        merge = self.query_one("#config-merge", Select).value
+        merge = self.query_one("#config-merge", Select).value if self.path else "default"
+        display = {}
+        for key in ("icon_style", "tag_style"):
+            value = self.query_one(f"#config-{key.replace('_', '-')}", Select).value
+            if value != getattr(self, key):
+                display[key] = value
         project, labels = "", []
         if self.can_link:
             project = self.query_one("#config-project", Input).value.strip()
             labels = [label.strip() for label in self.query_one("#config-labels", Input).value.split(",")]
         self.app.submit_config(self, None if merge == "default" else merge, set(self.removed),
-                               project, [label for label in labels if label], set(self.removed_pins))
+                               project, [label for label in labels if label], set(self.removed_pins), display=display)
 
 
 class CellMouseDriver(LinuxDriver):
@@ -1345,9 +1364,9 @@ class HerdboardApp(App):
     #card-type:focus-within { border: round $primary; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
-    #config-merge { border: round $surface-lighten-2; height: auto; }
-    #config-merge > SelectCurrent { border: none; }
-    #config-merge:focus-within { border: round $primary; }
+    #config-merge, #config-icon-style, #config-tag-style { border: round $surface-lighten-2; height: auto; }
+    #config-merge > SelectCurrent, #config-icon-style > SelectCurrent, #config-tag-style > SelectCurrent { border: none; }
+    #config-merge:focus-within, #config-icon-style:focus-within, #config-tag-style:focus-within { border: round $primary; }
     .config, #config-links, #config-pins { scrollbar-size-vertical: 1; }
     #config-links, #config-pins { height: auto; max-height: 6; border: round $surface-lighten-2; }
     #config-links:focus, #config-pins:focus { border: round $primary; }
@@ -2629,22 +2648,21 @@ class HerdboardApp(App):
 
     def action_config(self) -> None:
         path = self.repo_board
-        if path is None:
-            self.notify("There is no repository board to configure. Press i in a repository to create one.",
-                        severity="warning")
-            return
         try:
-            meta = self.store.board_meta(path)
+            meta = self.store.board_meta(path) if path else BoardMeta(None, [])
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return
         if meta.error:
             self.notify(meta.error, severity="error")
             return
-        self.push_screen(ConfigScreen(path, meta, self.store.config.merge, self.resolve_link is not None))
+        self.push_screen(ConfigScreen(path, meta, self.store.config.merge,
+                                      path is not None and self.resolve_link is not None,
+                                      self.store.config.icon_style, self.store.config.tag_style))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
-                      project: str, labels: list[str], removed_pins: set[str] = frozenset()) -> None:
+                      project: str, labels: list[str], removed_pins: set[str] = frozenset(),
+                      display: dict[str, str] | None = None) -> None:
         """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing."""
         path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
 
@@ -2655,10 +2673,21 @@ class HerdboardApp(App):
                 kept = [l for l in links if l.id not in removed]
                 return with_link(kept, link) if link else kept
 
-            self.store.update_config(
-                path, merge=KEEP if merge == before else merge,
-                change_links=change if removed or link else None,
-                change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None)
+            board_changed = path is not None and (merge != before or removed or link or removed_pins)
+            if board_changed:
+                self.store.update_config(
+                    path, merge=KEEP if merge == before else merge,
+                    change_links=change if removed or link else None,
+                    change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None)
+            if display:
+                try:
+                    save_display_config(self.config_file, **display)
+                except HerdboardError as error:
+                    if board_changed:
+                        raise HerdboardError(f"Board settings saved; display settings not saved: {error}") from error
+                    raise
+                for key, value in display.items():
+                    setattr(self.store.config, key, value)
 
         self._start_write(write, add=screen, refetch=bool(removed or project or removed_pins))
 

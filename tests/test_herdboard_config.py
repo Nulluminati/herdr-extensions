@@ -79,6 +79,97 @@ class ConfigTest(unittest.TestCase):
                 with self.assertRaisesRegex(HerdboardError, "icon_style"):
                     load_config(path)
 
+    def test_save_display_creates_the_selected_config_file(self):
+        from herdboard.config import save_display_config
+        path = self.dir / "settings" / "config.toml"
+        save_display_config(path, icon_style="nerd", tag_style="block")
+        config = load_config(path)
+        self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_save_display_preserves_comments_tables_and_other_settings(self):
+        from herdboard.config import save_display_config
+        original = ('# My settings\nicon_style = "plain" # icons\n'
+                    "'tag_style' = 'round' # tags\n"
+                    'theme = "nord"\n\n[linear]\n# Keep this section\n'
+                    'enabled = false\nicon_style = "unrelated"\n')
+        path = self.write(self.dir / "a.toml", original)
+        path.chmod(0o640)
+        save_display_config(path, icon_style="nerd", tag_style="block")
+        self.assertEqual(path.read_text(), original.replace('"plain"', '"nerd"').replace("'round'", '"block"'))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(load_config(path).theme, "nord")
+
+    def test_save_display_adds_root_keys_before_tables_and_only_writes_changed_keys(self):
+        from herdboard.config import save_display_config
+        path = self.write(self.dir / "a.toml", 'tag_style = "block"\n[linear]\nenabled = false\n')
+        save_display_config(path, icon_style="nerd")
+        config = load_config(path)
+        self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
+        save_display_config(path, tag_style="round")
+        self.assertEqual(load_config(path).icon_style, "nerd")
+
+    def test_save_display_uses_the_config_environment_path(self):
+        from herdboard.config import save_display_config
+        path = self.dir / "env.toml"
+        with mock.patch.dict(os.environ, {"HERDBOARD_CONFIG": str(path)}):
+            save_display_config(icon_style="nerd")
+        self.assertEqual(load_config(path).icon_style, "nerd")
+
+    def test_save_display_rejects_unknown_values_before_creating_files(self):
+        from herdboard.config import save_display_config
+        path = self.dir / "settings" / "config.toml"
+        for values in ({"icon_style": "auto"}, {"tag_style": "square"}, {"icon_style": 1}):
+            with self.subTest(values=values):
+                with self.assertRaises(HerdboardError):
+                    save_display_config(path, **values)
+                self.assertFalse(path.exists())
+
+    def test_save_display_does_not_replace_invalid_or_unreadable_configs(self):
+        from herdboard.config import save_display_config
+        for content in (b"invalid = [", b"# \xff"):
+            with self.subTest(content=content):
+                path = self.dir / "a.toml"
+                path.write_bytes(content)
+                with self.assertRaises(HerdboardError):
+                    save_display_config(path, icon_style="nerd")
+                self.assertEqual(path.read_bytes(), content)
+        path = self.dir / "folder"
+        path.mkdir()
+        with self.assertRaises(HerdboardError):
+            save_display_config(path, icon_style="nerd")
+
+    def test_save_display_failure_keeps_the_file_and_cleans_up_the_temporary_file(self):
+        from herdboard.config import save_display_config
+        path = self.write(self.dir / "a.toml", '# Keep\nicon_style = "plain"\n')
+        original = path.read_bytes()
+        with mock.patch("herdboard.config.os.replace", side_effect=OSError("read-only directory")):
+            with self.assertRaisesRegex(HerdboardError, "read-only directory"):
+                save_display_config(path, icon_style="nerd")
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), [".a.toml.lock", "a.toml"])
+
+    def test_save_display_preserves_a_symlink(self):
+        from herdboard.config import save_display_config
+        target = self.write(self.dir / "target.toml", 'icon_style = "plain"\n')
+        path = self.dir / "linked.toml"
+        path.symlink_to(target)
+        save_display_config(path, icon_style="nerd")
+        self.assertTrue(path.is_symlink())
+        self.assertEqual(load_config(target).icon_style, "nerd")
+
+    def test_concurrent_display_saves_keep_both_changes(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from herdboard.config import save_display_config
+        path = self.write(self.dir / "a.toml", '# Keep\n[linear]\nenabled = false\n')
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            icon = pool.submit(save_display_config, path, icon_style="nerd")
+            tag = pool.submit(save_display_config, path, tag_style="block")
+            icon.result()
+            tag.result()
+        config = load_config(path)
+        self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
+
     def test_types_default(self):
         self.assertEqual(load_config().types, ["bug", "feature", "chore", "docs", "refactor"])
 
