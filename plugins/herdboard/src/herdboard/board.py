@@ -2237,15 +2237,19 @@ class HerdboardApp(App):
     .column.completed .column-header { color: $success; }
     .cards { height: 1fr; scrollbar-size-vertical: 1; }
     #filter { dock: bottom; border: round $primary; }
-    #tab-bar { height: auto; background: $panel; }
-    #tab-bar .tab { width: auto; height: 1; padding: 0; margin-right: 1; background: transparent; color: $text; }
-    #tab-bar .tab.active { background: $accent; color: $text; }
+    /* The tabs stand on the title bar in its color: the current tab is filled and joins the bar,
+       the other tab is an outline open at the bottom. */
+    #tab-bar { height: auto; background: $background; align-vertical: bottom; }
+    #tab-bar .tab { width: auto; height: 2; padding: 0; margin-right: 1; background: transparent; color: $text;
+                    border: round $primary; border-bottom: none; }
+    #tab-bar .tab.active { background: $primary; color: $text; border: tall $primary; border-bottom: none; }
     #tab-bar .tab:hover { background: $primary 40%; }
+    #tab-bar .tab.active:hover { background: $primary; }
     #tab-keys { width: 1fr; height: auto; padding: 0 1; color: $text-muted;
                 link-style: none; link-color: $text-muted; link-background: transparent;
                 link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
     App:ansi #tab-bar .tab { background: transparent; color: ansi_default; }
-    App:ansi #tab-bar .tab.active { background: ansi_magenta; color: ansi_black; }
+    App:ansi #tab-bar .tab.active { background: $primary; color: ansi_black; }
     .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
     .card.selected { background: $accent; color: $text; }
     .column.current { border: round $accent; }

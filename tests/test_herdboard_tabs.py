@@ -150,6 +150,27 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.cursor_row, 3)
             self.assertEqual(screen.current().number, 6)
 
+    async def test_the_tabs_and_the_bar_under_them_have_one_color(self):
+        for theme in ("textual-dark", "ansi-dark"):
+            app = self.app()
+            app.theme = theme
+            async with app.run_test(size=(160, 30)) as pilot:
+                await self.settle(app, pilot)
+                for screen_key in ("", "G"):
+                    if screen_key:
+                        await pilot.press(screen_key)
+                        await self.settle(app, pilot)
+                    bar = app.screen.query_one("#pr-title" if screen_key else "#title-bar")
+                    color = bar.styles.background
+                    active = app.screen.query_one(".tab.active")
+                    other = next(tab for tab in app.screen.query(".tab") if not tab.has_class("active"))
+                    self.assertEqual(active.styles.background, color, theme)
+                    for side in ("top", "left", "right"):
+                        self.assertEqual(getattr(other.styles, f"border_{side}")[1], color, (theme, side))
+                    self.assertEqual(other.styles.border_bottom[0], "", theme)
+                    self.assertEqual(other.region.bottom, bar.region.y, theme)
+                    self.assertEqual(active.region.bottom, bar.region.y, theme)
+
     async def test_each_key_can_be_clicked(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
