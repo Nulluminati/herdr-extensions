@@ -264,7 +264,30 @@ class DoctorTests(unittest.TestCase):
         with patch("herdboard.doctor.shutil.which", side_effect=lambda name: None if name == "gh" else real(name)):
             found = self.findings("gh_missing")
         self.assertEqual([(f["level"], f["message"]) for f in found],
-                         [("info", "No GitHub CLI `gh` found. Only merge --pr and finish of a pull request need it.")])
+                         [("info", "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request and pull request reviews need it.")])
+
+    def test_missing_hunk_is_a_warning(self):
+        real = shutil.which
+        with patch("herdboard.doctor.shutil.which", side_effect=lambda name: None if name == "hunk" else real(name)):
+            found = self.findings("hunk_missing")
+        self.assertEqual([f["level"] for f in found], ["warning"])
+        self.assertIn("pull request reviews", found[0]["message"])
+
+    def test_hunk_without_the_review_extension_is_a_warning(self):
+        listing = subprocess.CompletedProcess([], 0, "other-ext  v1.0.0  https://example.com\n", "")
+        with patch("herdboard.doctor.shutil.which", return_value="/usr/bin/hunk"), \
+                patch("herdboard.doctor.subprocess.run", return_value=listing) as run:
+            found = self.findings("hunk_gh_review_missing")
+        self.assertEqual([f["level"] for f in found], ["warning"])
+        self.assertIn("hunk extension install phl28/hunk-gh-review", found[0]["fix"])
+        self.assertEqual(run.call_args.args[0], ["hunk", "extension", "list"])
+
+    def test_hunk_with_the_review_extension_is_fine(self):
+        listing = subprocess.CompletedProcess([], 0, "hunk-gh-review  v0.1.0  https://github.com/phl28/hunk-gh-review\n", "")
+        with patch("herdboard.doctor.shutil.which", return_value="/usr/bin/hunk"), \
+                patch("herdboard.doctor.subprocess.run", return_value=listing):
+            self.assertEqual(self.findings("hunk_gh_review_missing"), [])
+            self.assertEqual(self.findings("hunk_missing"), [])
 
     def test_herdr_environment_path_takes_precedence(self):
         executable = self.root / "herdr"

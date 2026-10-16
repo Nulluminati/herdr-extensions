@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import subprocess
 
 from .config import Config, config_path, load_config
 from .identity import IdentityError, _canonical_identity, repo_identity
@@ -377,7 +378,23 @@ def check_herdr():
 def check_gh():
     if shutil.which("gh") is None:
         return [finding("info", "gh_missing",
-                        "No GitHub CLI `gh` found. Only merge --pr and finish of a pull request need it.")]
+                        "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request and pull request reviews need it.")]
+    return []
+
+
+def check_hunk():
+    """Pull request reviews show the PR in Hunk, and the user submits with its `hunk-gh-review` extension."""
+    if shutil.which("hunk") is None:
+        return [finding("warning", "hunk_missing",
+                        "No `hunk` found. Only pull request reviews need it; the board works without it.")]
+    try:
+        result = subprocess.run(["hunk", "extension", "list"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return [finding("warning", "hunk_check_failed", f"`hunk extension list` failed: {error}")]
+    if result.returncode or not any(line.split()[:1] == ["hunk-gh-review"] for line in result.stdout.splitlines()):
+        return [finding("warning", "hunk_gh_review_missing",
+                        "The Hunk extension `hunk-gh-review` is not installed, so S in Hunk cannot submit "
+                        "a pull request review.", fix="hunk extension install phl28/hunk-gh-review")]
     return []
 
 
@@ -417,6 +434,7 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
         findings.extend(check_promotions(promotion_path, store_path))
     findings.extend(check_herdr())
     findings.extend(check_gh())
+    findings.extend(check_hunk())
     summary = {level: sum(f["level"] == level for f in findings) for level in LEVELS}
     return {"findings": findings, "fixed": fixed, "summary": summary}
 
