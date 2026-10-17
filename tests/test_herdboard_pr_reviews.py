@@ -756,6 +756,35 @@ class FinishTests(PrReviewTestCase):
         self.assertIn("1 notes of yours", str(raised.exception))
         self.assertIn(KEY, pr_reviews.records())
 
+    def test_user_notes_saved_by_a_failed_refresh_stop_finish(self):
+        # A refresh that failed after it closed Hunk left the notes only in the file.
+        self.record(hunk_pane=None, hunk_session=None,
+                    user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
+        pr_reviews._save_notes(KEY, [{"filePath": "a.py", "newLine": 3, "summary": "Mine"},
+                                     {"filePath": "a.py", "newLine": 5, "summary": "Agent note"}])
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.finish(KEY)
+        self.assertEqual(raised.exception.code, "unsent_notes")
+        self.assertIn("1 notes of yours", str(raised.exception))
+        self.assertIn(KEY, pr_reviews.records())
+        self.assertIsNotNone(pr_reviews._saved_notes(KEY))
+        self.assertEqual(self.fake.made("herdr", "worktree"), [])
+
+    def test_saved_agent_notes_do_not_stop_finish(self):
+        self.record(hunk_pane=None, hunk_session=None)
+        pr_reviews._save_notes(KEY, [{"filePath": "a.py", "newLine": 5, "summary": "Agent note"}])
+        pr_reviews.finish(KEY)
+        self.assertNotIn(KEY, pr_reviews.records())
+        self.assertIsNone(pr_reviews._saved_notes(KEY))
+
+    def test_force_removes_saved_user_notes(self):
+        self.record(hunk_pane=None, hunk_session=None,
+                    user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
+        pr_reviews._save_notes(KEY, [{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
+        pr_reviews.finish(KEY, force=True)
+        self.assertNotIn(KEY, pr_reviews.records())
+        self.assertIsNone(pr_reviews._saved_notes(KEY))
+
     def test_a_branch_that_git_does_not_delete_keeps_the_review(self):
         self.record()
         self.fake.on("hunk", "session", "comment", "list", out={"comments": []})

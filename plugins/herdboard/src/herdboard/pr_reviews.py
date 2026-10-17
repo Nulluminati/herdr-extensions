@@ -801,11 +801,15 @@ def finish(key: str, force: bool = False) -> dict:
     record = find(key)
     checkout, worktree = record["checkout"], record.get("worktree_path")
     with _lock(".pr-review-" + safe_key(key) + ".lock"):
-        if not force and _session_live(record.get("hunk_session")):
+        if not force:
             # A refresh applies the user's notes again as agent notes; the record knows them.
             mine = {_note_place(entry) for entry in record.get("user_notes") or []}
-            unsent = [note for note in _comments(record["hunk_session"], "all")
-                      if note.get("source") == "user" or _note_place(_note_entry(note)) in mine]
+            if _session_live(record.get("hunk_session")):
+                unsent = [note for note in _comments(record["hunk_session"], "all")
+                          if note.get("source") == "user" or _note_place(_note_entry(note)) in mine]
+            else:
+                # A refresh that failed after it closed Hunk left the notes only in the file.
+                unsent = [entry for entry in _saved_notes(key) or [] if _note_place(entry) in mine]
             if unsent:
                 raise PrReviewError(f"{key} has {len(unsent)} notes of yours that are not submitted. "
                                     "Submit them with S in Hunk, or finish with force", "unsent_notes")

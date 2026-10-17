@@ -323,7 +323,7 @@ The flow:
 5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
 6. A background worker waits up to 30 minutes for the agent to go idle. Then it marks the PR `reviewed` and shows a Herdr notification with the count of notes that this review added.
 7. Press `g` to go to the workspace. Read the chat and the notes, add your own, and press `S` in Hunk to submit one GitHub review. Hunk's notes keep GitHub's diff positions, so the submit targets the right lines.
-8. Press `f` when you are done. herdboard closes the workspace, removes the worktree and deletes `pr/<N>`. When Hunk still has notes of yours that you did not submit, it asks again before it removes them.
+8. Press `f` when you are done. herdboard closes the workspace, removes the worktree and deletes `pr/<N>`. When notes of yours are not submitted, it asks again before it removes them. It checks the notes in Hunk, and the notes that a failed refresh saved.
 
 When the author pushes new commits, the list shows `new commits` within a minute. Press `u`. herdboard moves `pr/<N>` to the new head, opens Hunk again on the new diff, and adds the old notes back. A note whose line is no longer in the diff is dropped, and the notice names it. Then herdboard offers a new review by the same agent. A running agent gets the new request in its chat. `u` stops when the worktree has changes.
 
