@@ -596,7 +596,7 @@ class RefreshTests(PrReviewTestCase):
         self.worktree.mkdir(parents=True)
 
     def test_a_dirty_worktree_is_refused(self):
-        self.record()
+        self.record(status="reviewed")
         self.fake.on("git", "-C", str(self.worktree), "status", "--porcelain", out=" M a.py\n")
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
             pr_reviews.refresh(KEY)
@@ -604,7 +604,7 @@ class RefreshTests(PrReviewTestCase):
         self.assertEqual(self.fake.made("git", "-C", str(self.worktree), "fetch"), [])
 
     def test_refresh_moves_the_branch_reopens_hunk_and_applies_the_notes(self):
-        self.record()
+        self.record(status="reviewed")
         notes = [{"noteId": "1", "source": "agent", "filePath": "a.py", "newRange": [3, 3], "body": "Bug here",
                   "author": "Claude"},
                  {"noteId": "2", "source": "user", "filePath": "b.py", "oldRange": [9, 9], "body": "Why?"},
@@ -634,6 +634,17 @@ class RefreshTests(PrReviewTestCase):
         self.assertEqual(result["dropped"], ["gone.py:1: Old"])
         self.assertEqual(pr_reviews.records()[KEY]["hunk_session"], "s-two")
         self.assertEqual(self.fake.made("hunk", "session", "comment", "apply")[0][4], "s-two")
+        # Hunk restores every note as an agent note, so the record keeps which ones were the user's.
+        self.assertEqual(pr_reviews.records()[KEY]["user_notes"],
+                         [{"filePath": "b.py", "oldLine": 9, "summary": "Why?"}])
+
+    def test_refresh_is_refused_while_the_reviewer_works(self):
+        self.record(status="reviewing")
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.refresh(KEY)
+        self.assertEqual(raised.exception.code, "agent_running")
+        self.assertEqual(self.fake.made("git", "-C", str(self.worktree), "fetch"), [])
+        self.assertEqual(self.fake.made("herdr", "pane", "close"), [])
 
 
 class RefreshFailureTests(PrReviewTestCase):
@@ -643,7 +654,7 @@ class RefreshFailureTests(PrReviewTestCase):
         self.notes = [{"noteId": "1", "source": "user", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"}]
 
     def test_a_failed_hunk_keeps_the_notes_for_the_next_refresh(self):
-        self.record()
+        self.record(status="reviewed")
         self.fake.on("hunk", "session", "comment", "list", out={"comments": self.notes})
         self.fake.on("hunk", "session", "list", out={"sessions": []})
         self.fake.on("herdr", "pane", "split", error="pane_not_found")
@@ -662,8 +673,26 @@ class RefreshFailureTests(PrReviewTestCase):
         self.assertEqual(json.loads(apply[0]["input"])["comments"][0]["summary"], "Mine")
         self.assertIsNone(pr_reviews._saved_notes(KEY))
 
+    def test_a_failed_note_list_of_a_live_session_stops_the_refresh(self):
+        self.record(status="reviewed")
+        self.fake.on("hunk", "session", "comment", "list", code=1, err="timeout")
+        self.fake.on("hunk", "session", "list", out={"sessions": [session("s-new", self.worktree)]})
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.refresh(KEY)
+        self.assertEqual(raised.exception.code, "hunk_failed")
+        self.assertEqual(self.fake.made("herdr", "pane", "close"), [])
+        self.assertEqual(pr_reviews.records()[KEY]["hunk_session"], "s-new")
+
+    def test_a_failed_note_list_when_hunk_cannot_list_sessions_stops_the_refresh(self):
+        self.record(status="reviewed")
+        self.fake.on("hunk", "session", "comment", "list", code=1, err="timeout")
+        self.fake.on("hunk", "session", "list", code=1, err="timeout")
+        with self.assertRaises(pr_reviews.PrReviewError):
+            pr_reviews.refresh(KEY)
+        self.assertEqual(self.fake.made("herdr", "pane", "close"), [])
+
     def test_the_notes_are_saved_before_the_pane_closes(self):
-        self.record()
+        self.record(status="reviewed")
         self.fake.on("hunk", "session", "comment", "list", out={"comments": self.notes})
         saved_at_close = []
         self.fake.on("herdr", "pane", "close", result={"type": "ok"},
@@ -714,6 +743,47 @@ class FinishTests(PrReviewTestCase):
         pr_reviews.finish(KEY)
         herdr = [argv[1:3] for argv, _ in self.fake.calls if argv[0] == "herdr"]
         self.assertLess(herdr.index(["worktree", "remove"]), herdr.index(["pane", "close"]))
+
+    def test_user_notes_that_a_refresh_restored_stop_finish(self):
+        self.record(user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": [
+            {"noteId": "9", "source": "agent", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"},
+            {"noteId": "8", "source": "agent", "filePath": "a.py", "newRange": [5, 5], "body": "Agent note",
+             "author": "Claude"}]})
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.finish(KEY)
+        self.assertEqual(raised.exception.code, "unsent_notes")
+        self.assertIn("1 notes of yours", str(raised.exception))
+        self.assertIn(KEY, pr_reviews.records())
+
+    def test_a_branch_that_git_does_not_delete_keeps_the_review(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        self.fake.on("git", "-C", str(self.checkout), "branch", "-D", code=1, err="error: branch is locked")
+        self.fake.on("git", "-C", str(self.checkout), "rev-parse", "--verify", "--quiet", out="abc\n")
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.finish(KEY)
+        self.assertEqual(raised.exception.code, "git_failed")
+        self.assertIn("branch is locked", str(raised.exception))
+        record = pr_reviews.records()[KEY]
+        self.assertIsNone(record["workspace_id"])
+        self.assertIsNone(record["hunk_pane"])
+        # A second finish has only the branch left to delete.
+        self.fake.replies.pop(("git", "-C", str(self.checkout), "branch", "-D"))
+        removes = len(self.fake.made("herdr", "worktree", "remove"))
+        result = pr_reviews.finish(KEY)
+        self.assertTrue(result["branch_deleted"])
+        self.assertNotIn(KEY, pr_reviews.records())
+        self.assertEqual(len(self.fake.made("herdr", "worktree", "remove")), removes)
+
+    def test_a_branch_that_is_already_gone_finishes(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        self.fake.on("git", "-C", str(self.checkout), "branch", "-D", code=1, err="error: branch not found")
+        self.fake.on("git", "-C", str(self.checkout), "rev-parse", "--verify", "--quiet", code=1)
+        result = pr_reviews.finish(KEY)
+        self.assertFalse(result["branch_deleted"])
+        self.assertNotIn(KEY, pr_reviews.records())
 
     def test_force_removes_with_notes(self):
         self.record()

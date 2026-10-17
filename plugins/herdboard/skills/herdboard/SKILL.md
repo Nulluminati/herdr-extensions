@@ -167,12 +167,12 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `hunk_unavailable` | `review` needs the hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`), and `pr-review` needs `hunk gh pr` to start a session. Tell the user the message. |
 | `remote_unknown` | No Git remote of the checkout points to the PR's base repository. Tell the user. |
 | `branch_exists` | A local branch `pr/<N>` exists that no PR review owns. Tell the user to delete or rename it. |
-| `agent_running` | A reviewer with another agent kind, model or thinking level still runs for the PR. Tell the user to close it, or to review with the same agent and model. |
+| `agent_running` | A reviewer with another agent kind, model or thinking level still runs for the PR. Tell the user to close it, or to review with the same agent and model. For `pr-review-refresh`, the reviewer still works: refresh after it finishes. |
 | `workspace_closed` | The PR's review workspace is not open in Herdr. Run `pr-review <N>` again to open it, after you ask the user. |
 | `worktree_missing` | The PR's worktree is gone. Tell the user to run `pr-review-finish <N>` and review again. |
 | `new_commits` | The PR has commits that its review worktree does not have. Ask the user, then run `pr-review-refresh <N>` before `pr-review <N>`. |
 | `unsent_notes` | Hunk still has notes of the user that are not submitted. Tell the user. Use `--force` only when they say so. |
-| `gh_failed`, `git_failed`, `hunk_failed` | A `gh`, `git` or `hunk` command failed. Tell the user the message. |
+| `gh_failed`, `git_failed`, `hunk_failed` | A `gh`, `git` or `hunk` command failed. Tell the user the message. For `pr-review-finish`, `git_failed` means Git kept `pr/<N>`: the review stays, and a second finish deletes the branch. |
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
 | `plan_running` | A planner for the card still runs in a Herdr tab. Tell the user to finish or close it. |
 | `review_running` | An agent review of the card still runs. Tell the user; its findings arrive by themselves. |
