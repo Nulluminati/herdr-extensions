@@ -1354,50 +1354,57 @@ TABS = [("board", "Board"), ("prs", "Pull requests")]
 TAB_KEY = "G"
 # The actions that the tabs show, so the key list leaves them out.
 TAB_ACTIONS = {"pull_requests", "close"}
-# With less room than this next to the tabs, the keys take their own row above them.
-TAB_KEYS_MIN_WIDTH = 40
 
 
 class TabBar(Horizontal):
-    """The top row: the Board and Pull requests tabs, then the keys of the current tab.
-
-    It takes the place of a footer. The keys come from the screen's active bindings, as Textual's
-    footer finds them, and the row wraps when they do not fit. A click on a key presses it; a click
-    on the other tab switches to it."""
+    """The top row: the Board and Pull requests tabs. A click on the other tab switches to it."""
 
     def __init__(self, active: str):
         super().__init__(id="tab-bar")
         self.active = active
 
     def compose(self) -> ComposeResult:
-        # The tabs sit at the bottom of their group, so they stand on the bar under the row
-        # however many lines the keys take.
-        with Vertical(id="tab-group"):
-            with Horizontal(id="tabs"):
-                for tab, label in TABS:
-                    text = self._tab_text(tab, label)
-                    widget = Container(Static(text, classes="tab-label"), id=f"tab-{tab}",
-                                       classes="tab active" if tab == self.active else "tab")
-                    widget.plain = text.plain
-                    yield widget
-        keys = Static("", id="tab-keys")
-        keys.plain = ""
-        yield keys
+        for tab, label in TABS:
+            text = self._tab_text(tab, label)
+            widget = Container(Static(text, classes="tab-label"), id=f"tab-{tab}",
+                               classes="tab active" if tab == self.active else "tab")
+            widget.plain = text.plain
+            yield widget
 
     def _tab_text(self, tab: str, label: str) -> Text:
         """The tab's label, as wide when it is current as when it is not, so a switch does not
-        resize the tab."""
+        resize the tab. The current tab's bold comes from the style sheet."""
         width = len(f" {label} {TAB_KEY} ")
         if tab != self.active:
             text = Text(f" {label} ")
             text.append(f"{TAB_KEY} ", style="bold yellow")
             return text
-        text = Text(label, style="bold")
+        text = Text(label)
         text.align("center", width)
         return text
 
     def tab_labels(self) -> list[str]:
         return [" ".join(widget.plain.split()) for widget in self.query(".tab")]
+
+    def on_click(self, event: events.Click) -> None:
+        widget = event.widget
+        while widget is not None and widget is not self and not widget.has_class("tab"):
+            widget = widget.parent
+        tab = (widget.id or "").removeprefix("tab-") if widget is not None else ""
+        if tab in dict(TABS) and tab != self.active:
+            event.stop()
+            self.app.simulate_key(TAB_KEY)
+
+
+class KeyBar(Static):
+    """The bottom row: the keys of the current screen, in the place of a footer.
+
+    The keys come from the screen's active bindings, as Textual's footer finds them. The row wraps
+    between two keys when they do not fit. A click on a key presses it."""
+
+    def __init__(self):
+        super().__init__("", id="key-bar")
+        self.plain = ""
 
     def on_mount(self) -> None:
         self.screen.bindings_updated_signal.subscribe(self, self._bindings_changed)
@@ -1411,7 +1418,7 @@ class TabBar(Horizontal):
             self.show_keys()
 
     def key_labels(self) -> list[Text]:
-        """Each key of the current tab once, in its binding order, as `key Description`."""
+        """Each key of the current screen once, in its binding order, as `key Description`."""
         seen = set()
         labels = []
         for _node, binding, enabled, _tooltip in self.screen.active_bindings.values():
@@ -1446,33 +1453,13 @@ class TabBar(Horizontal):
         return text
 
     def show_keys(self) -> None:
-        keys = self.query_one("#tab-keys", Static)
         text = self.keys_text()
-        keys.plain = text.plain
-        if not self.size.width:
-            keys.update(text)
-            return
-        group = self.query_one("#tab-group")
-        width = self.size.width - group.outer_size.width - keys.styles.gutter.width
-        narrow = width < TAB_KEYS_MIN_WIDTH
-        self.set_class(narrow, "narrow")
-        if narrow:
-            width = self.size.width - keys.styles.gutter.width
-        shown = self._wrapped_keys(width)
-        keys.update(shown)
-        group.styles.height = 2 if narrow else max(2, len(shown.plain.splitlines()))
+        self.plain = text.plain
+        width = self.content_size.width
+        self.update(self._wrapped_keys(width) if width else text)
 
     def on_resize(self, event: events.Resize) -> None:
         self.call_after_refresh(self.show_keys)
-
-    def on_click(self, event: events.Click) -> None:
-        widget = event.widget
-        while widget is not None and widget is not self and not widget.has_class("tab"):
-            widget = widget.parent
-        tab = (widget.id or "").removeprefix("tab-") if widget is not None else ""
-        if tab in dict(TABS) and tab != self.active:
-            event.stop()
-            self.app.simulate_key(TAB_KEY)
 
 
 class PullRequestService:
@@ -1898,7 +1885,9 @@ class PullRequestsScreen(Screen):
         search = Input(placeholder="GitHub search: words, author:NAME, draft:true, review-requested:@me · "
                                    "enter searches · escape cancels", id="pr-search")
         search.display = False
-        yield search
+        with Vertical(classes="bottom-dock"):
+            yield search
+            yield KeyBar()
 
     def on_mount(self) -> None:
         self.action_load()
@@ -2283,28 +2272,27 @@ class HerdboardApp(App):
     .column-header { text-style: bold; padding: 0 1; background: $surface; }
     .column.completed .column-header { color: $success; }
     .cards { height: 1fr; scrollbar-size-vertical: 1; }
-    #filter { dock: bottom; border: round $primary; }
+    #filter { border: round $primary; }
+    .bottom-dock { dock: bottom; height: auto; }
     /* The tabs stand on the title bar in its color: the current tab is filled and joins the bar,
        the other tab is an outline open at the bottom. */
-    #tab-bar { height: auto; background: $background; }
-    #tab-group { width: auto; height: 2; align-vertical: bottom; }
-    #tab-bar.narrow { layout: vertical; }
-    #tab-bar.narrow #tab-keys { dock: top; width: 100%; }
-    #tabs { width: auto; height: 2; }
+    #tab-bar { height: 2; background: $background; }
     #tab-bar .tab { width: auto; height: 2; padding: 0; margin-right: 1; background: transparent;
                     border: round $primary; border-bottom: none; }
     #tab-bar .tab-label { width: auto; height: 1; color: $text; }
     /* The inner border fills the inner half of each edge cell, up to where the other tab draws
        its line, so the current tab is filled to its edges at the same size. */
     #tab-bar .tab.active { border: inner $primary; border-bottom: none; }
-    #tab-bar .tab.active .tab-label { background: $primary; }
+    #tab-bar .tab.active .tab-label { background: $primary; text-style: bold; }
     #tab-bar .tab:hover .tab-label { background: $primary 40%; }
     #tab-bar .tab.active:hover .tab-label { background: $primary; }
-    #tab-keys { width: 1fr; height: auto; padding: 0 1; color: $text-muted;
+    #key-bar { height: auto; padding: 0 1; color: $text-muted;
                 link-style: none; link-color: $text-muted; link-background: transparent;
                 link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
     App:ansi #tab-bar .tab-label { color: ansi_default; }
-    App:ansi #tab-bar .tab.active .tab-label { background: $primary; color: ansi_black; }
+    /* Terminals that draw bold text in bright colors turn bold black into grey, so the dark text
+       on the bars and the current tab is not bold in the ANSI themes. */
+    App:ansi #tab-bar .tab.active .tab-label { background: $primary; color: ansi_black; text-style: none; }
     .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
     .card.selected { background: $accent; color: $text; }
     .column.current { border: round $accent; }
@@ -2356,7 +2344,7 @@ class HerdboardApp(App):
     #pr-list > .datatable--header { text-style: bold; color: $text-muted; background: $surface; }
     #pr-list > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
     #pr-status { height: 1; padding: 0 1; }
-    #pr-search { dock: bottom; border: round $primary; }
+    #pr-search { border: round $primary; }
     .pr-detail { width: 100; }
     #pr-detail-title, #pr-detail-meta, #pr-detail-marks { margin-bottom: 1; }
     #pr-detail-body { height: auto; margin: 0; }
@@ -2381,7 +2369,7 @@ class HerdboardApp(App):
     App:ansi .column.current .column-header { background: ansi_magenta; color: ansi_black; }
     App:ansi .column.current .card { color: ansi_default; }
     App:ansi .card.selected { background: ansi_default; border: heavy ansi_yellow; text-style: bold; }
-    App:ansi #title-bar, App:ansi #pr-title { color: ansi_black; }
+    App:ansi #title-bar, App:ansi #pr-title { color: ansi_black; text-style: none; }
     App:ansi .dialog { border: round $primary; }
     App:ansi .detail-block { border: round ansi_bright_black; }
     App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
@@ -2537,7 +2525,10 @@ class HerdboardApp(App):
         search = Input(placeholder="Filter: words, or #tag · enter keeps it · escape clears it", id="filter")
         search.display = False
         search.disabled = True
-        yield search
+        # Docks on one edge overlap, so the filter and the keys share one bottom dock.
+        with Vertical(classes="bottom-dock"):
+            yield search
+            yield KeyBar()
 
     async def on_mount(self) -> None:
         await self.reload()

@@ -55,7 +55,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 ## The board
 
-The top row has two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The keys of the current tab follow the tabs on the same row, and the row wraps when they do not fit. A click on a key presses it. There is no footer.
+The top row has two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The bottom row shows the keys of the current tab. It wraps between two keys when they do not fit. A click on a key presses it.
 
 | Key | Action |
 |---|---|

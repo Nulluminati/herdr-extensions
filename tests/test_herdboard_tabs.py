@@ -1,4 +1,4 @@
-"""The tab bar at the top: Board and Pull requests tabs, with the keys of the current tab after them."""
+"""The tab bar at the top, with the Board and Pull requests tabs, and the keys of the current tab at the bottom."""
 import asyncio
 import os
 from pathlib import Path
@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from textual.widgets import Footer  # noqa: E402
 
-from herdboard.board import HerdboardApp, PullRequestsScreen, TabBar  # noqa: E402
+from herdboard.board import HerdboardApp, KeyBar, PullRequestsScreen, TabBar  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -44,18 +44,22 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
     def bar(self, app) -> TabBar:
         return app.screen.query_one(TabBar)
 
-    async def test_the_board_has_tabs_and_its_keys_at_the_top_and_no_footer(self):
+    def keys(self, app) -> KeyBar:
+        return app.screen.query_one(KeyBar)
+
+    async def test_the_board_has_tabs_at_the_top_and_its_keys_at_the_bottom(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
             bar = self.bar(app)
             self.assertEqual(bar.active, "board")
             self.assertEqual(bar.tab_labels(), ["Board", "Pull requests G"])
-            keys = bar.keys_text().plain.replace("\xa0", " ")
+            keys = self.keys(app).keys_text().plain.replace("\xa0", " ")
             for part in ("a Add", "/ Filter", "s Start", "? Help", "q Quit"):
                 self.assertIn(part, keys)
             self.assertNotIn("PRs", keys)
             self.assertEqual(bar.region.y, 0)
+            self.assertEqual(self.keys(app).region.bottom, 30)
             self.assertEqual(list(app.screen.query(Footer)), [])
 
     async def test_the_pull_request_tab_has_its_own_keys(self):
@@ -67,10 +71,11 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             bar = self.bar(app)
             self.assertEqual(bar.active, "prs")
             self.assertEqual(bar.tab_labels(), ["Board G", "Pull requests"])
-            keys = bar.keys_text().plain.replace("\xa0", " ")
+            keys = self.keys(app).keys_text().plain.replace("\xa0", " ")
             for part in ("/ Search", "n Next", "s Review", "esc Back"):
                 self.assertIn(part, keys)
             self.assertNotIn("a Add", keys)
+            self.assertEqual(self.keys(app).region.bottom, 30)
             self.assertEqual(list(app.screen.query(Footer)), [])
 
     async def test_a_click_on_the_other_tab_switches(self):
@@ -196,8 +201,6 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.press(key)
                     await self.settle(app, pilot)
                 bar = app.screen.query_one("#pr-title" if key else "#title-bar")
-                keys = app.screen.query_one("#tab-keys")
-                self.assertGreater(keys.region.height, 2)
                 for tab in app.screen.query(".tab"):
                     self.assertEqual(tab.region.bottom, bar.region.y, (key, tab.id))
 
@@ -217,18 +220,51 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             app = self.app()
             async with app.run_test(size=(width, 40)) as pilot:
                 await self.settle(app, pilot)
-                bar = self.bar(app)
-                keys = app.screen.query_one("#tab-keys")
-                labels = [part for part in bar.keys_text().plain.split("   ") if part]
+                keys = self.keys(app)
+                labels = [part for part in keys.keys_text().plain.split("   ") if part]
                 lines = ["".join(segment.text for segment in keys.render_line(y)) for y in range(keys.size.height)]
                 for label in labels:
                     self.assertTrue(any(label in line for line in lines), (width, label, lines))
+
+    async def test_the_keys_stay_under_an_open_filter(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            await pilot.press("slash")
+            await pilot.pause()
+            self.assertEqual(self.keys(app).region.bottom, 30)
+            self.assertEqual(app.screen.query_one("#filter").region.bottom, self.keys(app).region.y)
+            await pilot.press("escape", "G")
+            await self.settle(app, pilot)
+            await pilot.press("slash")
+            await pilot.pause()
+            self.assertEqual(self.keys(app).region.bottom, 30)
+            self.assertEqual(app.screen.query_one("#pr-search").region.bottom, self.keys(app).region.y)
+
+    async def test_dark_text_on_the_bars_and_the_tab_is_not_bold_in_the_ansi_themes(self):
+        # Terminals that draw bold text in bright colors make bold black text grey.
+        for theme, bold in (("ansi-dark", False), ("textual-dark", True)):
+            app = self.app()
+            app.theme = theme
+            async with app.run_test(size=(160, 30)) as pilot:
+                await self.settle(app, pilot)
+                for key in ("", "G"):
+                    if key:
+                        await pilot.press(key)
+                        await self.settle(app, pilot)
+                    bar = app.screen.query_one("#pr-title" if key else "#title-bar")
+                    label = app.screen.query_one(".tab.active .tab-label")
+                    for widget in (bar, label):
+                        self.assertEqual(bool(widget.visual_style.bold), bold, (theme, key, widget))
+                    # The bold comes from the style sheet, so the ANSI themes can turn it off.
+                    text = self.bar(app)._tab_text(self.bar(app).active, "Tab")
+                    self.assertFalse(text.style or any(span.style == "bold" for span in text.spans), theme)
 
     async def test_each_key_can_be_clicked(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            text = self.bar(app).keys_text()
+            text = self.keys(app).keys_text()
             clicks = {span.style.meta.get("@click") for span in text.spans if hasattr(span.style, "meta")}
         self.assertIn("app.simulate_key('a')", clicks)
 
