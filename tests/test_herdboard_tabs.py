@@ -268,6 +268,19 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("G", other.plain)
             self.assertEqual(current.plain, other.plain.replace("G", " "), tab)
 
+    async def test_the_pull_request_columns_fill_the_width(self):
+        from herdboard.pr_reviews import PullRequest
+        for count in (3, 40):
+            prs = [PullRequest(n, f"PR {n}", "u", "octo", False, "a" * 40, "b", False, False) for n in range(count, 0, -1)]
+            self.service.page.return_value = ("acme/api", Page(prs, count, None))
+            for width in (120, 160):
+                app = self.app()
+                async with app.run_test(size=(width, 30)) as pilot:
+                    await pilot.press("G")
+                    await self.settle(app, pilot)
+                    table = app.screen.query_one("#pr-list")
+                    self.assertEqual(table.virtual_size.width, table.scrollable_content_region.width, (count, width))
+
     def test_a_tab_has_no_hover_color(self):
         rules = [line for line in HerdboardApp.CSS.splitlines() if ".tab" in line]
         self.assertTrue(rules)

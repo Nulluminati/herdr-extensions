@@ -1558,7 +1558,8 @@ def pr_size_cell(pr: pr_reviews.PullRequest) -> Text:
 
 
 def pr_title_cell(pr: pr_reviews.PullRequest, width: int) -> Text:
-    """The title, cut to fit beside its first labels."""
+    """The title, cut to fit beside its first labels, and padded to `width` so the columns fill
+    the table."""
     chips = [label_chip(label) for label in pr.labels[:PR_LIST_LABELS]]
     if len(pr.labels) > PR_LIST_LABELS:
         chips.append(Text(f"+{len(pr.labels) - PR_LIST_LABELS}", style="dim"))
@@ -1569,6 +1570,7 @@ def pr_title_cell(pr: pr_reviews.PullRequest, width: int) -> Text:
     for chip in chips:
         text.append(" ")
         text.append_text(chip)
+    text.pad_right(width - text.cell_len)
     return text
 
 
@@ -1932,9 +1934,12 @@ class PullRequestsScreen(Screen):
         title = PR_COLUMNS.index("Title")
         others = sum(max([cell_len(header), *(cell_len(row[index].plain) for row in rows)])
                      for index, header in enumerate(PR_COLUMNS) if index != title)
-        # One cell of padding on each side of each column, the border and the scrollbar.
-        fixed = others + 2 * len(PR_COLUMNS) + 3
-        return max(PR_TITLE_MIN, self.size.width - fixed)
+        # One cell of padding on each side of each column, and the scrollbar when the rows and the
+        # header do not fit. The table's size leaves out its border.
+        table = self.query_one("#pr-list", PullRequestTable)
+        scrollbar = 1 if len(prs) + 1 > table.size.height else 0
+        fixed = others + 2 * len(PR_COLUMNS) + scrollbar
+        return max(PR_TITLE_MIN, table.size.width - fixed)
 
     def _summary(self, repo: str, prs: list[pr_reviews.PullRequest]) -> Text:
         """Where the list is (the total, the page, the search), then what the shown PRs need."""
