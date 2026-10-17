@@ -51,7 +51,7 @@ Requirements: Herdr 0.9 or later, Python 3.11 or later, and Fontconfig (`fc-matc
    rows = [["state_icon", "$agent_icon", "agent", "state_text"]]
 
    [ui.sidebar.agents.rows_by_agent]
-   claude = [["state_icon", { token = "agent_icon", fg = "#D97757" }, "agent"]]
+   claude = [["state_icon", { token = "$agent_icon", fg = "#D97757" }, "agent"]]
    pi = [["state_icon", "$agent_icon", "agent"]]
    ```
 
