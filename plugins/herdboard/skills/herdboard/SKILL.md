@@ -172,7 +172,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `worktree_missing` | The PR's worktree is gone. Tell the user to run `pr-review-finish <N>` and review again. |
 | `new_commits` | The PR has commits that its review worktree does not have. Ask the user, then run `pr-review-refresh <N>` before `pr-review <N>`. |
 | `unsent_notes` | Hunk still has notes of the user that are not submitted. Tell the user. Use `--force` only when they say so. |
-| `gh_failed`, `git_failed`, `hunk_failed` | A `gh`, `git` or `hunk` command failed. Tell the user the message. For `pr-review-finish`, `git_failed` means Git kept `pr/<N>`: the review stays, and a second finish deletes the branch. |
+| `gh_failed`, `git_failed`, `hunk_failed` | A `gh`, `git` or `hunk` command failed. Tell the user the message. For `pr-review-finish`, `git_failed` means Git kept `pr/<N>`: the review stays, and a second finish deletes the branch. For `pr-review-refresh` or `pr-review`, `hunk_failed` can mean Hunk refused saved notes: they stay saved, and a second refresh applies them again. |
 | `agent_unavailable` | No agent runs in the card's pane, so review comments have no target. Tell the user the message. |
 | `plan_running` | A planner for the card still runs in a Herdr tab. Tell the user to finish or close it. |
 | `review_running` | An agent review of the card still runs. Tell the user; its findings arrive by themselves. |

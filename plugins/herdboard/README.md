@@ -365,7 +365,8 @@ Limits:
 
 - One reviewer agent per PR. A review with another agent kind, model or thinking level stops with `agent_running` while the first agent still runs. Close it first, or press `f` and review again.
 - Old notes come back after `u` as agent notes, with their author kept. herdboard remembers which of them were yours, so `f` still stops at them.
-- `u` waits for a running reviewer: it stops with `agent_running` until the review ends. When Hunk cannot list the notes of a live session, `u` stops and Hunk stays open.
+- `u` waits for a reviewer that Herdr shows as working: it stops with `agent_running` until the review ends. A review that shows `reviewing` but has no working agent counts as failed, and `u` goes on. When Hunk cannot list the notes of a live session, `u` stops and Hunk stays open.
+- A note on a line that is no longer in the diff is dropped. When Hunk refuses a note for another reason, herdboard keeps it in the saved notes and stops with `hunk_failed`. Press `u` to apply it again. `f` counts these saved notes too.
 - When Git does not delete `pr/<N>`, `f` stops with `git_failed` and keeps the review. Fix the branch, then press `f` again.
 - `u` saves the notes to `pr-reviews/<PR>.notes.json` in the state folder before it closes Hunk. When the new Hunk does not open, the next `u` or review puts them back.
 - A review (`s`) of a PR whose worktree is behind the PR head stops with `new_commits`. On the list, herdboard then offers to fetch the new commits first.

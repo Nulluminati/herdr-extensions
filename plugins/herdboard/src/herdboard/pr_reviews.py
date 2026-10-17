@@ -603,7 +603,9 @@ def request(checkout, repo: str, number: int, kind: str, model: str | None = Non
                 herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
             record = open_hunk(record)
             # A refresh that failed after it closed Hunk left its notes in a file.
-            _restore_notes(key, record)
+            _, _, failed, error = _restore_notes(key, record)
+            if failed:
+                raise _refused_notes(key, failed, error)
         return start_reviewer(key, record, pr, kind, model, thinking)
 
 
@@ -719,21 +721,46 @@ def _save_notes(key: str, entries: list[dict]) -> None:
         raise PrReviewError(f"{path}: cannot save the notes: {error}", "io") from error
 
 
-def _restore_notes(key: str, record: dict) -> tuple[int, list[dict]]:
-    """Apply the saved notes to the record's new session, then delete them. Returns (kept, dropped)."""
+def _restore_notes(key: str, record: dict) -> tuple[int, list[dict], list[dict], str]:
+    """Apply the saved notes to the record's new session. Returns (kept, dropped, failed, error).
+
+    The file keeps the failed notes, which Hunk refused for another reason than a missing line."""
     entries = _saved_notes(key) or []
-    dropped = _apply(record["hunk_session"], entries)
-    _request_path(key, ".notes.json").unlink(missing_ok=True)
-    return len(entries) - len(dropped), dropped
+    dropped, failed, error = _apply(record["hunk_session"], entries)
+    if failed:
+        _save_notes(key, failed)
+    else:
+        _request_path(key, ".notes.json").unlink(missing_ok=True)
+    return len(entries) - len(dropped) - len(failed), dropped, failed, error
 
 
-def _apply(session_id: str, entries: list[dict]) -> list[dict]:
-    """Apply notes to a session. Returns the notes that match no diff line."""
+# What Hunk prints for a note whose file or line is not in the diff.
+NO_DIFF_LINE = re.compile(r"No diff file matches |No \w+ diff hunk in .* covers line |No diff hunk \d+ exists in ")
+
+
+def _apply(session_id: str, entries: list[dict]) -> tuple[list[dict], list[dict], str]:
+    """Apply notes to a session. Returns (dropped, failed, error): the notes that match no diff line,
+    the notes that Hunk refused for another reason, and Hunk's last other error."""
     argv = ["hunk", "session", "comment", "apply", session_id, "--stdin", "--json"]
     if not entries or run(argv, input=json.dumps({"comments": entries})).returncode == 0:
-        return []
+        return [], [], ""
     # Hunk refuses the whole batch when one note matches no line, so the notes go one at a time.
-    return [entry for entry in entries if run(argv, input=json.dumps({"comments": [entry]})).returncode]
+    dropped, failed, error = [], [], ""
+    for entry in entries:
+        result = run(argv, input=json.dumps({"comments": [entry]}))
+        if result.returncode == 0:
+            continue
+        if NO_DIFF_LINE.search(result.stderr or ""):
+            dropped.append(entry)
+        else:
+            failed.append(entry)
+            error = (result.stderr or result.stdout or "").strip()
+    return dropped, failed, error
+
+
+def _refused_notes(key: str, failed: list[dict], error: str) -> PrReviewError:
+    return PrReviewError(f"Hunk did not take {len(failed)} notes of {key}: {error}. They stay saved; "
+                         f"refresh {key} to apply them again", "hunk_failed")
 
 
 def refresh(key: str) -> dict:
@@ -744,10 +771,13 @@ def refresh(key: str) -> dict:
         raise PrReviewError(f"The worktree of {key} is gone; finish the review and review it again",
                             "worktree_missing")
     with _lock(".pr-review-" + safe_key(key) + ".lock"):
-        # The reviewer writes to the session that a refresh replaces.
         if record.get("status") == "reviewing":
-            raise PrReviewError(f"The reviewer of {key} is still working; refresh after it finishes",
-                                "agent_running")
+            # The reviewer writes to the session that a refresh replaces.
+            if _agent_status(record) == "working":
+                raise PrReviewError(f"The reviewer of {key} is still working; refresh after it finishes",
+                                    "agent_running")
+            # No worker moves this status on any more, so it would block every refresh.
+            record.update(status="failed", error="The reviewer stopped before it finished")
         if _git(worktree, "status", "--porcelain").strip():
             raise PrReviewError(f"{worktree} has changes; clean it before a refresh", "worktree_dirty")
         _git(worktree, "fetch", base_remote(record["checkout"], record["repo"]), f"pull/{record['number']}/head")
@@ -776,10 +806,12 @@ def refresh(key: str) -> dict:
             herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
         # Hunk reloads only `diff` and `show` sessions, so a new pane loads the PR's new diff.
         record = open_hunk(record)
-        kept, dropped = _restore_notes(key, record)
+        kept, dropped, failed, error = _restore_notes(key, record)
         if dropped:
             record["user_notes"] = [entry for entry in record["user_notes"] if entry not in dropped]
             save(key, record)
+        if failed:
+            raise _refused_notes(key, failed, error)
         line = lambda e: f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary'].splitlines()[0][:80]}"
         return {"key": key, "number": record["number"], "hunk_pane": record["hunk_pane"],
                 "hunk_session": record["hunk_session"], "kept": kept,
@@ -804,12 +836,11 @@ def finish(key: str, force: bool = False) -> dict:
         if not force:
             # A refresh applies the user's notes again as agent notes; the record knows them.
             mine = {_note_place(entry) for entry in record.get("user_notes") or []}
+            # The file holds the notes that a failed refresh saved, or that Hunk did not take.
+            unsent = [entry for entry in _saved_notes(key) or [] if _note_place(entry) in mine]
             if _session_live(record.get("hunk_session")):
-                unsent = [note for note in _comments(record["hunk_session"], "all")
-                          if note.get("source") == "user" or _note_place(_note_entry(note)) in mine]
-            else:
-                # A refresh that failed after it closed Hunk left the notes only in the file.
-                unsent = [entry for entry in _saved_notes(key) or [] if _note_place(entry) in mine]
+                unsent += [note for note in _comments(record["hunk_session"], "all")
+                           if note.get("source") == "user" or _note_place(_note_entry(note)) in mine]
             if unsent:
                 raise PrReviewError(f"{key} has {len(unsent)} notes of yours that are not submitted. "
                                     "Submit them with S in Hunk, or finish with force", "unsent_notes")
