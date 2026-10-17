@@ -280,6 +280,8 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                     await self.settle(app, pilot)
                     table = app.screen.query_one("#pr-list")
                     self.assertEqual(table.virtual_size.width, table.scrollable_content_region.width, (count, width))
+                    # Two cells on each side of a column keep the short count columns apart.
+                    self.assertEqual(table.cell_padding, 2)
 
     def test_a_tab_has_no_hover_color(self):
         rules = [line for line in HerdboardApp.CSS.splitlines() if ".tab" in line]

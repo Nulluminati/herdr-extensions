@@ -1575,6 +1575,8 @@ def pr_title_cell(pr: pr_reviews.PullRequest, width: int) -> Text:
 
 
 PR_COLUMNS = ["", "PR", "Title", "Author", "Size", "CI", "GitHub review", "Agent review (local)", "Notes"]
+# The cells on each side of a column in the list, so short columns such as the counts stay apart.
+PR_CELL_PADDING = 2
 
 
 def pr_cells(pr: pr_reviews.PullRequest, icon_style: str, title_width: int) -> list[Text]:
@@ -1878,7 +1880,7 @@ class PullRequestsScreen(Screen):
         title = Static("Pull requests", id="pr-title")
         title.plain = "Pull requests"
         yield title
-        table = PullRequestTable(id="pr-list", cursor_type="row", zebra_stripes=True)
+        table = PullRequestTable(id="pr-list", cursor_type="row", zebra_stripes=True, cell_padding=PR_CELL_PADDING)
         table.add_columns(*PR_COLUMNS)
         yield table
         status = Static("Reading GitHub…", id="pr-status")
@@ -1934,11 +1936,11 @@ class PullRequestsScreen(Screen):
         title = PR_COLUMNS.index("Title")
         others = sum(max([cell_len(header), *(cell_len(row[index].plain) for row in rows)])
                      for index, header in enumerate(PR_COLUMNS) if index != title)
-        # One cell of padding on each side of each column, and the scrollbar when the rows and the
-        # header do not fit. The table's size leaves out its border.
+        # The padding on each side of each column, and the scrollbar when the rows and the header
+        # do not fit. The table's size leaves out its border.
         table = self.query_one("#pr-list", PullRequestTable)
         scrollbar = 1 if len(prs) + 1 > table.size.height else 0
-        fixed = others + 2 * len(PR_COLUMNS) + scrollbar
+        fixed = others + 2 * PR_CELL_PADDING * len(PR_COLUMNS) + scrollbar
         return max(PR_TITLE_MIN, table.size.width - fixed)
 
     def _summary(self, repo: str, prs: list[pr_reviews.PullRequest]) -> Text:
