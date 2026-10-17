@@ -369,6 +369,17 @@ class ReviewerTests(PrReviewTestCase):
         self.assertEqual(self.workers[0][0], ["pr-review-wait", KEY])
         self.assertEqual(result["agent_name"], "pr-api-7")
 
+    def test_agent_names_are_valid_herdr_names(self):
+        name = pr_reviews._agent_name("acme/" + "a-very-long-repository-name-for-tests", 123456)
+        self.assertRegex(name, r"^[a-z][a-z0-9_-]{0,31}$")
+        self.assertTrue(name.startswith("pr-a-very-long"))
+        self.assertTrue(name.endswith("-123456"))
+        self.assertRegex(pr_reviews._agent_name("Acme/API", 7), r"^pr-api-[0-9a-f]{4}-7$")
+
+    def test_a_fork_and_its_upstream_get_different_agent_names(self):
+        self.assertNotEqual(pr_reviews._agent_name("acme/api", 7), pr_reviews._agent_name("fork/api", 7))
+        self.assertEqual(pr_reviews._agent_name("acme/api", 7), pr_reviews._agent_name("Acme/API", 7))
+
     def test_a_failed_agent_start_saves_failed(self):
         record = self.record(status=None)
         self.fake.on("herdr", "agent", "start", error="agent_start_failed")
@@ -885,6 +896,17 @@ class FinishTests(PrReviewTestCase):
         result = pr_reviews.finish(KEY)
         self.assertFalse(result["branch_deleted"])
         self.assertNotIn(KEY, pr_reviews.records())
+
+    def test_a_dirty_worktree_stops_finish_with_worktree_dirty(self):
+        self.record()
+        self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
+        self.fake.on("herdr", "worktree", "remove", error="dirty_worktree_requires_force")
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews.finish(KEY)
+        self.assertEqual(raised.exception.code, "worktree_dirty")
+        self.assertIn("finish with force", str(raised.exception))
+        self.assertIn(KEY, pr_reviews.records())
+        self.assertEqual(self.fake.made("herdr", "pane", "close"), [])
 
     def test_force_removes_with_notes(self):
         self.record()

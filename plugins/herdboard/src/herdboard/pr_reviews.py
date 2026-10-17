@@ -10,6 +10,7 @@ A background worker waits for the agent to go idle, counts its notes and shows a
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -503,8 +504,11 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 
 
 def _agent_name(repo: str, number: int) -> str:
-    name = re.sub(r"[^a-z0-9]+", "-", repo.split("/")[-1].lower()).strip("-") or "repo"
-    return f"pr-{name}-{number}"
+    """A Herdr agent name: at most 32 characters, and unique per repository, so a fork and its upstream differ."""
+    tag = hashlib.sha1(repo.lower().encode()).hexdigest()[:4]
+    room = 32 - len(f"pr---{tag}-{number}")
+    name = re.sub(r"[^a-z0-9]+", "-", repo.split("/")[-1].lower())[:room].strip("-") or "repo"
+    return f"pr-{name}-{tag}-{number}"
 
 
 def _agent_status(record: dict) -> str | None:
@@ -847,8 +851,14 @@ def finish(key: str, force: bool = False) -> dict:
         # The worktree goes first: when Herdr or Git refuses it, Hunk and its notes are still there.
         removed = False
         if record.get("workspace_id"):
-            removed = herdr("worktree", "remove", "--workspace", record["workspace_id"], "--trust-repository",
-                            *(["--force"] if force else []), tolerated=("workspace_not_found",)) is not None
+            try:
+                removed = herdr("worktree", "remove", "--workspace", record["workspace_id"], "--trust-repository",
+                                *(["--force"] if force else []), tolerated=("workspace_not_found",)) is not None
+            except start.StartError as error:
+                if error.code == "dirty_worktree_requires_force":
+                    raise PrReviewError(f"{worktree} has uncommitted changes. Commit or remove them, "
+                                        "or finish with force", "worktree_dirty") from error
+                raise
         if not removed and worktree and Path(worktree).exists():
             _git(checkout, "worktree", "remove", *(["--force"] if force else []), worktree)
         if record.get("hunk_pane"):

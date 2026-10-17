@@ -1809,7 +1809,7 @@ class PullRequestDetailScreen(ModalBase):
             return  # The screen closed meanwhile.
         if error is not None:
             message = Text(f"Cannot read GitHub: {error}", style="red")
-            for widget_id in ("#pr-detail-checks", "#pr-detail-issues"):
+            for widget_id in ("#pr-detail-checks", "#pr-detail-issues", "#pr-detail-github"):
                 self._set(widget_id, message)
             self.query_one("#pr-detail-body", Markdown).update(f"*Cannot read the description: {error}*")
             return

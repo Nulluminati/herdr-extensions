@@ -179,7 +179,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes. Tell the user. |
 | `worker_failed` | The agent review or pull request worker did not start, and its agent was closed. Tell the user the message. |
 | `pr_writing` | An agent still writes the card's pull request description. Wait; the PR opens when it is done. |
-| `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. For `pr-review-refresh`, the PR worktree has changes: tell the user. |
+| `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. For `pr-review-refresh`, the PR worktree has changes: tell the user. For `pr-review-finish`, the PR worktree has changes: tell the user to commit or remove them, or to finish with force. |
 | `nothing_to_merge` | The card branch has no commits ahead of its base. Tell the user. |
 | `base_dirty` | The checkout of the base branch has uncommitted changes. Tell the user to commit or stash them. |
 | `rebase_conflict` | The rebase conflicted, and herdboard sent the conflict to the card's agent. Tell the user. Do not merge again until the card is back in Review. |

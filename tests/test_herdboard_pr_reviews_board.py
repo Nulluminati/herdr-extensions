@@ -264,6 +264,17 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(text.index("unit tests"), text.index("lint"))
         self.service.page.assert_called_with("", None)
 
+    async def test_a_failed_details_read_shows_the_error_in_every_block(self):
+        self.service.details.side_effect = PrReviewError("gh failed", "gh_failed")
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            await pilot.press("enter")
+            await self.settle(app, pilot)
+            text = app.screen.text()
+            self.assertNotIn("Reading", text)
+            self.assertIn("Cannot read GitHub: gh failed", text)
+
     async def test_n_and_p_move_between_pages(self):
         first = Page([pull_request(n, f"PR {n}") for n in (9, 8)], 5, "c1")
         second = Page([pull_request(n, f"PR {n}") for n in (7, 6)], 5, "c2")
