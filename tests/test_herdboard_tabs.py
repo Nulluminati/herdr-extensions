@@ -171,7 +171,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(other.region.bottom, bar.region.y, theme)
                     self.assertEqual(active.region.bottom, bar.region.y, theme)
 
-    async def test_a_tab_keeps_its_size_and_round_border_when_selected(self):
+    async def test_a_tab_keeps_its_size_and_is_filled_when_selected(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
@@ -181,7 +181,10 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             for tab in ("board", "prs"):
                 widget = app.screen.query_one(f"#tab-{tab}")
                 self.assertEqual(widget.region.size, sizes[tab], tab)
-                self.assertEqual(widget.styles.border_top[0], "round", tab)
+                # The current tab fills the inner half of its border cells, up to where the
+                # other tab draws its line, so the fill covers the tab and the size stays.
+                self.assertEqual(widget.styles.border_top[0], "inner" if tab == "prs" else "round", tab)
+                self.assertEqual(widget.styles.border_bottom[0], "", tab)
                 self.assertEqual(widget.styles.background.a, 0, tab)
 
     async def test_the_tabs_stand_on_the_bar_in_a_thin_pane(self):

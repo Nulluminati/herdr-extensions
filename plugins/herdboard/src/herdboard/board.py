@@ -2294,6 +2294,9 @@ class HerdboardApp(App):
     #tab-bar .tab { width: auto; height: 2; padding: 0; margin-right: 1; background: transparent;
                     border: round $primary; border-bottom: none; }
     #tab-bar .tab-label { width: auto; height: 1; color: $text; }
+    /* The inner border fills the inner half of each edge cell, up to where the other tab draws
+       its line, so the current tab is filled to its edges at the same size. */
+    #tab-bar .tab.active { border: inner $primary; border-bottom: none; }
     #tab-bar .tab.active .tab-label { background: $primary; }
     #tab-bar .tab:hover .tab-label { background: $primary 40%; }
     #tab-bar .tab.active:hover .tab-label { background: $primary; }
