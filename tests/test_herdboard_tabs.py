@@ -163,13 +163,63 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                     bar = app.screen.query_one("#pr-title" if screen_key else "#title-bar")
                     color = bar.styles.background
                     active = app.screen.query_one(".tab.active")
+                    self.assertEqual(active.query_one(".tab-label").styles.background, color, theme)
                     other = next(tab for tab in app.screen.query(".tab") if not tab.has_class("active"))
-                    self.assertEqual(active.styles.background, color, theme)
                     for side in ("top", "left", "right"):
                         self.assertEqual(getattr(other.styles, f"border_{side}")[1], color, (theme, side))
                     self.assertEqual(other.styles.border_bottom[0], "", theme)
                     self.assertEqual(other.region.bottom, bar.region.y, theme)
                     self.assertEqual(active.region.bottom, bar.region.y, theme)
+
+    async def test_a_tab_keeps_its_size_and_round_border_when_selected(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            sizes = {tab: app.screen.query_one(f"#tab-{tab}").region.size for tab in ("board", "prs")}
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            for tab in ("board", "prs"):
+                widget = app.screen.query_one(f"#tab-{tab}")
+                self.assertEqual(widget.region.size, sizes[tab], tab)
+                self.assertEqual(widget.styles.border_top[0], "round", tab)
+                self.assertEqual(widget.styles.background.a, 0, tab)
+
+    async def test_the_tabs_stand_on_the_bar_in_a_thin_pane(self):
+        for key in ("", "G"):
+            app = self.app()
+            async with app.run_test(size=(50, 40)) as pilot:
+                await self.settle(app, pilot)
+                if key:
+                    await pilot.press(key)
+                    await self.settle(app, pilot)
+                bar = app.screen.query_one("#pr-title" if key else "#title-bar")
+                keys = app.screen.query_one("#tab-keys")
+                self.assertGreater(keys.region.height, 2)
+                for tab in app.screen.query(".tab"):
+                    self.assertEqual(tab.region.bottom, bar.region.y, (key, tab.id))
+
+    async def test_the_board_bar_and_the_pull_request_bar_look_the_same(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            board = app.screen.query_one("#title-bar").styles
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            prs = app.screen.query_one("#pr-title").styles
+            for rule in ("color", "background", "text_style", "padding"):
+                self.assertEqual(getattr(board, rule), getattr(prs, rule), rule)
+
+    async def test_a_key_and_its_description_stay_on_one_line(self):
+        for width in (50, 90, 160):
+            app = self.app()
+            async with app.run_test(size=(width, 40)) as pilot:
+                await self.settle(app, pilot)
+                bar = self.bar(app)
+                keys = app.screen.query_one("#tab-keys")
+                labels = [part for part in bar.keys_text().plain.split("   ") if part]
+                lines = ["".join(segment.text for segment in keys.render_line(y)) for y in range(keys.size.height)]
+                for label in labels:
+                    self.assertTrue(any(label in line for line in lines), (width, label, lines))
 
     async def test_each_key_can_be_clicked(self):
         app = self.app()

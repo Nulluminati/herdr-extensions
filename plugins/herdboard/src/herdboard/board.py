@@ -1354,6 +1354,8 @@ TABS = [("board", "Board"), ("prs", "Pull requests")]
 TAB_KEY = "G"
 # The actions that the tabs show, so the key list leaves them out.
 TAB_ACTIONS = {"pull_requests", "close"}
+# With less room than this next to the tabs, the keys take their own row above them.
+TAB_KEYS_MIN_WIDTH = 40
 
 
 class TabBar(Horizontal):
@@ -1368,19 +1370,30 @@ class TabBar(Horizontal):
         self.active = active
 
     def compose(self) -> ComposeResult:
-        for tab, label in TABS:
-            text = self._tab_text(tab, label)
-            widget = Static(text, id=f"tab-{tab}", classes="tab active" if tab == self.active else "tab")
-            widget.plain = text.plain
-            yield widget
+        # The tabs sit at the bottom of their group, so they stand on the bar under the row
+        # however many lines the keys take.
+        with Vertical(id="tab-group"):
+            with Horizontal(id="tabs"):
+                for tab, label in TABS:
+                    text = self._tab_text(tab, label)
+                    widget = Container(Static(text, classes="tab-label"), id=f"tab-{tab}",
+                                       classes="tab active" if tab == self.active else "tab")
+                    widget.plain = text.plain
+                    yield widget
         keys = Static("", id="tab-keys")
         keys.plain = ""
         yield keys
 
     def _tab_text(self, tab: str, label: str) -> Text:
-        text = Text(f" {label} ", style="bold" if tab == self.active else "")
+        """The tab's label, as wide when it is current as when it is not, so a switch does not
+        resize the tab."""
+        width = len(f" {label} {TAB_KEY} ")
         if tab != self.active:
+            text = Text(f" {label} ")
             text.append(f"{TAB_KEY} ", style="bold yellow")
+            return text
+        text = Text(label, style="bold")
+        text.align("center", width)
         return text
 
     def tab_labels(self) -> list[str]:
@@ -1397,32 +1410,65 @@ class TabBar(Horizontal):
         if self.is_attached and screen is self.screen:
             self.show_keys()
 
-    def keys_text(self) -> Text:
+    def key_labels(self) -> list[Text]:
         """Each key of the current tab once, in its binding order, as `key Description`."""
         seen = set()
-        text = Text()
+        labels = []
         for _node, binding, enabled, _tooltip in self.screen.active_bindings.values():
             if not binding.show or binding.action in seen or binding.action in TAB_ACTIONS:
                 continue
             seen.add(binding.action)
-            if text:
-                text.append("   ")
             click = Style(meta={"@click": f"app.simulate_key({binding.key!r})"})
-            # No-break spaces keep a key and its description on one line when the row wraps.
             label = f"{self.app.get_key_display(binding)}\u00a0{binding.description.replace(' ', chr(0xa0))}"
             key = len(self.app.get_key_display(binding))
+            text = Text()
             text.append(label[:key], style=Style(bold=True, dim=not enabled) + click)
             text.append(label[key:], style=click)
+            labels.append(text)
+        return labels
+
+    def keys_text(self) -> Text:
+        return Text("   ").join(self.key_labels())
+
+    def _wrapped_keys(self, width: int) -> Text:
+        """The keys in lines of at most `width` cells. Rich breaks lines at any space, a no-break
+        space too, so the lines break only between two keys."""
+        lines: list[Text] = []
+        for label in self.key_labels():
+            if lines and lines[-1].cell_len + 3 + label.cell_len <= width:
+                lines[-1].append("   ")
+                lines[-1].append_text(label)
+            else:
+                lines.append(label)
+        text = Text("\n").join(lines)
+        text.no_wrap = True
+        text.overflow = "ellipsis"
         return text
 
     def show_keys(self) -> None:
         keys = self.query_one("#tab-keys", Static)
         text = self.keys_text()
         keys.plain = text.plain
-        keys.update(text)
+        if not self.size.width:
+            keys.update(text)
+            return
+        group = self.query_one("#tab-group")
+        width = self.size.width - group.outer_size.width - keys.styles.gutter.width
+        narrow = width < TAB_KEYS_MIN_WIDTH
+        self.set_class(narrow, "narrow")
+        if narrow:
+            width = self.size.width - keys.styles.gutter.width
+        shown = self._wrapped_keys(width)
+        keys.update(shown)
+        group.styles.height = 2 if narrow else max(2, len(shown.plain.splitlines()))
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.call_after_refresh(self.show_keys)
 
     def on_click(self, event: events.Click) -> None:
         widget = event.widget
+        while widget is not None and widget is not self and not widget.has_class("tab"):
+            widget = widget.parent
         tab = (widget.id or "").removeprefix("tab-") if widget is not None else ""
         if tab in dict(TABS) and tab != self.active:
             event.stop()
@@ -2228,7 +2274,8 @@ class CellMouseDriver(LinuxDriver):
 class HerdboardApp(App):
     TITLE = "herdboard"
     CSS = """
-    #title-bar { height: 1; padding: 0 1; background: $primary; color: $text; }
+    /* The board and the pull requests have one bar style, under the tabs. */
+    #title-bar, #pr-title { height: 1; padding: 0 1; background: $primary; color: $text; text-style: bold; }
     #columns { height: 1fr; overflow-x: auto; overflow-y: hidden; }
     #columns { scrollbar-size-horizontal: 1; }
     .column { width: 1fr; min-width: 24; height: 100%; border: round $surface-lighten-2; }
@@ -2239,17 +2286,22 @@ class HerdboardApp(App):
     #filter { dock: bottom; border: round $primary; }
     /* The tabs stand on the title bar in its color: the current tab is filled and joins the bar,
        the other tab is an outline open at the bottom. */
-    #tab-bar { height: auto; background: $background; align-vertical: bottom; }
-    #tab-bar .tab { width: auto; height: 2; padding: 0; margin-right: 1; background: transparent; color: $text;
+    #tab-bar { height: auto; background: $background; }
+    #tab-group { width: auto; height: 2; align-vertical: bottom; }
+    #tab-bar.narrow { layout: vertical; }
+    #tab-bar.narrow #tab-keys { dock: top; width: 100%; }
+    #tabs { width: auto; height: 2; }
+    #tab-bar .tab { width: auto; height: 2; padding: 0; margin-right: 1; background: transparent;
                     border: round $primary; border-bottom: none; }
-    #tab-bar .tab.active { background: $primary; color: $text; border: tall $primary; border-bottom: none; }
-    #tab-bar .tab:hover { background: $primary 40%; }
-    #tab-bar .tab.active:hover { background: $primary; }
+    #tab-bar .tab-label { width: auto; height: 1; color: $text; }
+    #tab-bar .tab.active .tab-label { background: $primary; }
+    #tab-bar .tab:hover .tab-label { background: $primary 40%; }
+    #tab-bar .tab.active:hover .tab-label { background: $primary; }
     #tab-keys { width: 1fr; height: auto; padding: 0 1; color: $text-muted;
                 link-style: none; link-color: $text-muted; link-background: transparent;
                 link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
-    App:ansi #tab-bar .tab { background: transparent; color: ansi_default; }
-    App:ansi #tab-bar .tab.active { background: $primary; color: ansi_black; }
+    App:ansi #tab-bar .tab-label { color: ansi_default; }
+    App:ansi #tab-bar .tab.active .tab-label { background: $primary; color: ansi_black; }
     .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
     .card.selected { background: $accent; color: $text; }
     .column.current { border: round $accent; }
@@ -2296,8 +2348,6 @@ class HerdboardApp(App):
     #issue-results { height: auto; max-height: 12; border: round $surface-lighten-2; }
     #issue-results:focus { border: round $primary; }
     #config-project { width: 2fr; }
-    #pr-title { height: 1; padding: 0 1; background: $primary; color: $text; }
-    #pr-title { text-style: bold; }
     #pr-list { height: 1fr; border: round $surface-lighten-2; scrollbar-size-vertical: 1; }
     #pr-list:focus { border: round $accent; }
     #pr-list > .datatable--header { text-style: bold; color: $text-muted; background: $surface; }
@@ -2311,7 +2361,6 @@ class HerdboardApp(App):
         margin: 0; padding: 0; content-align: left middle; text-align: left; color: $text; text-style: bold;
     }
     App:ansi #pr-list > .datatable--cursor { background: ansi_default; text-style: bold reverse; }
-    App:ansi #pr-title { color: ansi_black; }
     #config-labels { width: 1fr; }
     /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
     App:ansi .card { border: round ansi_bright_black; margin: 0; }
@@ -2329,7 +2378,7 @@ class HerdboardApp(App):
     App:ansi .column.current .column-header { background: ansi_magenta; color: ansi_black; }
     App:ansi .column.current .card { color: ansi_default; }
     App:ansi .card.selected { background: ansi_default; border: heavy ansi_yellow; text-style: bold; }
-    App:ansi #title-bar { color: ansi_black; }
+    App:ansi #title-bar, App:ansi #pr-title { color: ansi_black; }
     App:ansi .dialog { border: round $primary; }
     App:ansi .detail-block { border: round ansi_bright_black; }
     App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
