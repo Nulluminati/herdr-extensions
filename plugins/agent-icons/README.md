@@ -42,7 +42,22 @@ Requirements: Herdr 0.9 or later, Python 3.11 or later, and Fontconfig (`fc-matc
    symbol_map U+E1A0-U+E1BA Herdr Agent Icons Max
    ```
 
-   Open a new terminal window. The map does not apply to windows that are already open.
+   Alacritty and other terminals with no codepoint map use Fontconfig fallback. Add the font as a fallback in `~/.config/fontconfig/conf.d/50-herdr-agent-icons.conf`, then run `fc-cache -f`:
+
+   ```xml
+   <?xml version="1.0"?>
+   <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+   <fontconfig>
+     <!-- Herdr agent logos: try this font before the system fallbacks. It has only Private Use Area glyphs. -->
+     <match target="pattern">
+       <edit name="family" mode="append" binding="strong">
+         <string>Herdr Agent Icons Max</string>
+       </edit>
+     </match>
+   </fontconfig>
+   ```
+
+   Open a new terminal window. The map and the rule do not apply to windows that are already open.
 
 4. Add the token to the agent rows in `~/.config/herdr/config.toml`:
 
@@ -75,6 +90,7 @@ Run the `Agent icons: refresh` action (`nulluminati.agent-icons.refresh`) after 
 - Font only. When `fc-match` does not find the font, the plugin clears the token and shows no icon. There is no text fallback.
 - On macOS, the font check also uses `fc-match`. Without Fontconfig, there are no icons.
 - The plugin cannot see your terminal's codepoint map. Boxes in place of logos mean the map (step 3) is missing.
+- Other fonts also use these codepoints. STIX Two Math, for example, puts Greek letters there, so a Claude row shows λ. That also means step 3 is missing for your terminal.
 - Agents with no logo in the font get no icon.
 - `herdr plugin log list --plugin nulluminati.agent-icons` shows failed Herdr calls.
 
