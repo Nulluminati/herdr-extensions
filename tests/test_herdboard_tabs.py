@@ -260,6 +260,19 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                     text = self.bar(app)._tab_text(self.bar(app).active, "Tab")
                     self.assertFalse(text.style or any(span.style == "bold" for span in text.spans), theme)
 
+    async def test_the_label_does_not_move_when_a_tab_is_selected(self):
+        # The current tab keeps the G's place blank, so its text stays where it was.
+        for tab, label in (("board", "Board"), ("prs", "Pull requests")):
+            current = TabBar(tab)._tab_text(tab, label)
+            other = TabBar("board" if tab == "prs" else "prs")._tab_text(tab, label)
+            self.assertIn("G", other.plain)
+            self.assertEqual(current.plain, other.plain.replace("G", " "), tab)
+
+    def test_a_tab_has_no_hover_color(self):
+        rules = [line for line in HerdboardApp.CSS.splitlines() if ".tab" in line]
+        self.assertTrue(rules)
+        self.assertEqual([line for line in rules if ":hover" in line], [])
+
     async def test_each_key_can_be_clicked(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:

@@ -1372,15 +1372,14 @@ class TabBar(Horizontal):
             yield widget
 
     def _tab_text(self, tab: str, label: str) -> Text:
-        """The tab's label, as wide when it is current as when it is not, so a switch does not
-        resize the tab. The current tab's bold comes from the style sheet."""
-        width = len(f" {label} {TAB_KEY} ")
+        """The tab's label. The current tab keeps the switch key's place blank, so a switch
+        neither resizes the tab nor moves its text. The current tab's bold comes from the style
+        sheet."""
+        text = Text(f" {label} ")
         if tab != self.active:
-            text = Text(f" {label} ")
             text.append(f"{TAB_KEY} ", style="bold yellow")
-            return text
-        text = Text(label)
-        text.align("center", width)
+        else:
+            text.append(" " * len(f"{TAB_KEY} "))
         return text
 
     def tab_labels(self) -> list[str]:
@@ -2284,8 +2283,6 @@ class HerdboardApp(App):
        its line, so the current tab is filled to its edges at the same size. */
     #tab-bar .tab.active { border: inner $primary; border-bottom: none; }
     #tab-bar .tab.active .tab-label { background: $primary; text-style: bold; }
-    #tab-bar .tab:hover .tab-label { background: $primary 40%; }
-    #tab-bar .tab.active:hover .tab-label { background: $primary; }
     #key-bar { height: auto; padding: 0 1; color: $text-muted;
                 link-style: none; link-color: $text-muted; link-background: transparent;
                 link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
