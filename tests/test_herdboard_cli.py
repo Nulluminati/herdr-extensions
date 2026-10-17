@@ -71,6 +71,49 @@ class CommandTests(CliTestCase):
         self.assertTrue(card["path"].endswith("inbox.md"))
         self.assertNotIn("hint", data)
 
+    def test_add_with_body(self):
+        card = self.run_json("add", "notes", "--body", "line one\nline two\n")["card"]
+        self.assertEqual(card["body"], ["\tline one", "\tline two"])
+        self.assertEqual(self.run_json("show", card["ref"])["card"]["body"], card["body"])
+
+    def test_add_with_empty_body(self):
+        card = self.run_json("add", "notes", "--body", "")["card"]
+        self.assertEqual(card["body"], [])
+
+    def test_add_body_from_file(self):
+        body = self.plain / "body.txt"
+        body.write_text("line one\nline two é\n", encoding="utf-8")
+        for path in (str(body), "body.txt"):
+            with self.subTest(path=path):
+                card = self.run_json("add", "notes", "--body-file", path,
+                                     directory=self.plain)["card"]
+                self.assertEqual(card["body"], ["\tline one", "\tline two é"])
+
+    def test_add_body_options_are_mutually_exclusive(self):
+        data = self.run_json("add", "notes", "--body", "", "--body-file", "missing.txt", expect=1)
+        self.assertEqual(data["error"]["code"], "usage")
+        self.assertEqual(self.run_json("list")["cards"], [])
+
+    def test_add_unreadable_body_file_creates_no_card(self):
+        data = self.run_json("add", "notes", "--body-file", "missing.txt", expect=1)
+        self.assertEqual(data["error"]["code"], "not_found")
+        self.assertEqual(self.run_json("list")["cards"], [])
+
+    def test_add_subcard_with_body(self):
+        parent = self.run_json("add", "parent")["card"]
+        card = self.run_json("add", "child", "--parent", parent["ref"],
+                             "--body", "child detail")["card"]
+        self.assertEqual(card["parent"], parent["ref"])
+        self.assertEqual(card["body"], ["\tchild detail"])
+
+    def test_card_agent_can_add_body_but_cannot_edit_it(self):
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
+                mock.patch.object(cli, "card_agent_panes", return_value={"w1:p2"}):
+            card = self.run_json("add", "notes", "--body", "original")["card"]
+            data = self.run_json("edit", card["ref"], "--body", "changed", expect=1)
+            self.assertEqual(data["error"]["code"], "agent_edit_denied")
+            self.assertEqual(self.run_json("show", card["ref"])["card"]["body"], ["\toriginal"])
+
     def test_add_position_top(self):
         self.run_cli("add", "first", directory=self.plain)
         self.run_cli("add", "second", "--position", "top", directory=self.plain)

@@ -443,8 +443,8 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 |---|---|
 | `herdboard board [--view NAME] [--project NAME]` | Open the board |
 | `herdboard list [--view] [--board] [--column] [--source todo\|linear] [--archived]` | List cards. `--archived` lists the archived todos |
-| `herdboard add "text" [--type NAME] [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
-| `herdboard add --linear "title" [--type NAME] [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
+| `herdboard add "text" [--body TEXT \| --body-file PATH] [--type NAME] [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
+| `herdboard add --linear "title" [--body TEXT \| --body-file PATH] [--type NAME] [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
 | `herdboard show <id> [--log]` | Show a card, its attachments and its last 10 log entries. `--log` shows them all |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card to a column |
 | `herdboard move <id> --up\|--down` | Move a todo up or down in its column |
@@ -480,6 +480,18 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 - With `--json`, output goes to standard output as JSON. An error has the form `{"error": {"code": "…", "message": "…"}}`. The skill lists the error codes.
 - Exit codes: 0 success, 1 user error, 2 conflict (the card changed, the lock is held, a rebase conflict), 3 Linear error.
 - A command that asks a question in a terminal fails without a terminal or with `--json`. `delete --yes` and `migrate --yes` confirm without a question.
+
+### Add card details
+
+Use `add --body TEXT` to set details when you create a todo. Use `--body-file PATH` to read the details from a UTF-8 file. Do not use both options. Relative file paths start from the command directory (`-C`, if set).
+
+```bash
+herdboard add "Fix login timeout" --body "Check the retry limit"
+herdboard add "Fix login timeout" --body-file docs/login.md
+herdboard add --linear "Fix login timeout" --team ENG --body-file docs/login.md
+```
+
+With `--linear`, the body becomes the issue description. Started agents can create cards with details. They still cannot edit existing card titles or details.
 
 ### migrate
 

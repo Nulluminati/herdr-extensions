@@ -121,6 +121,7 @@ class LinearWriter:
         ask: Ask = refuse,
         state_name: str | None = None,
         type_label: str | None = None,
+        description: str | None = None,
     ) -> dict:
         """Create an issue assigned to you. `project` is a Linear project with its `teams`.
 
@@ -149,6 +150,7 @@ class LinearWriter:
                 project_id=project["id"] if project else None,
                 label_ids=list(label_ids) or None,
                 assignee_id=self.source.account()[1],
+                description=description,
             )
             known = {
                 "title": title,

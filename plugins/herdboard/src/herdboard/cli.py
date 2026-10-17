@@ -85,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("add", "add a card, or with --linear a Linear issue assigned to you")
     sub.add_argument("text")
+    sub.add_argument("--body", help="the card's details, one per line")
+    sub.add_argument("--body-file", type=Path, help="read the card's details from a file")
     sub.add_argument("--parent", help="make the todo a sub-card of this todo, on its board")
     sub.add_argument("--type", help="the card's type, such as bug or feature (the `types` setting)")
     sub.add_argument("--column")
@@ -497,8 +499,15 @@ def _cmd_list(ctx: _Context) -> dict:
 
 def _cmd_add(ctx: _Context) -> dict:
     args, store = ctx.args, ctx.store
+    if args.body is not None and args.body_file is not None:
+        raise UsageError("Use --body or --body-file, not both")
+    body = args.body
+    if args.body_file is not None:
+        path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
+        body = _read_todo_file(path)
     if args.linear:
-        return _cmd_add_linear(ctx)
+        return _cmd_add_linear(ctx, body)
+    lines = body.splitlines() if body is not None else None
     if args.team or args.project or args.label or args.state:
         raise UsageError("--team, --project, --label and --state work only with --linear")
     if args.type is not None:
@@ -510,7 +519,8 @@ def _cmd_add(ctx: _Context) -> dict:
         parent = store.show(args.parent)
         path = store.ensure_inbox() if args.board == "inbox" else (
             store.resolve_board(args.board) if args.board else parent.path)
-        return {"card": store.add(path, args.text, args.column, args.position, parent=parent.ref), "hint": None}
+        return {"card": store.add(path, args.text, args.column, args.position,
+                                  body=lines, parent=parent.ref), "hint": None}
     if args.board == "inbox":
         path = store.ensure_inbox()
     elif args.board:
@@ -521,7 +531,7 @@ def _cmd_add(ctx: _Context) -> dict:
             path = store.ensure_inbox()
             if ctx.identity is not None:
                 hint = INIT_HINT
-    card = store.add(path, args.text, args.column, args.position)
+    card = store.add(path, args.text, args.column, args.position, body=lines)
     return {"card": card, "hint": hint}
 
 
@@ -1042,7 +1052,7 @@ def _linear_target(
     return project, label_ids
 
 
-def _cmd_add_linear(ctx: _Context) -> dict:
+def _cmd_add_linear(ctx: _Context, body: str | None = None) -> dict:
     args = ctx.args
     if args.board:
         raise UsageError("--linear and --board cannot be used together")
@@ -1054,6 +1064,7 @@ def _cmd_add_linear(ctx: _Context) -> dict:
     issue = writer.create(
         args.text, team=args.team, project=project, label_ids=label_ids,
         column=args.column, ask=ctx.ask(), state_name=args.state, type_label=kind,
+        description=body,
     )
     return {"card": ctx.linear_card(issue), "hint": None}
 

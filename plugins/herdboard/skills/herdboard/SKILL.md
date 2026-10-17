@@ -47,6 +47,8 @@ Do these when the user asks for them, or when a handed-over card tells you to up
 herdboard --json add "Fix the login timeout #auth 📅 2026-11-01"   # this repository's board, else the inbox
 herdboard --json add "Buy milk" --board inbox
 herdboard --json add "Fix the login timeout" --type bug     # adds #type/bug
+herdboard --json add "Fix the login timeout" --body "Check the retry limit"
+herdboard --json add "Fix the login timeout" --body-file docs/login.md
 herdboard --json move tep3 "In progress"
 herdboard --json move ENG-123 Review
 herdboard --json done tep3
@@ -65,6 +67,8 @@ herdboard --json archive tep3                        # to the board's archive, h
 herdboard --json unarchive tep3                      # back to the board's done column
 herdboard --json unarchive acme-api:archive-2        # an archived card without an ID, by its archive reference
 ```
+
+Use `add --body` or `add --body-file` to set details when you create a card, including from a started agent. Do not use both options. Relative file paths start from the command directory (`-C`, if set). With `add --linear`, these options set the issue description.
 
 The archive keeps old todos out of the columns. Commands other than `show`, `log` and `unarchive` refuse an archived todo. Linear issues are not archived here.
 

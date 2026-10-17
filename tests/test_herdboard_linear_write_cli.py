@@ -221,6 +221,24 @@ class AddLinearTests(WriteCliCase):
         self.assertEqual(inputs, {"id": inputs["id"], "teamId": "t-eng", "title": "New thing",
                                   "stateId": "ws-ENG-Backlog", "assigneeId": "u1"})
 
+    def test_body_sets_the_description(self):
+        self.add("--team", "ENG", "New thing", "--body", "Details\nSecond line")
+        self.assertEqual(self.inputs("IssueCreate")[0]["description"], "Details\nSecond line")
+
+    def test_body_file_sets_the_description(self):
+        body = self.plain / "body.txt"
+        body.write_text("Details é\nSecond line\n", encoding="utf-8")
+        self.add("--team", "ENG", "New thing", "--body-file", "body.txt", directory=self.plain)
+        self.assertEqual(self.inputs("IssueCreate")[0]["description"], "Details é\nSecond line\n")
+
+    def test_body_validation_creates_no_issue(self):
+        for options, code in ((("--body-file", "missing.txt"), "not_found"),
+                              (("--body", "", "--body-file", "missing.txt"), "usage")):
+            with self.subTest(options=options):
+                error = self.add("--team", "ENG", "New thing", *options, expect=1)["error"]
+                self.assertEqual(error["code"], code)
+                self.assertEqual(self.requests("IssueCreate"), [])
+
     def test_text_output(self):
         out, _ = self.run_cli("add", "--linear", "--team", "OPS", "--column", "Todo", "Fix it",
                               directory=self.plain)
