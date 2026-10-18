@@ -136,7 +136,7 @@ class IconTextTests(unittest.TestCase):
                     Console(file=output, width=width, color_system=None).print(widget.content)
                     first, *rest = output.getvalue().splitlines()
                     label = f"{ATTACHMENT} files" if style == "nerd" else "files"
-                    self.assertTrue(first.endswith(label), first)
+                    self.assertTrue(first.endswith(f"{label} t123"), first)
                     self.assertEqual(cell_len(first), width)
                     self.assertTrue(all(cell_len(line) <= width for line in rest))
                     self.assertIn(label, widget.plain)
@@ -163,7 +163,7 @@ class IconBoardTests(BoardTestCase):
                         label = f"{ATTACHMENT} files" if style == "nerd" else "files"
                         self.assertIn(label, widget.plain)
                         first = widget.render_line(0).text.rstrip()
-                        self.assertTrue(first.endswith(label), first)
+                        self.assertTrue(first.endswith(f"{label} {item.ref}"), first)
                         self.assertEqual(cell_len(first), widget.size.width)
                         await pilot.press("enter")
                         await settle(pilot)
@@ -179,7 +179,7 @@ class IconBoardTests(BoardTestCase):
                         self.store.edit(item.ref, body=["Updated details"])
                         await app.reload(item.ref)
                         await pilot.pause()
-                        self.assertIn("+1", app.query_one(".card").plain)
+                        self.assertIn("Updated details", app.query_one(".card").plain)
                         if style == "nerd":
                             self.assertIn(TYPE_ICONS["feature"], app.query_one(".card").plain)
                         self.store.edit(item.ref, body=[])
@@ -187,6 +187,7 @@ class IconBoardTests(BoardTestCase):
 
     async def test_round_tags_stay_independent_in_plain_mode(self):
         self.config.icon_style = "plain"
+        self.config.tag_style = "round"
         self.store.add(self.repo_path, "Ship it #api", "Backlog")
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:

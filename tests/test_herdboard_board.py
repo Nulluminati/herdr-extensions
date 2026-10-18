@@ -114,11 +114,11 @@ class RenderTests(BoardTestCase):
                 ["Backlog 2", "Todo 2/5", "In progress 0", "Review 1", "Done 1"],
             )
             plain = self.cards(app)
-            self.assertTrue(any(c.startswith("Compare tile suppliers\n\ue0b6research\ue0b4") and "+0" not in c for c in plain))
+            self.assertIn("Compare tile suppliers  t3m9\n research ", plain)
             multi = [c for c in plain if "Plan the lighting" in c]
             self.assertEqual(len(multi), 1)
-            self.assertIn("+3", multi[0])
-            self.assertNotIn("t3m9", " ".join(plain), "local card IDs stay off the board")
+            # A card without a block ID shows no ID; its first detail line is its description.
+            self.assertEqual(multi[0], "Plan the lighting\nSecond line of the same card")
             self.assertFalse(any("Old card" in c for c in plain))
             self.assertEqual(len(list(app.query(".column.completed"))), 1)
 
@@ -162,26 +162,28 @@ class RenderTests(BoardTestCase):
 
 
 class CardLookTests(BoardTestCase):
-    async def test_cards_do_not_show_local_ids(self):
+    async def test_cards_show_their_id_after_the_title(self):
         card = self.store.add(self.repo_path, "Write release notes", "Todo")
         app = self.make_app()
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
             text = [c for c in self.cards(app) if "Write release notes" in c][0]
-            self.assertNotIn(card.ref, text)
+            self.assertEqual(text, f"Write release notes  {card.ref}")
+            first = app.query_one(".card").render_line(0).text.rstrip()
+            self.assertTrue(first.endswith(card.ref), first)
 
     async def test_tags_are_colored_chips_and_leave_the_title(self):
-        self.store.add(self.repo_path, "Fix login #auth #web 📅 2026-11-01", "Todo")
+        card = self.store.add(self.repo_path, "Fix login #auth #web 📅 2026-11-01", "Todo")
         app = self.make_app()
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
             widget = app.query_one(".card")
             first_line = widget.plain.splitlines()[0]
-            self.assertEqual(first_line, "Fix login")
-            chips = [widget.rich_text.plain[span.start:span.end] for span in widget.rich_text.spans
+            self.assertEqual(first_line, f"Fix login  {card.ref}")
+            chips = [widget.rich_text.plain[span.start:span.end].strip() for span in widget.rich_text.spans
                      if " on " in str(span.style)]
             self.assertEqual(chips, ["auth", "web"])
-            self.assertIn("\ue0b6auth\ue0b4 \ue0b6web\ue0b4", widget.plain)
+            self.assertIn(" auth   web ", widget.plain)
             self.assertIn("Due Nov 1", widget.plain)
 
     async def test_block_tags_for_fonts_without_round_ends(self):
@@ -1309,11 +1311,13 @@ class ThemeTests(BoardTestCase):
             selected = app.query_one(".card.selected")
             beside = next(w for w in column.query(".card") if w.plain.startswith("beside"))
             elsewhere = next(w for w in app.query(".card") if w.plain.startswith("elsewhere"))
-            magenta, yellow, bright_black = 5, 3, 8
+            # Todo is the second column: its color is magenta.
+            magenta, default, bright_black = 5, -1, 8
+            self.assertEqual(column.styles.border_top[0], "heavy")
             self.assertEqual(column.styles.border_top[1].ansi, magenta)
             self.assertEqual(column.query_one(".column-header").styles.background.ansi, magenta)
             self.assertEqual(selected.styles.border_top[0], "heavy")
-            self.assertEqual(selected.styles.border_top[1].ansi, yellow)
+            self.assertEqual(selected.styles.border_top[1].ansi, default)
             # Cards outside the current column fade, so the eye goes to one column.
             self.assertEqual(elsewhere.styles.color.ansi, bright_black)
             self.assertNotEqual(beside.styles.color.ansi, bright_black)

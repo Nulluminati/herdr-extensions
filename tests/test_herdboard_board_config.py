@@ -170,7 +170,7 @@ class ConfigScreenTests(BoardTestCase):
             screen = await self.open_config(pilot)
             await pilot.press("tab", "enter", "down", "enter")
             self.assertEqual(screen.query_one("#config-icon-style").value, "nerd")
-            await pilot.press("tab", "enter", "down", "enter")
+            await pilot.press("tab", "enter", "down", "down", "enter")
             self.assertEqual(screen.query_one("#config-tag-style").value, "block")
             await pilot.press("ctrl+s")
             await settle(pilot)
@@ -238,7 +238,7 @@ class ConfigScreenTests(BoardTestCase):
             screen.query_one("#config-tag-style").value = "block"
             await pilot.press("escape")
             await settle(pilot)
-            self.assertEqual((self.config.icon_style, self.config.tag_style), ("plain", "round"))
+            self.assertEqual((self.config.icon_style, self.config.tag_style), ("plain", "outline"))
             self.assertFalse(app.config_file.exists())
 
     async def test_unchanged_display_settings_do_not_create_a_config_file(self):
@@ -351,7 +351,7 @@ class ConfigScreenTests(BoardTestCase):
     async def test_menu_can_disable_icons_and_restore_round_tags(self):
         self.config.icon_style = "nerd"
         self.config.tag_style = "block"
-        self.store.add(self.repo_path, "Ship it #type/bug #api", "Backlog")
+        item = self.store.add(self.repo_path, "Ship it #type/bug #api", "Backlog")
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
@@ -360,9 +360,30 @@ class ConfigScreenTests(BoardTestCase):
             screen.query_one("#config-tag-style").value = "round"
             await pilot.press("ctrl+s")
             await settle(pilot)
-            self.assertEqual(app.query_one(".card").plain, "Ship it\nbug \ue0b6api\ue0b4")
+            self.assertEqual(app.query_one(".card").plain, f"Ship it  {item.ref}\nbug \ue0b6api\ue0b4")
         config = load_config(app.config_file)
         self.assertEqual((config.icon_style, config.tag_style), ("plain", "round"))
+
+    async def test_card_style_and_outline_tags_save_and_redraw_the_cards(self):
+        self.store.add(self.repo_path, "Ship it #api", "Backlog", body=["Speed up the search"])
+        self.config.tag_style = "block"
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            self.assertEqual(screen.query_one("#config-card-style").value, "full")
+            rendered = "\n".join(strip.text for strip in screen._compositor.render_strips())
+            self.assertIn("Cards (all boards)", rendered)
+            screen.query_one("#config-card-style").value = "compact"
+            screen.query_one("#config-tag-style").value = "outline"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+            widget = app.query_one(".card")
+            self.assertTrue(widget.has_class("compact"))
+            self.assertNotIn("Speed up", widget.plain)
+        config = load_config(app.config_file)
+        self.assertEqual((config.card_style, config.tag_style), ("compact", "outline"))
 
     async def test_display_and_board_changes_save_together(self):
         app = self.make_app()

@@ -15,6 +15,7 @@ import zlib
 from typing import Callable
 
 from rich.cells import cell_len
+from rich.console import Group
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
@@ -36,7 +37,7 @@ from .linear_links import ProjectLink, with_link
 from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, plain_tags, split_title
-from .store import KEEP, TEMP_REF, BoardMeta, CardView, Store
+from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import start as start_module
 from .config import THINKING_LEVELS, save_display_config
 from . import merge as merge_module
@@ -110,6 +111,8 @@ ICONS = {
     "attachment": "\uf0c6",
     "branch": "\ue0a0",
     "pr": "\uf407",
+    "sub_cards": "\uf0ae",
+    "comments": "\uf086",
 }
 
 
@@ -177,18 +180,35 @@ class ColumnData:
     archive: bool = False
 
     @property
-    def header(self) -> str:
+    def count_label(self) -> str:
         count = len(self.cards)
-        return f"{self.name} {count}" if self.limit is None else f"{self.name} {count}/{self.limit}"
+        return f"{count}" if self.limit is None else f"{count}/{self.limit}"
+
+    @property
+    def header(self) -> str:
+        return f"{self.name} {self.count_label}"
 
 
 # Tag chip colors: terminal palette names, so ANSI themes use the terminal's own colors.
 CHIP_COLORS = ["blue", "magenta", "cyan", "green", "yellow", "bright_blue", "bright_magenta", "bright_cyan"]
+# The RGB that an outline tag's tint mixes, for each chip color: a terminal color has no RGB of its own.
+CHIP_RGB = {
+    "blue": (59, 142, 234), "magenta": (188, 63, 188), "cyan": (17, 168, 205), "green": (13, 188, 121),
+    "yellow": (229, 229, 16), "bright_blue": (59, 142, 234), "bright_magenta": (214, 112, 214),
+    "bright_cyan": (41, 184, 219),
+}
 
 
 def chip_color(tag: str) -> str:
     """The same tag always gets the same color."""
     return CHIP_COLORS[zlib.crc32(tag.casefold().encode()) % len(CHIP_COLORS)]
+
+
+def chip_tint(color: str, dark: bool = True) -> str:
+    """A faint tint of a chip color on a dark or a light background, as a hex color."""
+    base = (24, 24, 24) if dark else (250, 250, 250)
+    red, green, blue = (round(b + (c - b) * 0.22) for c, b in zip(CHIP_RGB[color], base))
+    return f"#{red:02x}{green:02x}{blue:02x}"
 
 
 def icon_label(key: str, label: str, icon_style: str) -> str:
@@ -225,12 +245,15 @@ def type_badge(kind: str, icon_style: str = "plain") -> Text:
 
 
 # Nerd Font half circles that round off a tag block.
-ROUND_LEFT, ROUND_RIGHT = "\ue0b6", "\ue0b4"
+ROUND_LEFT, ROUND_RIGHT = "", ""
 
 
-def tag_chip(tag: str, style: str) -> Text:
-    """A tag as a colored block, with round ends when `style` is "round"."""
+def tag_chip(tag: str, style: str, dark: bool = True) -> Text:
+    """A tag as a colored block: with round ends when `style` is "round", or as text in its color
+    on a faint tint of it when `style` is "outline"."""
     color = chip_color(tag)
+    if style == "outline":
+        return Text(f" {tag} ", style=f"{color} on {chip_tint(color, dark)}")
     if style == "round":
         chip = Text(ROUND_LEFT, style=color)
         chip.append(tag, style=f"black on {color}")
@@ -239,35 +262,149 @@ def tag_chip(tag: str, style: str) -> Text:
     return Text(f" {tag} ", style=f"black on {color}")
 
 
-def card_text(card: CardView, show_board: bool, tag_style: str = "round", icon_style: str = "plain") -> Text:
-    """A card as the board shows it: the title, then tag chips, the due date and notes."""
+# The icon before a card's title: not started, started, done. The icon takes the column color.
+CARD_ICONS = {"new": "○", "started": "●", "done": "✓"}
+# The icon before a column's name: the completed column, the start column, any other column.
+COLUMN_ICONS = {"done": "✓", "started": "●", "other": "○"}
+# How many colors the columns take in turn. The completed column is always green.
+COLUMN_COLORS = 5
+# Rows of a card's description line, at most.
+DESCRIPTION_ROWS = 2
+
+
+def column_class(index: int, column: ColumnData) -> str:
+    """The style class that gives a column its color, from its place on the board."""
+    if column.completed:
+        return "col-done"
+    if column.archive:
+        return "col-archive"
+    return f"col-{index % COLUMN_COLORS}"
+
+
+def card_state(card: CardView, done: bool) -> str:
+    """`done` in the completed column, `started` while a worktree or an agent works on the card."""
+    if done:
+        return "done"
+    if card.worktree or card.agent_review or card.pr_writing or card.planning:
+        return "started"
+    return "new"
+
+
+def card_description(card: CardView) -> str:
+    """The first detail line that is not a checklist item, without its bullet."""
+    for line in card.body:
+        line = _hold_indent(line).lstrip(" ")
+        if not line.strip() or CHECK_ITEM.match(line):
+            continue
+        bullet = BULLET_ITEM.match(line)
+        return (bullet.group("text") if bullet else line).strip()
+    return ""
+
+
+class ClampedText:
+    """Text wrapped to the given width and cut to `rows` rows, with an ellipsis when cut."""
+
+    def __init__(self, text: Text, rows: int):
+        self.text = text
+        self.rows = rows
+
+    def __rich_console__(self, console, options):
+        lines = self.text.wrap(console, options.max_width)
+        if len(lines) > self.rows:
+            lines = lines[:self.rows]
+            last = lines[-1]
+            last.rstrip()
+            last.truncate(max(options.max_width - 1, 0))
+            last.append("…")
+        text = Text("\n").join(lines)
+        text.no_wrap = True
+        yield text
+
+
+class ChipRow:
+    """Chips in rows that break only between two chips, so no chip splits over two rows."""
+
+    def __init__(self, chips: list[Text]):
+        self.chips = chips
+
+    def __rich_console__(self, console, options):
+        lines: list[Text] = []
+        for chip in self.chips:
+            if lines and lines[-1].cell_len + 1 + chip.cell_len <= options.max_width:
+                lines[-1].append(" ")
+                lines[-1].append_text(chip)
+            else:
+                lines.append(chip.copy())
+        text = Text("\n").join(lines)
+        text.no_wrap = True
+        text.overflow = "ellipsis"
+        yield text
+
+
+@dataclass
+class CardFace:
+    """A card's rows as the board shows them. Empty rows stay off the card."""
+
+    title: Text
+    corner: Text
+    description: Text
+    chips: list[Text]
+    count: Text
+    due: Text
+    status: Text
+
+    def lines(self) -> list[Text]:
+        title = self.title.copy()
+        if self.corner:
+            title.append("  ")
+            title.append_text(self.corner)
+        footer = self.count.copy()
+        if self.count and self.due:
+            footer.append("  ")
+        footer.append_text(self.due)
+        chips = Text(" ").join(self.chips)
+        return [line for line in (title, self.description, chips, footer, self.status) if line]
+
+    def text(self) -> Text:
+        return Text("\n").join(self.lines())
+
+
+def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
+              card_style: str = "full", done: bool = False, dark: bool = True) -> CardFace:
+    """A card's rows: the title with its state icon and ID, the description, the type and tags,
+    the sub-card count and due date, then herdboard's status of the card."""
     if card.source == "linear":
         title, tags, due = card.title, card.tags, card.due
     else:
         title, tags, due = split_title(card.title)
-    text = Text(title or card.title)
-    text.append(" ")
-    text.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
-    line = Text()
-    if card.type:
-        line.append_text(type_badge(card.type, icon_style))
-    for tag in plain_tags(tags):
-        if line:
-            line.append(" ")
-        line.append_text(tag_chip(tag, tag_style))
-    if due:
-        if line:
-            line.append(" ")
-        line.append_text(due_label(due, icon_style=icon_style))
+    muted = "dim strike" if done else ""
+    heading = Text(CARD_ICONS[card_state(card, done)], style=Style(meta={"card_icon": True}))
+    heading.append(" ")
+    heading.append(title or card.title, style=muted)
+    heading.append(" ")
+    heading.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
+    corner = Text(style="dim")
+    if card.has_attachments:
+        corner.append(icon_label("attachment", ATTACHMENT_MARK, icon_style))
+    # A card without a block ID has a reference that is only its place on the board.
+    if card.source == "linear" or not (TEMP_REF.match(card.ref) or ARCHIVE_REF.match(card.ref)):
+        if corner:
+            corner.append(" ")
+        corner.append(f"{LINEAR_MARK} {card.ref}" if card.source == "linear" else card.ref)
+    description = Text()
+    if card_style == "full":
+        description = Text(card_description(card), style="dim strike" if done else "dim")
+    chips = [type_badge(card.type, icon_style)] if card.type else []
+    chips += [tag_chip(tag, tag_style, dark) for tag in plain_tags(tags)]
+    count = Text()
+    if card.sub_cards:
+        count = Text(icon_label("sub_cards", f"{card.sub_cards[0]}/{card.sub_cards[1]} done", icon_style),
+                     style="dim")
     info = []
-    if card.source == "linear":
-        info.append(Text(f"{LINEAR_MARK} {card.ref}", style="dim"))
-        if card.pr:
-            info.append(Text(icon_label("pr", "PR", icon_style), style="bold"))
+    if card.source == "linear" and card.pr:
+        info.append(Text(icon_label("pr", "PR", icon_style), style="bold"))
     if show_board:
         info.append(Text(card.board, style="dim"))
-    if card.body:
-        info.append(Text(f"+{len(card.body)}", style="dim"))
     if card.worktree_removed:
         info.append(Text(icon_label("branch", "worktree removed", icon_style), style="bold yellow"))
     if card.pr_state:
@@ -283,37 +420,52 @@ def card_text(card: CardView, show_board: bool, tag_style: str = "round", icon_s
         info.append(Text(f"planning: {card.planning}", style="bold cyan"))
     if card.parent_title:
         info.append(Text(f"↳ {card.parent_title}", style="dim"))
-    if card.sub_cards:
-        info.append(Text(f"{card.sub_cards[0]}/{card.sub_cards[1]} done", style="dim"))
-    if info:
-        if line:
-            line.append("  ")
-        line.append_text(Text(" · ", style="dim").join(info))
-    if line:
-        text.append("\n")
-        text.append_text(line)
-    return text
+    return CardFace(heading, corner, description, chips, count,
+                    due_label(due, icon_style=icon_style) if due else Text(),
+                    Text(" · ", style="dim").join(info))
+
+
+def card_text(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
+              card_style: str = "full", done: bool = False) -> Text:
+    """A card's rows as one text, as the board shows them."""
+    return card_face(card, show_board, tag_style, icon_style, card_style, done).text()
+
+
+def _two_sided(left, right: Text) -> Table:
+    """One row with `left` taking the room and `right` at the right edge."""
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(justify="right", no_wrap=True)
+    grid.add_row(left, right)
+    return grid
 
 
 class CardWidget(Static):
     # A drag moves the card, so it must not also select text.
     ALLOW_SELECT = False
 
-    def __init__(self, card: CardView, show_board: bool, tag_style: str = "round", icon_style: str = "plain"):
+    def __init__(self, card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
+                 card_style: str = "full", done: bool = False, dark: bool = True):
         self.card = card
-        self.rich_text = card_text(card, show_board, tag_style, icon_style)
-        # The menu marker is not card text: `plain` keeps the title line without it.
-        title, newline, rest = self.rich_text.plain.partition("\n")
-        self.plain = title.removesuffix(f" {MENU_MARK}") + newline + rest
-        content = self.rich_text
-        if card.has_attachments:
-            content = Table.grid(expand=True)
-            content.add_column(ratio=1)
-            content.add_column(justify="right", no_wrap=True)
-            mark = icon_label("attachment", ATTACHMENT_MARK, icon_style)
-            content.add_row(self.rich_text, Text(mark))
-            self.plain += f" {mark}"
-        super().__init__(content, classes="card")
+        face = card_face(card, show_board, tag_style, icon_style, card_style, done, dark)
+        self.rich_text = face.text()
+        # The state icon and the menu marker are not card text: `plain` keeps the title line without them.
+        first, newline, rest = self.rich_text.plain.partition("\n")
+        icon, _, first = first.partition(" ")
+        self.plain = first.replace(f" {MENU_MARK}", "", 1) + newline + rest
+        # What a redraw compares: the text with its styles and the classes.
+        classes = "card" + (" compact" if card_style == "compact" else "") + (" done" if done else "")
+        self.key = (self.rich_text.plain, tuple(self.rich_text.spans), classes)
+        rows = [_two_sided(face.title, face.corner) if face.corner else face.title]
+        if face.description:
+            rows.append(ClampedText(face.description, DESCRIPTION_ROWS))
+        if face.chips:
+            rows.append(ChipRow(face.chips))
+        if face.count or face.due:
+            rows.append(_two_sided(face.count, face.due))
+        if face.status:
+            rows.append(face.status)
+        super().__init__(Group(*rows), classes=classes)
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:
@@ -337,9 +489,26 @@ class CardWidget(Static):
 
 
 class ColumnHeader(Static):
-    def __init__(self, column: ColumnData):
+    """The column's icon and name at the left, its card count at the right, in the column color."""
+
+    def __init__(self, column: ColumnData, start_column: str | None = None):
         self.plain = column.header
-        super().__init__(Text(column.header), classes="column-header")
+        super().__init__(self._content(column, start_column), classes="column-header")
+
+    @staticmethod
+    def _content(column: ColumnData, start_column: str | None) -> Table:
+        if column.completed:
+            icon = COLUMN_ICONS["done"]
+        elif start_column and column.name.casefold() == start_column.casefold():
+            icon = COLUMN_ICONS["started"]
+        else:
+            icon = COLUMN_ICONS["other"]
+        return _two_sided(Text(f"{icon} {column.name}"), Text(column.count_label))
+
+    def show(self, column: ColumnData, start_column: str | None) -> None:
+        if self.plain != column.header:
+            self.plain = column.header
+            self.update(self._content(column, start_column))
 
 
 class ModalBase(ModalScreen):
@@ -580,7 +749,7 @@ class DetailScreen(ModalBase):
         for tag in tags:
             if chips:
                 chips.append(" ")
-            chips.append_text(tag_chip(tag, self.tag_style))
+            chips.append_text(tag_chip(tag, self.tag_style, self.app.current_theme.dark))
         if due:
             if chips:
                 chips.append("  ")
@@ -1233,7 +1402,7 @@ class ConfigScreen(ModalBase):
     AUTO_FOCUS = "#config-merge"
 
     def __init__(self, path: Path | None, meta: BoardMeta, default_merge: str, can_link: bool,
-                 icon_style: str = "plain", tag_style: str = "round"):
+                 icon_style: str = "plain", tag_style: str = "outline", card_style: str = "full"):
         super().__init__()
         self.path = path
         self.meta = meta
@@ -1241,6 +1410,7 @@ class ConfigScreen(ModalBase):
         self.can_link = can_link
         self.icon_style = icon_style
         self.tag_style = tag_style
+        self.card_style = card_style
         if path is None:
             self.AUTO_FOCUS = "#config-icon-style"
         self.removed: set[str] = set()
@@ -1285,9 +1455,14 @@ class ConfigScreen(ModalBase):
             yield self._titled(Select([("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
                                       value=self.icon_style, allow_blank=False,
                                       id="config-icon-style"), "Icons (all boards)")
-            yield self._titled(Select([("round: Nerd Font ends", "round"), ("block: square ends", "block")],
+            yield self._titled(Select([("outline: text on a tint", "outline"), ("round: Nerd Font ends", "round"),
+                                       ("block: square ends", "block")],
                                       value=self.tag_style, allow_blank=False,
                                       id="config-tag-style"), "Tags (all boards)")
+            yield self._titled(Select([("full: a border and a description", "full"),
+                                       ("compact: title, tags and status", "compact")],
+                                      value=self.card_style, allow_blank=False,
+                                      id="config-card-style"), "Cards (all boards)")
             yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
             if self.meta.links:
                 yield self._titled(OptionList(*[self._link_label(link) for link in self.meta.links],
@@ -1337,7 +1512,7 @@ class ConfigScreen(ModalBase):
     def action_save(self) -> None:
         merge = self.query_one("#config-merge", Select).value if self.path else "default"
         display = {}
-        for key in ("icon_style", "tag_style"):
+        for key in ("icon_style", "tag_style", "card_style"):
             value = self.query_one(f"#config-{key.replace('_', '-')}", Select).value
             if value != getattr(self, key):
                 display[key] = value
@@ -2247,6 +2422,29 @@ class PullRequestsScreen(Screen):
         threading.Thread(target=watch_opener, args=(self.app, pr.url, opener, process), daemon=True).start()
 
 
+# The column colors in turn, as (color, ANSI color), and the completed column's green.
+COLUMN_PALETTE = [("#4ea8de", "ansi_blue"), ("#d670b8", "ansi_magenta"), ("#e3b341", "ansi_yellow"),
+                  ("#3fb8c9", "ansi_cyan"), ("#7bc96f", "ansi_green")]
+DONE_COLORS = ("$success", "ansi_green")
+
+
+def column_css() -> str:
+    """Each column color on the column border, its header and its cards. The current column has a
+    heavy border and a filled header."""
+    rules = []
+    named = [(f"col-{index}", colors) for index, colors in enumerate(COLUMN_PALETTE[:COLUMN_COLORS])]
+    for name, (color, ansi) in named + [("col-done", DONE_COLORS)]:
+        for prefix, value, dark in (("", color, "$background"), ("App:ansi ", ansi, "ansi_black")):
+            rules += [f"{prefix}.{name} {{ border: round {value}; }}",
+                      f"{prefix}.{name} .column-header {{ color: {value}; }}",
+                      f"{prefix}.{name} .card {{ border: round {value}; }}",
+                      f"{prefix}.{name}.current {{ border: heavy {value}; }}",
+                      f"{prefix}.{name}.current .column-header {{ background: {value}; color: {dark}; }}"]
+    rules += ["App:ansi .col-archive .card { border: round ansi_bright_black; }",
+              ".col-archive .column-header { color: $text-muted; }"]
+    return "\n".join(rules)
+
+
 class CellMouseDriver(LinuxDriver):
     """Textual's terminal driver without pixel mouse reports (mode 1016).
 
@@ -2274,9 +2472,7 @@ class HerdboardApp(App):
     #columns { height: 1fr; overflow-x: auto; overflow-y: hidden; }
     #columns { scrollbar-size-horizontal: 1; }
     .column { width: 1fr; min-width: 24; height: 100%; border: round $surface-lighten-2; }
-    .column.completed { border: round $success; }
-    .column-header { text-style: bold; padding: 0 1; background: $surface; }
-    .column.completed .column-header { color: $success; }
+    .column-header { text-style: bold; padding: 0 1; }
     .cards { height: 1fr; scrollbar-size-vertical: 1; }
     #filter { border: round $primary; }
     .bottom-dock { dock: bottom; height: auto; }
@@ -2297,9 +2493,7 @@ class HerdboardApp(App):
     /* Terminals that draw bold text in bright colors turn bold black into grey, so the dark text
        on the bars and the current tab is not bold in the ANSI themes. */
     App:ansi #tab-bar .tab.active .tab-label { background: $primary; color: ansi_black; text-style: none; }
-    .card { padding: 0 1; margin: 0 0 1 0; background: $panel; height: auto; }
-    .card.selected { background: $accent; color: $text; }
-    .column.current { border: round $accent; }
+    .card { padding: 0 1; height: auto; border: round $surface-lighten-2; }
     .dialog { width: 70; max-width: 90%; height: auto; max-height: 80%; padding: 1 2;
               border: round $accent; background: $surface; }
     /* A Label is as wide as its text by default, so a long line runs past the dialog edge. */
@@ -2332,9 +2526,13 @@ class HerdboardApp(App):
     #card-type:focus-within { border: round $primary; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
-    #config-merge, #config-icon-style, #config-tag-style { border: round $surface-lighten-2; height: auto; }
-    #config-merge > SelectCurrent, #config-icon-style > SelectCurrent, #config-tag-style > SelectCurrent { border: none; }
-    #config-merge:focus-within, #config-icon-style:focus-within, #config-tag-style:focus-within { border: round $primary; }
+    #config-merge, #config-icon-style, #config-tag-style, #config-card-style {
+        border: round $surface-lighten-2; height: auto;
+    }
+    #config-merge > SelectCurrent, #config-icon-style > SelectCurrent, #config-tag-style > SelectCurrent,
+    #config-card-style > SelectCurrent { border: none; }
+    #config-merge:focus-within, #config-icon-style:focus-within, #config-tag-style:focus-within,
+    #config-card-style:focus-within { border: round $primary; }
     .config, #config-links, #config-pins { scrollbar-size-vertical: 1; }
     #config-links, #config-pins { height: auto; max-height: 6; border: round $surface-lighten-2; }
     #config-links:focus, #config-pins:focus { border: round $primary; }
@@ -2357,22 +2555,24 @@ class HerdboardApp(App):
     }
     App:ansi #pr-list > .datatable--cursor { background: ansi_default; text-style: bold reverse; }
     #config-labels { width: 1fr; }
-    /* The ANSI themes paint cards in the terminal background, so a border keeps them apart. */
-    App:ansi .card { border: round ansi_bright_black; margin: 0; }
     App:ansi .column { border: round ansi_bright_black; }
-    App:ansi .column.completed { border: round $success; }
+    /* Cards outside the current column fade in the ANSI themes, so the eye goes to one column. */
+    App:ansi .column .card { color: ansi_bright_black; border: round ansi_bright_black; }
+    App:ansi .column.current .card { color: ansi_default; }
+    """ + column_css() + """
     .column.archive { border: dashed $surface-lighten-2; }
     App:ansi .column.archive { border: dashed ansi_bright_black; }
     .column.archive.current { border: dashed $accent; }
     App:ansi .column.archive.current { border: dashed ansi_magenta; }
-    /* In the ANSI themes the accent and the done color are both green, and the title bar is blue.
-       The current column uses magenta and the selected card yellow, so each has its own color.
-       Cards outside the current column fade. */
-    App:ansi .column .card { color: ansi_bright_black; }
-    App:ansi .column.current { border: round ansi_magenta; }
-    App:ansi .column.current .column-header { background: ansi_magenta; color: ansi_black; }
-    App:ansi .column.current .card { color: ansi_default; }
-    App:ansi .card.selected { background: ansi_default; border: heavy ansi_yellow; text-style: bold; }
+    /* A compact card has no border of its own. The ANSI themes paint cards in the terminal
+       background, so there a border keeps them apart. */
+    .column .card.compact { border: none; margin: 0 0 1 0; background: $panel; }
+    App:ansi .column .card.compact { border: round ansi_bright_black; margin: 0; }
+    .column .card.done { color: $text-muted; }
+    /* Every column has its color, so the selected card has a heavy border in the text color. */
+    .column .card.selected { border: heavy $foreground; background: $accent 20%; }
+    .column .card.compact.selected { border: none; background: $accent; color: $text; }
+    App:ansi .column .card.selected { background: ansi_default; border: heavy ansi_default; text-style: bold; }
     App:ansi #title-bar, App:ansi #pr-title { color: ansi_black; text-style: none; }
     App:ansi .dialog { border: round $primary; }
     App:ansi .detail-block { border: round ansi_bright_black; }
@@ -2732,35 +2932,39 @@ class HerdboardApp(App):
         # of columns whose cards changed, in one screen update.
         with self.batch_update():
             if [getattr(w, "column_name", None) for w in existing] == [c.name for c in self.columns]:
-                for widget, column in zip(existing, self.columns):
-                    await self._update_column(widget, column, show_board)
+                for index, (widget, column) in enumerate(zip(existing, self.columns)):
+                    await self._update_column(widget, index, column, show_board)
             else:
                 await container.remove_children()
-                await container.mount_all([self._column_widget(c, show_board) for c in self.columns])
+                await container.mount_all([self._column_widget(index, c, show_board)
+                                           for index, c in enumerate(self.columns)])
             self._show_selection()
 
-    def _column_widget(self, column: ColumnData, show_board: bool) -> Vertical:
-        classes = "column" + (" completed" if column.completed else "") + (" archive" if column.archive else "")
-        cards = VerticalScroll(
-            *[CardWidget(card, show_board, self.store.config.tag_style, self.store.config.icon_style)
-              for card in column.cards], classes="cards", can_focus=False
-        )
-        widget = Vertical(ColumnHeader(column), cards, classes=classes)
+    def _card_widgets(self, column: ColumnData, show_board: bool) -> list[CardWidget]:
+        config = self.store.config
+        dark = self.current_theme.dark
+        return [CardWidget(card, show_board, config.tag_style, config.icon_style, config.card_style,
+                           column.completed, dark) for card in column.cards]
+
+    def _column_widget(self, index: int, column: ColumnData, show_board: bool) -> Vertical:
+        classes = ("column " + column_class(index, column) + (" completed" if column.completed else "")
+                   + (" archive" if column.archive else ""))
+        cards = VerticalScroll(*self._card_widgets(column, show_board), classes="cards", can_focus=False)
+        widget = Vertical(ColumnHeader(column, self.store.config.start_column), cards, classes=classes)
         widget.column_name = column.name
         return widget
 
-    async def _update_column(self, widget: Vertical, column: ColumnData, show_board: bool) -> None:
+    async def _update_column(self, widget: Vertical, index: int, column: ColumnData, show_board: bool) -> None:
         widget.set_class(column.completed, "completed")
         widget.set_class(column.archive, "archive")
-        header = widget.query_one(ColumnHeader)
-        if header.plain != column.header:
-            header.plain = column.header
-            header.update(Text(column.header))
+        for name in [name for name in widget.classes if name.startswith("col-")]:
+            widget.remove_class(name)
+        widget.add_class(column_class(index, column))
+        widget.query_one(ColumnHeader).show(column, self.store.config.start_column)
         holder = widget.query_one(".cards", VerticalScroll)
         old = list(holder.query(CardWidget))
-        new = [CardWidget(card, show_board, self.store.config.tag_style, self.store.config.icon_style)
-               for card in column.cards]
-        if [w.plain for w in old] == [w.plain for w in new]:
+        new = self._card_widgets(column, show_board)
+        if [w.key for w in old] == [w.key for w in new]:
             for widget_, card in zip(old, column.cards):
                 widget_.card = card
             return
@@ -3651,7 +3855,8 @@ class HerdboardApp(App):
             return
         self.push_screen(ConfigScreen(path, meta, self.store.config.merge,
                                       path is not None and self.resolve_link is not None,
-                                      self.store.config.icon_style, self.store.config.tag_style))
+                                      self.store.config.icon_style, self.store.config.tag_style,
+                                      self.store.config.card_style))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
                       project: str, labels: list[str], removed_pins: set[str] = frozenset(),

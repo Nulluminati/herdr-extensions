@@ -29,6 +29,8 @@ THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 MERGE_MODES = ("local", "pr")
 # The names that a card's `#type/<name>` tag takes in `add --type`, `edit --type` and the board.
 DEFAULT_TYPES = ["bug", "feature", "chore", "docs", "refactor"]
+TAG_STYLES = ("outline", "round", "block")
+CARD_STYLES = ("full", "compact")
 
 
 @dataclass
@@ -73,8 +75,11 @@ class Config:
     merge: str = "local"
     # A Textual theme name. The ANSI themes use the terminal's own colors.
     theme: str = "ansi-dark"
-    # "round" draws tag ends with Nerd Font half circles; "block" needs no special font.
-    tag_style: str = "round"
+    # "outline" draws tag text in its color on a faint tint; "round" draws tag ends with Nerd Font
+    # half circles; "block" needs no special font.
+    tag_style: str = "outline"
+    # "full" draws each card in its own border with a description line; "compact" leaves both out.
+    card_style: str = "full"
     # "plain" uses text labels; "nerd" adds Nerd Font icons beside them.
     icon_style: str = "plain"
     types: list[str] = field(default_factory=lambda: list(DEFAULT_TYPES))
@@ -109,14 +114,15 @@ def default_config_path() -> Path:
 
 
 def save_display_config(path: Path | None = None, *, icon_style: str | None = None,
-                        tag_style: str | None = None) -> None:
+                        tag_style: str | None = None, card_style: str | None = None) -> None:
     """Save only changed display settings, with comments, permissions and other values intact."""
     changes = {}
     for key, value, choices in (("icon_style", icon_style, ("plain", "nerd")),
-                                ("tag_style", tag_style, ("round", "block"))):
+                                ("tag_style", tag_style, TAG_STYLES),
+                                ("card_style", card_style, CARD_STYLES)):
         if value is not None:
             if value not in choices:
-                raise HerdboardError(f"{key} must be {' or '.join(choices)}")
+                raise HerdboardError(f"{key} must be {', '.join(choices[:-1])} or {choices[-1]}")
             changes[key] = value
     if not changes:
         return
@@ -273,9 +279,14 @@ def load_config(path: Path | None = None) -> Config:
         config.merge = merge
     tag_style = _string(path, data, "tag_style")
     if tag_style is not None:
-        if tag_style not in ("round", "block"):
-            raise HerdboardError(f"{path}: tag_style must be round or block")
+        if tag_style not in TAG_STYLES:
+            raise HerdboardError(f"{path}: tag_style must be outline, round or block")
         config.tag_style = tag_style
+    card_style = _string(path, data, "card_style")
+    if card_style is not None:
+        if card_style not in CARD_STYLES:
+            raise HerdboardError(f"{path}: card_style must be full or compact")
+        config.card_style = card_style
     icon_style = _string(path, data, "icon_style")
     if icon_style is not None:
         if icon_style not in ("plain", "nerd"):

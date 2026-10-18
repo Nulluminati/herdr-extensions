@@ -48,17 +48,33 @@ class ConfigTest(unittest.TestCase):
                 with self.assertRaises(HerdboardError):
                     load_config(path)
 
-    def test_tag_style_defaults_to_round(self):
-        self.assertEqual(load_config().tag_style, "round")
+    def test_tag_style_defaults_to_outline(self):
+        self.assertEqual(load_config().tag_style, "outline")
 
-    def test_tag_style_block(self):
-        path = self.write(self.dir / "a.toml", 'tag_style = "block"\n')
-        self.assertEqual(load_config(path).tag_style, "block")
+    def test_tag_style_block_round_and_outline(self):
+        for style in ("block", "round", "outline"):
+            with self.subTest(style=style):
+                path = self.write(self.dir / "a.toml", f'tag_style = "{style}"\n')
+                self.assertEqual(load_config(path).tag_style, style)
 
     def test_tag_style_must_be_known(self):
         path = self.write(self.dir / "a.toml", 'tag_style = "square"\n')
         with self.assertRaises(HerdboardError):
             load_config(path)
+
+    def test_card_style_defaults_to_full(self):
+        self.assertEqual(load_config().card_style, "full")
+
+    def test_card_style_compact(self):
+        path = self.write(self.dir / "a.toml", 'card_style = "compact"\n')
+        self.assertEqual(load_config(path).card_style, "compact")
+
+    def test_card_style_must_be_known(self):
+        for value in ('"small"', '""', '3'):
+            with self.subTest(value=value):
+                path = self.write(self.dir / "a.toml", f"card_style = {value}\n")
+                with self.assertRaisesRegex(HerdboardError, "card_style"):
+                    load_config(path)
 
     def test_icon_style_defaults_to_plain(self):
         self.assertEqual(load_config().icon_style, "plain")
@@ -109,6 +125,13 @@ class ConfigTest(unittest.TestCase):
         save_display_config(path, tag_style="round")
         self.assertEqual(load_config(path).icon_style, "nerd")
 
+    def test_save_display_writes_card_style_and_outline_tags(self):
+        from herdboard.config import save_display_config
+        path = self.dir / "a.toml"
+        save_display_config(path, card_style="compact", tag_style="outline")
+        config = load_config(path)
+        self.assertEqual((config.card_style, config.tag_style), ("compact", "outline"))
+
     def test_save_display_uses_the_config_environment_path(self):
         from herdboard.config import save_display_config
         path = self.dir / "env.toml"
@@ -119,7 +142,8 @@ class ConfigTest(unittest.TestCase):
     def test_save_display_rejects_unknown_values_before_creating_files(self):
         from herdboard.config import save_display_config
         path = self.dir / "settings" / "config.toml"
-        for values in ({"icon_style": "auto"}, {"tag_style": "square"}, {"icon_style": 1}):
+        for values in ({"icon_style": "auto"}, {"tag_style": "square"}, {"icon_style": 1},
+                       {"card_style": "small"}):
             with self.subTest(values=values):
                 with self.assertRaises(HerdboardError):
                     save_display_config(path, **values)
