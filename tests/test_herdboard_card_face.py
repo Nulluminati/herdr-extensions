@@ -108,6 +108,16 @@ class CardFaceTests(unittest.TestCase):
         lines = rendered(board.CardWidget(item, False), width=24)
         self.assertEqual([line.rstrip() for line in lines[1:]], ["feature  enhancement", " low   documentation"])
 
+    def test_tags_after_the_type_badge_do_not_take_its_bold(self):
+        item = card(title="Ship it #api #low #documentation", type="feature")
+        widget = board.CardWidget(item, False)
+        output = Console(width=24, color_system=None, file=StringIO())
+        row = next(r for r in widget.content.renderables if isinstance(r, board.ChipRow))
+        for line in output.render_lines(row, output.options.update(width=24)):
+            for segment in line:
+                if segment.text.strip() and segment.text.strip() != "feature":
+                    self.assertFalse(segment.style and segment.style.bold, segment)
+
     def test_outline_tags_are_text_in_their_color_on_a_tint(self):
         chip = board.tag_chip("api", "outline")
         color = board.chip_color("api")

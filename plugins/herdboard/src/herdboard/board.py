@@ -362,7 +362,9 @@ class ChipRow:
                 lines[-1].append(" ")
                 lines[-1].append_text(chip)
             else:
-                lines.append(chip.copy())
+                # A new row, not a copy of the chip: a copy's style would carry on to the next chips.
+                lines.append(Text())
+                lines[-1].append_text(chip)
         text = Text("\n").join(lines)
         text.no_wrap = True
         text.overflow = "ellipsis"
