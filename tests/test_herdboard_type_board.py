@@ -13,25 +13,25 @@ from test_herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
 
 class TypeLookTests(BoardTestCase):
     async def test_a_typed_card_shows_its_type_before_the_tags(self):
-        self.store.add(self.repo_path, "Fix login #type/bug #auth", "Todo")
+        card = self.store.add(self.repo_path, "Fix login #type/bug #auth", "Todo")
         app = self.make_app()
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
             widget = app.query_one(".card")
             lines = widget.plain.splitlines()
-            self.assertEqual(lines[0], "Fix login")
+            self.assertEqual(lines[0], f"Fix login  {card.ref}")
             self.assertTrue(lines[1].startswith("bug "), lines[1])
             self.assertNotIn("type/bug", widget.plain)
-            chips = [widget.rich_text.plain[span.start:span.end] for span in widget.rich_text.spans
+            chips = [widget.rich_text.plain[span.start:span.end].strip() for span in widget.rich_text.spans
                      if " on " in str(span.style)]
             self.assertEqual(chips, ["auth"])
 
     async def test_a_card_without_a_type_shows_no_badge(self):
-        self.store.add(self.repo_path, "Fix login", "Todo")
+        card = self.store.add(self.repo_path, "Fix login", "Todo")
         app = self.make_app()
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
-            self.assertEqual(app.query_one(".card").plain, "Fix login")
+            self.assertEqual(app.query_one(".card").plain, f"Fix login  {card.ref}")
 
     async def test_the_detail_shows_the_type(self):
         self.store.add(self.repo_path, "Fix login #type/feature #auth", "Todo")

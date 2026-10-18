@@ -15,7 +15,6 @@ import time
 import zlib
 from typing import Callable
 
-from rich.cells import cell_len
 from rich.console import Group
 from rich.style import Style
 from rich.table import Table
@@ -27,9 +26,10 @@ from textual.containers import Container, Horizontal, HorizontalScroll, Vertical
 from textual._context import NoActiveAppError
 from textual.driver import Driver
 from textual.errors import NoWidget
+from textual.message import Message
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
-from textual.widgets import DataTable, Input, Label, Markdown, OptionList, Select, Static, TextArea
+from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from . import activity, attachments, pr_reviews
@@ -89,7 +89,6 @@ PR_STATES = {
     "issue": ("", "#", ""),
     "github": ("", "", "bold"),
 }
-PR_TITLE_MIN = 24
 # At most this many labels follow a title in the list; the details show them all.
 PR_LIST_LABELS = 2
 DETAIL_LOG_ENTRIES = 10
@@ -114,7 +113,7 @@ ICONS = {
     "branch": "\ue0a0",
     "pr": "\uf407",
     "sub_cards": "\uf0ae",
-    "comments": "\uf086",
+    "comments": "\uf27b",
 }
 
 
@@ -1800,53 +1799,143 @@ def pr_size_cell(pr: pr_reviews.PullRequest) -> Text:
     return text
 
 
-def pr_title_cell(pr: pr_reviews.PullRequest, width: int) -> Text:
-    """The title, cut to fit beside its first labels, and padded to `width` so the columns fill
-    the table."""
-    chips = [label_chip(label) for label in pr.labels[:PR_LIST_LABELS]]
-    if len(pr.labels) > PR_LIST_LABELS:
-        chips.append(Text(f"+{len(pr.labels) - PR_LIST_LABELS}", style="dim"))
-    room = width - sum(len(chip.plain) + 1 for chip in chips)
-    room = max(room, min(width, PR_TITLE_MIN // 2))
-    title = pr.title if len(pr.title) <= room else pr.title[:room - 1] + "…"
-    text = Text(title, style="dim" if pr.draft else "")
-    for chip in chips:
+def pr_title_line(pr: pr_reviews.PullRequest) -> Text:
+    """The title, then its first labels. The row cuts the line to fit."""
+    text = Text(pr.title, style="dim" if pr.draft else "bold")
+    for label in pr.labels[:PR_LIST_LABELS]:
         text.append(" ")
-        text.append_text(chip)
-    text.pad_right(width - text.cell_len)
+        text.append_text(label_chip(label))
+    if len(pr.labels) > PR_LIST_LABELS:
+        text.append(f" +{len(pr.labels) - PR_LIST_LABELS}", style="dim")
     return text
 
 
-PR_COLUMNS = ["", "PR", "Title", "Author", "Size", "CI", "GitHub review", "Agent review (local)", "Notes"]
-# The cells on each side of a column in the list, so short columns such as the counts stay apart.
-PR_CELL_PADDING = 2
+def ago(stamp: str, now: datetime | None = None) -> str:
+    """How long ago a GitHub time was: `5 min ago`, `3 hours ago`, `2 days ago`; "" when unknown."""
+    try:
+        then = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    now = now or datetime.now(then.tzinfo)
+    seconds = max(0, int((now - then).total_seconds()))
+    for size, unit in ((7 * 86400, "week"), (86400, "day"), (3600, "hour"), (60, "min")):
+        if seconds >= size:
+            count = seconds // size
+            return f"{count} {unit}{'' if count == 1 or unit == 'min' else 's'} ago"
+    return "just now"
 
 
-def pr_cells(pr: pr_reviews.PullRequest, icon_style: str, title_width: int) -> list[Text]:
+# The parts of a pull request row, in the order that `PullRequestsScreen.rows` gives them.
+PR_FIELDS = ["", "PR", "Title", "Author", "Size", "CI", "GitHub review", "Agent review (local)", "Notes",
+             "Comments", "Branch", "Updated"]
+
+
+def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None = None) -> list[Text]:
+    """Each part of a pull request row, as `PR_FIELDS` names them."""
     state = "draft" if pr.draft else "open"
-    notes = Text(f"{pr.notes} {pr_icon('notes', icon_style)}".rstrip(), justify="right") \
-        if pr.notes else Text("")
+    notes = Text(f"{pr.notes} {pr_icon('notes', icon_style)}".rstrip()) if pr.notes else Text("")
+    comments = Text(icon_label("comments", f"{pr.comments} comments", icon_style), style="dim")
+    branch = Text(icon_label("branch", pr.head_branch, icon_style), style="cyan")
+    if pr.base_branch:
+        branch.append(f" → {pr.base_branch}", style="dim")
+    updated = ago(pr.updated, now)
     return [Text(pr_icon(state, icon_style), style=PR_STATES[state][2]),
-            Text(f"#{pr.number}", style="dim"),
-            pr_title_cell(pr, title_width),
+            Text(f"#{pr.number}", style="bold"),
+            pr_title_line(pr),
             Text(pr.author, style="bold cyan" if pr.mine else ""),
             pr_size_cell(pr),
             pr_ci_cell(pr, icon_style),
             pr_github_cell(pr, icon_style),
             pr_agent_cell(pr, icon_style),
-            notes]
+            notes,
+            comments,
+            branch,
+            Text(f"updated {updated}" if updated else "", style="dim")]
 
 
-class PullRequestTable(DataTable):
-    """The pull request list. One click on a row selects it, as enter does, so a click opens the details."""
+def pr_row_content(fields: list[Text]) -> Table:
+    """A pull request in three rows: the number and title, with the author, size and branch under it.
+    At the right: CI, the reviews, the comments and notes, and when it was updated."""
+    icon, number, title, author, size, ci, github, agent, notes, comments, branch, updated = fields
+    grid = Table.grid(expand=True, padding=(0, 2))
+    grid.add_column(no_wrap=True, width=7)
+    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
+    # Fixed widths, so the parts line up from row to row.
+    grid.add_column(no_wrap=True, width=10, overflow="ellipsis")
+    grid.add_column(no_wrap=True, width=26, overflow="ellipsis")
+    grid.add_column(no_wrap=True, width=20, overflow="ellipsis")
+    who = author.copy()
+    if size:
+        who.append("  ")
+        who.append_text(size)
+    grid.add_row(Text.assemble(icon, " ", number), title, ci, github, comments)
+    grid.add_row(Text(""), who, Text(""), agent, notes)
+    grid.add_row(Text(""), branch, Text(""), Text(""), updated)
+    return grid
 
-    async def _on_click(self, event: events.Click) -> None:
-        before = self.cursor_coordinate
-        await super()._on_click(event)
-        row = event.style.meta.get("row")
-        # DataTable selects only a click on the row that is already highlighted.
-        if isinstance(row, int) and row >= 0 and self.cursor_coordinate != before:
-            self._post_selected_message()
+
+class PullRequestRow(Static):
+    """One pull request: a bordered box in the color of its CI state."""
+
+    # A click opens the details, so it must not also select text.
+    ALLOW_SELECT = False
+
+    def __init__(self, index: int, pr: pr_reviews.PullRequest, fields: list[Text]):
+        super().__init__(pr_row_content(fields), classes=f"pr-row ci-{pr.ci or 'none'}")
+        self.index = index
+        self.fields = fields
+
+    def show(self, pr: pr_reviews.PullRequest, fields: list[Text]) -> None:
+        for name in [name for name in self.classes if name.startswith("ci-")]:
+            self.remove_class(name)
+        self.add_class(f"ci-{pr.ci or 'none'}")
+        self.fields = fields
+        self.update(pr_row_content(fields))
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        self.parent.select(self.index, open_details=True)
+
+
+class PullRequestList(VerticalScroll, can_focus=True):
+    """The pull request rows, with one selected row. One click on a row selects it and, as enter does,
+    opens its details."""
+
+    class Selected(Message):
+        """A click chose a row."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cursor_row = 0
+
+    @property
+    def row_count(self) -> int:
+        return len(self.query(PullRequestRow))
+
+    async def show(self, prs: list[pr_reviews.PullRequest], rows: list[list[Text]]) -> None:
+        """Show the rows. Rows for the same pull requests are updated in place, so the scroll stays."""
+        widgets = list(self.query(PullRequestRow))
+        if len(widgets) == len(prs):
+            for widget, pr, fields in zip(widgets, prs, rows):
+                widget.show(pr, fields)
+        else:
+            await self.remove_children()
+            await self.mount_all([PullRequestRow(index, pr, fields)
+                                  for index, (pr, fields) in enumerate(zip(prs, rows))])
+
+    def move_cursor(self, row: int, scroll: bool = True) -> None:
+        widgets = list(self.query(PullRequestRow))
+        self.cursor_row = max(0, min(row, len(widgets) - 1)) if widgets else 0
+        for index, widget in enumerate(widgets):
+            widget.set_class(index == self.cursor_row, "selected")
+        if scroll and widgets:
+            self.call_after_refresh(widgets[self.cursor_row].scroll_visible, animate=False)
+
+    def select(self, index: int, open_details: bool = False) -> None:
+        self.focus()
+        self.move_cursor(index)
+        if open_details:
+            self.post_message(self.Selected())
 
 
 def check_order(check: dict) -> int:
@@ -2121,11 +2210,12 @@ class PullRequestsScreen(Screen):
     def compose(self) -> ComposeResult:
         yield HeaderBar("Pull requests", self.app.view)
         yield TabBar("prs")
-        table = PullRequestTable(id="pr-list", cursor_type="row", zebra_stripes=True, cell_padding=PR_CELL_PADDING)
-        table.add_columns(*PR_COLUMNS)
-        yield table
+        repo = Static("", id="pr-repo")
+        repo.display = False
+        yield repo
         status = Static("Reading GitHub…", id="pr-status")
         yield status
+        yield PullRequestList(id="pr-list")
         search = Input(placeholder="GitHub search: words, author:NAME, draft:true, review-requested:@me · "
                                    "enter searches · escape cancels", id="pr-search")
         search.display = False
@@ -2136,7 +2226,7 @@ class PullRequestsScreen(Screen):
     def on_mount(self) -> None:
         self.action_load()
         self.timer = self.set_interval(PR_SECONDS, self.action_load)
-        self.query_one("#pr-list", PullRequestTable).focus()
+        self.query_one("#pr-list", PullRequestList).focus()
 
     def on_screen_suspend(self) -> None:
         # The board shows: no GitHub reads in the background.
@@ -2152,15 +2242,11 @@ class PullRequestsScreen(Screen):
         return self.app.store.config.icon_style
 
     def rows(self) -> list[tuple[str, ...]]:
-        """The rows as plain text, for tests."""
-        table = self.query_one("#pr-list", PullRequestTable)
-        return [tuple(cell.plain for cell in table.get_row_at(index)) for index in range(table.row_count)]
-
-    def headers(self) -> list[str]:
-        return [str(column.label) for column in self.query_one("#pr-list", PullRequestTable).ordered_columns]
+        """Each row's parts (`PR_FIELDS`) as plain text, for tests."""
+        return [tuple(field.plain for field in row.fields) for row in self.query(PullRequestRow)]
 
     def current(self) -> pr_reviews.PullRequest | None:
-        index = self.query_one("#pr-list", PullRequestTable).cursor_row
+        index = self.query_one("#pr-list", PullRequestList).cursor_row
         return self.prs[index] if self.prs and 0 <= index < len(self.prs) else None
 
     def status_text(self) -> str:
@@ -2170,19 +2256,6 @@ class PullRequestsScreen(Screen):
         status = self.query_one("#pr-status", Static)
         status.plain = text if isinstance(text, str) else text.plain
         status.update(text)
-
-    def _title_width(self, prs: list[pr_reviews.PullRequest]) -> int:
-        """The width left for titles, so a row fits the screen without a sideways scroll."""
-        rows = [pr_cells(pr, self.icon_style, 0) for pr in prs]
-        title = PR_COLUMNS.index("Title")
-        others = sum(max([cell_len(header), *(cell_len(row[index].plain) for row in rows)])
-                     for index, header in enumerate(PR_COLUMNS) if index != title)
-        # The padding on each side of each column, and the scrollbar when the rows and the header
-        # do not fit. The table's size leaves out its border.
-        table = self.query_one("#pr-list", PullRequestTable)
-        scrollbar = 1 if len(prs) + 1 > table.size.height else 0
-        fixed = others + 2 * PR_CELL_PADDING * len(PR_COLUMNS) + scrollbar
-        return max(PR_TITLE_MIN, table.size.width - fixed)
 
     def _summary(self, repo: str, prs: list[pr_reviews.PullRequest]) -> Text:
         """Where the list is (the total, the page, the search), then what the shown PRs need."""
@@ -2223,7 +2296,7 @@ class PullRequestsScreen(Screen):
         text.append(f" │ read at {datetime.now().strftime('%H:%M')}", style="dim")
         return text
 
-    def _show(self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None) -> None:
+    async def _show(self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None) -> None:
         selected = self.current()
         self.repo, self.prs = repo, prs
         if page is not None:
@@ -2234,27 +2307,19 @@ class PullRequestsScreen(Screen):
             for screen in self.app.screen_stack + [self]:
                 for bar in screen.query(TabBar):
                     bar.show_counts()
-        table = self.query_one("#pr-list", PullRequestTable)
-        width = self._title_width(prs)
-        rows = [pr_cells(pr, self.icon_style, width) for pr in prs]
-        # A read that changed nothing leaves the table alone, so the cursor and the scroll stay.
+        heading = self.query_one("#pr-repo", Static)
+        heading.display = True
+        heading.update(pr_label("github", f"github.com/{repo}", self.icon_style))
+        listing = self.query_one("#pr-list", PullRequestList)
+        rows = [pr_fields(pr, self.icon_style) for pr in prs]
+        # A read that changed nothing leaves the rows alone, so the cursor and the scroll stay.
         if rows != self.shown_rows:
             self.shown_rows = rows
-            scroll = table.scroll_y
-            table.clear()
-            for pr, cells in zip(prs, rows):
-                table.add_row(*cells, key=str(pr.number))
-            if prs:
-                numbers = [pr.number for pr in prs]
-                table.move_cursor(row=numbers.index(selected.number) if selected and selected.number in numbers
-                                  else 0, scroll=False)
-                table.scroll_to(y=scroll, animate=False)
-                table.move_cursor(row=table.cursor_row)
+            await listing.show(prs, rows)
+            numbers = [pr.number for pr in prs]
+            listing.move_cursor(numbers.index(selected.number) if selected and selected.number in numbers else 0,
+                                scroll=selected is None)
         self._status(self._summary(repo, prs))
-
-    def on_resize(self, event: events.Resize) -> None:
-        if self.prs:
-            self._show(self.repo, self.prs)
 
     def _call(self, function, *args, **options) -> None:
         """Run a function on the event loop from a worker thread. Nothing runs once the board quits."""
@@ -2267,11 +2332,11 @@ class PullRequestsScreen(Screen):
         text, after = self.search, self.cursors[self.page_index]
         self.reading = True
 
-        def done(repo: str | None, page: pr_reviews.Page | None) -> None:
+        async def done(repo: str | None, page: pr_reviews.Page | None) -> None:
             self.reading = False
             if page is not None:
                 self.read_at = time.monotonic()
-                self._show(repo, page.prs, page)
+                await self._show(repo, page.prs, page)
 
         def load() -> None:
             try:
@@ -2321,7 +2386,7 @@ class PullRequestsScreen(Screen):
             return
         event.stop()
         event.input.display = False
-        self.query_one("#pr-list", PullRequestTable).focus()
+        self.query_one("#pr-list", PullRequestList).focus()
         self._set_search(event.value.strip())
 
     def action_back(self) -> None:
@@ -2329,7 +2394,7 @@ class PullRequestsScreen(Screen):
         search = self.query_one("#pr-search", Input)
         if search.display:
             search.display = False
-            self.query_one("#pr-list", PullRequestTable).focus()
+            self.query_one("#pr-list", PullRequestList).focus()
         elif self.search:
             self._set_search("")
         else:
@@ -2368,14 +2433,14 @@ class PullRequestsScreen(Screen):
         self.app.pop_screen()
 
     def action_cursor(self, step: int) -> None:
-        table = self.query_one("#pr-list", PullRequestTable)
+        listing = self.query_one("#pr-list", PullRequestList)
         if self.prs:
-            table.move_cursor(row=max(0, min(table.cursor_row + step, len(self.prs) - 1)))
+            listing.move_cursor(listing.cursor_row + step)
 
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen())
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+    def on_pull_request_list_selected(self, event: PullRequestList.Selected) -> None:
         event.stop()
         self.action_detail()
 
@@ -2497,6 +2562,26 @@ COLUMN_PALETTE = [("#4ea8de", "ansi_blue"), ("#d670b8", "ansi_magenta"), ("#e3b3
 DONE_COLORS = ("$success", "ansi_green")
 
 
+# The border of a pull request row by its CI state, as (color, ANSI color).
+PR_ROW_COLORS = {"passed": ("$success", "ansi_green"), "failed": ("$error", "ansi_red"),
+                 "pending": ("$warning", "ansi_yellow"), "skipped": ("$surface-lighten-2", "ansi_bright_black"),
+                 "none": ("$surface-lighten-2", "ansi_bright_black")}
+
+
+def pr_row_css() -> str:
+    """Each CI state's color on the row border. The selected row has a heavy border."""
+    rules = []
+    for state, (color, ansi) in PR_ROW_COLORS.items():
+        for prefix, value in (("", color), ("App:ansi ", ansi)):
+            rules += [f"{prefix}.pr-row.ci-{state} {{ border: round {value}; }}",
+                      f"{prefix}.pr-row.ci-{state}.selected {{ border: heavy {value}; }}"]
+    # Without a CI color, the selected row's border takes the text color.
+    rules += [".pr-row.ci-none.selected, .pr-row.ci-skipped.selected { border: heavy $foreground; }",
+              "App:ansi .pr-row.ci-none.selected, App:ansi .pr-row.ci-skipped.selected "
+              "{ border: heavy ansi_default; }"]
+    return "\n".join(rules)
+
+
 def column_css() -> str:
     """Each column color on the column border, its header and its cards. The current column has a
     heavy border and a filled header."""
@@ -2614,11 +2699,16 @@ class HerdboardApp(App):
     #issue-results { height: auto; max-height: 12; border: round $surface-lighten-2; }
     #issue-results:focus { border: round $primary; }
     #config-project { width: 2fr; }
-    #pr-list { height: 1fr; border: round $surface-lighten-2; scrollbar-size-vertical: 1; }
-    #pr-list:focus { border: round $accent; }
-    #pr-list > .datatable--header { text-style: bold; color: $text-muted; background: $surface; }
-    #pr-list > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
-    #pr-status { height: 1; padding: 0 1; }
+    #pr-repo { height: 1; padding: 0 1; color: $accent; }
+    #pr-status { height: 1; padding: 0 1; color: $text-muted; }
+    #pr-list { height: 1fr; scrollbar-size-vertical: 1; }
+    .pr-row { height: auto; padding: 0 1; }
+    """ + pr_row_css() + """
+    .pr-row.selected { background: $accent 20%; }
+    App:ansi #pr-repo { color: ansi_magenta; }
+    App:ansi #pr-status { color: ansi_default; }
+    App:ansi .pr-row { color: ansi_bright_black; }
+    App:ansi .pr-row.selected { background: ansi_default; color: ansi_default; text-style: bold; }
     #pr-search { border: round $primary; }
     .pr-detail { width: 100; }
     #pr-detail-title, #pr-detail-meta, #pr-detail-marks { margin-bottom: 1; }
@@ -2626,7 +2716,6 @@ class HerdboardApp(App):
     #pr-detail-body MarkdownH1, #pr-detail-body MarkdownH2, #pr-detail-body MarkdownH3 {
         margin: 0; padding: 0; content-align: left middle; text-align: left; color: $text; text-style: bold;
     }
-    App:ansi #pr-list > .datatable--cursor { background: ansi_default; text-style: bold reverse; }
     #config-labels { width: 1fr; }
     App:ansi .column { border: round ansi_bright_black; }
     /* Cards outside the current column fade in the ANSI themes, so the eye goes to one column. */

@@ -256,20 +256,24 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("G", other.plain)
             self.assertEqual(current.plain, other.plain.replace("G", " "), tab)
 
-    async def test_the_pull_request_columns_fill_the_width(self):
+    async def test_the_pull_request_rows_fill_the_width_and_cut_long_titles(self):
+        from herdboard.board import PullRequestRow
         from herdboard.pr_reviews import PullRequest
         for count in (3, 40):
-            prs = [PullRequest(n, f"PR {n}", "u", "octo", False, "a" * 40, "b", False, False) for n in range(count, 0, -1)]
+            prs = [PullRequest(n, f"PR {n} " + "long title " * 20, "u", "octo", False, "a" * 40, "b", False, False)
+                   for n in range(count, 0, -1)]
             self.service.page.return_value = ("acme/api", Page(prs, count, None))
-            for width in (120, 160):
+            for width in (80, 160):
                 app = self.app()
                 async with app.run_test(size=(width, 30)) as pilot:
                     await pilot.press("G")
                     await self.settle(app, pilot)
-                    table = app.screen.query_one("#pr-list")
-                    self.assertEqual(table.virtual_size.width, table.scrollable_content_region.width, (count, width))
-                    # Two cells on each side of a column keep the short count columns apart.
-                    self.assertEqual(table.cell_padding, 2)
+                    listing = app.screen.query_one("#pr-list")
+                    row = app.screen.query(PullRequestRow).first()
+                    self.assertEqual(listing.virtual_size.width, listing.scrollable_content_region.width)
+                    self.assertEqual(row.region.width, listing.scrollable_content_region.width, (count, width))
+                    first = "".join(segment.text for segment in row.render_line(0))
+                    self.assertIn("…", first, (count, width))
 
     def test_a_tab_has_no_hover_color(self):
         rules = [line for line in HerdboardApp.CSS.splitlines() if ".tab" in line]

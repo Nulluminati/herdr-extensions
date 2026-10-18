@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
-from herdboard.board import (AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp, ModelScreen,  # noqa: E402
-                             PullRequestDetailScreen, PullRequestsScreen)
+from herdboard.board import (PR_FIELDS, AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
+                             ModelScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago)
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page, PrReviewError, PullRequest  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -77,13 +77,12 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             screen = await self.open(app, pilot)
             rows = screen.rows()
-            self.assertEqual([row[:2] + row[3:] for row in rows], [
+            self.assertEqual([row[:2] + row[3:9] for row in rows], [
                 ("◌", "#7", "octo", "+12 −3", "", "◆ your review", "", ""),
                 ("●", "#8", "octo", "+0 −0", "✗ failed", "✔ approved", "✓ reviewed  ↑ new commits", "3 ✎")])
             self.assertTrue(rows[0][2].startswith("Fix login timeout"))
             self.assertIn(" bug ", rows[0][2])
-            self.assertEqual(screen.headers(), ["", "PR", "Title", "Author", "Size", "CI", "GitHub review",
-                                                "Agent review (local)", "Notes"])
+            self.assertEqual([len(row) for row in rows], [len(PR_FIELDS)] * 2)
             await pilot.press("G")
             await pilot.pause()
             self.assertIs(app.screen, app.screen_stack[0])
@@ -91,6 +90,53 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             await pilot.pause()
             self.assertNotIsInstance(app.screen, PullRequestsScreen)
+
+    async def test_a_row_shows_every_part_in_a_border_of_its_ci_color(self):
+        prs = self.service.page.return_value[1].prs
+        prs[0].comments, prs[0].base_branch, prs[0].head_branch = 12, "main", "fix-login"
+        prs[0].updated = "2026-10-16T18:00:00Z"
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open(app, pilot)
+            row = screen.rows()[0]
+            self.assertEqual(row[9:11], ("12 comments", "fix-login → main"))
+            self.assertTrue(row[11].startswith("updated "), row[11])
+            widgets = list(screen.query(PullRequestRow))
+            self.assertEqual([w.has_class("ci-none") for w in widgets], [True, False])
+            self.assertTrue(widgets[1].has_class("ci-failed"))
+            red = 1
+            self.assertEqual(widgets[1].styles.border_top[1].ansi, red)
+            self.assertEqual(widgets[0].region.height, 5)
+            lines = ["".join(segment.text for segment in widgets[0].render_line(y)) for y in range(3)]
+            for part in ("◌ #7", "Fix login timeout", " bug ", "◆ your review", "12 comments"):
+                self.assertIn(part, lines[0])
+            self.assertIn("octo  +12 −3", lines[1])
+            self.assertIn("fix-login → main", lines[2])
+            self.assertIn("updated", lines[2])
+            self.assertEqual(screen.query_one("#pr-repo").render().plain, "github.com/acme/api")
+
+    async def test_j_and_k_move_the_selected_row(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open(app, pilot)
+            widgets = list(screen.query(PullRequestRow))
+            self.assertEqual([w.has_class("selected") for w in widgets], [True, False])
+            await pilot.press("j")
+            self.assertEqual(screen.current().number, 8)
+            self.assertEqual([w.has_class("selected") for w in widgets], [False, True])
+            await pilot.press("j")
+            self.assertEqual(screen.current().number, 8)
+            await pilot.press("k")
+            self.assertEqual(screen.current().number, 7)
+
+    def test_ago_says_how_long_ago_in_one_unit(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
+        for stamp, expected in (("2026-10-18T11:59:30Z", "just now"), ("2026-10-18T11:55:00Z", "5 min ago"),
+                                ("2026-10-18T09:00:00Z", "3 hours ago"), ("2026-10-17T11:00:00Z", "1 day ago"),
+                                ("2026-10-01T12:00:00Z", "2 weeks ago"), ("", ""), ("soon", "")):
+            with self.subTest(stamp=stamp):
+                self.assertEqual(ago(stamp, now), expected)
 
     async def test_nerd_icons(self):
         self.store.config.icon_style = "nerd"
@@ -124,8 +170,7 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Fix login timeout", app.screen.text())
             await pilot.press("escape")
             await pilot.pause()
-            # Line 1 of the table is its header, so PR #8 is on line 3.
-            await pilot.click("#pr-list", offset=(12, 3))
+            await pilot.click(list(app.screen.query(PullRequestRow))[1], offset=(12, 1))
             await pilot.pause()
             self.assertIsInstance(app.screen, PullRequestDetailScreen)
             self.assertEqual(app.screen.pr.number, 8)

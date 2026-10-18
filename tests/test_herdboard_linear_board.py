@@ -54,7 +54,8 @@ class LinearBoardCase(BoardTestCase, LinearEnvTestCase):
         return app
 
     def title(self, app):
-        return app.query_one("#header-bar").plain
+        """The left part of the header: the board names and the Linear state."""
+        return app.query_one("#header-bar").place
 
     def notifications(self, app):
         return [(n.message, n.severity) for n in app._notifications]
@@ -82,7 +83,7 @@ class LinearBoardTests(LinearBoardCase):
             await settle(pilot)
             self.assertEqual(self.headers(app), ["Backlog 0", "Todo 3", "In progress 0", "Review 1", "Done 0"])
             self.assertRegex(self.title(app), r"Linear: \d\d:\d\d$")
-            self.assertIn("view: repo", self.title(app))
+            self.assertEqual(app.query_one("#header-bar").view, "repo")
 
     async def test_linear_cards_are_marked_and_show_pr(self):
         app = self.make_linear_app()
@@ -91,7 +92,8 @@ class LinearBoardTests(LinearBoardCase):
             cards = self.cards(app)
             marked = [c for c in cards if "Issue 1" in c]
             self.assertEqual(len(marked), 1)
-            self.assertIn("◆ ENG-1 · PR", marked[0])
+            self.assertTrue(marked[0].startswith("Issue 1  ◆ ENG-1\n"), marked[0])
+            self.assertEqual(marked[0].splitlines()[-1], "PR")
             self.assertTrue(any("◆ ENG-2" in c and "PR" not in c for c in cards))
             self.assertFalse(any("◆" in c for c in cards if "local todo" in c))
 

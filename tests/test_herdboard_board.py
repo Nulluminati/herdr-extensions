@@ -1137,7 +1137,8 @@ class InitAssistTests(BoardTestCase):
         return app
 
     def title(self, app):
-        return app.query_one("#header-bar").plain
+        """The left part of the header: the board names and the board's state."""
+        return app.query_one("#header-bar").place
 
     async def test_title_says_how_to_create_the_board(self):
         app = self.make_unboarded_app()
@@ -1159,7 +1160,7 @@ class InitAssistTests(BoardTestCase):
             self.assertIsNotNone(board)
             self.assertEqual(app.repo_board, board)
             self.assertNotIn("press i", self.title(app))
-            self.assertIn("view: repo", self.title(app))
+            self.assertEqual(app.query_one("#header-bar").view, "repo")
             await pilot.press("v")
             await pilot.pause()
             await pilot.press("v")

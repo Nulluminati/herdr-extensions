@@ -77,7 +77,7 @@ class PlanningBoardTests(BoardTestCase):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
-            self.assertEqual(self.cards(app), ["Plan login"])
+            self.assertEqual(self.cards(app), [f"Plan login  {self.card.ref}"])
             self.assertFalse(app._notifications)
 
     async def test_a_planning_read_error_does_not_hide_the_cards(self):
@@ -86,7 +86,7 @@ class PlanningBoardTests(BoardTestCase):
         with patch.object(plan, "_read", side_effect=IoError("Cannot read planning state")):
             async with app.run_test(size=SIZE) as pilot:
                 await pilot.pause()
-                self.assertEqual(self.cards(app), ["Plan login"])
+                self.assertEqual(self.cards(app), [f"Plan login  {self.card.ref}"])
                 self.assertFalse(app._notifications)
 
     async def test_a_busy_start_lock_does_not_hide_the_cards(self):
@@ -112,7 +112,7 @@ class PlanningBoardTests(BoardTestCase):
             self.pane_exists.return_value = False
             await app.check_files()
             await pilot.pause()
-            self.assertEqual(self.cards(app), ["Plan login"])
+            self.assertEqual(self.cards(app), [f"Plan login  {self.card.ref}"])
 
     async def test_a_broken_state_file_clears_the_marker_without_blocking_other_changes(self):
         self.record()
@@ -121,10 +121,10 @@ class PlanningBoardTests(BoardTestCase):
             await pilot.pause()
             self.assertIn("planning: pi", self.cards(app)[0])
             plan._plans_path().write_text("{", encoding="utf-8")
-            self.store.add(self.repo_path, "Another card", "Todo")
+            another = self.store.add(self.repo_path, "Another card", "Todo")
             await app.check_files()
             await pilot.pause()
-            self.assertEqual(self.cards(app), ["Plan login", "Another card"])
+            self.assertEqual(self.cards(app), [f"Plan login  {self.card.ref}", f"Another card  {another.ref}"])
             self.assertFalse(app._notifications)
 
     async def test_archive_markers_show_on_load_and_survive_reload(self):

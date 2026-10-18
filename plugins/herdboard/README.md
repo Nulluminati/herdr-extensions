@@ -55,7 +55,19 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 ## The board
 
-The top row has two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The bottom row shows the keys of the current tab. It wraps between two keys when they do not fit. A click on a key presses it.
+The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The Pull requests tab shows the open PR count after the list reads GitHub. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it.
+
+Each column takes a color in turn: blue, magenta, yellow, cyan and green. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and a filled header. The selected card has a heavy border in the text color.
+
+A card shows, from top to bottom:
+
+- A state icon (`○` not started, `●` a worktree or an agent works on it, `✓` in the done column), the title, `⋯` for the card menu, and the card ID at the right. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
+- The first detail line that is not a checklist item, in at most two rows. Cards in the done column strike the title and this line through.
+- The type and the tags.
+- The sub-card count (`2/5 done`) at the left and the due date at the right.
+- The markers below, when the card has any.
+
+Set `card_style = "compact"` for cards without a border and without the detail line.
 
 | Key | Action |
 |---|---|
@@ -309,14 +321,15 @@ herdboard can have an agent review an open GitHub pull request of the current re
 
 The flow:
 
-1. Press `G` on the board. The list shows the open PRs in a table, 50 to a page, newest first. The columns are:
+1. Press `G` on the board. The list shows the open PRs, 50 to a page, newest first. Each PR is a box. Its border is green when the checks passed, red when they failed and yellow while they run. A PR shows:
    - An open or draft icon, the number, and the title with its first two labels in their GitHub colors.
-   - The author (yours in cyan) and the size (`+84 −31`).
+   - The author (yours in cyan) and the size (`+84 −31`), then the branch and its base (`fix-login → main`).
    - **CI**: the state of the last commit's checks: `passed`, `failed` or `pending`.
    - **GitHub review**: what GitHub says. `your review` when the PR asks you, and GitHub's review decision: `approved`, `changes requested` or `review required`.
-   - **Agent review (local)**: what herdboard's agent did on this machine: `reviewing`, `reviewed` or `failed`, and `new commits` since then. Then the agent's note count.
+   - **Agent review (local)**, under the GitHub review: what herdboard's agent did on this machine: `reviewing`, `reviewed` or `failed`, and `new commits` since then.
+   - At the right: the comment count, the agent's note count, and when the PR was last updated.
 
-   The line under the table shows the total, the page and the search, then counts what needs you on the page, by GitHub, CI and agent.
+   The lines above the list show the repository, the total, the page and the search, then count what needs you on the page, by GitHub, CI and agent.
 2. Press `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
@@ -533,7 +546,8 @@ start_agent = "claude"     # or "pi"
 # start_column = "In progress"               # default: linear.columns.started
 merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
-tag_style = "round"        # tag ends in Nerd Font half circles; "block" for other fonts
+tag_style = "outline"      # tag text on a tint of its color; "round" (Nerd Font ends) or "block"
+card_style = "full"        # cards with a border and a detail line; "compact" without both
 icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
 types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
 
@@ -558,7 +572,7 @@ To make pull requests the default for one repository, add `merge: pr` to the fro
 
 ### Display icons
 
-Press `c` to open configuration. Use `Icons (all boards)` and `Tags (all boards)` to select display styles. Press `ctrl+s` to save. Changes apply immediately in this session. Herdboard saves them in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. The controls also work outside a repository. Press `escape` to cancel without saving.
+Press `c` to open configuration. Use `Icons (all boards)`, `Tags (all boards)` and `Cards (all boards)` to select display styles. Press `ctrl+s` to save. Changes apply immediately in this session. Herdboard saves them in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. The controls also work outside a repository. Press `escape` to cancel without saving.
 
 Display saves keep a `.<config name>.lock` file beside the configuration file (`.config.toml.lock` by default). Leave it in place; it coordinates concurrent saves.
 
@@ -568,7 +582,7 @@ Set `icon_style = "nerd"` to add icons beside text labels on board cards and det
 
 Use a **Nerd Font Mono** font in your terminal for `nerd` mode. Other Nerd Font variants can draw wider icons and disrupt spacing. Herdboard does not detect font support. See the [Nerd Fonts troubleshooting guide](https://github.com/ryanoasis/nerd-fonts/wiki/FAQ-and-Troubleshooting).
 
-To disable these icons, select `plain` in the menu. Alternatively, set `icon_style = "plain"` in the file and restart Herdboard. The separate `tag_style` setting still controls tag shapes. Set `tag_style = "block"` to remove Nerd Font tag ends too. Existing structural symbols, such as checklist marks, remain in both modes.
+To disable these icons, select `plain` in the menu. Alternatively, set `icon_style = "plain"` in the file and restart Herdboard. The separate `tag_style` setting still controls tag shapes. The default `outline` and `block` need no Nerd Font; `round` draws Nerd Font tag ends. Existing structural symbols, such as checklist marks, remain in both modes.
 
 These settings affect display only. Stored Markdown, filters and command-line output do not change.
 
