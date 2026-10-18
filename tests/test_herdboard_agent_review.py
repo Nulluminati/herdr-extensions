@@ -2,6 +2,8 @@
 import contextlib
 import io
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -86,6 +88,39 @@ class AgentReviewTestCase(MergeTestCase):
             return agent_review.wait(self.store, self.card.ref, self.folder)
 
 
+class WorkerTests(CliTestCase):
+    def test_detached_worker_uses_the_callers_package_from_an_unrelated_directory(self):
+        self.config.write_text(f'todos_dir = "{self.todos}"\ntag_style = "outline"\n')
+        folder = self.plain / "review"
+        folder.mkdir()
+        stale = self.plain / "stale"
+        package = stale / "herdboard"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        (package / "__main__.py").write_text('raise SystemExit("tag_style must be round or block")\n')
+        captured = {}
+
+        def launch(argv, **options):
+            captured.update(argv=argv, options=options)
+
+        with patch.dict(os.environ, {"PYTHONPATH": str(stale)}), \
+                patch.object(agent_review.subprocess, "Popen", side_effect=launch):
+            agent_review.start_worker(["--config", str(self.config), "review-wait", "t123",
+                                       "--folder", str(folder)], folder / "worker.log")
+        environment = captured["options"]["env"]
+        self.assertEqual(environment["PYTHONPATH"].split(os.pathsep)[1:], [str(stale)])
+        result = subprocess.run([sys.executable, "-c", "import herdboard; print(herdboard.__file__)"],
+                                cwd=self.plain, env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()).resolve(),
+                         Path(agent_review.__file__).with_name("__init__.py").resolve())
+        result = subprocess.run(captured["argv"], cwd=self.plain, env=environment,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot read the agent review", result.stderr)
+        self.assertNotIn("tag_style must be", result.stderr)
+
+
 class RequestTests(AgentReviewTestCase):
     def test_a_card_that_was_never_started_cannot_be_reviewed(self):
         with self.assertRaises(review.ReviewError) as raised:
@@ -159,6 +194,8 @@ class RequestTests(AgentReviewTestCase):
         self.assertEqual(args[1:], ["--permission-mode", "dontAsk", "--allowedTools", "Read", "Grep", "Glob",
                                     f"Edit(/{folder}/**)"])
         self.assertEqual(result["reviewer"], "claude")
+        self.assertIn("Herdboard automatically delivers", (folder / "request.md").read_text())
+        self.assertIn("No command execution", (folder / "request.md").read_text())
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -277,6 +314,71 @@ class WaitTests(AgentReviewTestCase):
         self.assertEqual(notification[2], f"Agent review of {self.card.ref} done")
         self.assertNotIn("agent_review", self.records()[self.card.ref])
         self.assertEqual(self.calls("plugin", "action", "invoke"), [])
+
+    def test_a_failed_review_followed_by_a_file_only_retry_delivers_the_second_findings(self):
+        self.fake.findings = None
+        self.fake.reviewer_states = ["working", None]
+        self.request()
+        self.assertEqual(self.wait(), 1)
+        self.fake.reviewer_states = ["idle"]
+        result = self.request(reviewer="pi")
+        findings = Path(result["folder"]) / "findings.md"
+        findings.write_text("No findings.\n")
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(self.errors.getvalue(), "")
+        self.assertIn(str(findings), self.calls("agent", "prompt")[-1][3])
+
+    def test_a_late_failed_worker_does_not_clear_the_retry_record(self):
+        first = self.request()
+        self.fake.reviewer_states = [None]
+        second = self.request()
+        self.fake.reviewer_states = ["working", None]
+        self.fake.findings = None
+        with contextlib.redirect_stderr(io.StringIO()), \
+                patch.object(agent_review, "_wait_for_findings",
+                             side_effect=review.ReviewError("Reviewer stopped", "review_failed")):
+            self.assertEqual(agent_review.wait(self.store, self.card.ref, Path(first["folder"])), 1)
+        self.assertEqual(self.records()[self.card.ref]["agent_review"]["folder"], second["folder"])
+        self.fake.reviewer_states = ["idle"]
+        (self.folder / "findings.md").write_text("No findings.\n")
+        self.assertEqual(self.wait(), 0)
+        self.assertIn(str(self.folder / "findings.md"), self.calls("agent", "prompt")[-1][3])
+
+    def test_delivery_failure_is_not_reported_as_success(self):
+        self.request()
+        real_command = self.fake
+
+        def failed_wait(argv, timeout=120):
+            if argv[1:3] == ["agent", "wait"]:
+                return self.fake.reply(argv, error="timeout")
+            return real_command(argv, timeout)
+
+        with patch.object(start, "command", side_effect=failed_wait):
+            self.assertEqual(self.wait(), 1)
+        self.assertEqual(self.calls("agent", "prompt"), [])
+        self.assertIn("cannot prompt", self.errors.getvalue())
+        self.assertTrue(any("done: 2 findings" in entry for entry in self.log()))
+        self.assertIn(str(self.folder / "findings.md"), self.log()[-1])
+        self.assertEqual(self.calls("notification", "show")[-1][2],
+                         f"Agent review of {self.card.ref} delivery failed")
+
+    def test_a_prompt_failure_reports_completed_findings_and_delivery_failure(self):
+        self.request()
+        real_command = self.fake
+
+        def failed_prompt(argv, timeout=120):
+            if argv[1:3] == ["agent", "prompt"]:
+                return self.fake.reply(argv, error="agent_blocked")
+            return real_command(argv, timeout)
+
+        with patch.object(start, "command", side_effect=failed_prompt):
+            self.assertEqual(self.wait(), 1)
+        self.assertIn("cannot prompt", self.errors.getvalue())
+        self.assertTrue(any("done: 2 findings" in entry for entry in self.log()))
+        self.assertTrue(self.log()[-1].startswith("Agent review delivery failed:"))
+        self.assertIn(str(self.folder / "findings.md"), self.log()[-1])
+        self.assertEqual(self.calls("notification", "show")[-1][2],
+                         f"Agent review of {self.card.ref} delivery failed")
 
     def test_the_answer_command_uses_the_worker_config_file(self):
         self.request()

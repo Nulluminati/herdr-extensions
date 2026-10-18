@@ -29,9 +29,13 @@ POLL_SECONDS = 5
 
 def start_worker(arguments: list[str], log: Path) -> None:
     """Run herdboard detached, so the caller (the CLI or the board) returns at once."""
+    # A linked checkout can differ from the installed package. Workers must use the caller's code.
+    environment = os.environ.copy()
+    source = str(Path(__file__).resolve().parent.parent)
+    environment["PYTHONPATH"] = os.pathsep.join(filter(None, (source, environment.get("PYTHONPATH"))))
     with log.open("a") as output:
         subprocess.Popen([sys.executable, "-m", "herdboard", *arguments], stdin=subprocess.DEVNULL,
-                         stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+                         stdout=output, stderr=subprocess.STDOUT, start_new_session=True, env=environment)
 
 
 def _git(worktree: Path, *args: str) -> str:
@@ -91,6 +95,10 @@ Write your findings to `{folder / 'findings.md'}` in this format:
     - path:line: concern.
 
 If you find nothing, write "No findings."
+Finish writing the complete findings file before you end your turn.
+Herdboard automatically delivers the findings path to the card's requesting agent after your turn ends.
+No command execution or notification from you is required. Do not wait for another prompt.
+If you cannot run tests or inspect live screens, state those limits in the findings.
 """
 
 
@@ -162,7 +170,7 @@ class AgentReviewer(Reviewer):
         except OSError as error:
             # Without the worker nobody closes the reviewer, and its record would block the next review.
             herdr("pane", "close", pane, tolerated=("pane_not_found",))
-            _forget(ref)
+            _forget(ref, folder)
             activity.append(self.store, ref, f"Agent review failed: the worker did not start: {error}", "herdboard")
             raise ReviewError(f"The agent review worker did not start: {error}", "worker_failed") from error
         return {"ref": ref, "reviewer": kind, "model": model, "pane_id": pane, "folder": str(folder),
@@ -202,14 +210,20 @@ def _notify(title: str, body: str) -> None:
         print(f"herdboard: cannot show a notification: {error}", file=sys.stderr)
 
 
-def _forget(ref: str) -> dict | None:
-    """Remove the agent review from the card's start record, and return the record (None when it is gone)."""
+def _forget(ref: str, folder: Path) -> dict | None:
+    """Remove only this review, returning the start record (None when it is gone).
+
+    A late worker must not clear a retry's review from the card's start record.
+    """
     path = state_dir() / "starts.json"
     with _lock(wait=2):
         found = find_record(ref)
         if found is None:
             return None
         key, record = found
+        running = record.get("agent_review")
+        if not running or Path(running["folder"]) != folder:
+            return record
         records = _read(path)
         record.pop("agent_review", None)
         records[key] = record
@@ -235,9 +249,10 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         herdr("pane", "close", pane, tolerated=("pane_not_found",))
     except HerdboardError as failure:
         print(f"herdboard: cannot close the reviewer pane {pane}: {failure}", file=sys.stderr)
-    record = _forget(ref)
+    record = _forget(ref, folder)
     if record is None:
         return 0  # The card was finished during the review.
+    delivery_error = None
     if error is None:
         activity.append(store, ref, f"Agent review by {kind} done: {_count_findings(findings)} findings. {findings}",
                         "herdboard")
@@ -247,13 +262,18 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
                    "Do not change any code. Wait for the user to decide what to fix.")
         timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000
         try:
-            start_module.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", record["pane_id"],
-                                  "--until", "idle", "--timeout", str(timeout_ms)],
-                                 timeout=REVIEW_TIMEOUT_SECONDS + 60)
+            result = start_module.command(
+                [os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", record["pane_id"],
+                 "--until", "idle", "--until", "done", "--timeout", str(timeout_ms)],
+                timeout=REVIEW_TIMEOUT_SECONDS + 60)
+            if result.returncode:
+                raise ReviewError(f"Waiting for the card's agent failed: {result.stderr or result.stdout}",
+                                  "delivery_failed")
             herdr("agent", "prompt", record["pane_id"], message)
         except (HerdboardError, OSError, subprocess.TimeoutExpired) as failure:
             print(f"herdboard: cannot prompt the card's agent: {failure}", file=sys.stderr)
-            activity.append(store, ref, f"The card's agent did not get the agent review: {failure}", "herdboard")
+            delivery_error = failure
+            activity.append(store, ref, f"Agent review delivery failed: {findings}. {failure}", "herdboard")
     else:
         print(f"herdboard: {error}", file=sys.stderr)
         activity.append(store, ref, f"Agent review failed: {error}", "herdboard")
@@ -263,6 +283,9 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         except HerdboardError as failure:
             print(f"herdboard: cannot open Hunk: {failure}", file=sys.stderr)
             activity.append(store, ref, f"Hunk did not open after the agent review: {failure}", "herdboard")
+    if delivery_error is not None:
+        _notify(f"Agent review of {ref} delivery failed", f"{findings}. {delivery_error}")
+        return 1
     if error is None:
         _notify(f"Agent review of {ref} done", f"{_count_findings(findings)} findings. {findings}")
         return 0
