@@ -329,15 +329,9 @@ class CardActionTests(MouseTestCase):
 
 
 class MenuTests(MouseTestCase):
-    def marker_offset(self, widget):
-        """Where the widget draws the menu marker: after the title, which can wrap in a narrow column.
-        `render_line` gives the lines inside the border and the padding."""
-        self.assertIn(" ⋯", widget.rich_text.plain.split("\n")[1])
-        for y in range(widget.size.height):
-            line = "".join(segment.text for segment in widget.render_line(y))
-            if "⋯" in line:
-                return content_offset(widget, cell_len(line[:line.index("⋯")]), y)
-        self.fail("no menu marker on the card")
+    async def open_menu(self, pilot, widget):
+        """A right click on the card opens its menu."""
+        await pilot.click(widget, offset=content_offset(widget), button=3)
 
     async def choose(self, pilot, action):
         menu = pilot.app.screen
@@ -359,16 +353,6 @@ class MenuTests(MouseTestCase):
             self.assertIsInstance(app.screen, EditScreen)
             self.assertEqual(app.screen.card.ref, self.second.ref)
 
-    async def test_a_click_on_the_marker_opens_the_menu_not_the_detail(self):
-        app = self.make_app()
-        async with app.run_test(size=SIZE) as pilot:
-            await pilot.pause()
-            widget = self.widget(app, self.waiting.ref)
-            await pilot.click(widget, offset=self.marker_offset(widget))
-            await pilot.pause()
-            self.assertIsInstance(app.screen, CardMenuScreen)
-            self.assertIn("waiting card", self.selected(app)[0])
-
     async def test_a_click_on_the_title_opens_no_menu(self):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
@@ -383,7 +367,7 @@ class MenuTests(MouseTestCase):
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             widget = self.widget(app, self.first.ref)
-            await pilot.click(widget, offset=self.marker_offset(widget))
+            await self.open_menu(pilot, widget)
             await pilot.pause()
             await pilot.press("escape")
             await settle(pilot)
@@ -403,7 +387,7 @@ class MenuTests(MouseTestCase):
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             widget = self.widget(app, self.second.ref)
-            await pilot.click(widget, offset=self.marker_offset(widget))
+            await self.open_menu(pilot, widget)
             await pilot.pause()
             self.assertIsInstance(app.screen, CardMenuScreen)
             await self.remount_todo_column(pilot)
@@ -429,7 +413,7 @@ class MenuTests(MouseTestCase):
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             widget = self.widget(app, self.second.ref)
-            await pilot.click(widget, offset=self.marker_offset(widget))
+            await self.open_menu(pilot, widget)
             await pilot.pause()
             self.assertIsInstance(app.screen, CardMenuScreen)
             self.store.delete(self.second.ref)
@@ -445,7 +429,7 @@ class MenuTests(MouseTestCase):
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             widget = self.widget(app, card.ref)
-            await pilot.click(widget, offset=self.marker_offset(widget))
+            await self.open_menu(pilot, widget)
             await pilot.pause()
             self.assertIsInstance(app.screen, CardMenuScreen)
             self.assertIn("Fix the [/auth] bug", app.screen.query_one("#card-menu-title").render().plain)
@@ -465,7 +449,7 @@ class MenuTests(MouseTestCase):
 
     def test_help_lists_the_mouse(self):
         keys = [key for key, _ in HELP_KEYS]
-        for key in ("click", "double-click", "right-click, ⋯", "drag"):
+        for key in ("click", "double-click", "right-click", "drag"):
             self.assertIn(key, keys)
 
 

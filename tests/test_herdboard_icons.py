@@ -135,7 +135,7 @@ class IconTextTests(unittest.TestCase):
                     output = StringIO()
                     Console(file=output, width=width, color_system=None).print(widget.content)
                     first, *rest = output.getvalue().splitlines()
-                    label = f"{ATTACHMENT} files" if style == "nerd" else "files"
+                    label = ATTACHMENT if style == "nerd" else "files"
                     self.assertTrue(first.endswith(f"{label} t123"), first)
                     self.assertEqual(cell_len(first), width)
                     self.assertTrue(all(cell_len(line) <= width for line in rest))
@@ -160,7 +160,7 @@ class IconBoardTests(BoardTestCase):
                         widget = app.query_one(".card")
                         self.assertIn(f"{TYPE_ICONS['feature']} feature" if style == "nerd" else "feature", widget.plain)
                         self.assertIn(f"{CALENDAR} Due Nov 1" if style == "nerd" else "Due Nov 1", widget.plain)
-                        label = f"{ATTACHMENT} files" if style == "nerd" else "files"
+                        label = ATTACHMENT if style == "nerd" else "files"
                         self.assertIn(label, widget.plain)
                         first = widget.render_line(0).text.rstrip()
                         self.assertTrue(first.endswith(f"{label} {item.ref}"), first)

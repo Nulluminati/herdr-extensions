@@ -57,12 +57,12 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The Pull requests tab shows the open PR count after the list reads GitHub. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it.
 
-Each column takes a color in turn: blue, magenta, yellow, cyan and green. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and an underlined header. The selected card has a heavy border in the text color.
+Each column takes a color in turn: blue, magenta, yellow, cyan and green. The column's scrollbar has its color too. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and an underlined header. The selected card has a heavy border in the text color.
 
 A card shows, from top to bottom:
 
 - A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), and the card ID at the right. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
-- The title, then `⋯` for the card menu.
+- The title.
 - The first detail line that is not a checklist item, in at most two rows. Cards in the done column strike the title and this line through.
 - The type and the tags.
 - The sub-card count (`2/5 done`) at the left and the due date at the right.
@@ -113,13 +113,13 @@ The keys stay the main input. Each mouse action runs an action that a key also r
 | Click a card | Select the card |
 | Click a column header, or the empty part of a column | Select the column |
 | Double-click a card | Card detail (enter) |
-| Right-click a card, or click the `⋯` at the end of its title | A menu of the actions that apply to the card |
+| Right-click a card | A menu of the actions that apply to the card |
 | Drag a card to another column | Move the card to the bottom of that column (`H` / `L`) |
 | Click a checklist item in the card detail | Check or clear the item (space) |
 | Click an attachment in the card detail | Open the attachment (`o`) |
 | Wheel | Scroll a column, or the columns |
 
-- Herdr keeps right-click for its own menu. To send right-clicks to the board, turn on "send right clicks to pane" in Herdr's right-click menu. Without it, click the `⋯` marker.
+- Herdr keeps right-click for its own menu. To send right-clicks to the board, turn on "send right clicks to pane" in Herdr's right-click menu. Without it, use the keys of the actions.
 - The menu uses only what the board knows, such as a worktree that exists. An action still makes its own checks, so it can refuse with its usual notice.
 - A drop always puts the card at the bottom of the column. Use `K` / `J` to change the order.
 - The wheel only scrolls. It does not change the selected card.
@@ -168,11 +168,11 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 |---|---|
 | `↳ <parent>` | A sub-card. For a Linear sub-issue whose parent is not in the view, the marker shows the parent's identifier, such as `↳ ENG-12` |
 | `2/5 done` | A parent card and the progress of its sub-cards |
-| `≡` (top-right corner) | The card has attachments. Open the card detail to see them |
+| `≡` (top-right corner) | The card has attachments. Open the card detail to see them. With `icon_style = "nerd"`, a paperclip icon alone |
 | `planning: pi`, `planning: claude` | The card's planner runs. The card keeps its current column |
 | `agent review: pi` | An agent review runs |
 
-When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README.md) plugin is installed, `planning:` and `agent review:` show the agent's logo before its name. The board looks for the font with `fc-match` when it starts.
+When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README.md) plugin is installed, `planning:` and `agent review:` show the agent's logo before its name. A card that `start` started shows the logo of its agent after the state icon, while the worktree exists. The board looks for the font with `fc-match` when it starts.
 | `PR: writing` | An agent writes the pull request description |
 | `PR open`, `PR merged`, `PR closed` | The state of the card's pull request. The board reads it at most once a minute |
 | `worktree removed` | The card's worktree folder is gone |

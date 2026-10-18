@@ -41,7 +41,7 @@ class CardFaceTests(unittest.TestCase):
                 text = board.card_text(item, False, done=done)
                 first, second = text.plain.splitlines()[:2]
                 self.assertTrue(first.startswith(icon), text.plain)
-                self.assertEqual(second, f"Ship it {board.MENU_MARK}")
+                self.assertEqual(second, "Ship it")
                 widget = board.CardWidget(item, False, done=done)
                 self.assertTrue(widget.plain.startswith("Ship it"), widget.plain)
 
@@ -97,16 +97,29 @@ class CardFaceTests(unittest.TestCase):
 
     def test_the_first_row_has_only_the_icon_and_the_corner(self):
         lines = rendered(board.CardWidget(card(), False), width=20)
-        self.assertEqual([line.rstrip() for line in lines], ["○               t123", f"Ship it {board.MENU_MARK}"])
+        self.assertEqual([line.rstrip() for line in lines], ["○               t123", "Ship it"])
         item = card(title="Improve Auto tab titles", ref="tveq", has_attachments=True)
         lines = rendered(board.CardWidget(item, False), width=20)
         self.assertEqual([line.rstrip() for line in lines],
-                         ["○         files tveq", "Improve Auto tab", f"titles {board.MENU_MARK}"])
+                         ["○         files tveq", "Improve Auto tab", "titles"])
         self.assertEqual(rendered(board.CardWidget(card(ref="api:3"), False), width=20)[0].rstrip(), "○")
+
+    def test_cards_have_no_menu_marker(self):
+        for style in ("full", "compact"):
+            with self.subTest(style=style):
+                self.assertNotIn("⋯", "\n".join(rendered(board.CardWidget(card(), False, card_style=style))))
+
+    def test_nerd_cards_show_the_attachment_icon_without_its_name(self):
+        item = card(has_attachments=True)
+        nerd = rendered(board.CardWidget(item, False, icon_style="nerd"), width=20)[0]
+        self.assertTrue(nerd.endswith(f"{board.ICONS['attachment']} t123"), nerd)
+        self.assertNotIn(board.ATTACHMENT_MARK, nerd)
+        plain = rendered(board.CardWidget(item, False), width=20)[0]
+        self.assertTrue(plain.endswith(f"{board.ATTACHMENT_MARK} t123"), plain)
 
     def test_compact_cards_keep_the_title_on_the_first_row(self):
         lines = rendered(board.CardWidget(card(), False, card_style="compact"), width=20)
-        self.assertEqual(lines, [f"○ Ship it {board.MENU_MARK}     t123"])
+        self.assertEqual(lines, ["○ Ship it       t123"])
 
     def test_the_id_always_has_a_space_before_it(self):
         item = card(title="Archive Cards", ref="t323")
@@ -114,7 +127,6 @@ class CardFaceTests(unittest.TestCase):
             with self.subTest(width=width):
                 first = rendered(board.CardWidget(item, False), width=width)[0].rstrip()
                 self.assertTrue(first.endswith(" t323"), first)
-                self.assertNotIn("⋯t323", first)
 
     def test_cards_without_a_block_id_show_no_id(self):
         for ref in ("api:3", "api:archive-2"):
@@ -153,6 +165,15 @@ class AgentLogoTests(unittest.TestCase):
                       logos)
         self.assertIn("agent review: other", board.CardWidget(card(agent_review="other"), False,
                                                               agent_logos=True).plain)
+
+    def test_the_started_agent_logo_follows_the_state_icon(self):
+        item = card(worktree=True, agent="claude")
+        lines = rendered(board.CardWidget(item, False, agent_logos=True), width=20)
+        self.assertEqual(lines[0], f"● {board.AGENT_LOGOS['claude']}             t123")
+        self.assertEqual(rendered(board.CardWidget(item, False), width=20)[0], "●               t123")
+        compact = rendered(board.CardWidget(item, False, card_style="compact", agent_logos=True), width=20)[0]
+        self.assertTrue(compact.startswith(f"● {board.AGENT_LOGOS['claude']} Ship it"), compact)
+        self.assertEqual(board.CardWidget(item, False, agent_logos=True).plain, "Ship it  t123")
 
     def test_the_logos_need_the_herdr_agent_icons_font(self):
         def fc_match(output):
@@ -235,6 +256,18 @@ class CardStyleBoardTests(BoardTestCase):
             self.assertEqual(header.styles.background.a, 0)
             self.assertEqual(header.styles.color.ansi, 4)
             self.assertTrue(header.styles.text_style.underline)
+
+    async def test_the_card_scrollbar_has_the_column_color(self):
+        for _ in range(12):
+            self.store.add(self.repo_path, "Ship it", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            cards = app.query_one(".col-1 .cards")
+            magenta = 5
+            self.assertEqual(cards.styles.scrollbar_color.ansi, magenta)
+            self.assertEqual(cards.styles.scrollbar_color_hover.ansi, magenta)
+            self.assertEqual(cards.styles.scrollbar_color_active.ansi, magenta)
 
     async def test_full_cards_have_a_border_in_the_column_color(self):
         self.store.add(self.repo_path, "first", "Todo")

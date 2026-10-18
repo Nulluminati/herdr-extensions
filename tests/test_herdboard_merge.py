@@ -1,6 +1,7 @@
 """Merge a card branch into its base with a rebase and a fast-forward, then finish the card."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -457,6 +458,15 @@ class PullRequestStateTests(PullRequestTestCase):
         done = self.store.done(self.card.ref)
         start.mark_removed([done])
         self.assertTrue(done.worktree_left)
+
+
+    def test_the_board_card_knows_its_started_agent_while_the_worktree_exists(self):
+        card = self.store.show(self.card.ref)
+        start.mark_removed([card])
+        self.assertEqual(card.agent, "pi")
+        shutil.rmtree(self.worktree)
+        start.mark_removed([card])
+        self.assertIsNone(card.agent)
 
 
 class MergeModeTests(MergeTestCase):

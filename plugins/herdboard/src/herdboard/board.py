@@ -100,7 +100,6 @@ LINEAR_MARK = "◆"
 # Shown in the top-right corner of a card that has attachments.
 ATTACHMENT_MARK = "files"
 # Ends a card's title. A click on it opens the card menu, also where Herdr keeps right-click for itself.
-MENU_MARK = "⋯"
 
 # Nerd Font glyphs shared by board cards and detail screens. Labels remain readable without them.
 ICONS = {
@@ -168,7 +167,7 @@ HELP_KEYS = [
     ("q", "quit"),
     ("click", "select a card, or a column on its header"),
     ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
-    ("right-click, ⋯", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
+    ("right-click", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
     ("drag", "move the card to the bottom of another column"),
 ]
 
@@ -447,13 +446,14 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     muted = "dim strike" if done else ""
     state = card_state(card, done)
     icon = Text(CARD_ICONS[state], style=CARD_ICON_STYLES[state])
-    heading = Text()
-    heading.append(title or card.title, style=muted)
-    heading.append(" ")
-    heading.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
+    logo = AGENT_LOGOS.get(card.agent) if agent_logos and card.agent else None
+    if logo:
+        icon.append(f" {logo}")
+    heading = Text(title or card.title, style=muted)
     corner = Text(style="dim")
     if card.has_attachments:
-        corner.append(icon_label("attachment", ATTACHMENT_MARK, icon_style))
+        # Nerd Font cards show the paperclip alone.
+        corner.append(ICONS["attachment"] if icon_style == "nerd" else ATTACHMENT_MARK)
     # A card without a block ID has a reference that is only its place on the board.
     if card.source == "linear" or not (TEMP_REF.match(card.ref) or ARCHIVE_REF.match(card.ref)):
         if corner:
@@ -518,8 +518,8 @@ class CardWidget(Static):
         self.agent_logos = agent_logos
         face = card_face(card, show_board, tag_style, icon_style, card_style, done, dark, agent_logos)
         self.rich_text = face.text()
-        # The state icon and the menu marker are not card text: `plain` has the title, then the corner.
-        first = face.title.plain.replace(f" {MENU_MARK}", "", 1) + (f"  {face.corner.plain}" if face.corner else "")
+        # The state icon and the agent logo are not card text: `plain` has the title, then the corner.
+        first = face.title.plain + (f"  {face.corner.plain}" if face.corner else "")
         rest = [line.plain for line in face.lines()[1 if face.compact else 2:]]
         self.plain = "\n".join([first, *rest])
         # What a redraw compares: the text with its styles and the classes.
@@ -550,7 +550,7 @@ class CardWidget(Static):
             # The click that ends a drag: the drop has already selected the card.
             app.dropped = False
             return
-        if event.button == 3 or (event.button == 1 and event.style.meta.get("card_menu")):
+        if event.button == 3:
             app.open_card_menu(self.card)
         elif event.button == 1 and event.chain == 1:
             app.select_card(self.card)
@@ -2676,7 +2676,9 @@ def column_css() -> str:
                       f"{prefix}.{name} .column-header {{ color: {value}; }}",
                       f"{prefix}.{name} .card {{ border: round {value}; }}",
                       f"{prefix}.{name}.current {{ border: heavy {value}; }}",
-                      f"{prefix}.{name}.current .column-header {{ text-style: bold underline; }}"]
+                      f"{prefix}.{name}.current .column-header {{ text-style: bold underline; }}",
+                      f"{prefix}.{name} .cards {{ scrollbar-color: {value}; scrollbar-color-hover: {value}; "
+                      f"scrollbar-color-active: {value}; }}"]
     rules += ["App:ansi .col-archive .card { border: round ansi_bright_black; }",
               ".col-archive .column-header { color: $text-muted; }"]
     return "\n".join(rules)
@@ -3237,7 +3239,7 @@ class HerdboardApp(App):
 
         def status():
             return [(card.worktree_removed, card.worktree, card.worktree_left, card.pr_state, card.agent_review,
-                     card.pr_writing, card.planning, card.has_attachments)
+                     card.pr_writing, card.planning, card.has_attachments, card.agent)
                     for card in cards]
 
         old = status()
