@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import re
 import subprocess
 import sys
@@ -23,6 +24,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, HorizontalScroll, Vertical, VerticalScroll
+from textual._context import NoActiveAppError
 from textual.driver import Driver
 from textual.errors import NoWidget
 from textual.drivers.linux_driver import LinuxDriver
@@ -378,8 +380,7 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     else:
         title, tags, due = split_title(card.title)
     muted = "dim strike" if done else ""
-    heading = Text(CARD_ICONS[card_state(card, done)], style=Style(meta={"card_icon": True}))
-    heading.append(" ")
+    heading = Text(f"{CARD_ICONS[card_state(card, done)]} ")
     heading.append(title or card.title, style=muted)
     heading.append(" ")
     heading.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
@@ -1524,15 +1525,56 @@ class ConfigScreen(ModalBase):
                                project, [label for label in labels if label], set(self.removed_pins), display=display)
 
 
-# The two tabs at the top of the board: (tab, label). G switches between them.
+# The two tabs under the header: (tab, label). G switches between them.
 TABS = [("board", "Board"), ("prs", "Pull requests")]
 TAB_KEY = "G"
+# Each tab's icon: its Nerd Font icon and its plain icon.
+TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂")}
 # The actions that the tabs show, so the key list leaves them out.
 TAB_ACTIONS = {"pull_requests", "close"}
 
 
+def herdboard_version() -> str:
+    """The installed herdboard version, or "" without package metadata."""
+    try:
+        return importlib.metadata.version("herdboard")
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
+class HeaderBar(Horizontal):
+    """The top row: herdboard and the board or repository at the left, the view and the version at
+    the right."""
+
+    def __init__(self, place: str = "", view: str = ""):
+        super().__init__(id="header-bar")
+        self.version = herdboard_version()
+        self.place, self.view = place, view
+        self.plain = self._plain()
+
+    def compose(self) -> ComposeResult:
+        yield Static("herdboard", id="header-app")
+        yield Static("│", id="header-rule")
+        yield Static(self.place, id="header-place")
+        yield Static(self._right(), id="header-view")
+
+    def _right(self) -> str:
+        return "  ".join(part for part in (self.view, f"v{self.version}" if self.version else "") if part)
+
+    def _plain(self) -> str:
+        return f"herdboard │ {self.place}" + (f" │ {self._right()}" if self._right() else "")
+
+    def show(self, place: str, view: str) -> None:
+        self.place, self.view = place, view
+        self.plain = self._plain()
+        if self.is_mounted:
+            self.query_one("#header-place", Static).update(Text(place, no_wrap=True, overflow="ellipsis"))
+            self.query_one("#header-view", Static).update(self._right())
+
+
 class TabBar(Horizontal):
-    """The top row: the Board and Pull requests tabs. A click on the other tab switches to it."""
+    """The row under the header: the Board and Pull requests tabs, each with its icon, and the
+    open pull request count once the list has read it. A click on the other tab switches to it."""
 
     def __init__(self, active: str):
         super().__init__(id="tab-bar")
@@ -1546,16 +1588,42 @@ class TabBar(Horizontal):
             widget.plain = text.plain
             yield widget
 
+    def _icon(self, tab: str) -> str:
+        nerd, plain = TAB_ICONS[tab]
+        try:
+            style = self.app.store.config.icon_style
+        except NoActiveAppError:
+            # A tab bar outside a running board.
+            style = "plain"
+        return nerd if style == "nerd" else plain
+
+    def _count(self, tab: str) -> int | None:
+        try:
+            return self.app.pr_count if tab == "prs" else None
+        except NoActiveAppError:
+            return None
+
     def _tab_text(self, tab: str, label: str) -> Text:
-        """The tab's label. The current tab keeps the switch key's place blank, so a switch
-        neither resizes the tab nor moves its text. The current tab's bold comes from the style
+        """The tab's icon, label and count. The current tab keeps the switch key's place blank, so a
+        switch neither resizes the tab nor moves its text. The current tab's bold comes from the style
         sheet."""
-        text = Text(f" {label} ")
+        text = Text(f"{self._icon(tab)} {label}")
+        count = self._count(tab)
+        if count is not None:
+            text.append(f" {count}", style="bold")
+        text.append(" ")
         if tab != self.active:
-            text.append(f"{TAB_KEY} ", style="bold yellow")
+            text.append(TAB_KEY, style="bold yellow")
         else:
-            text.append(" " * len(f"{TAB_KEY} "))
+            text.append(" " * len(TAB_KEY))
         return text
+
+    def show_counts(self) -> None:
+        for (tab, label), widget in zip(TABS, self.query(".tab")):
+            text = self._tab_text(tab, label)
+            if widget.plain != text.plain:
+                widget.plain = text.plain
+                widget.query_one(".tab-label", Static).update(text)
 
     def tab_labels(self) -> list[str]:
         return [" ".join(widget.plain.split()) for widget in self.query(".tab")]
@@ -1592,7 +1660,8 @@ class KeyBar(Static):
             self.show_keys()
 
     def key_labels(self) -> list[Text]:
-        """Each key of the current screen once, in its binding order, as `key Description`."""
+        """Each key of the current screen once, in its binding order: the key as a keycap in reverse
+        colors, then its description. No-break spaces keep a key and its description together."""
         seen = set()
         labels = []
         for _node, binding, enabled, _tooltip in self.screen.active_bindings.values():
@@ -1600,11 +1669,10 @@ class KeyBar(Static):
                 continue
             seen.add(binding.action)
             click = Style(meta={"@click": f"app.simulate_key({binding.key!r})"})
-            label = f"{self.app.get_key_display(binding)}\u00a0{binding.description.replace(' ', chr(0xa0))}"
-            key = len(self.app.get_key_display(binding))
+            key = self.app.get_key_display(binding).replace(" ", "\u00a0")
             text = Text()
-            text.append(label[:key], style=Style(bold=True, dim=not enabled) + click)
-            text.append(label[key:], style=click)
+            text.append(f"\u00a0{key}\u00a0", style=Style(bold=True, reverse=True, dim=not enabled) + click)
+            text.append(f"\u00a0{binding.description.replace(' ', chr(0xa0))}", style=click)
             labels.append(text)
         return labels
 
@@ -2051,10 +2119,8 @@ class PullRequestsScreen(Screen):
         self.shown_rows: list[list[Text]] = []
 
     def compose(self) -> ComposeResult:
+        yield HeaderBar("Pull requests", self.app.view)
         yield TabBar("prs")
-        title = Static("Pull requests", id="pr-title")
-        title.plain = "Pull requests"
-        yield title
         table = PullRequestTable(id="pr-list", cursor_type="row", zebra_stripes=True, cell_padding=PR_CELL_PADDING)
         table.add_columns(*PR_COLUMNS)
         yield table
@@ -2162,9 +2228,12 @@ class PullRequestsScreen(Screen):
         self.repo, self.prs = repo, prs
         if page is not None:
             self.page = page
-        title = self.query_one("#pr-title", Static)
-        title.plain = f"Pull requests · {repo}"
-        title.update(title.plain)
+        self.query_one(HeaderBar).show(repo, self.app.view)
+        if page is not None:
+            self.app.pr_count = page.total
+            for screen in self.app.screen_stack + [self]:
+                for bar in screen.query(TabBar):
+                    bar.show_counts()
         table = self.query_one("#pr-list", PullRequestTable)
         width = self._title_width(prs)
         rows = [pr_cells(pr, self.icon_style, width) for pr in prs]
@@ -2467,8 +2536,15 @@ class CellMouseDriver(LinuxDriver):
 class HerdboardApp(App):
     TITLE = "herdboard"
     CSS = """
-    /* The board and the pull requests have one bar style, under the tabs. */
-    #title-bar, #pr-title { height: 1; padding: 0 1; background: $primary; color: $text; text-style: bold; }
+    /* The header row of the board and the pull requests: herdboard | board or repository, view, version. */
+    #header-bar { height: 2; padding: 0 1; border-bottom: solid $surface-lighten-2; }
+    #header-app { width: auto; color: $accent; text-style: bold; }
+    #header-rule { width: auto; padding: 0 1; color: $text-muted; }
+    #header-place { width: 1fr; height: 1; color: $text-muted; }
+    #header-view { width: auto; padding-left: 2; color: $accent; }
+    App:ansi #header-bar { border-bottom: solid ansi_bright_black; }
+    App:ansi #header-app, App:ansi #header-view { color: ansi_magenta; }
+    App:ansi #header-rule, App:ansi #header-place { color: ansi_default; }
     #columns { height: 1fr; overflow-x: auto; overflow-y: hidden; }
     #columns { scrollbar-size-horizontal: 1; }
     .column { width: 1fr; min-width: 24; height: 100%; border: round $surface-lighten-2; }
@@ -2476,23 +2552,20 @@ class HerdboardApp(App):
     .cards { height: 1fr; scrollbar-size-vertical: 1; }
     #filter { border: round $primary; }
     .bottom-dock { dock: bottom; height: auto; }
-    /* The tabs stand on the title bar in its color: the current tab is filled and joins the bar,
-       the other tab is an outline open at the bottom. */
-    #tab-bar { height: 2; background: $background; }
-    #tab-bar .tab { width: auto; height: 2; padding: 0; margin-right: 1; background: transparent;
-                    border: round $primary; border-bottom: none; }
-    #tab-bar .tab-label { width: auto; height: 1; color: $text; }
-    /* The inner border fills the inner half of each edge cell, up to where the other tab draws
-       its line, so the current tab is filled to its edges at the same size. */
-    #tab-bar .tab.active { border: inner $primary; border-bottom: none; }
-    #tab-bar .tab.active .tab-label { background: $primary; text-style: bold; }
+    /* Each tab is a box with its icon and label. The current tab has an accent border and bold text. */
+    #tab-bar { height: 3; background: $background; }
+    #tab-bar .tab { width: auto; height: 3; padding: 0 1; margin-right: 1; background: transparent;
+                    border: round $surface-lighten-2; }
+    #tab-bar .tab-label { width: auto; height: 1; color: $text-muted; }
+    #tab-bar .tab.active { border: round $accent; }
+    #tab-bar .tab.active .tab-label { color: $accent; text-style: bold; }
     #key-bar { height: auto; padding: 0 1; color: $text-muted;
                 link-style: none; link-color: $text-muted; link-background: transparent;
                 link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
+    App:ansi #tab-bar .tab { border: round ansi_bright_black; }
     App:ansi #tab-bar .tab-label { color: ansi_default; }
-    /* Terminals that draw bold text in bright colors turn bold black into grey, so the dark text
-       on the bars and the current tab is not bold in the ANSI themes. */
-    App:ansi #tab-bar .tab.active .tab-label { background: $primary; color: ansi_black; text-style: none; }
+    App:ansi #tab-bar .tab.active { border: round ansi_magenta; }
+    App:ansi #tab-bar .tab.active .tab-label { color: ansi_magenta; text-style: bold; }
     .card { padding: 0 1; height: auto; border: round $surface-lighten-2; }
     .dialog { width: 70; max-width: 90%; height: auto; max-height: 80%; padding: 1 2;
               border: round $accent; background: $surface; }
@@ -2573,7 +2646,6 @@ class HerdboardApp(App):
     .column .card.selected { border: heavy $foreground; background: $accent 20%; }
     .column .card.compact.selected { border: none; background: $accent; color: $text; }
     App:ansi .column .card.selected { background: ansi_default; border: heavy ansi_default; text-style: bold; }
-    App:ansi #title-bar, App:ansi #pr-title { color: ansi_black; text-style: none; }
     App:ansi .dialog { border: round $primary; }
     App:ansi .detail-block { border: round ansi_bright_black; }
     App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
@@ -2689,6 +2761,8 @@ class HerdboardApp(App):
         # The pull request list's calls into `pr_reviews`; `open_prs` opens the board on that list.
         self.pr_service = pr_service or PullRequestService(self.directory)
         self.open_prs = open_prs
+        # The open pull request count of the last read, for the tab; None before the first read.
+        self.pr_count: int | None = None
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
         self.starting = False
@@ -2721,10 +2795,8 @@ class HerdboardApp(App):
     # Layout
 
     def compose(self) -> ComposeResult:
+        yield HeaderBar(view=self.view)
         yield TabBar("board")
-        title = Static("", id="title-bar")
-        title.plain = ""
-        yield title
         yield HorizontalScroll(id="columns", can_focus=False)
         search = Input(placeholder="Filter: words, or #tag · enter keeps it · escape clears it", id="filter")
         search.display = False
@@ -2914,16 +2986,15 @@ class HerdboardApp(App):
 
     async def _rebuild(self) -> None:
         names = ", ".join(self.store.board_name(path) for path in self.paths) or "no boards"
-        title = self.base.query_one("#title-bar", Static)
-        title.plain = f"herdboard · view: {self.view} · {names} · {self.linear_label()}"
+        place = f"{names} · {self.linear_label()}"
         if self.filter_text:
             shown = sum(len(c.cards) for c in self.columns)
-            title.plain += f' · filter: "{self.filter_text}" ({shown} of {sum(len(c.cards) for c in self.loaded)})'
+            place += f' · filter: "{self.filter_text}" ({shown} of {sum(len(c.cards) for c in self.loaded)})'
         if self.show_archive:
-            title.plain += " · archive shown"
+            place += " · archive shown"
         if self.repo_board is None and self.init_board is not None:
-            title.plain += " · no board for this repository: press i to create it"
-        title.update(Text(title.plain))
+            place += " · no board for this repository: press i to create it"
+        self.base.query_one(HeaderBar).show(place, self.view)
         show_board = len(self.paths) > 1
         container = self.base.query_one("#columns", HorizontalScroll)
         existing = list(container.query(".column"))

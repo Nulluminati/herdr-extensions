@@ -225,6 +225,20 @@ class ListTests(PrReviewTestCase):
         self.assertEqual(pr_reviews.base_repository(self.checkout), REPO)
 
 
+class CommentCountTests(unittest.TestCase):
+    def test_the_comment_count_comes_from_the_search_reply(self):
+        pr = pr_reviews.PullRequest.from_json(pr_json(comments={"totalCount": 12}), "me")
+        self.assertEqual(pr.comments, 12)
+        self.assertEqual(pr.to_dict()["comments"], 12)
+
+    def test_a_reply_without_comments_counts_none(self):
+        self.assertEqual(pr_reviews.PullRequest.from_json(pr_json(), "me").comments, 0)
+        self.assertEqual(pr_reviews.PullRequest.from_json(pr_json(comments=None), "me").comments, 0)
+
+    def test_the_search_asks_github_for_the_comment_count(self):
+        self.assertIn("comments { totalCount }", pr_reviews.SEARCH_QUERY)
+
+
 class RemoteTests(PrReviewTestCase):
     def remotes(self, text):
         self.fake.replies.pop(("git", "-C", str(self.checkout), "remote", "-v"))

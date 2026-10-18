@@ -45,6 +45,7 @@ SEARCH_QUERY = """query($q: String!, $first: Int!, $after: String) {
       author { login }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
       reviewDecision
+      comments { totalCount }
       labels(first: 10) { nodes { name color } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     } }
@@ -128,6 +129,8 @@ class PullRequest:
     updated: str = ""
     body: str = ""
     labels: list = field(default_factory=list)
+    # The count of comments on the pull request's conversation.
+    comments: int = 0
     # The state of the last commit's checks (passed, failed, pending), None without checks.
     ci: str | None = None
     # GitHub's review decision (approved, changes requested, review required), None when the
@@ -156,6 +159,7 @@ class PullRequest:
                    additions=int(data.get("additions") or 0), deletions=int(data.get("deletions") or 0),
                    files=int(data.get("changedFiles") or 0), updated=data.get("updatedAt") or "",
                    body=data.get("body") or "", labels=_labels(data.get("labels")),
+                   comments=int((data.get("comments") or {}).get("totalCount") or 0),
                    ci=CI_STATES.get(_rollup(data).get("state")), decision=DECISIONS.get(data.get("reviewDecision")))
 
     def marks(self) -> list[str]:
@@ -176,7 +180,8 @@ class PullRequest:
                 "draft": self.draft, "head_sha": self.head_sha, "head_branch": self.head_branch,
                 "requested": self.requested, "mine": self.mine, "base_branch": self.base_branch,
                 "additions": self.additions, "deletions": self.deletions, "files": self.files,
-                "updated": self.updated, "labels": self.labels, "ci": self.ci, "decision": self.decision,
+                "updated": self.updated, "labels": self.labels, "comments": self.comments, "ci": self.ci,
+                "decision": self.decision,
                 "status": self.status, "new_commits": self.new_commits,
                 "notes": self.notes, "review": self.review}
 

@@ -35,7 +35,7 @@ class ArchiveBoardTests(BoardTestCase):
             await settle(pilot)
             self.assertEqual(self.headers(app)[-1], "Archive 1")
             self.assertIn("done card", "\n".join(self.cards(app)))
-            self.assertIn("archive shown", app.query_one("#title-bar").plain)
+            self.assertIn("archive shown", app.query_one("#header-bar").plain)
             self.assertIn("archive", app.query(".column")[-1].classes)
             await pilot.press("z")
             await settle(pilot)

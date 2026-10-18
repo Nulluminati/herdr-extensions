@@ -128,8 +128,8 @@ class RenderTests(BoardTestCase):
         app = self.make_app("repo")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
-            self.assertIn("repo", app.query_one("#title-bar").plain)
-            self.assertIn("acme-api", app.query_one("#title-bar").plain)
+            self.assertIn("repo", app.query_one("#header-bar").plain)
+            self.assertIn("acme-api", app.query_one("#header-bar").plain)
             self.assertFalse(any("acme-api" in c for c in self.cards(app)))
             await pilot.press("v")
             await pilot.press("v")
@@ -236,7 +236,7 @@ class FilterTests(BoardTestCase):
             await pilot.press("slash", *"timeout")
             await pilot.pause()
             self.assertEqual(self.visible(app), ["Fix the login timeout #auth"])
-            self.assertIn('filter: "timeout"', app.query_one("#title-bar").plain)
+            self.assertIn('filter: "timeout"', app.query_one("#header-bar").plain)
 
     async def test_words_match_details_too(self):
         app = self.make_app()
@@ -270,7 +270,7 @@ class FilterTests(BoardTestCase):
             await pilot.press("escape")
             await pilot.pause()
             self.assertEqual(len(self.visible(app)), 3)
-            self.assertNotIn("filter:", app.query_one("#title-bar").plain)
+            self.assertNotIn("filter:", app.query_one("#header-bar").plain)
 
     async def test_escape_while_typing_clears_the_filter(self):
         app = self.make_app()
@@ -1137,7 +1137,7 @@ class InitAssistTests(BoardTestCase):
         return app
 
     def title(self, app):
-        return app.query_one("#title-bar").plain
+        return app.query_one("#header-bar").plain
 
     async def test_title_says_how_to_create_the_board(self):
         app = self.make_unboarded_app()

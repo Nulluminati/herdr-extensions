@@ -54,7 +54,7 @@ class LinearBoardCase(BoardTestCase, LinearEnvTestCase):
         return app
 
     def title(self, app):
-        return app.query_one("#title-bar").plain
+        return app.query_one("#header-bar").plain
 
     def notifications(self, app):
         return [(n.message, n.severity) for n in app._notifications]

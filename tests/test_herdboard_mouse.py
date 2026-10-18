@@ -330,9 +330,14 @@ class CardActionTests(MouseTestCase):
 
 class MenuTests(MouseTestCase):
     def marker_offset(self, widget):
-        title = widget.plain.split("\n")[0]
-        self.assertTrue(widget.rich_text.plain.startswith(f"{title} ⋯"))
-        return content_offset(widget, cell_len(title) + 1)
+        """Where the widget draws the menu marker: after the title, which can wrap in a narrow column.
+        `render_line` gives the lines inside the border and the padding."""
+        self.assertIn(" ⋯", widget.rich_text.plain.split("\n")[0])
+        for y in range(widget.size.height):
+            line = "".join(segment.text for segment in widget.render_line(y))
+            if "⋯" in line:
+                return content_offset(widget, cell_len(line[:line.index("⋯")]), y)
+        self.fail("no menu marker on the card")
 
     async def choose(self, pilot, action):
         menu = pilot.app.screen

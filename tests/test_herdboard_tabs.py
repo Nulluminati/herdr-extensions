@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from textual.widgets import Footer  # noqa: E402
 
-from herdboard.board import HerdboardApp, KeyBar, PullRequestsScreen, TabBar  # noqa: E402
+from herdboard.board import HeaderBar, HerdboardApp, KeyBar, PullRequestsScreen, TabBar  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -53,12 +53,12 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             bar = self.bar(app)
             self.assertEqual(bar.active, "board")
-            self.assertEqual(bar.tab_labels(), ["Board", "Pull requests G"])
-            keys = self.keys(app).keys_text().plain.replace("\xa0", " ")
+            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests G"])
+            keys = " ".join(self.keys(app).keys_text().plain.split())
             for part in ("a Add", "/ Filter", "s Start", "? Help", "q Quit"):
                 self.assertIn(part, keys)
             self.assertNotIn("PRs", keys)
-            self.assertEqual(bar.region.y, 0)
+            self.assertEqual(bar.region.y, app.screen.query_one(HeaderBar).region.bottom)
             self.assertEqual(self.keys(app).region.bottom, 30)
             self.assertEqual(list(app.screen.query(Footer)), [])
 
@@ -70,8 +70,8 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, PullRequestsScreen)
             bar = self.bar(app)
             self.assertEqual(bar.active, "prs")
-            self.assertEqual(bar.tab_labels(), ["Board G", "Pull requests"])
-            keys = self.keys(app).keys_text().plain.replace("\xa0", " ")
+            self.assertEqual(bar.tab_labels(), ["▦ Board G", "⑂ Pull requests 0"])
+            keys = " ".join(self.keys(app).keys_text().plain.split())
             for part in ("/ Search", "n Next", "s Review", "esc Back"):
                 self.assertIn(part, keys)
             self.assertNotIn("a Add", keys)
@@ -155,65 +155,72 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.cursor_row, 3)
             self.assertEqual(screen.current().number, 6)
 
-    async def test_the_tabs_and_the_bar_under_them_have_one_color(self):
+    async def test_the_header_names_herdboard_the_place_the_view_and_the_version(self):
+        with patch("herdboard.board.herdboard_version", return_value="0.3.1"):
+            app = self.app()
+            async with app.run_test(size=(160, 30)) as pilot:
+                await self.settle(app, pilot)
+                header = app.screen.query_one(HeaderBar)
+                self.assertEqual(header.region.y, 0)
+                self.assertTrue(header.plain.startswith("herdboard │ inbox · Linear: off"), header.plain)
+                self.assertTrue(header.plain.endswith("│ inbox  v0.3.1"), header.plain)
+                # The view and the version stand at the right edge, inside the padding.
+                self.assertEqual(app.screen.query_one("#header-view").region.right, 159)
+                self.assertEqual(self.bar(app).region.y, header.region.bottom)
+                await pilot.press("G")
+                await self.settle(app, pilot)
+                header = app.screen.query_one(HeaderBar)
+                self.assertEqual(header.plain, "herdboard │ acme/api │ inbox  v0.3.1")
+
+    async def test_the_header_leaves_out_a_missing_version(self):
+        from importlib.metadata import PackageNotFoundError
+        from herdboard import board
+        with patch("importlib.metadata.version", side_effect=PackageNotFoundError("herdboard")):
+            self.assertEqual(board.herdboard_version(), "")
+            self.assertEqual(HeaderBar("acme-api", "repo").plain, "herdboard │ acme-api │ repo")
+
+    async def test_the_current_tab_has_an_accent_border_and_both_keep_their_size(self):
         for theme in ("textual-dark", "ansi-dark"):
             app = self.app()
             app.theme = theme
             async with app.run_test(size=(160, 30)) as pilot:
+                await pilot.press("G")
                 await self.settle(app, pilot)
-                for screen_key in ("", "G"):
-                    if screen_key:
-                        await pilot.press(screen_key)
-                        await self.settle(app, pilot)
-                    bar = app.screen.query_one("#pr-title" if screen_key else "#title-bar")
-                    color = bar.styles.background
-                    active = app.screen.query_one(".tab.active")
-                    self.assertEqual(active.query_one(".tab-label").styles.background, color, theme)
-                    other = next(tab for tab in app.screen.query(".tab") if not tab.has_class("active"))
-                    for side in ("top", "left", "right"):
-                        self.assertEqual(getattr(other.styles, f"border_{side}")[1], color, (theme, side))
-                    self.assertEqual(other.styles.border_bottom[0], "", theme)
-                    self.assertEqual(other.region.bottom, bar.region.y, theme)
-                    self.assertEqual(active.region.bottom, bar.region.y, theme)
+                await pilot.press("G")
+                await self.settle(app, pilot)
+                sizes = {tab: app.screen.query_one(f"#tab-{tab}").region.size for tab in ("board", "prs")}
+                await pilot.press("G")
+                await self.settle(app, pilot)
+                active = app.screen.query_one(".tab.active")
+                other = next(tab for tab in app.screen.query(".tab") if not tab.has_class("active"))
+                self.assertEqual(active.id, "tab-prs")
+                self.assertEqual(active.styles.border_top[0], "round")
+                self.assertNotEqual(active.styles.border_top[1], other.styles.border_top[1], theme)
+                self.assertTrue(active.query_one(".tab-label").visual_style.bold, theme)
+                for tab in ("board", "prs"):
+                    self.assertEqual(app.screen.query_one(f"#tab-{tab}").region.size, sizes[tab], (theme, tab))
 
-    async def test_a_tab_keeps_its_size_and_is_filled_when_selected(self):
+    async def test_the_pull_request_tab_shows_the_open_count_after_a_read(self):
+        from herdboard.pr_reviews import PullRequest
+        prs = [PullRequest(n, f"PR {n}", "u", "octo", False, "a" * 40, "b", False, False) for n in (2, 1)]
+        self.service.page.return_value = ("acme/api", Page(prs, 7, None))
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            sizes = {tab: app.screen.query_one(f"#tab-{tab}").region.size for tab in ("board", "prs")}
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests G"])
             await pilot.press("G")
             await self.settle(app, pilot)
-            for tab in ("board", "prs"):
-                widget = app.screen.query_one(f"#tab-{tab}")
-                self.assertEqual(widget.region.size, sizes[tab], tab)
-                # The current tab fills the inner half of its border cells, up to where the
-                # other tab draws its line, so the fill covers the tab and the size stays.
-                self.assertEqual(widget.styles.border_top[0], "inner" if tab == "prs" else "round", tab)
-                self.assertEqual(widget.styles.border_bottom[0], "", tab)
-                self.assertEqual(widget.styles.background.a, 0, tab)
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board G", "⑂ Pull requests 7"])
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7 G"])
 
-    async def test_the_tabs_stand_on_the_bar_in_a_thin_pane(self):
-        for key in ("", "G"):
-            app = self.app()
-            async with app.run_test(size=(50, 40)) as pilot:
-                await self.settle(app, pilot)
-                if key:
-                    await pilot.press(key)
-                    await self.settle(app, pilot)
-                bar = app.screen.query_one("#pr-title" if key else "#title-bar")
-                for tab in app.screen.query(".tab"):
-                    self.assertEqual(tab.region.bottom, bar.region.y, (key, tab.id))
-
-    async def test_the_board_bar_and_the_pull_request_bar_look_the_same(self):
+    async def test_the_tabs_use_nerd_icons_only_in_nerd_mode(self):
+        self.store.config.icon_style = "nerd"
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            board = app.screen.query_one("#title-bar").styles
-            await pilot.press("G")
-            await self.settle(app, pilot)
-            prs = app.screen.query_one("#pr-title").styles
-            for rule in ("color", "background", "text_style", "padding"):
-                self.assertEqual(getattr(board, rule), getattr(prs, rule), rule)
+            self.assertEqual(self.bar(app).tab_labels(), ["\uf0db Board", "\uf407 Pull requests G"])
 
     async def test_a_key_and_its_description_stay_on_one_line(self):
         for width in (50, 90, 160):
@@ -240,25 +247,6 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(self.keys(app).region.bottom, 30)
             self.assertEqual(app.screen.query_one("#pr-search").region.bottom, self.keys(app).region.y)
-
-    async def test_dark_text_on_the_bars_and_the_tab_is_not_bold_in_the_ansi_themes(self):
-        # Terminals that draw bold text in bright colors make bold black text grey.
-        for theme, bold in (("ansi-dark", False), ("textual-dark", True)):
-            app = self.app()
-            app.theme = theme
-            async with app.run_test(size=(160, 30)) as pilot:
-                await self.settle(app, pilot)
-                for key in ("", "G"):
-                    if key:
-                        await pilot.press(key)
-                        await self.settle(app, pilot)
-                    bar = app.screen.query_one("#pr-title" if key else "#title-bar")
-                    label = app.screen.query_one(".tab.active .tab-label")
-                    for widget in (bar, label):
-                        self.assertEqual(bool(widget.visual_style.bold), bold, (theme, key, widget))
-                    # The bold comes from the style sheet, so the ANSI themes can turn it off.
-                    text = self.bar(app)._tab_text(self.bar(app).active, "Tab")
-                    self.assertFalse(text.style or any(span.style == "bold" for span in text.spans), theme)
 
     async def test_the_label_does_not_move_when_a_tab_is_selected(self):
         # The current tab keeps the G's place blank, so its text stays where it was.
@@ -287,6 +275,27 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
         rules = [line for line in HerdboardApp.CSS.splitlines() if ".tab" in line]
         self.assertTrue(rules)
         self.assertEqual([line for line in rules if ":hover" in line], [])
+
+    async def test_each_key_is_a_keycap_before_its_description(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            label = next(text for text in self.keys(app).key_labels() if "Add" in text.plain)
+            self.assertEqual(label.plain, "\xa0a\xa0\xa0Add")
+            caps = [label.plain[span.start:span.end] for span in label.spans if span.style.reverse]
+            self.assertEqual(caps, ["\xa0a\xa0"])
+            plain = [span for span in label.spans if label.plain[span.start:span.end].endswith("Add")]
+            self.assertFalse(any(span.style.reverse for span in plain))
+
+    async def test_a_click_on_a_keycap_presses_its_key(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            keys = self.keys(app)
+            line = "".join(segment.text for segment in keys.render_line(0))
+            await pilot.click(keys, offset=(keys.styles.padding.left + line.index("\xa0a\xa0") + 1, 0))
+            await self.settle(app, pilot)
+            self.assertEqual(type(app.screen).__name__, "AddScreen")
 
     async def test_each_key_can_be_clicked(self):
         app = self.app()
