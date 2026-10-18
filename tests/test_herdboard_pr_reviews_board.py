@@ -172,6 +172,29 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             screen = await self.open(app, pilot)
             self.assertTrue(screen.rows()[1][7].startswith(AGENT_LOGOS["claude"]), screen.rows()[1][7])
 
+    def test_a_narrow_row_keeps_the_title_and_every_part(self):
+        pr = pull_request(123, "Fix login timeout for sessions", status="reviewed", ci="passed", decision="approved",
+                          notes=3, comments=4, head_branch="fix-login", base_branch="main",
+                          updated="2026-10-16T18:00:00Z")
+        fields = pr_fields(pr, "plain", None)
+        for width in (76, 100):
+            with self.subTest(width=width):
+                output = StringIO()
+                Console(file=output, width=width, color_system=None).print(pr_row_content(fields))
+                lines = output.getvalue().splitlines()
+                self.assertEqual(len(lines), 3, lines)
+                self.assertIn("#123", lines[0])
+                self.assertIn("Fix login timeout for sessions", lines[0])
+                text = "\n".join(lines)
+                for part in ("✓ passed", "✔ approved", "✓ reviewed", "3 ✎", "4 comments", "octo", "+0 −0",
+                             "fix-login → main", "updated"):
+                    self.assertIn(part, text)
+        output = StringIO()
+        Console(file=output, width=46, color_system=None).print(pr_row_content(fields))
+        first = output.getvalue().splitlines()[0]
+        self.assertIn("#123", first)
+        self.assertIn("Fix login", first)
+
     def test_ago_says_how_long_ago_in_one_unit(self):
         from datetime import datetime, timezone
         now = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
@@ -416,6 +439,23 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             await pilot.pause()
             self.assertNotIsInstance(app.screen, PullRequestsScreen)
+
+    async def test_a_search_keeps_the_open_count_on_the_tab(self):
+        everything = Page([pull_request(n, f"PR {n}") for n in (9, 8, 7)], 3, None)
+        found = Page([pull_request(8, "PR 8")], 1, None)
+        self.service.page.side_effect = lambda text, after: ("acme/api", found if text else everything)
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            self.assertEqual(app.pr_count, 3)
+            await pilot.press("slash")
+            await pilot.pause()
+            for key in "PR 8":
+                await pilot.press(key if key != " " else "space")
+            await pilot.press("enter")
+            await self.settle(app, pilot)
+            self.service.page.assert_called_with("PR 8", None)
+            self.assertEqual(app.pr_count, 3)
 
     async def test_the_board_can_open_on_the_list(self):
         app = self.app(open_prs=True)

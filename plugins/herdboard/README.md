@@ -55,7 +55,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 ## The board
 
-The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The Pull requests tab shows the open PR count after the list reads GitHub. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it.
+The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The Pull requests tab shows the open PR count after the list reads GitHub. A search does not change the count. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it.
 
 Each column takes a color in turn: blue, magenta, yellow, cyan and green. The column's scrollbar has its color too. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and an underlined header. The selected card has a heavy border in the text color.
 
@@ -331,6 +331,8 @@ The flow:
    - **GitHub review**: what GitHub says. `your review` when the PR asks you, and GitHub's review decision: `approved`, `changes requested` or `review required`.
    - **Agent review (local)**, under the GitHub review: what herdboard's agent did on this machine: `reviewing`, `reviewed` or `failed`, and `new commits` since then.
    - At the right: the comment count, the agent's note count, and when the PR was last updated.
+
+   In a window narrower than about 115 columns, a PR keeps three rows: the GitHub and agent reviews move under the title, and CI, the counts and the update time go to the right.
 
    The lines above the list show the repository, the total, the page and the search, then count what needs you on the page, by GitHub, CI and agent.
 2. Press `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.

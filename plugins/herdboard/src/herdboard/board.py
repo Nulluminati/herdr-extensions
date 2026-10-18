@@ -1929,26 +1929,48 @@ def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None 
             Text(f"updated {updated}" if updated else "", style="dim")]
 
 
-def pr_row_content(fields: list[Text]) -> Table:
+# The narrowest row that keeps the fixed columns of the wide layout and a readable title.
+PR_ROW_WIDE = 110
+
+
+class PullRequestRowContent:
     """A pull request in three rows: the number and title, with the author, size and branch under it.
-    At the right: CI, the reviews, the comments and notes, and when it was updated."""
-    icon, number, title, author, size, ci, github, agent, notes, comments, branch, updated = fields
-    grid = Table.grid(expand=True, padding=(0, 2))
-    # The state icon and the number, up to six digits.
-    grid.add_column(no_wrap=True, width=9)
-    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
-    # Fixed widths, so the parts line up from row to row.
-    grid.add_column(no_wrap=True, width=10, overflow="ellipsis")
-    grid.add_column(no_wrap=True, width=26, overflow="ellipsis")
-    grid.add_column(no_wrap=True, width=20, overflow="ellipsis")
-    who = author.copy()
-    if size:
-        who.append("  ")
-        who.append_text(size)
-    grid.add_row(Text.assemble(icon, " ", number), title, ci, github, comments)
-    grid.add_row(Text(""), who, Text(""), agent, notes)
-    grid.add_row(Text(""), branch, Text(""), Text(""), updated)
-    return grid
+    A wide row has fixed columns at the right: CI, the reviews, the comments and notes, and when it was
+    updated. A narrow row puts the reviews under the title, and CI, the comments and the time at the right."""
+
+    def __init__(self, fields: list[Text]):
+        self.fields = fields
+
+    def __rich_console__(self, console, options):
+        icon, number, title, author, size, ci, github, agent, notes, comments, branch, updated = self.fields
+        who = author.copy()
+        if size:
+            who.append("  ")
+            who.append_text(size)
+        grid = Table.grid(expand=True, padding=(0, 2))
+        # The state icon and the number, up to six digits.
+        grid.add_column(no_wrap=True, width=9)
+        grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
+        if options.max_width >= PR_ROW_WIDE:
+            # Fixed widths, so the parts line up from row to row.
+            grid.add_column(no_wrap=True, width=10, overflow="ellipsis")
+            grid.add_column(no_wrap=True, width=26, overflow="ellipsis")
+            grid.add_column(no_wrap=True, width=20, overflow="ellipsis")
+            grid.add_row(Text.assemble(icon, " ", number), title, ci, github, comments)
+            grid.add_row(Text(""), who, Text(""), agent, notes)
+            grid.add_row(Text(""), branch, Text(""), Text(""), updated)
+        else:
+            grid.add_column(no_wrap=True, overflow="ellipsis", justify="right")
+            reviews = Text("  ").join(part for part in (who, github, agent) if part)
+            talk = Text("  ").join(part for part in (notes, comments) if part)
+            grid.add_row(Text.assemble(icon, " ", number), title, ci)
+            grid.add_row(Text(""), reviews, talk)
+            grid.add_row(Text(""), branch, updated)
+        yield grid
+
+
+def pr_row_content(fields: list[Text]) -> PullRequestRowContent:
+    return PullRequestRowContent(fields)
 
 
 class PullRequestRow(Static):
@@ -2379,13 +2401,15 @@ class PullRequestsScreen(Screen):
         text.append(f" │ read at {datetime.now().strftime('%H:%M')}", style="dim")
         return text
 
-    async def _show(self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None) -> None:
+    async def _show(self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None,
+                    searched: bool = False) -> None:
+        """Show a page. A search page leaves the tab's open count as it is."""
         selected = self.current()
         self.repo, self.prs = repo, prs
         if page is not None:
             self.page = page
         self.query_one(HeaderBar).show(repo, self.app.view)
-        if page is not None:
+        if page is not None and not searched:
             self.app.pr_count = page.total
             for screen in self.app.screen_stack + [self]:
                 for bar in screen.query(TabBar):
@@ -2419,7 +2443,7 @@ class PullRequestsScreen(Screen):
             self.reading = False
             if page is not None:
                 self.read_at = time.monotonic()
-                await self._show(repo, page.prs, page)
+                await self._show(repo, page.prs, page, searched=bool(text))
 
         def load() -> None:
             try:
