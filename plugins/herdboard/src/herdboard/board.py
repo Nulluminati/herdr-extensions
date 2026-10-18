@@ -117,59 +117,93 @@ ICONS = {
 }
 
 
-HELP_KEYS = [
-    ("left, h", "previous column"),
-    ("right, l", "next column"),
-    ("up, k", "previous card"),
-    ("down, j", "next card"),
-    ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
-    ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
-    ("shift+up, K", "move the todo up in its column"),
-    ("shift+down, J", "move the todo down in its column"),
-    ("/", "filter: words match title, tags and details; #tag matches a tag, #type/bug a type; enter keeps it"),
-    ("escape", "clear the filter"),
-    ("enter", "card detail; there, o opens an attachment"),
-    ("a", "add a card to the selected column: title, type, tags, due date, details, and the board"),
-    ("d", "mark the card done (a Linear card moves to its completed state)"),
-    ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
-    ("b", "move the todo to another board, for example from the inbox to this repository"),
-    ("x", "delete the todo, after you confirm"),
-    ("A", "archive the todo; in the archive column, move it back to the done column (an archived parent too, after you confirm)"),
-    ("D", "archive every card in the done column, after you confirm"),
-    ("z", "show or hide the archive column"),
-    ("s", "start work with the default agent"),
-    ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
-    ("P", "plan the card with an agent in a new tab; the plan goes to the work agent's brief"),
-    ("g", "go to the started card's Herdr workspace"),
-    ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
-    ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
-    ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
-    ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
-    ("v", "cycle view: repo, inbox, all, mine"),
-    ("t", "hide or show Linear cards"),
-    ("i", "create the board for this repository"),
-    ("I", "search Linear (on enter) and pin an issue to this repository's board"),
-    ("u", "remove the pin of a pinned Linear issue"),
-    ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
-    ("r", "reload, and fetch Linear again"),
-    ("G", "switch between the Board and Pull requests tabs; a click on a tab or on a key in the top row works too"),
-    ("G, enter", "on a pull request, or a click: its details, the agent review and the description"),
-    ("G, s", "on a pull request: choose an agent and its model; it reviews the PR with notes in Hunk"),
-    ("G, g", "on a pull request: go to its review workspace"),
-    ("G, u", "on a pull request (Update): fetch new commits, open Hunk again with the old notes, offer a new agent review"),
-    ("G, f", "on a pull request: finish the review: close the workspace, remove the worktree and pr/N branch"),
-    ("G, o", "on a pull request: open it in the browser"),
-    ("G, r", "on the pull request list: read GitHub again"),
-    ("G, n / p", "on the pull request list: the next or previous page of 50"),
-    ("G, /", "on the pull request list: search GitHub (words, author:NAME, draft:true, review-requested:@me); escape clears it"),
-    ("?", "this help"),
-    ("escape", "close a screen or cancel input"),
-    ("q", "quit"),
-    ("click", "select a card, or a column on its header"),
-    ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
-    ("right-click", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
-    ("drag", "move the card to the bottom of another column"),
+# The help screen: a title, then its keys. A screen's keys are in its own section; the keys of
+# every screen are in "Everywhere".
+HELP_SECTIONS = [
+    ("Board", [
+        ("left, h", "previous column"),
+        ("right, l", "next column"),
+        ("up, k", "previous card"),
+        ("down, j", "next card"),
+        ("/", "filter: words match title, tags and details; #tag matches a tag, #type/bug a type; enter keeps it"),
+        ("escape", "clear the filter"),
+        ("enter", "card detail"),
+        ("v", "cycle view: repo, inbox, all, mine"),
+        ("t", "hide or show Linear cards"),
+        ("i", "create the board for this repository"),
+        ("I", "search Linear (on enter) and pin an issue to this repository's board"),
+        ("u", "remove the pin of a pinned Linear issue"),
+        ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
+        ("r", "reload, and fetch Linear again"),
+        ("G", "switch between the Board and Pull requests tabs; a click on a tab or on a key in the top row works too"),
+    ]),
+    ("Cards", [
+        ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
+        ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
+        ("shift+up, K", "move the todo up in its column"),
+        ("shift+down, J", "move the todo down in its column"),
+        ("a", "add a card to the selected column: title, type, tags, due date, details, and the board"),
+        ("d", "mark the card done (a Linear card moves to its completed state)"),
+        ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
+        ("b", "move the todo to another board, for example from the inbox to this repository"),
+        ("x", "delete the todo, after you confirm"),
+        ("A", "archive the todo; in the archive column, move it back to the done column (an archived parent too, after you confirm)"),
+        ("D", "archive every card in the done column, after you confirm"),
+        ("z", "show or hide the archive column"),
+        ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
+    ]),
+    ("Agents and branches", [
+        ("s", "start work with the default agent"),
+        ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
+        ("P", "plan the card with an agent in a new tab; the plan goes to the work agent's brief"),
+        ("g", "go to the started card's Herdr workspace"),
+        ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
+        ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
+        ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
+    ]),
+    ("Card detail", [
+        ("up, k", "previous checklist item"),
+        ("down, j", "next checklist item"),
+        ("space", "check or clear the checklist item"),
+        ("e", "edit the todo"),
+        ("o", "open an attachment"),
+    ]),
+    ("Pull requests", [
+        ("up, k", "previous pull request"),
+        ("down, j", "next pull request"),
+        ("enter", "its details, the agent review and the description"),
+        ("/", "search GitHub (words, author:NAME, draft:true, review-requested:@me)"),
+        ("escape", "close the search box, else clear the search, else go back to the board"),
+        ("n", "the next page of 50"),
+        ("p", "the previous page of 50"),
+        ("s", "choose an agent and its model; it reviews the PR with notes in Hunk"),
+        ("g", "go to its review workspace"),
+        ("u", "Update: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
+        ("f", "finish the review: close the workspace, remove the worktree and pr/N branch"),
+        ("o", "open it in the browser"),
+        ("r", "read GitHub again"),
+        ("G", "go back to the board"),
+    ]),
+    ("Pull request detail", [
+        ("s", "review the pull request with an agent"),
+        ("g", "go to its review workspace"),
+        ("u", "fetch new commits"),
+        ("f", "finish the review"),
+        ("o", "open it in the browser"),
+    ]),
+    ("Everywhere", [
+        ("?", "this help, on the board and on the pull request list"),
+        ("escape", "close a screen or cancel input"),
+        ("q", "quit"),
+    ]),
+    ("Mouse", [
+        ("click", "select a card, or a column on its header"),
+        ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
+        ("right-click", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
+        ("drag", "move the card to the bottom of another column"),
+    ]),
 ]
+HELP_KEYS = [entry for _title, entries in HELP_SECTIONS for entry in entries]
 
 
 @dataclass
@@ -959,18 +993,22 @@ class AttachmentScreen(ModalBase):
 
 
 class HelpScreen(ModalBase):
-    """The key list. Each description wraps inside its own column, so a long entry stays aligned."""
+    """The key list in sections. Each description wraps inside its own column, so a long entry stays aligned."""
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="dialog help"):
             with Container(id="help", classes="help-grid"):
-                for key, what in HELP_KEYS:
-                    key_label = Static(Text(key), classes="help-key")
-                    key_label.plain = key
-                    yield key_label
-                    what_label = Static(Text(what), classes="help-what")
-                    what_label.plain = what
-                    yield what_label
+                for title, entries in HELP_SECTIONS:
+                    section = Static(Text(title, style="bold"), classes="help-section")
+                    section.plain = title
+                    yield section
+                    for key, what in entries:
+                        key_label = Static(Text(key), classes="help-key")
+                        key_label.plain = key
+                        yield key_label
+                        what_label = Static(Text(what), classes="help-what")
+                        what_label.plain = what
+                        yield what_label
             yield Label("escape: close", classes="dim")
 
 
@@ -2770,6 +2808,8 @@ class HerdboardApp(App):
                  grid-gutter: 0 1; width: 100%; height: auto; }
     .help-key { width: 16; height: auto; }
     .help-what { height: auto; }
+    .help-section { column-span: 2; height: auto; padding-top: 1; color: $accent; }
+    .help-section:first-child { padding-top: 0; }
     .dim { color: $text-muted; }
     .error { color: $error; }
     ModalBase { align: center middle; }

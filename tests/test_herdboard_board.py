@@ -12,7 +12,10 @@ SRC = ROOT / "plugins/herdboard/src"
 sys.path.insert(0, str(SRC))
 
 from herdboard import cli  # noqa: E402
-from herdboard.board import AddScreen, ConfirmScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp  # noqa: E402
+from herdboard.board import (  # noqa: E402
+    HELP_SECTIONS, AddScreen, ConfirmScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp,
+    PullRequestDetailScreen, PullRequestsScreen,
+)
 from textual.widgets import Markdown  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
@@ -769,11 +772,47 @@ class ActionTests(BoardTestCase):
             await pilot.press("question_mark")
             await pilot.pause()
             lines = [strip.text for strip in app.screen._compositor.render_strips()]
-        first = next(i for i, line in enumerate(lines) if "shift+left, H" in line)
+        first = next(i for i, line in enumerate(lines) if "filter: words match" in line)
         tail = lines[first + 1]
-        self.assertIn("connection)", tail, "the entry should wrap at 80 columns")
+        self.assertIn("enter keeps it", tail, "the entry should wrap at 80 columns")
         # The wrapped tail sits in the description column, not under the keys.
-        self.assertEqual(tail.index("connection)"), lines[first].index("move card to previous column"))
+        self.assertEqual(tail.index("matches a tag"), lines[first].index("filter: words match"))
+
+    async def test_help_groups_the_keys_in_sections(self):
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            titles = [w.plain for w in app.screen.query(".help-section")]
+        self.assertEqual(titles, [title for title, _ in HELP_SECTIONS])
+        for title in ("Board", "Card detail", "Pull requests", "Pull request detail", "Mouse"):
+            self.assertIn(title, titles)
+
+
+def binding_keys(screen_class) -> set[str]:
+    """Every key of a screen's bindings, as the help writes it."""
+    names = {"slash": "/", "question_mark": "?"}
+    return {names.get(key, key) for binding in screen_class.BINDINGS for key in binding.key.split(",")}
+
+
+def help_keys(title: str) -> set[str]:
+    """Every key that a help section lists. An entry such as "left, h" lists two keys."""
+    return {key for entry, _ in dict(HELP_SECTIONS)[title] for key in entry.split(", ")}
+
+
+class HelpCoverageTests(unittest.TestCase):
+    def test_every_key_of_a_screen_has_a_help_entry(self):
+        everywhere = help_keys("Everywhere")
+        for screen_class, titles in [
+            (HerdboardApp, ("Board", "Cards", "Agents and branches")),
+            (DetailScreen, ("Card detail",)),
+            (PullRequestsScreen, ("Pull requests",)),
+            (PullRequestDetailScreen, ("Pull request detail",)),
+        ]:
+            listed = everywhere.union(*(help_keys(title) for title in titles))
+            with self.subTest(screen=screen_class.__name__):
+                self.assertEqual(binding_keys(screen_class) - listed, set())
 
 
 class ReloadTests(BoardTestCase):
