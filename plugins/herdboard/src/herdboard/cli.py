@@ -501,6 +501,10 @@ def _cmd_add(ctx: _Context) -> dict:
     args, store = ctx.args, ctx.store
     if args.body is not None and args.body_file is not None:
         raise UsageError("Use --body or --body-file, not both")
+    if args.linear and args.board:
+        raise UsageError("--linear and --board cannot be used together")
+    if not args.linear and (args.team or args.project or args.label or args.state):
+        raise UsageError("--team, --project, --label and --state work only with --linear")
     body = args.body
     if args.body_file is not None:
         path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
@@ -508,8 +512,6 @@ def _cmd_add(ctx: _Context) -> dict:
     if args.linear:
         return _cmd_add_linear(ctx, body)
     lines = body.splitlines() if body is not None else None
-    if args.team or args.project or args.label or args.state:
-        raise UsageError("--team, --project, --label and --state work only with --linear")
     if args.type is not None:
         args.text = with_type(args.text, ctx.config.type_named(args.type))
     hint = None
@@ -1054,8 +1056,6 @@ def _linear_target(
 
 def _cmd_add_linear(ctx: _Context, body: str | None = None) -> dict:
     args = ctx.args
-    if args.board:
-        raise UsageError("--linear and --board cannot be used together")
     # The type is the label of that name: the issue's team label, else the workspace label.
     kind = ctx.config.type_named(args.type) if args.type is not None else None
     writer = ctx.writer

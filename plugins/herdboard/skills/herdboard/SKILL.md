@@ -55,7 +55,8 @@ herdboard --json done tep3
 herdboard --json move tep3 --board inbox             # to another board; the ID stays
 herdboard --json move tep3 --up                      # one place higher in its column
 herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
-herdboard --json edit tep3 --body "first detail line\nsecond detail line"
+herdboard --json edit tep3 --body "Replace the card details"
+herdboard --json edit tep3 --body-file docs/login.md  # read multiple detail lines from a file
 herdboard --json edit tep3 --type feature             # or --no-type
 herdboard --json log tep3 "Ready for review: 3 commits."   # append to the card's activity log
 herdboard --json attach tep3 docs/spec.md             # copy a large document into the card's attachments
@@ -69,6 +70,8 @@ herdboard --json unarchive acme-api:archive-2        # an archived card without 
 ```
 
 Use `add --body` or `add --body-file` to set details when you create a card, including from a started agent. Do not use both options. Relative file paths start from the command directory (`-C`, if set). With `add --linear`, these options set the issue description.
+
+For multiple detail lines, use `--body-file` with `add` or `edit`. In shell double quotes, `\n` stays literal; it does not create a line break.
 
 The archive keeps old todos out of the columns. Commands other than `show`, `log` and `unarchive` refuse an archived todo. Linear issues are not archived here.
 

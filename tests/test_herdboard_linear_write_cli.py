@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import linear_data  # noqa: E402
 from herdboard import cli  # noqa: E402
+from herdboard.linear import LinearClient, LinearNetworkError, LinearWriteUnknownError  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink  # noqa: E402
 from test_herdboard_linear_cli import LinearCliCase  # noqa: E402
 
@@ -224,6 +225,51 @@ class AddLinearTests(WriteCliCase):
     def test_body_sets_the_description(self):
         self.add("--team", "ENG", "New thing", "--body", "Details\nSecond line")
         self.assertEqual(self.inputs("IssueCreate")[0]["description"], "Details\nSecond line")
+
+    def test_body_survives_a_failed_final_read(self):
+        create_issue = LinearClient.create_issue
+        for reconciled in (False, True):
+            for missing in (False, True):
+                with self.subTest(reconciled=reconciled, missing=missing):
+                    def create(client, **kwargs):
+                        issue = create_issue(client, **kwargs)
+                        if reconciled:
+                            raise LinearWriteUnknownError("Response lost after creation")
+                        return issue
+
+                    before = len(self.requests("IssueCreate"))
+                    with mock.patch.object(LinearClient, "create_issue", autospec=True, side_effect=create), \
+                            mock.patch.object(LinearClient, "issue", return_value=None,
+                                              side_effect=None if missing else LinearNetworkError("down")):
+                        card = self.add("--team", "ENG", "New thing",
+                                        "--body", "Details\nSecond line")["card"]
+                    self.assertEqual(card["body"], ["Details", "Second line"])
+                    self.assertEqual(self.issue(card["ref"])["description"], "Details\nSecond line")
+                    self.assertEqual(len(self.requests("IssueCreate")), before + 1)
+
+    def test_empty_body_sets_an_empty_description(self):
+        card = self.add("--team", "ENG", "New thing", "--body", "")["card"]
+        self.assertEqual(self.inputs("IssueCreate")[0]["description"], "")
+        self.assertEqual(card["body"], [])
+
+    def test_card_agent_can_create_a_linear_issue_with_body(self):
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
+                mock.patch.object(cli, "card_agent_panes", return_value={"w1:p2"}):
+            card = self.add("--team", "ENG", "New thing", "--body", "Details")["card"]
+        self.assertEqual(card["body"], ["Details"])
+        self.assertEqual(self.inputs("IssueCreate")[0]["description"], "Details")
+
+    def test_invalid_option_combinations_precede_body_file_reads(self):
+        combinations = (("--team", "ENG"), ("--project", "Platform"),
+                        ("--label", "x"), ("--state", "x"),
+                        ("--linear", "--board", "inbox"))
+        for options in combinations:
+            with self.subTest(options=options):
+                error = self.error("add", "x", *options, "--body-file", "missing.txt")
+                self.assertEqual(error["code"], "usage")
+                self.assertIn("--linear", error["message"])
+                self.assertEqual(self.requests("IssueCreate"), [])
+                self.assertFalse(self.todos.exists())
 
     def test_body_file_sets_the_description(self):
         body = self.plain / "body.txt"

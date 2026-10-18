@@ -41,6 +41,12 @@ class SkillTests(unittest.TestCase):
             with self.subTest(argv=argv):
                 parser.parse_args(argv)
 
+    def test_body_examples_do_not_use_literal_newline_escapes(self):
+        for argv in skill_commands():
+            if "--body" in argv:
+                with self.subTest(argv=argv):
+                    self.assertNotIn("\\n", argv[argv.index("--body") + 1])
+
     def test_agents_log_progress_instead_of_editing_the_card(self):
         commands = skill_commands()
         self.assertIn(["--json", "log", "tep3", "Ready for review: 3 commits."], commands)

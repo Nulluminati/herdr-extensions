@@ -154,6 +154,7 @@ class LinearWriter:
             )
             known = {
                 "title": title,
+                "description": description,
                 "labels": [],
                 "project": {"id": project["id"], "name": project["name"]} if project else None,
             }
