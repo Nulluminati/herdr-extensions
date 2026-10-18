@@ -322,6 +322,33 @@ class ClampedText:
         yield text
 
 
+class TitleLine:
+    """The title with `corner` at the right of its first row. The rows after the first use the full width,
+    and the corner always has a space before it."""
+
+    def __init__(self, title: Text, corner: Text):
+        self.title = title
+        self.corner = corner
+
+    def __rich_console__(self, console, options):
+        width = options.max_width
+        room = width - self.corner.cell_len - 1
+        if room < 1:
+            yield self.title
+            yield self.corner
+            return
+        first = self.title.wrap(console, room)[0]
+        rest = self.title[len(first.plain):]
+        rest = rest[len(rest.plain) - len(rest.plain.lstrip()):]
+        first.rstrip()
+        first.append(" " * (width - first.cell_len - self.corner.cell_len))
+        first.append_text(self.corner)
+        lines = [first, *rest.wrap(console, width)] if rest.plain else [first]
+        text = Text("\n").join(lines)
+        text.no_wrap = True
+        yield text
+
+
 class ChipRow:
     """Chips in rows that break only between two chips, so no chip splits over two rows."""
 
@@ -456,7 +483,7 @@ class CardWidget(Static):
         # What a redraw compares: the text with its styles and the classes.
         classes = "card" + (" compact" if card_style == "compact" else "") + (" done" if done else "")
         self.key = (self.rich_text.plain, tuple(self.rich_text.spans), classes)
-        rows = [_two_sided(face.title, face.corner) if face.corner else face.title]
+        rows = [TitleLine(face.title, face.corner) if face.corner else face.title]
         if face.description:
             rows.append(ClampedText(face.description, DESCRIPTION_ROWS))
         if face.chips:
@@ -1858,7 +1885,8 @@ def pr_row_content(fields: list[Text]) -> Table:
     At the right: CI, the reviews, the comments and notes, and when it was updated."""
     icon, number, title, author, size, ci, github, agent, notes, comments, branch, updated = fields
     grid = Table.grid(expand=True, padding=(0, 2))
-    grid.add_column(no_wrap=True, width=7)
+    # The state icon and the number, up to six digits.
+    grid.add_column(no_wrap=True, width=9)
     grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
     # Fixed widths, so the parts line up from row to row.
     grid.add_column(no_wrap=True, width=10, overflow="ellipsis")
@@ -1900,6 +1928,12 @@ class PullRequestRow(Static):
 class PullRequestList(VerticalScroll, can_focus=True):
     """The pull request rows, with one selected row. One click on a row selects it and, as enter does,
     opens its details."""
+
+    # The arrows move the selected row, not only the scroll.
+    BINDINGS = [
+        Binding("down", "screen.cursor(1)", "Next", show=False),
+        Binding("up", "screen.cursor(-1)", "Previous", show=False),
+    ]
 
     class Selected(Message):
         """A click chose a row."""

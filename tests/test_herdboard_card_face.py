@@ -85,6 +85,19 @@ class CardFaceTests(unittest.TestCase):
         item = card(source="linear", ref="ENG-12")
         self.assertEqual(board.CardWidget(item, False).plain, f"Ship it  {board.LINEAR_MARK} ENG-12")
 
+    def test_a_long_title_wraps_under_the_id_at_the_full_width(self):
+        item = card(title="Improve Auto tab titles", ref="tveq", has_attachments=True)
+        lines = rendered(board.CardWidget(item, False), width=20)
+        self.assertEqual([line.rstrip() for line in lines], ["○ Improve files tveq", "Auto tab titles ⋯"])
+
+    def test_the_id_always_has_a_space_before_it(self):
+        item = card(title="Archive Cards", ref="t323")
+        for width in range(16, 26):
+            with self.subTest(width=width):
+                first = rendered(board.CardWidget(item, False), width=width)[0].rstrip()
+                self.assertTrue(first.endswith(" t323"), first)
+                self.assertNotIn("⋯t323", first)
+
     def test_cards_without_a_block_id_show_no_id(self):
         for ref in ("api:3", "api:archive-2"):
             with self.subTest(ref=ref):

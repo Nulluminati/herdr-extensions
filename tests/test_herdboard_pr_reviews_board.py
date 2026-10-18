@@ -1,5 +1,6 @@
 """The board's pull request list: G opens it, and its keys start, refresh and finish PR reviews."""
 import asyncio
+from io import StringIO
 import os
 from pathlib import Path
 import sys
@@ -7,9 +8,12 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+from rich.console import Console
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from herdboard.board import (PR_FIELDS, AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
-                             ModelScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago)
+                             ModelScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago,
+                             pr_fields, pr_row_content)
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page, PrReviewError, PullRequest  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -128,6 +132,29 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.current().number, 8)
             await pilot.press("k")
             self.assertEqual(screen.current().number, 7)
+
+    async def test_the_arrow_keys_move_the_selected_row_in_a_list_that_scrolls(self):
+        self.service.page.return_value = ("acme/api", Page(
+            [pull_request(number, f"Change {number}") for number in range(1, 13)], 12, None))
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open(app, pilot)
+            for _ in range(7):
+                await pilot.press("down")
+            await pilot.pause()
+            self.assertEqual(screen.current().number, 8)
+            selected = next(w for w in screen.query(PullRequestRow) if w.has_class("selected"))
+            self.assertTrue(screen.query_one("#pr-list").region.contains_region(selected.region))
+            await pilot.press("up")
+            self.assertEqual(screen.current().number, 7)
+
+    def test_a_five_digit_number_shows_in_full(self):
+        for style in ("plain", "nerd"):
+            with self.subTest(style=style):
+                fields = pr_fields(pull_request(12345, "Big repository"), style, None)
+                output = StringIO()
+                Console(file=output, width=140, color_system=None).print(pr_row_content(fields))
+                self.assertIn("#12345", output.getvalue().splitlines()[0])
 
     def test_ago_says_how_long_ago_in_one_unit(self):
         from datetime import datetime, timezone
