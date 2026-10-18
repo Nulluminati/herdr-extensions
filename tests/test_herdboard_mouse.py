@@ -332,7 +332,7 @@ class MenuTests(MouseTestCase):
     def marker_offset(self, widget):
         """Where the widget draws the menu marker: after the title, which can wrap in a narrow column.
         `render_line` gives the lines inside the border and the padding."""
-        self.assertIn(" ⋯", widget.rich_text.plain.split("\n")[0])
+        self.assertIn(" ⋯", widget.rich_text.plain.split("\n")[1])
         for y in range(widget.size.height):
             line = "".join(segment.text for segment in widget.render_line(y))
             if "⋯" in line:

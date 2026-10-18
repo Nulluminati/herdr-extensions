@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib.metadata
 import re
 import subprocess
@@ -212,6 +213,28 @@ def chip_tint(color: str, dark: bool = True) -> str:
     return f"#{red:02x}{green:02x}{blue:02x}"
 
 
+# Private Use Area codepoints of the "Herdr Agent Icons Max" font, as the agent-icons plugin uses them.
+AGENT_FONT = "Herdr Agent Icons Max"
+AGENT_LOGOS = {"claude": "\ue1a0", "pi": "\ue1a9"}
+
+
+@functools.cache
+def agent_font_installed() -> bool:
+    """Whether Fontconfig has the agent logo font. fc-match always returns some font, so compare the family."""
+    try:
+        output = subprocess.run(["fc-match", "--format", "%{family}\n", AGENT_FONT], check=True,
+                                capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return any(family.strip() == AGENT_FONT for family in output.replace(",", "\n").splitlines())
+
+
+def agent_label(agent: str, agent_logos: bool) -> str:
+    """The agent's name, after its logo when the logos show and the agent has one."""
+    logo = AGENT_LOGOS.get(agent) if agent_logos else None
+    return f"{logo} {agent}" if logo else agent
+
+
 def icon_label(key: str, label: str, icon_style: str) -> str:
     """Add an optional icon without replacing the label or inventing unknown icons."""
     icon = ICONS.get(key) if icon_style == "nerd" else None
@@ -265,6 +288,8 @@ def tag_chip(tag: str, style: str, dark: bool = True) -> Text:
 
 # The icon before a card's title: not started, started, done. The icon takes the column color.
 CARD_ICONS = {"new": "○", "started": "●", "done": "✓"}
+# Terminal palette names, so ANSI themes use the terminal's own green and yellow.
+CARD_ICON_STYLES = {"new": "", "started": "yellow", "done": "green"}
 # The icon before a column's name: the completed column, the start column, any other column.
 COLUMN_ICONS = {"done": "✓", "started": "●", "other": "○"}
 # How many colors the columns take in turn. The completed column is always green.
@@ -373,8 +398,10 @@ class ChipRow:
 
 @dataclass
 class CardFace:
-    """A card's rows as the board shows them. Empty rows stay off the card."""
+    """A card's rows as the board shows them. Empty rows stay off the card. A full card has the state icon
+    and the corner in its first row and the title under them; a compact card has them all in one row."""
 
+    icon: Text
     title: Text
     corner: Text
     description: Text
@@ -382,33 +409,45 @@ class CardFace:
     count: Text
     due: Text
     status: Text
+    compact: bool = False
+
+    def heading(self) -> Text:
+        """The title row of a compact card."""
+        heading = self.icon.copy()
+        heading.append(" ")
+        heading.append_text(self.title)
+        return heading
 
     def lines(self) -> list[Text]:
-        title = self.title.copy()
+        first = self.heading() if self.compact else self.icon.copy()
         if self.corner:
-            title.append("  ")
-            title.append_text(self.corner)
+            first.append("  ")
+            first.append_text(self.corner)
+        title = Text() if self.compact else self.title
         footer = self.count.copy()
         if self.count and self.due:
             footer.append("  ")
         footer.append_text(self.due)
         chips = Text(" ").join(self.chips)
-        return [line for line in (title, self.description, chips, footer, self.status) if line]
+        return [line for line in (first, title, self.description, chips, footer, self.status) if line]
 
     def text(self) -> Text:
         return Text("\n").join(self.lines())
 
 
 def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-              card_style: str = "full", done: bool = False, dark: bool = True) -> CardFace:
-    """A card's rows: the title with its state icon and ID, the description, the type and tags,
+              card_style: str = "full", done: bool = False, dark: bool = True,
+              agent_logos: bool = False) -> CardFace:
+    """A card's rows: the state icon and ID, the title, the description, the type and tags,
     the sub-card count and due date, then herdboard's status of the card."""
     if card.source == "linear":
         title, tags, due = card.title, card.tags, card.due
     else:
         title, tags, due = split_title(card.title)
     muted = "dim strike" if done else ""
-    heading = Text(f"{CARD_ICONS[card_state(card, done)]} ")
+    state = card_state(card, done)
+    icon = Text(CARD_ICONS[state], style=CARD_ICON_STYLES[state])
+    heading = Text()
     heading.append(title or card.title, style=muted)
     heading.append(" ")
     heading.append(MENU_MARK, style=Style(dim=True, meta={"card_menu": True}))
@@ -442,16 +481,16 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     if card.worktree_left:
         info.append(Text(icon_label("branch", "worktree still exists", icon_style), style="bold yellow"))
     if card.agent_review:
-        info.append(Text(f"agent review: {card.agent_review}", style="bold"))
+        info.append(Text(f"agent review: {agent_label(card.agent_review, agent_logos)}", style="bold"))
     if card.pr_writing:
         info.append(Text(icon_label("pr", "PR: writing", icon_style), style="bold"))
     if card.planning:
-        info.append(Text(f"planning: {card.planning}", style="bold cyan"))
+        info.append(Text(f"planning: {agent_label(card.planning, agent_logos)}", style="bold cyan"))
     if card.parent_title:
         info.append(Text(f"↳ {card.parent_title}", style="dim"))
-    return CardFace(heading, corner, description, chips, count,
+    return CardFace(icon, heading, corner, description, chips, count,
                     due_label(due, icon_style=icon_style) if due else Text(),
-                    Text(" · ", style="dim").join(info))
+                    Text(" · ", style="dim").join(info), card_style == "compact")
 
 
 def card_text(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
@@ -474,18 +513,22 @@ class CardWidget(Static):
     ALLOW_SELECT = False
 
     def __init__(self, card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-                 card_style: str = "full", done: bool = False, dark: bool = True):
+                 card_style: str = "full", done: bool = False, dark: bool = True, agent_logos: bool = False):
         self.card = card
-        face = card_face(card, show_board, tag_style, icon_style, card_style, done, dark)
+        self.agent_logos = agent_logos
+        face = card_face(card, show_board, tag_style, icon_style, card_style, done, dark, agent_logos)
         self.rich_text = face.text()
-        # The state icon and the menu marker are not card text: `plain` keeps the title line without them.
-        first, newline, rest = self.rich_text.plain.partition("\n")
-        icon, _, first = first.partition(" ")
-        self.plain = first.replace(f" {MENU_MARK}", "", 1) + newline + rest
+        # The state icon and the menu marker are not card text: `plain` has the title, then the corner.
+        first = face.title.plain.replace(f" {MENU_MARK}", "", 1) + (f"  {face.corner.plain}" if face.corner else "")
+        rest = [line.plain for line in face.lines()[1 if face.compact else 2:]]
+        self.plain = "\n".join([first, *rest])
         # What a redraw compares: the text with its styles and the classes.
         classes = "card" + (" compact" if card_style == "compact" else "") + (" done" if done else "")
         self.key = (self.rich_text.plain, tuple(self.rich_text.spans), classes)
-        rows = [TitleLine(face.title, face.corner) if face.corner else face.title]
+        if face.compact:
+            rows = [TitleLine(face.heading(), face.corner) if face.corner else face.heading()]
+        else:
+            rows = [_two_sided(face.icon, face.corner), face.title]
         if face.description:
             rows.append(ClampedText(face.description, DESCRIPTION_ROWS))
         if face.chips:
@@ -1810,14 +1853,17 @@ def pr_github_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
     return Text("  ").join(parts)
 
 
-def pr_agent_cell(pr: pr_reviews.PullRequest, icon_style: str) -> Text:
-    """The local agent review that herdboard ran, and new commits since then."""
+def pr_agent_cell(pr: pr_reviews.PullRequest, icon_style: str, agent_logos: bool = False) -> Text:
+    """The local agent review that herdboard ran, after the agent's logo, and new commits since then."""
     parts = []
+    logo = AGENT_LOGOS.get((pr.review or {}).get("agent")) if agent_logos and pr.status else None
+    if logo:
+        parts.append(Text(logo))
     if pr.status:
         parts.append(pr_label(f"agent:{pr.status}", pr.status, icon_style))
     if pr.new_commits:
         parts.append(pr_label("agent:new commits", "new commits", icon_style))
-    return Text("  ").join(parts)
+    return Text(" ").join(parts[:1] + [Text("  ").join(parts[1:])]) if logo else Text("  ").join(parts)
 
 
 def pr_size_cell(pr: pr_reviews.PullRequest) -> Text:
@@ -1859,7 +1905,8 @@ PR_FIELDS = ["", "PR", "Title", "Author", "Size", "CI", "GitHub review", "Agent 
              "Comments", "Branch", "Updated"]
 
 
-def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None = None) -> list[Text]:
+def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None = None,
+              agent_logos: bool = False) -> list[Text]:
     """Each part of a pull request row, as `PR_FIELDS` names them."""
     state = "draft" if pr.draft else "open"
     notes = Text(f"{pr.notes} {pr_icon('notes', icon_style)}".rstrip()) if pr.notes else Text("")
@@ -1875,7 +1922,7 @@ def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None 
             pr_size_cell(pr),
             pr_ci_cell(pr, icon_style),
             pr_github_cell(pr, icon_style),
-            pr_agent_cell(pr, icon_style),
+            pr_agent_cell(pr, icon_style, agent_logos),
             notes,
             comments,
             branch,
@@ -2347,7 +2394,7 @@ class PullRequestsScreen(Screen):
         heading.display = True
         heading.update(pr_label("github", f"github.com/{repo}", self.icon_style))
         listing = self.query_one("#pr-list", PullRequestList)
-        rows = [pr_fields(pr, self.icon_style) for pr in prs]
+        rows = [pr_fields(pr, self.icon_style, agent_logos=self.app.agent_logos) for pr in prs]
         # A read that changed nothing leaves the rows alone, so the cursor and the scroll stay.
         if rows != self.shown_rows:
             self.shown_rows = rows
@@ -2620,16 +2667,16 @@ def pr_row_css() -> str:
 
 def column_css() -> str:
     """Each column color on the column border, its header and its cards. The current column has a
-    heavy border and a filled header."""
+    heavy border and an underlined header."""
     rules = []
     named = [(f"col-{index}", colors) for index, colors in enumerate(COLUMN_PALETTE[:COLUMN_COLORS])]
     for name, (color, ansi) in named + [("col-done", DONE_COLORS)]:
-        for prefix, value, dark in (("", color, "$background"), ("App:ansi ", ansi, "ansi_black")):
+        for prefix, value in (("", color), ("App:ansi ", ansi)):
             rules += [f"{prefix}.{name} {{ border: round {value}; }}",
                       f"{prefix}.{name} .column-header {{ color: {value}; }}",
                       f"{prefix}.{name} .card {{ border: round {value}; }}",
                       f"{prefix}.{name}.current {{ border: heavy {value}; }}",
-                      f"{prefix}.{name}.current .column-header {{ background: {value}; color: {dark}; }}"]
+                      f"{prefix}.{name}.current .column-header {{ text-style: bold underline; }}"]
     rules += ["App:ansi .col-archive .card { border: round ansi_bright_black; }",
               ".col-archive .column-header { color: $text-muted; }"]
     return "\n".join(rules)
@@ -2849,6 +2896,7 @@ class HerdboardApp(App):
         search_issues: Callable[[str], list[dict]] | None = None,
         pr_service=None,
         open_prs: bool = False,
+        agent_logos: bool = False,
     ):
         super().__init__()
         theme = store.config.theme
@@ -2886,6 +2934,8 @@ class HerdboardApp(App):
         # The pull request list's calls into `pr_reviews`; `open_prs` opens the board on that list.
         self.pr_service = pr_service or PullRequestService(self.directory)
         self.open_prs = open_prs
+        # The agent logo font is installed, so agent names show their logos.
+        self.agent_logos = agent_logos
         # The open pull request count of the last read, for the tab; None before the first read.
         self.pr_count: int | None = None
         # Passed on to the background workers, so they read the same boards.
@@ -3140,7 +3190,7 @@ class HerdboardApp(App):
         config = self.store.config
         dark = self.current_theme.dark
         return [CardWidget(card, show_board, config.tag_style, config.icon_style, config.card_style,
-                           column.completed, dark) for card in column.cards]
+                           column.completed, dark, self.agent_logos) for card in column.cards]
 
     def _column_widget(self, index: int, column: ColumnData, show_board: bool) -> Vertical:
         classes = ("column " + column_class(index, column) + (" completed" if column.completed else "")

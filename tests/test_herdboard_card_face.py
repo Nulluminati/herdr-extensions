@@ -2,8 +2,10 @@
 
 from io import StringIO
 from pathlib import Path
+import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
@@ -37,9 +39,17 @@ class CardFaceTests(unittest.TestCase):
         for item, done, icon in cases:
             with self.subTest(item=item, done=done):
                 text = board.card_text(item, False, done=done)
-                self.assertTrue(text.plain.startswith(f"{icon} Ship it"), text.plain)
+                first, second = text.plain.splitlines()[:2]
+                self.assertTrue(first.startswith(icon), text.plain)
+                self.assertEqual(second, f"Ship it {board.MENU_MARK}")
                 widget = board.CardWidget(item, False, done=done)
                 self.assertTrue(widget.plain.startswith("Ship it"), widget.plain)
+
+    def test_done_icons_are_green_and_started_icons_yellow(self):
+        for item, done, style in ((card(), False, ""), (card(worktree=True), False, "yellow"),
+                                  (card(), True, "green")):
+            with self.subTest(done=done, style=style):
+                self.assertEqual(str(board.card_face(item, False, done=done).icon.style), style)
 
     def test_done_cards_strike_their_title_and_description(self):
         text = board.card_text(card(body=["Initial release"]), False, done=True)
@@ -54,8 +64,8 @@ class CardFaceTests(unittest.TestCase):
     def test_the_description_takes_at_most_two_rows(self):
         item = card(body=["word " * 40])
         lines = rendered(board.CardWidget(item, False), width=24)
-        self.assertEqual(len(lines), 3, lines)
-        self.assertTrue(lines[2].rstrip().endswith("…"), lines)
+        self.assertEqual(len(lines), 4, lines)
+        self.assertTrue(lines[3].rstrip().endswith("…"), lines)
 
     def test_compact_cards_have_no_description(self):
         item = card(body=["Speed up the search"])
@@ -85,10 +95,18 @@ class CardFaceTests(unittest.TestCase):
         item = card(source="linear", ref="ENG-12")
         self.assertEqual(board.CardWidget(item, False).plain, f"Ship it  {board.LINEAR_MARK} ENG-12")
 
-    def test_a_long_title_wraps_under_the_id_at_the_full_width(self):
+    def test_the_first_row_has_only_the_icon_and_the_corner(self):
+        lines = rendered(board.CardWidget(card(), False), width=20)
+        self.assertEqual([line.rstrip() for line in lines], ["○               t123", f"Ship it {board.MENU_MARK}"])
         item = card(title="Improve Auto tab titles", ref="tveq", has_attachments=True)
         lines = rendered(board.CardWidget(item, False), width=20)
-        self.assertEqual([line.rstrip() for line in lines], ["○ Improve files tveq", "Auto tab titles ⋯"])
+        self.assertEqual([line.rstrip() for line in lines],
+                         ["○         files tveq", "Improve Auto tab", f"titles {board.MENU_MARK}"])
+        self.assertEqual(rendered(board.CardWidget(card(ref="api:3"), False), width=20)[0].rstrip(), "○")
+
+    def test_compact_cards_keep_the_title_on_the_first_row(self):
+        lines = rendered(board.CardWidget(card(), False, card_style="compact"), width=20)
+        self.assertEqual(lines, [f"○ Ship it {board.MENU_MARK}     t123"])
 
     def test_the_id_always_has_a_space_before_it(self):
         item = card(title="Archive Cards", ref="t323")
@@ -106,7 +124,7 @@ class CardFaceTests(unittest.TestCase):
     def test_chips_wrap_only_between_two_chips(self):
         item = card(title="Ship it #enhancement #low #documentation", type="feature")
         lines = rendered(board.CardWidget(item, False), width=24)
-        self.assertEqual([line.rstrip() for line in lines[1:]], ["feature  enhancement", " low   documentation"])
+        self.assertEqual([line.rstrip() for line in lines[2:]], ["feature  enhancement", " low   documentation"])
 
     def test_tags_after_the_type_badge_do_not_take_its_bold(self):
         item = card(title="Ship it #api #low #documentation", type="feature")
@@ -124,6 +142,33 @@ class CardFaceTests(unittest.TestCase):
         self.assertEqual(chip.plain, " api ")
         self.assertEqual(str(chip.style), f"{color} on {board.chip_tint(color)}")
         self.assertNotEqual(board.chip_tint(color, dark=True), board.chip_tint(color, dark=False))
+
+
+class AgentLogoTests(unittest.TestCase):
+    def test_the_agent_logo_shows_before_the_agent_name(self):
+        item = card(agent_review="pi", planning="claude")
+        self.assertIn("agent review: pi · planning: claude", board.CardWidget(item, False).plain)
+        logos = board.CardWidget(item, False, agent_logos=True).plain
+        self.assertIn(f"agent review: {board.AGENT_LOGOS['pi']} pi · planning: {board.AGENT_LOGOS['claude']} claude",
+                      logos)
+        self.assertIn("agent review: other", board.CardWidget(card(agent_review="other"), False,
+                                                              agent_logos=True).plain)
+
+    def test_the_logos_need_the_herdr_agent_icons_font(self):
+        def fc_match(output):
+            return patch("herdboard.board.subprocess.run",
+                         return_value=subprocess.CompletedProcess([], 0, stdout=output, stderr=""))
+        board.agent_font_installed.cache_clear()
+        self.addCleanup(board.agent_font_installed.cache_clear)
+        with fc_match("Herdr Agent Icons Max\n") as run:
+            self.assertTrue(board.agent_font_installed())
+            self.assertEqual(run.call_args.args[0][:1], ["fc-match"])
+        board.agent_font_installed.cache_clear()
+        with fc_match("DejaVu Sans\n"):
+            self.assertFalse(board.agent_font_installed())
+        board.agent_font_installed.cache_clear()
+        with patch("herdboard.board.subprocess.run", side_effect=OSError("no fc-match")):
+            self.assertFalse(board.agent_font_installed())
 
 
 class ColumnColorTests(unittest.TestCase):
@@ -172,6 +217,24 @@ class CardStyleBoardTests(BoardTestCase):
             await app.reload()
             await settle(pilot)
             self.assertTrue(app.query_one(".card").has_class("compact"))
+
+    async def test_cards_show_agent_logos_when_the_app_has_them(self):
+        self.store.add(self.repo_path, "Ship it", "Todo")
+        app = self.make_app()
+        app.agent_logos = True
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            self.assertTrue(app.query_one(".card").agent_logos)
+
+    async def test_the_current_column_header_is_not_filled(self):
+        self.store.add(self.repo_path, "Ship it", "Todo")
+        app = self.make_app()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await pilot.pause()
+            header = app.query_one(".column.current .column-header")
+            self.assertEqual(header.styles.background.a, 0)
+            self.assertEqual(header.styles.color.ansi, 4)
+            self.assertTrue(header.styles.text_style.underline)
 
     async def test_full_cards_have_a_border_in_the_column_color(self):
         self.store.add(self.repo_path, "first", "Todo")

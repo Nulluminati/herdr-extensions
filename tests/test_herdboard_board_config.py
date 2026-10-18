@@ -635,6 +635,13 @@ class BoardCommandTests(CliTestCase):
         self.init_repo_board()
         self.assertIsNone(board_arguments(self)["resolve_link"])
 
+    def test_the_board_shows_agent_logos_when_the_font_is_installed(self):
+        self.init_repo_board()
+        for installed in (True, False):
+            with self.subTest(installed=installed), \
+                    mock.patch("herdboard.board.agent_font_installed", return_value=installed):
+                self.assertEqual(board_arguments(self)["agent_logos"], installed)
+
     def test_prs_opens_the_board_on_the_pull_request_list(self):
         self.init_repo_board()
         self.assertFalse(board_arguments(self)["open_prs"])

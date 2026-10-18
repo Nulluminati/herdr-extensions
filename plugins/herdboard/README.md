@@ -57,17 +57,18 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The Pull requests tab shows the open PR count after the list reads GitHub. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it.
 
-Each column takes a color in turn: blue, magenta, yellow, cyan and green. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and a filled header. The selected card has a heavy border in the text color.
+Each column takes a color in turn: blue, magenta, yellow, cyan and green. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and an underlined header. The selected card has a heavy border in the text color.
 
 A card shows, from top to bottom:
 
-- A state icon (`○` not started, `●` a worktree or an agent works on it, `✓` in the done column), the title, `⋯` for the card menu, and the card ID at the right. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
+- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), and the card ID at the right. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
+- The title, then `⋯` for the card menu.
 - The first detail line that is not a checklist item, in at most two rows. Cards in the done column strike the title and this line through.
 - The type and the tags.
 - The sub-card count (`2/5 done`) at the left and the due date at the right.
 - The markers below, when the card has any.
 
-Set `card_style = "compact"` for cards without a border and without the detail line.
+Set `card_style = "compact"` for cards without a border and without the detail line. A compact card has the state icon, the title and the ID in one row.
 
 | Key | Action |
 |---|---|
@@ -170,6 +171,8 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 | `≡` (top-right corner) | The card has attachments. Open the card detail to see them |
 | `planning: pi`, `planning: claude` | The card's planner runs. The card keeps its current column |
 | `agent review: pi` | An agent review runs |
+
+When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README.md) plugin is installed, `planning:` and `agent review:` show the agent's logo before its name. The board looks for the font with `fc-match` when it starts.
 | `PR: writing` | An agent writes the pull request description |
 | `PR open`, `PR merged`, `PR closed` | The state of the card's pull request. The board reads it at most once a minute |
 | `worktree removed` | The card's worktree folder is gone |
@@ -356,7 +359,7 @@ Keys on the list:
 | `escape` | Close the search box, else clear the search, else go back to the board |
 | `G` | Back to the board tab |
 
-The icons follow `icon_style` in the config: Nerd Font icons with `nerd`, plain symbols (● ◌ ◆ … ✓ ✗ ↑) otherwise.
+The icons follow `icon_style` in the config: Nerd Font icons with `nerd`, plain symbols (● ◌ ◆ … ✓ ✗ ↑) otherwise. When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README.md) plugin is installed, a local agent review shows the logo of its agent.
 
 The Herdr action `nulluminati.herdboard.prs` opens the board on this list. A suggested key:
 

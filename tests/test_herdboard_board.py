@@ -1316,7 +1316,7 @@ class ThemeTests(BoardTestCase):
             magenta, default, bright_black = 5, -1, 8
             self.assertEqual(column.styles.border_top[0], "heavy")
             self.assertEqual(column.styles.border_top[1].ansi, magenta)
-            self.assertEqual(column.query_one(".column-header").styles.background.ansi, magenta)
+            self.assertEqual(column.query_one(".column-header").styles.color.ansi, magenta)
             self.assertEqual(selected.styles.border_top[0], "heavy")
             self.assertEqual(selected.styles.border_top[1].ansi, default)
             # Cards outside the current column fade, so the eye goes to one column.

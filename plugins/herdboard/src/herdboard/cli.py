@@ -1175,7 +1175,7 @@ def _cmd_board(ctx: _Context) -> dict:
     views = ctx.views
     views.paths(view)  # fails early when the view has no board
     try:
-        from .board import HerdboardApp
+        from .board import HerdboardApp, agent_font_installed
     except ImportError as error:
         raise HerdboardError(f"The board needs Textual: {error}") from error
     HerdboardApp(
@@ -1195,6 +1195,7 @@ def _cmd_board(ctx: _Context) -> dict:
         if views.source.active and not views.source.offline else None,
         search_issues=views.source.search if views.source.active and not views.source.offline else None,
         open_prs=ctx.args.prs,
+        agent_logos=agent_font_installed(),
     ).run()
     return {}
 

@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from rich.console import Console
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
-from herdboard.board import (PR_FIELDS, AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
+from herdboard.board import (AGENT_LOGOS, PR_FIELDS, AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
                              ModelScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago,
                              pr_fields, pr_row_content)
 from herdboard.config import Config  # noqa: E402
@@ -155,6 +155,22 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
                 output = StringIO()
                 Console(file=output, width=140, color_system=None).print(pr_row_content(fields))
                 self.assertIn("#12345", output.getvalue().splitlines()[0])
+
+    def test_the_agent_review_shows_the_agent_logo(self):
+        pr = pull_request(7, "Fix", status="reviewed", review={"agent": "pi"})
+        agent = PR_FIELDS.index("Agent review (local)")
+        self.assertFalse(pr_fields(pr, "plain", None)[agent].plain.startswith(AGENT_LOGOS["pi"]))
+        self.assertEqual(pr_fields(pr, "plain", None, agent_logos=True)[agent].plain,
+                         f"{AGENT_LOGOS['pi']} ✓ reviewed")
+
+    async def test_the_list_shows_agent_logos_when_the_app_has_them(self):
+        prs = self.service.page.return_value[1].prs
+        prs[1].review = {"agent": "claude"}
+        app = self.app()
+        app.agent_logos = True
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open(app, pilot)
+            self.assertTrue(screen.rows()[1][7].startswith(AGENT_LOGOS["claude"]), screen.rows()[1][7])
 
     def test_ago_says_how_long_ago_in_one_unit(self):
         from datetime import datetime, timezone
