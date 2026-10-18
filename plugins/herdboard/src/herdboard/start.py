@@ -742,7 +742,7 @@ class Starter:
                     base = self._parent_branch(card, repo, checkout)
                 record["base"] = self._base(local, base or record.get("base"), branch)
                 save("base")
-                record.update(self._workspace(local, branch, record))
+                record.update(self._workspace(local, branch, record, focus=False))
                 save("worktree")
                 # Hunk and `git status` compare a branch with its upstream, so the base is the upstream.
                 if _git(local, "branch", f"--set-upstream-to={record['base']}", branch) is None:

@@ -97,7 +97,14 @@ class StartTests(unittest.TestCase):
         self.assertEqual(result["worktree_path"], again["worktree_path"])
         self.assertEqual(sum(c[:2] == ["agent", "start"] for c in self.fake.calls), 1)
         self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
-        self.assertTrue(any(c[:2] == ["workspace", "focus"] for c in self.fake.calls))
+
+    def test_start_keeps_the_user_where_they_are(self):
+        self.starter.start(self.card.ref)
+        self.starter.start(self.card.ref)
+        self.assertFalse(any(c[:2] == ["workspace", "focus"] for c in self.fake.calls))
+        opened = [c for c in self.fake.calls if c[:2] in (["worktree", "create"], ["worktree", "open"])]
+        self.assertTrue(opened)
+        self.assertTrue(all("--no-focus" in c and "--focus" not in c for c in opened))
 
     def test_go_to_workspace_focuses_the_open_workspace(self):
         self.starter.start(self.card.ref, no_agent=True)
