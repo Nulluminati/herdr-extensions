@@ -118,22 +118,61 @@ def default_config_path() -> Path:
 def save_display_config(path: Path | None = None, *, icon_style: str | None = None,
                         tag_style: str | None = None, card_style: str | None = None) -> None:
     """Save only changed display settings, with comments, permissions and other values intact."""
-    changes = {}
-    for key, value, choices in (("icon_style", icon_style, ("plain", "nerd")),
-                                ("tag_style", tag_style, TAG_STYLES),
-                                ("card_style", card_style, CARD_STYLES)):
-        if value is not None:
-            if value not in choices:
-                raise HerdboardError(f"{key} must be {', '.join(choices[:-1])} or {choices[-1]}")
-            changes[key] = value
+    changes = {key: value for key, value in (("icon_style", icon_style), ("tag_style", tag_style),
+                                             ("card_style", card_style)) if value is not None}
+    save_global_config(path, **changes)
+
+
+class _Unchanged:
+    def __repr__(self) -> str:
+        return "UNCHANGED"
+
+
+# A `save_global_config` argument that leaves its setting as it is. None removes an optional setting.
+UNCHANGED = _Unchanged()
+# The settings that may be absent: None removes them, so the agent's own default applies.
+_OPTIONAL_SETTINGS = ("start_model", "start_thinking")
+
+
+def _check_global(key: str, value) -> None:
+    """Raise when `value` is not a valid value of the global setting `key`."""
+    if value is None and key in _OPTIONAL_SETTINGS:
+        return
+    choices = {"start_agent": ("claude", "pi"), "start_thinking": THINKING_LEVELS, "merge": MERGE_MODES,
+               "icon_style": ("plain", "nerd"), "tag_style": TAG_STYLES, "card_style": CARD_STYLES}.get(key)
+    if choices is not None:
+        if value not in choices:
+            raise HerdboardError(f"{key} must be {', '.join(choices[:-1])} or {choices[-1]}")
+    elif not isinstance(value, str) or not value:
+        raise HerdboardError(f"{key} must be a non-empty string")
+    elif key == "start_model" and any(ch.isspace() for ch in value):
+        raise HerdboardError("start_model must be one model name, such as zai/glm-5.3")
+
+
+def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent=UNCHANGED,
+                       start_model=UNCHANGED, start_thinking=UNCHANGED, merge=UNCHANGED,
+                       icon_style=UNCHANGED, tag_style=UNCHANGED, card_style=UNCHANGED) -> None:
+    """Save only the given settings, with comments, permissions and other values intact.
+
+    None removes `start_model` or `start_thinking`. Every value is checked before any write.
+    """
+    changes = {key: value for key, value in (
+        ("theme", theme), ("start_agent", start_agent), ("start_model", start_model),
+        ("start_thinking", start_thinking), ("merge", merge), ("icon_style", icon_style),
+        ("tag_style", tag_style), ("card_style", card_style)) if value is not UNCHANGED}
+    for key, value in changes.items():
+        _check_global(key, value)
     if not changes:
+        return
+    path = config_path(path)
+    if all(value is None for value in changes.values()) and not path.exists():
         return
 
     # Core config reads need only the standard library; the board installs its TOML writer.
     import tomlkit
     from tomlkit.exceptions import ParseError
 
-    path = config_path(path).resolve()
+    path = path.resolve()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.with_name(f".{path.name}.lock").open("a") as lock:
@@ -145,7 +184,10 @@ def save_display_config(path: Path | None = None, *, icon_style: str | None = No
                 text, mode = "", 0o600
             document = tomlkit.parse(text)
             for key, value in changes.items():
-                document[key] = value
+                if value is not None:
+                    document[key] = value
+                elif key in document:
+                    del document[key]
             temp = None
             try:
                 with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
@@ -161,7 +203,7 @@ def save_display_config(path: Path | None = None, *, icon_style: str | None = No
     except ParseError as error:
         raise HerdboardError(f"{path}: invalid TOML: {error}") from error
     except (OSError, UnicodeDecodeError) as error:
-        raise IoError(f"{path}: cannot save display settings: {error}") from error
+        raise IoError(f"{path}: cannot save settings: {error}") from error
 
 
 def _string(path: Path, data: dict, key: str) -> str | None:

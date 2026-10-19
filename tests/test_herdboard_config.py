@@ -195,6 +195,98 @@ class ConfigTest(unittest.TestCase):
         config = load_config(path)
         self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
 
+    def test_save_global_writes_each_setting(self):
+        from herdboard.config import save_global_config
+        path = self.dir / "a.toml"
+        save_global_config(path, theme="nord", start_agent="pi", start_model="zai/glm-5.3",
+                           start_thinking="high", merge="pr", icon_style="nerd", tag_style="block",
+                           card_style="compact")
+        config = load_config(path)
+        self.assertEqual(
+            (config.theme, config.start_agent, config.start_model, config.start_thinking, config.merge,
+             config.icon_style, config.tag_style, config.card_style),
+            ("nord", "pi", "zai/glm-5.3", "high", "pr", "nerd", "block", "compact"))
+
+    def test_save_global_none_removes_the_model_and_thinking_level_only(self):
+        from herdboard.config import save_global_config
+        original = ('# Mine\nstart_agent = "pi"\nstart_model = "zai/glm-5.3" # model\n'
+                    'start_thinking = "high"\ntheme = "nord"\n\n[linear]\n# Keep\nenabled = false\n')
+        path = self.write(self.dir / "a.toml", original)
+        save_global_config(path, start_model=None, start_thinking=None)
+        self.assertEqual(path.read_text(), original.replace('start_model = "zai/glm-5.3" # model\n', "")
+                         .replace('start_thinking = "high"\n', ""))
+        config = load_config(path)
+        self.assertEqual((config.start_agent, config.start_model, config.start_thinking, config.theme),
+                         ("pi", None, None, "nord"))
+
+    def test_save_global_writes_only_the_named_settings(self):
+        from herdboard.config import save_global_config
+        original = '# Mine\nstart_model = "opus"\nmerge = "local" # merge\n'
+        path = self.write(self.dir / "a.toml", original)
+        save_global_config(path, merge="pr")
+        self.assertEqual(path.read_text(), original.replace('"local"', '"pr"'))
+
+    def test_save_global_without_changes_creates_no_file(self):
+        from herdboard.config import save_global_config
+        path = self.dir / "settings" / "config.toml"
+        save_global_config(path)
+        save_global_config(path, start_model=None, start_thinking=None)
+        self.assertFalse(path.exists())
+        self.assertFalse(path.parent.exists())
+
+    def test_save_global_rejects_invalid_values_before_any_write(self):
+        from herdboard.config import save_global_config
+        original = 'icon_style = "plain"\n'
+        path = self.write(self.dir / "a.toml", original)
+        for values in ({"start_agent": "codex"}, {"start_agent": None}, {"start_model": "two words"},
+                       {"start_model": ""}, {"start_model": 3}, {"start_thinking": "huge"},
+                       {"merge": "squash"}, {"merge": None}, {"theme": ""}, {"theme": None},
+                       {"theme": 3}, {"icon_style": "nerd", "card_style": "small"}):
+            with self.subTest(values=values):
+                with self.assertRaises(HerdboardError):
+                    save_global_config(path, **values)
+                self.assertEqual(path.read_text(), original)
+
+    def test_save_global_does_not_replace_an_invalid_config(self):
+        from herdboard.config import save_global_config
+        path = self.write(self.dir / "a.toml", "invalid = [")
+        with self.assertRaisesRegex(HerdboardError, "invalid TOML"):
+            save_global_config(path, start_agent="pi")
+        self.assertEqual(path.read_text(), "invalid = [")
+
+    def test_save_global_write_failure_keeps_the_file(self):
+        from herdboard.config import save_global_config
+        path = self.write(self.dir / "a.toml", 'merge = "local"\n')
+        with mock.patch("herdboard.config.os.replace", side_effect=OSError("read-only directory")):
+            with self.assertRaisesRegex(HerdboardError, "read-only directory"):
+                save_global_config(path, merge="pr")
+        self.assertEqual(path.read_text(), 'merge = "local"\n')
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), [".a.toml.lock", "a.toml"])
+
+    def test_save_global_uses_the_config_environment_path(self):
+        from herdboard.config import save_global_config
+        path = self.dir / "env.toml"
+        with mock.patch.dict(os.environ, {"HERDBOARD_CONFIG": str(path)}):
+            save_global_config(start_agent="pi")
+        self.assertEqual(load_config(path).start_agent, "pi")
+
+    def test_save_global_uses_the_default_path(self):
+        from herdboard.config import save_global_config
+        save_global_config(theme="nord")
+        self.assertEqual(load_config(self.dir / "home/.config/herdboard/config.toml").theme, "nord")
+
+    def test_concurrent_global_saves_keep_both_changes(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from herdboard.config import save_global_config
+        path = self.write(self.dir / "a.toml", '# Keep\n[linear]\nenabled = false\n')
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            agent = pool.submit(save_global_config, path, start_agent="pi")
+            merge = pool.submit(save_global_config, path, merge="pr")
+            agent.result()
+            merge.result()
+        config = load_config(path)
+        self.assertEqual((config.start_agent, config.merge), ("pi", "pr"))
+
     def test_types_default(self):
         self.assertEqual(load_config().types, ["bug", "feature", "chore", "docs", "refactor"])
 
