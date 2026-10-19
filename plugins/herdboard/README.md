@@ -311,7 +311,7 @@ A failure logs `PR not opened: <reason>` and shows a notification.
 
 The start record keeps the folder of the last written `pr.md`. Without one, the command fails with `no_description`. `herdboard pr-sync <id> --fetch` writes the current GitHub title and body to a new `pr.md` first, and prints its path: the agent edits that file and runs `pr-sync` again. `--fetch` changes nothing on GitHub. It covers a pull request that opened before this command existed, or one opened by hand.
 
-A sync replaces the GitHub title and body, and so overwrites edits made on the GitHub web page. Both modes stop when the worktree has uncommitted or untracked files (`worktree_dirty`), when an agent still writes the description (`pr_writing`), and when the branch has no open pull request (`no_pr`).
+A sync replaces the GitHub title and body, and so overwrites edits made on the GitHub web page. A sync stops when the worktree has uncommitted or untracked files (`worktree_dirty`). Both modes stop when an agent still writes the description (`pr_writing`), and when the branch has no open pull request (`no_pr`). `--fetch` reads GitHub only: a dirty worktree does not stop it.
 
 ### finish
 

@@ -80,8 +80,11 @@ class SkillTests(unittest.TestCase):
         handed = text[text.index("## When a card was handed to you"):text.index("## Errors")]
         self.assertIn("pr-sync <id>", handed)
         self.assertIn("pr-sync <id> --fetch", handed)
-        guarded = text[text.index("Ask the user first"):text.index("```bash")]
-        self.assertNotIn("`pr-sync`", guarded)
+        start = text.index("Ask the user first")
+        guarded = text[start:text.index("```bash", start)]
+        # The slice must hold the ask-first list, or `assertNotIn` below proves nothing.
+        self.assertIn("`merge` and `finish`", guarded)
+        self.assertNotIn("pr-sync", guarded)
 
     def test_agent_review_is_documented(self):
         commands = skill_commands()

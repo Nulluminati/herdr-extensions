@@ -389,6 +389,14 @@ class SyncTests(PrWriteTestCase):
             self.sync()
         self.assertEqual(self.gh.bodies, ["Body.\n"])
 
+    def test_a_fetch_keeps_a_linear_line_that_is_not_last(self):
+        self.opened()
+        self.gh.body = "First.\n\nLinear: https://linear.app/acme/issue/ENG-1\n\nLast.\n"
+        result = self.sync(fetch=True)
+        self.assertEqual(Path(result["path"]).read_text(),
+                         "fix: keep sessions for 30 minutes\n\nFirst.\n\n"
+                         "Linear: https://linear.app/acme/issue/ENG-1\n\nLast.\n")
+
     def test_the_pull_request_is_found_by_its_branch(self):
         self.opened()
         self.stored(pr_url=None)
@@ -396,6 +404,17 @@ class SyncTests(PrWriteTestCase):
         result = self.sync()
         self.assertEqual(result["pr_url"], "https://github.com/acme/api/pull/9")
         self.assertEqual(self.records()[self.card.ref]["pr_url"], "https://github.com/acme/api/pull/9")
+
+    def test_a_closed_pull_request_gives_way_to_the_open_one_of_the_branch(self):
+        self.opened()
+        self.stored(pr_url="https://github.com/acme/api/pull/6", pr_state="merged")
+        self.gh.existing = ["https://github.com/acme/api/pull/9"]
+        result = self.sync()
+        self.assertEqual(result["pr_url"], "https://github.com/acme/api/pull/9")
+        self.assertEqual(self.gh.calls[0][:2], ["pr", "list"])
+        [edit] = [c for c in self.gh.calls if c[:2] == ["pr", "edit"]]
+        self.assertEqual(edit[2], "https://github.com/acme/api/pull/9")
+        self.assertEqual(self.records()[self.card.ref]["pr_state"], "open")
 
     def test_a_fetch_writes_the_github_text_without_pushing_or_editing(self):
         self.opened()
@@ -462,6 +481,19 @@ class SyncTests(PrWriteTestCase):
         with self.assertRaises(merge.MergeError) as raised:
             self.sync()
         self.assertEqual(raised.exception.code, "pr_writing")
+
+    def test_a_writer_that_starts_under_the_lock_stops_the_sync(self):
+        # The sync reads the record before it takes the lock. A rewrite that starts in between is
+        # invisible to that read, so the check must run again inside the lock.
+        self.opened()
+        key, stale = self.card.ref, dict(self.records()[self.card.ref])
+        racing = dict(stale, pr_write={"pane_id": "w9:p1", "started": time.time(), "own_pane": False})
+        (start.state_dir() / "starts.json").write_text(json.dumps({key: racing}))
+        with patch.object(merge.Merger, "_started", lambda merger, ref: (None, ref, key, stale)):
+            with self.assertRaises(merge.MergeError) as raised:
+                self.sync()
+        self.assertEqual(raised.exception.code, "pr_writing")
+        self.assertEqual([c for c in self.gh.calls if c[:2] == ["pr", "edit"]], [])
 
     def test_an_empty_title_stops_the_sync(self):
         self.opened()

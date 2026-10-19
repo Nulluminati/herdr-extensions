@@ -220,12 +220,15 @@ def parse(text: str, linear_url: str | None) -> tuple[str, str]:
     return title, body + "\n" if body else ""
 
 
-# The Linear link that `parse` appends. A fetched GitHub body already has it, at its end.
-LINEAR_LINE = re.compile(r"\n*^Linear: https?://\S+\s*$", re.MULTILINE)
+# The Linear link that `parse` appends, as the last line of the body. `\Z` matches only at the very
+# end of the text, so a mid-body `Linear: <url>` line is the agent's text and stays. `\s*` reaches back
+# over the newline that the body ends with; `[ \t]*` with `\Z` would not match a body that ends in
+# `\n`, which every fetched body does.
+LINEAR_LINE = re.compile(r"\n*^Linear: https?://\S+\s*\Z", re.MULTILINE)
 
 
 def strip_linear_link(text: str) -> str:
-    """The body without its `Linear: <url>` line, so a sync adds the link once, at the end."""
+    """The body without a trailing `Linear: <url>` line, so a sync adds the link once, at the end."""
     return LINEAR_LINE.sub("", text).strip()
 
 
@@ -355,9 +358,11 @@ def sync(merger, ref: str, fetch: bool = False) -> dict:
     if not record.get("worktree_path") or not worktree.exists():
         raise merge.MergeError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again",
                                "not_started")
-    check_running(ref, record)
     branch, base = record["branch"], record["base"]
     with _lock(".start-" + safe_key(key) + ".lock"):
+        # Inside the lock, as in `merge`: a rewrite that starts between a check and the lock would race.
+        current = find_record(ref)
+        check_running(ref, current[1] if current is not None else record)
         url = open_url(worktree, branch, record)
         if url is None:
             raise merge.MergeError(f"{ref} has no open pull request. "
@@ -372,10 +377,10 @@ def sync(merger, ref: str, fetch: bool = False) -> dict:
         if merge._dirty(worktree):
             raise merge.MergeError(f"{worktree} has uncommitted changes. The agent must commit them first.",
                                    "worktree_dirty")
-        # A Linear card's link is not in the record after the writer settled, so read the issue for it.
-        # A Linear ref has no card here, and no todo URL, so only then is the issue worth a read.
+        # A Linear card's link is not in the record after the writer settled. Only a Linear ref has
+        # no card here, so then the issue is worth a read. A failed read fails the sync, as `merge` does.
         linear_url = card.url if card is not None and card.source == "linear" else None
-        if linear_url is None and card is None:
+        if card is None:
             linear_url = merger._card(None, ref).url
         _sync_text(worktree, branch, base, url, folder, linear_url)
         record.update(pr_url=url, pr_state="open", pr_checked=time.time(), pr_folder=str(folder))

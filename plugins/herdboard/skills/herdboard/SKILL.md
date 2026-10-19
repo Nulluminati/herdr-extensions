@@ -85,7 +85,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `start` (creates a worktree and starts an agent).
 - `plan` (opens a Herdr tab and starts a planner agent).
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
-- `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on. `pr-sync` is not in this list: you may run it for your own card.
+- `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `pr-review` (opens a workspace and Hunk, and starts a reviewer agent), `pr-review-refresh` (moves `pr/<N>` and reopens Hunk) and `pr-review-finish` (removes the PR's worktree and branch).
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `archive --done` (archives every card in the board's done column).
@@ -137,7 +137,7 @@ A pull request reviewer only adds notes to the Hunk session. The user submits th
 8. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
 9. Do not run `done`. The user moves the card to Done.
 
-You may run `pr-sync <id>` for your own card. It pushes your branch and sends `pr.md` to the open pull request. When the user asks to change the PR title or description: edit the card's `pr.md` and run `pr-sync <id>`. You do not know that path after `merge --pr` settles, so run `pr-sync <id> --fetch` first. Edit the file that it names, then run `pr-sync <id>`.
+You may run `pr-sync <id>` for your own card. It pushes your branch and sends `pr.md` to the open pull request. When the user asks to change the PR title or description, edit the `pr.md` you wrote when you know its path. Otherwise, run `pr-sync <id> --fetch`, which names a new `pr.md`. Edit that file, then run `pr-sync <id>`.
 
 The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
 

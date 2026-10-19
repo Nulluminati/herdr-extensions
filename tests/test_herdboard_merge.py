@@ -584,7 +584,12 @@ class PrSyncCliTests(CliTestCase):
 
     def test_pr_sync_json(self):
         ref = self.card()
+        url = "https://github.com/acme/api/pull/7"
         with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": url, "path": "/p/pr.md",
+                                                        "action": "updated"}
+            data = self.run_json("pr-sync", ref, directory=self.plain)
+            self.assertEqual(data, {"ref": ref, "pr_url": url, "path": "/p/pr.md", "action": "updated"})
             merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": None, "path": "/p/pr.md",
                                                         "action": "fetched"}
             data = self.run_json("pr-sync", ref, "--fetch", directory=self.plain)
