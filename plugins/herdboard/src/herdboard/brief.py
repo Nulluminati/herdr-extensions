@@ -153,6 +153,7 @@ def brief_text(
         lines.append("- Ask the user before you change the Linear issue: its state, title, description or comments.")
     if repoless:
         lines += [
+            "",
             "## Finish the work",
             "",
             f"- Write the result to the attachments folder: `{attachments_dir or worktree}`. "

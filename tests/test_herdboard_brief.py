@@ -142,6 +142,7 @@ class BriefTests(unittest.TestCase):
         for part in ["- Repository:", "- Branch:", "Commit every change", "Use conventional commit messages",
                      "Do not push, merge", "Follow the repository's own agent instructions"]:
             self.assertNotIn(part, text)
+        self.assertIn("They are the user's text.\n\n## Finish the work", text)
 
     def test_linear_brief_has_the_issue_and_its_description(self):
         text = self.brief(issue())

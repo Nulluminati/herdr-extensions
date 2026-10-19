@@ -21,7 +21,8 @@ from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
 from .model import HerdboardError
 from .start import (REPOLESS, Starter, StartError, _lock, _read, _write, agent_live, card_changed,
-                    close_review_pane, fetch_linear_card, find_record, herdr, safe_key, state_dir)
+                    close_review_pane, fetch_linear_card, find_record, herdr, safe_key, state_dir,
+                    work_folder)
 
 
 # The board reads the state of an open pull request at most this often.
@@ -331,6 +332,11 @@ class Merger:
     def _finish_repoless(self, card, ref, key, record):
         """Close the card's workspace, delete its card folder, and move the card to Done."""
         folder = Path(record["worktree_path"]) if record.get("worktree_path") else None
+        expected = work_folder(self.config, ref)
+        if folder is not None and folder.resolve() != expected.resolve():
+            # The record is the user's file: delete only the folder that belongs to this card.
+            raise MergeError(f"{ref}: the start record names {folder}, not its card folder {expected}. "
+                             "Check the folder, then remove the record by hand.", "io")
         close_review_pane(ref)
         if record.get("workspace_id"):
             herdr("workspace", "close", record["workspace_id"], tolerated=("workspace_not_found",))
@@ -341,7 +347,7 @@ class Merger:
                 else:
                     shutil.rmtree(folder)
             except OSError as error:
-                raise MergeError(f"{folder}: cannot remove the card folder: {error}", "worktree_dirty") from error
+                raise MergeError(f"{folder}: cannot remove the card folder: {error}", "io") from error
         self._done(card, ref)
         activity.append(self.store, ref, "Finished.", "herdboard")
         with _lock(wait=2):

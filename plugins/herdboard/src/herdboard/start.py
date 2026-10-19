@@ -472,21 +472,35 @@ def repo_slug(card):
     return (_slug(card.title) or card.ref)[:50].rstrip("-")
 
 
+def _repository_folder_usable(path) -> bool:
+    """True for a folder that a stopped start may reuse: empty, or only an unborn `.git`."""
+    try:
+        entries = sorted(entry.name for entry in path.iterdir())
+    except OSError as error:
+        raise StartError(f"{path}: cannot read the folder: {error}", "io") from error
+    if not entries:
+        return True
+    if entries != [".git"] or not (path / ".git").is_dir():
+        return False
+    # `git init` ran in a start that stopped before the first commit.
+    return _git(path, "rev-parse", "--verify", "--quiet", "HEAD") is None
+
+
 def create_repository(path) -> RepoIdentity:
-    """Create a local Git repository with one empty commit, and return its identity."""
+    """Create a local Git repository with one empty commit, and return its identity.
+
+    A folder that a stopped start left with only an unborn repository is reused, so the
+    next start can make the first commit.
+    """
     path = Path(path).expanduser()
     if path.exists():
-        if not path.is_dir():
+        if not path.is_dir() or not _repository_folder_usable(path):
             raise StartError(f"{path} exists and is not an empty folder", "path_exists")
+    else:
         try:
-            if any(path.iterdir()):
-                raise StartError(f"{path} exists and is not an empty folder", "path_exists")
+            path.mkdir(parents=True, exist_ok=True)
         except OSError as error:
-            raise StartError(f"{path}: cannot read the folder: {error}", "path_exists") from error
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise StartError(f"{path}: cannot create the folder: {error}", "path_exists") from error
+            raise StartError(f"{path}: cannot create the folder: {error}", "io") from error
     if _git(path, "init", "-b", "main") is None:
         raise StartError(f"{path}: cannot create the Git repository", "new_repo_failed")
     if _git(path, "commit", "--allow-empty", "-m", "chore: initial commit") is None:
@@ -567,6 +581,9 @@ class Starter:
             raise StartError("A Linear issue cannot create a repository; use --no-repo", "usage")
         if card.path is not None and self.store.board_meta(card.path).repo:
             raise StartError(f"{card.board} already has a repository; use --repo to pick another one", "usage")
+        if card.parent or self.store.children(card.ref):
+            raise StartError(f"{card.ref} has a parent or sub-cards; their cards must stay on one board. "
+                             "Run it without a repository with --no-repo", "new_repo_family")
         if new_repo is True or new_repo is None:
             path = self.default_repo_path(card)
         else:
@@ -574,6 +591,16 @@ class Starter:
             if not path.is_absolute():
                 path = Path.cwd() / path
         return path.absolute()
+
+    def _refuse_over_live_worktree(self, card, option):
+        """Stop an option that would replace a repository start whose worktree still exists."""
+        found = find_record(card.ref)
+        record = found[1] if found else {}
+        path = record.get("worktree_path")
+        if record.get("mode") not in (None, REPO) or not path or not Path(path).exists():
+            return
+        raise StartError(f"{card.ref} has a worktree at {path}. Finish the card with "
+                         f"`herdboard finish {card.ref}` first, then use {option}.", "usage")
 
     def _target(self, card, repo, no_repo, new_repo, issue):
         """Where the card runs: `("repo", identity)`, `("new_repo", path)` or `("repoless", None)`.
@@ -584,8 +611,10 @@ class Starter:
         if new_repo is not None and (no_repo or repo):
             raise StartError("--new-repo cannot be used with --no-repo or --repo", "usage")
         if new_repo is not None:
+            self._refuse_over_live_worktree(card, "--new-repo")
             return NEW_REPO, self._new_repo_path(card, new_repo, issue)
         if no_repo:
+            self._refuse_over_live_worktree(card, "--no-repo")
             return REPOLESS, None
         if repo:
             return REPO, self._repository(card, repo, issue)
@@ -595,7 +624,7 @@ class Starter:
             return REPOLESS, None
         if stored.get("mode") == NEW_REPO:
             path = stored.get("new_repo_path")
-            return NEW_REPO, Path(path).expanduser() if path else self.default_repo_path(card)
+            return NEW_REPO, self._new_repo_path(card, path or True, issue)
         try:
             return REPO, self._repository(card, None, issue)
         except StartError as error:
@@ -608,6 +637,7 @@ class Starter:
             if mode == NEW_REPO:
                 return NEW_REPO, self._new_repo_path(card, value, issue)
             if mode == REPOLESS:
+                self._refuse_over_live_worktree(card, "--no-repo")
                 return REPOLESS, None
             return REPO, self._repository(card, value, issue)
 
@@ -898,9 +928,6 @@ class Starter:
 
         Each sub-step is saved, so a second `start` continues where the first stopped.
         """
-        if card.parent or self.store.children(card.ref):
-            raise StartError(f"{card.ref} has a parent or sub-cards; their cards must stay on one board. "
-                             "Run it without a repository with --no-repo", "new_repo_family")
         state_path = state_dir() / "starts.json"
         record = {"steps_done": []}
         herdr("workspace", "list")
@@ -927,6 +954,8 @@ class Starter:
             persist()
 
         try:
+            # Save the choice first: a failed `git init` or first commit then resumes at this path.
+            persist()
             if "new_repo" not in record["steps_done"]:
                 identity = create_repository(path)
                 record["repository"] = identity.identity

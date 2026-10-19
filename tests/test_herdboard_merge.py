@@ -648,3 +648,30 @@ class NoRepositoryFinishTests(MergeTestCase):
         result = self.merger.finish(self.card.ref)
         self.assertTrue(result["worktree_removed"])
         self.assertFalse(self.folder.exists())
+
+    def test_finish_refuses_a_record_that_names_another_folder(self):
+        other = self.root / "precious"
+        other.mkdir()
+        (other / "keep.txt").write_text("keep\n")
+        path = start.state_dir() / "starts.json"
+        records = json.loads(path.read_text())
+        records[self.card.ref]["worktree_path"] = str(other)
+        start._write(path, records)
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.finish(self.card.ref)
+        self.assertEqual(raised.exception.code, "io")
+        self.assertTrue((other / "keep.txt").is_file())
+        self.assertIn(self.card.ref, self.records())
+
+    @unittest.skipIf(os.geteuid() == 0, "root removes a read-only folder too")
+    def test_a_folder_that_cannot_be_removed_is_an_io_error(self):
+        parent = self.folder.parent
+        parent.chmod(0o500)
+        try:
+            with self.assertRaises(merge.MergeError) as raised:
+                self.merger.finish(self.card.ref)
+        finally:
+            parent.chmod(0o700)
+        self.assertEqual(raised.exception.code, "io")
+        self.assertTrue(self.folder.is_dir())
+        self.assertIn(self.card.ref, self.records())

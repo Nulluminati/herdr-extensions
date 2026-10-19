@@ -517,6 +517,24 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
                          {"agent": "claude", "model": None, "thinking": None, "no_repo": True})
         self.assertIn((f"claude plans {self.card.ref} in its work folder", None), notices)
 
+    async def test_a_new_repo_plan_says_it_plans_in_the_card_folder(self):
+        planned = {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
+                   "checkout": None, "plan": "/plan.md", "workspace_id": "x1",
+                   "worktree_path": "/todos/.herdboard/work/t000", "branch": None,
+                   "base": None, "mode": "new_repo"}
+        app = self.app(plan_card=Mock(return_value=planned))
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            await pilot.press("P")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.assertIn((f"claude plans {self.card.ref} in its work folder", None), notices)
+
     async def test_r_on_a_repoless_card_goes_to_the_agent_choice(self):
         from herdboard import start
         folder = start.work_folder(self.store.config, self.card.ref)

@@ -118,6 +118,28 @@ class StartTests(unittest.TestCase):
         self.assertTrue(opened)
         self.assertTrue(all("--no-focus" in c and "--focus" not in c for c in opened))
 
+    def test_no_repo_keeps_a_live_worktree(self):
+        result = self.starter.start(self.card.ref, no_agent=True)
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(self.card.ref, no_repo=True, no_agent=True)
+        self.assertEqual(raised.exception.code, "usage")
+        self.assertIn(result["worktree_path"], str(raised.exception))
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual(record.get("mode"), "repo")
+        self.assertEqual(record["branch"], result["branch"])
+        self.assertTrue(Path(result["worktree_path"]).exists())
+
+    def test_new_repo_keeps_a_live_worktree_of_an_inbox_card(self):
+        card = self.store.add(self.store.ensure_inbox(), "Global task")
+        result = self.starter.start(card.ref, repo=self.board.stem, no_agent=True)
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(card.ref, new_repo=self.root / "new", no_agent=True)
+        self.assertEqual(raised.exception.code, "usage")
+        self.assertIn(result["worktree_path"], str(raised.exception))
+        record = json.loads((start.state_dir() / "starts.json").read_text())[card.ref]
+        self.assertEqual(record["branch"], result["branch"])
+        self.assertFalse((self.root / "new").exists())
+
     def test_go_to_workspace_focuses_the_open_workspace(self):
         self.starter.start(self.card.ref, no_agent=True)
         self.fake.calls.clear()
@@ -1001,7 +1023,7 @@ class NewRepositoryStartTests(unittest.TestCase):
         result = self.starter.start(self.card.ref, new_repo=path)
         self.assertTrue(path.is_dir())
         self.assertEqual(self.git(path, "symbolic-ref", "--short", "HEAD"), "main")
-        self.assertEqual(len(self.git(path, "rev-list", "--count", "HEAD").split()), 1)
+        self.assertEqual(self.git(path, "rev-list", "--count", "HEAD"), "1")
         board = self.store.board_for_repo(repo_identity(path))
         self.assertIsNotNone(board)
         moved = self.store.show(self.card.ref)
@@ -1059,6 +1081,36 @@ class NewRepositoryStartTests(unittest.TestCase):
         self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
         self.assertEqual(self.store.show(self.card.ref).column, "In progress")
 
+    def test_a_failed_first_commit_resumes_on_the_next_start(self):
+        path = self.root / "resume-commit"
+        real = start._git
+        failed = []
+
+        def flaky(directory, *args):
+            if args[:2] == ("commit", "--allow-empty") and not failed:
+                failed.append(True)
+                return None
+            return real(directory, *args)
+
+        with patch.object(start, "_git", flaky):
+            with self.assertRaises(start.StartError) as raised:
+                self.starter.start(self.card.ref, new_repo=path)
+        self.assertEqual(raised.exception.code, "new_repo_failed")
+        self.assertTrue((path / ".git").is_dir())
+        self.assertEqual(list(path.iterdir()), [path / ".git"])
+        # The second start reuses the repository of the failed run, and makes its first commit.
+        self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(self.git(path, "rev-list", "--count", "HEAD"), "1")
+        self.assertEqual(self.git(path, "symbolic-ref", "--short", "HEAD"), "main")
+
+    def test_planning_a_new_repository_for_a_card_with_sub_cards_is_refused(self):
+        self.store.add(self.inbox, "Child task", parent=self.card.ref)
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.prepare(self.card, None, self.card.ref, new_repo=self.root / "new",
+                                 move_parent=False, check_column=False)
+        self.assertEqual(raised.exception.code, "new_repo_family")
+        self.assertFalse((self.root / "new").exists())
+
     def test_planning_first_records_the_path(self):
         path = self.root / "planned"
         prepared = self.starter.prepare(self.card, None, self.card.ref, new_repo=path, move_parent=False,
@@ -1070,10 +1122,6 @@ class NewRepositoryStartTests(unittest.TestCase):
         self.starter.start(self.card.ref)
         self.assertTrue((path / ".git").is_dir())
         self.assertFalse(start.work_folder(self.config, self.card.ref).exists())
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class StartCliTests(CliTestCase):
@@ -1111,3 +1159,7 @@ class StartCliTests(CliTestCase):
             self.assertTrue(planner.return_value.plan.call_args.kwargs["no_repo"])
             self.run_json("plan", "t123", "--new-repo", "/tmp/x", directory=self.plain)
             self.assertEqual(planner.return_value.plan.call_args.kwargs["new_repo"], "/tmp/x")
+
+
+if __name__ == "__main__":
+    unittest.main()

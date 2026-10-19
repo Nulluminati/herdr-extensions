@@ -13,7 +13,7 @@ from herdboard import cli  # noqa: E402
 from herdboard.linear import LinearError, LinearWriteRejectedError, LinearWriteUnknownError  # noqa: E402
 from herdboard.linear_source import LinearDisabledError  # noqa: E402
 from herdboard.linear_writes import LinearOfflineError, TeamRequiredError  # noqa: E402
-from herdboard.model import ArchivedError, CardActiveError, ConflictError, NotFoundError, UnknownTypeError  # noqa: E402
+from herdboard.model import ArchivedError, CardActiveError, ConflictError, IoError, NotFoundError, UnknownTypeError  # noqa: E402
 from herdboard.promote import AlreadyPromotedError, NotATodoError  # noqa: E402
 
 
@@ -108,7 +108,7 @@ class SkillTests(unittest.TestCase):
         known = {cls.code for cls in (
             NotFoundError, ConflictError, LinearWriteUnknownError, LinearOfflineError, LinearError,
             LinearWriteRejectedError, LinearDisabledError, TeamRequiredError,
-            AlreadyPromotedError, NotATodoError)}
+            AlreadyPromotedError, NotATodoError, IoError)}
         known.add(cli.UsageError.code)
         known |= {cli.ConfirmationRequired.code, cli.LinearDeleteError.code, cli.LinearEditError.code,
                   cli.AgentEditDenied.code}

@@ -125,7 +125,7 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 A card on the inbox can run without a repository. `start` and `plan` then fail with `repo_required` unless the user picks one:
 
 - A repository board: `--repo BOARD`. The card moves to that board if it is not there.
-- A new repository: `--new-repo [PATH]`. herdboard runs `git init -b main` and a first commit at PATH, creates the board, moves the card, then starts as usual. Without PATH it uses `projects_dir/<title>`; the default is `~/Projects`. The path must not exist, or must be an empty folder. Only todos can do this, and not a card with a parent or sub-cards (`new_repo_family`).
+- A new repository: `--new-repo [PATH]`. herdboard runs `git init -b main` and a first commit at PATH, creates the board, moves the card, then starts as usual. Without PATH it uses `projects_dir/<title>`; the default is `~/Projects`. The path must not exist, or must be an empty folder; a folder that a stopped start left with only an unborn repository is reused. Only todos can do this, and not a card with a parent or sub-cards (`new_repo_family`).
 - No repository: `--no-repo`. herdboard creates `<todos>/.herdboard/work/<id>/` and opens a workspace there. There is no Git, no branch and no worktree.
 
 A repoless card writes its result to the card's attachments (for example `findings.md`). Review it with `review <id> --agent`; Hunk and `merge` refuse with `no_repository`. `finish` closes the workspace, deletes the card folder with everything in it, and moves the card to Done. The start record keeps the choice, so a later `start` or `plan` asks nothing.
@@ -171,6 +171,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `linear_delete` | herdboard does not delete Linear issues. Tell the user to delete it in Linear. |
 | `unknown_type` | The type is not in the `types` setting. The message lists the types. Use one of them, or ask the user. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
+| `io` | herdboard could not read or write a file or folder. Tell the user the message. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
 | `card_active` | The card's worktree still exists, or its agent or planner still runs. Tell the user the message. |
 | `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
