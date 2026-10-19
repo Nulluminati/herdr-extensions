@@ -620,6 +620,10 @@ class ColumnHeader(Static):
 class ModalBase(ModalScreen):
     BINDINGS = [Binding("escape", "dismiss_screen", "Close")]
 
+    def on_mount(self) -> None:
+        # The dialog's keys at the bottom, over the key bar of the screen below.
+        self.mount(KeyBar())
+
     def action_dismiss_screen(self) -> None:
         self.dismiss(None)
 
@@ -776,6 +780,16 @@ class DetailScreen(ModalBase):
 
     def _selected(self) -> int | None:
         return self.items[self.cursor] if self.items else None
+
+    def key_applies(self, action: str) -> bool:
+        """False for a key that has nothing to act on: the key bar dims it."""
+        if action == "toggle":
+            return bool(self.items)
+        if action == "open_attachment":
+            return bool(self.files)
+        if action == "edit":
+            return self.card.source != "linear"
+        return True
 
     def _show_body(self) -> None:
         block = self.query_one("#detail-body", RichStatic)
@@ -1383,6 +1397,10 @@ MENU_ENTRIES = [
 ]
 
 
+# The board keys that act on the selected card. Without a card, the key bar dims them.
+CARD_KEY_ACTIONS = {action for action, _key, _label in MENU_ENTRIES} | {"move", "shift"}
+
+
 def card_actions(card: CardView) -> list[tuple[str, str]]:
     """The card menu's (label, action) pairs: only the actions that apply to the card.
 
@@ -1770,13 +1788,17 @@ class KeyBar(Static):
 
     def key_labels(self) -> list[Text]:
         """Each key of the current screen once, in its binding order: the key as a keycap in reverse
-        colors, then its description. No-break spaces keep a key and its description together."""
+        colors, then its description. No-break spaces keep a key and its description together.
+        A disabled key, or one that its node's `key_applies` rejects, has a dim keycap."""
         seen = set()
         labels = []
-        for _node, binding, enabled, _tooltip in self.screen.active_bindings.values():
+        for node, binding, enabled, _tooltip in self.screen.active_bindings.values():
             if not binding.show or binding.action in seen or binding.action in TAB_ACTIONS:
                 continue
             seen.add(binding.action)
+            # A key that has nothing to act on is dimmed, but still runs and says why.
+            applies = getattr(node, "key_applies", None)
+            enabled = enabled and (applies is None or applies(binding.action))
             click = Style(meta={"@click": f"app.simulate_key({binding.key!r})"})
             key = self.app.get_key_display(binding).replace(" ", "\u00a0")
             text = Text()
@@ -2073,6 +2095,8 @@ class PullRequestList(VerticalScroll, can_focus=True):
             widget.set_class(index == self.cursor_row, "selected")
         if scroll and widgets:
             self.call_after_refresh(widgets[self.cursor_row].scroll_visible, animate=False)
+        # The selected pull request sets which keys the key bar dims.
+        self.screen.refresh_bindings()
 
     def select(self, index: int, open_details: bool = False) -> None:
         self.focus()
@@ -2085,6 +2109,15 @@ def check_order(check: dict) -> int:
     """Failed checks first, then running, passed and skipped ones."""
     return ["failed", "pending", "passed", "skipped"].index(check["state"]) \
         if check["state"] in ("failed", "pending", "passed", "skipped") else 0
+
+
+def pr_key_applies(pr: pr_reviews.PullRequest | None, action: str) -> bool:
+    """Whether a pull request key has something to act on. Go, refresh and finish need a local review."""
+    if action in ("detail", "review", "open"):
+        return pr is not None
+    if action in ("go", "refresh", "finish"):
+        return pr is not None and pr.review is not None
+    return True
 
 
 class PullRequestDetailScreen(ModalBase):
@@ -2305,6 +2338,10 @@ class PullRequestDetailScreen(ModalBase):
                 parts.append(widget.plain)
         return "\n".join(parts + [self.pr.body])
 
+    def key_applies(self, action: str) -> bool:
+        """False for a key that has nothing to act on: the key bar dims it."""
+        return pr_key_applies(self.pr, action.removeprefix("act('").removesuffix("')"))
+
     def action_act(self, action: str) -> None:
         self.dismiss(action)
 
@@ -2392,6 +2429,14 @@ class PullRequestsScreen(Screen):
         index = self.query_one("#pr-list", PullRequestList).cursor_row
         return self.prs[index] if self.prs and 0 <= index < len(self.prs) else None
 
+    def key_applies(self, action: str) -> bool:
+        """False for a key that has nothing to act on: the key bar dims it."""
+        if action == "page(1)":
+            return self.page is not None and self.page.next_cursor is not None
+        if action == "page(-1)":
+            return self.page_index > 0
+        return pr_key_applies(self.current(), action)
+
     def status_text(self) -> str:
         return self.query_one("#pr-status", Static).plain
 
@@ -2465,6 +2510,7 @@ class PullRequestsScreen(Screen):
             listing.move_cursor(numbers.index(selected.number) if selected and selected.number in numbers else 0,
                                 scroll=selected is None)
         self._status(self._summary(repo, prs))
+        self.refresh_bindings()
 
     def _call(self, function, *args, **options) -> None:
         """Run a function on the event loop from a worker thread. Nothing runs once the board quits."""
@@ -2808,6 +2854,7 @@ class HerdboardApp(App):
                  grid-gutter: 0 1; width: 100%; height: auto; }
     .help-key { width: 16; height: auto; }
     .help-what { height: auto; }
+    ModalBase #key-bar { dock: bottom; background: $background; }
     .help-section { column-span: 2; height: auto; padding-top: 1; color: $accent; }
     .help-section:first-child { padding-top: 0; }
     .dim { color: $text-muted; }
@@ -3289,6 +3336,8 @@ class HerdboardApp(App):
         for widget in self.base.query(".card"):
             widget.set_class(widget.card is self.current_card(), "selected")
         self.call_after_refresh(self._reveal_selection)
+        # The selected card sets which keys the key bar dims.
+        self.refresh_bindings()
 
     def _reveal_selection(self) -> None:
         """Scroll the selected column and card into view, after layout."""
@@ -3333,6 +3382,19 @@ class HerdboardApp(App):
         if isinstance(self.screen, (ModalScreen, PullRequestsScreen)) and action in BOARD_ACTIONS:
             return False
         return True
+
+    def key_applies(self, action: str) -> bool:
+        """False for a card key that does not apply to the selected card, by the card menu's rules.
+        The key bar dims it."""
+        name = action.split("(")[0]
+        if name not in CARD_KEY_ACTIONS:
+            return True
+        card = self.current_card()
+        if card is None:
+            return False
+        if name in ("move", "shift"):
+            return not card.archived and (name == "move" or card.source != "linear")
+        return name in {menu_action for _label, menu_action in card_actions(card)}
 
     def action_column(self, step: int) -> None:
         if self.columns:
