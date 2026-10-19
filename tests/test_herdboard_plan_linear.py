@@ -55,6 +55,16 @@ class PlanLinearTests(WriteCliCase):
         self.assertIn("--workspace", tab)
         self.assertEqual(tab[tab.index("--cwd") + 1], record["worktree_path"])
 
+    def test_an_ambiguous_start_column_still_plans(self):
+        # Two started states match "In progress" and no choice is stored. Planning moves no card,
+        # so it must not fail on the column that a later start would need an answer for.
+        import linear_data
+        linear_data.add_state(self.fixtures, "ENG", "Coding", "started")
+        result = self.run_json("plan", "ENG-1", directory=self.repo)
+        self.assertEqual(result["ref"], "ENG-1")
+        self.assertIn("worktree_path", result)
+        self.assertEqual(self.requests("IssueUpdate"), [])
+
     def test_a_linear_issue_needs_a_linear_connection(self):
         import os
         del os.environ["LINEAR_API_KEY"]

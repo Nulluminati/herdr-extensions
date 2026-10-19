@@ -221,6 +221,18 @@ class RequestTests(PlanTestCase):
             self.assertIn(part, text)
         self.assertNotIn("A plan exists", text)
         self.assertNotIn("## Changes already in the worktree", text)
+        self.assertNotIn("work agent works in this worktree", text)
+
+    def test_the_brief_warns_when_a_work_agent_runs_in_the_worktree(self):
+        self.planner.plan(self.card.ref)
+        start._write(start.state_dir() / "starts.json",
+                     {self.card.ref: {"ref": self.card.ref, "pane_id": "w9:p1", "steps_done": [],
+                                      "agent_name": f"hb-{self.card.ref}"}})
+        self.fake.work_agents = {f"hb-{self.card.ref}", "w9:p1"}
+        self.fake.panes = [False]  # the first plan tab is gone
+        self.planner.plan(self.card.ref)
+        self.assertIn("- A work agent works in this worktree too. It can change files while you plan. "
+                      "Revert only your own changes.", self.brief())
 
     def test_the_brief_lists_changes_that_were_already_in_the_worktree(self):
         self.planner.plan(self.card.ref)

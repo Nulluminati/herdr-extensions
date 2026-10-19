@@ -33,6 +33,12 @@ class StartLinearTests(WriteCliCase):
         self.assertEqual(result["worktree_path"], result2["worktree_path"])
         self.assertEqual(len(self.inputs("IssueUpdate")), 1)
 
+    def test_the_move_gets_the_state_that_prepare_resolved(self):
+        from herdboard.linear_writes import LinearWriter
+        with patch.object(LinearWriter, "move", return_value=None) as move:
+            self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)
+        self.assertEqual(move.call_args.kwargs.get("state_name"), "Doing")
+
     def test_a_sub_issue_starts_from_the_current_branch_without_its_parent(self):
         self.issue("ENG-1")["parent"] = {"id": "i2", "identifier": "ENG-2"}
         result = self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)

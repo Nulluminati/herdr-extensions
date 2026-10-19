@@ -76,8 +76,9 @@ def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model
             f"Edit(/{folder}/**)", f"Write(/{folder}/**)"]
 
 
-def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, notes: list[dict],
-               plan: str | None, files: list[dict], log: list[dict], plan_file: Path, command: str) -> str:
+def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, work_agent: bool,
+               notes: list[dict], plan: str | None, files: list[dict], log: list[dict], plan_file: Path,
+               command: str) -> str:
     linear = card.source == "linear"
     lines = [f"# Plan: {_title(card)}", "",
              f"Plan {'Linear issue' if linear else 'herdboard card'} `{card.ref}` (board `{card.board}`, "
@@ -86,8 +87,11 @@ def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, not
              f"- Worktree: `{worktree}` on branch `{branch}` (base `{base}`). You may change code and run "
              "commands here to test ideas. Do not commit. Before planning ends, revert every change you "
              "made, so the worktree is as it was when you started. Do not touch changes that were there "
-             "before you.",
-             f"- The plan: `{plan_file}`", ""]
+             "before you."]
+    if work_agent:
+        lines += ["- A work agent works in this worktree too. It can change files while you plan. "
+                  "Revert only your own changes."]
+    lines += [f"- The plan: `{plan_file}`", ""]
     if linear and card.url:
         lines += [f"- Link: {card.url}", ""]
     if status.strip():
@@ -203,7 +207,7 @@ class Planner:
             if _planner_pane(running) is not None:
                 raise PlanError(f"A planner for {ref} still runs in pane {running['pane_id']}", "plan_running")
             record = starter.prepare(card, issue, key, repo=repo, checkout=checkout, base=base,
-                                     move_parent=False)
+                                     move_parent=False, check_column=False)
             workspace = record["workspace_id"]
             worktree = Path(record["worktree_path"])
             plan_file = attachments.plan_path(self.config, ref)
@@ -214,9 +218,15 @@ class Planner:
                 except HerdboardError:
                     notes = []
             status = _git(worktree, "status", "--short") or ""
+            work_agent = False
+            if record.get("agent_name"):
+                try:
+                    work_agent = agent_live(record)
+                except HerdboardError:
+                    work_agent = False
             brief = write_brief(safe_key(ref) + "-plan", brief_text(
                 card, worktree=worktree, branch=record["branch"], base=record["base"], status=status,
-                notes=notes, plan=attachments.plan_for_agent(self.store, ref),
+                work_agent=work_agent, notes=notes, plan=attachments.plan_for_agent(self.store, ref),
                 files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
                 plan_file=plan_file, command=herdboard_command(self.config_file)))
             # Read before the launch: the agent can save the plan while `agent start` waits for it.

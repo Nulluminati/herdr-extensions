@@ -562,7 +562,7 @@ class Starter:
                 return _remember(Path(answer).expanduser(), identity)
         raise StartError(f"No local checkout for {identity}; use --checkout PATH", "checkout_unknown")
 
-    def _parent_branch(self, card, repo, checkout, move_parent=True):
+    def _parent_branch(self, card, repo, checkout, move_parent=True, check_column=True):
         """A sub-card starts from its parent's branch. A parent without one starts first, with no agent."""
         found = find_record(card.parent)
         if found is None or not found[1].get("branch"):
@@ -573,7 +573,8 @@ class Starter:
                 parent = self.store.show(card.parent)
                 if TEMP_REF.match(parent.ref):
                     parent = self.store.ensure_id(parent.ref)
-                self.prepare(parent, None, parent.ref, repo=repo, checkout=checkout, move_parent=False)
+                self.prepare(parent, None, parent.ref, repo=repo, checkout=checkout, move_parent=False,
+                             check_column=check_column)
             found = find_record(card.parent)
         return found[1]["branch"]
 
@@ -665,19 +666,21 @@ class Starter:
         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
               tolerated=("timeout", "agent_not_ready"))
 
-    def prepare(self, card, issue, key, repo=None, checkout=None, base=None, move_parent=True):
+    def prepare(self, card, issue, key, repo=None, checkout=None, base=None, move_parent=True,
+                check_column=True):
         """Set a card up for work: repository, pin, checkout, branch, base, worktree and upstream.
 
         It writes the card's `starts.json` record and takes the card's start lock. It moves no card
         and starts no agent: `start` calls it and then moves the card and starts the agent, and
         `plan` calls it with `move_parent=False`, so a sub-card's parent is only prepared. The
         finished steps stay in the record, so a failed run resumes at the first failed step.
-        Returns the record.
+        With `check_column`, the start column must exist (and have a Linear state); only a caller
+        that moves the card needs that, so `plan` passes false. Returns the record.
         """
         with _lock(".start-" + safe_key(key) + ".lock"):
-            return self._prepare(card, issue, key, repo, checkout, base, move_parent)
+            return self._prepare(card, issue, key, repo, checkout, base, move_parent, check_column)
 
-    def _prepare(self, card, issue, key, repo, checkout, base, move_parent):
+    def _prepare(self, card, issue, key, repo, checkout, base, move_parent, check_column):
         state_path = state_dir() / "starts.json"
         record = {"steps_done": []}
         try:
@@ -717,17 +720,22 @@ class Starter:
             validate_branch(branch)
             record["branch"] = branch
             save("branch")
-            column = self.config.start_column
-            if issue:
-                with self.writer.online() as client:
-                    team = issue["team"]
-                    resolve_state(self.config, StateChoices(self.writer.source.account_dir()),
-                                  team, client.team_states(team["id"]), column, self.ask_state)
-            elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
-                raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
+            # Only a caller that moves the card needs the start column: `plan` prepares without
+            # moving, so it works even when the column has no state or the board has no column.
+            state = None
+            if check_column:
+                column = self.config.start_column
+                if issue:
+                    with self.writer.online() as client:
+                        team = issue["team"]
+                        state = resolve_state(self.config, StateChoices(self.writer.source.account_dir()),
+                                              team, client.team_states(team["id"]), column, self.ask_state)
+                elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
+                    raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
             # A Linear sub-issue can belong to another repository, so only todos start from a parent.
             if not base and not record.get("base") and card.parent and not issue:
-                base = self._parent_branch(card, repo, checkout, move_parent=move_parent)
+                base = self._parent_branch(card, repo, checkout, move_parent=move_parent,
+                                           check_column=check_column)
             record["base"] = self._base(local, base or record.get("base"), branch)
             save("base")
             record.update(self._workspace(local, branch, record, focus=False))
@@ -736,6 +744,10 @@ class Starter:
             if _git(local, "branch", f"--set-upstream-to={record['base']}", branch) is None:
                 raise StartError(f"Cannot set {record['base']} as the upstream of {branch}", "upstream_failed")
             save("upstream")
+            if state is not None:
+                # Transient, and set after the last save, so it never reaches the record on disk:
+                # `start` hands the resolved state to the move instead of resolving it again.
+                record["_state_name"] = state["name"]
             return record
         except HerdboardError as error:
             error.steps_done = list(record.get("steps_done", []))
@@ -773,7 +785,9 @@ class Starter:
             key = card.ref
         lock_key = safe_key(key)
         with _lock(".start-" + lock_key + ".lock"):
-            record = self._prepare(card, issue, key, repo, checkout, base, move_parent=True)
+            record = self._prepare(card, issue, key, repo, checkout, base, move_parent=True,
+                                   check_column=True)
+            state_name = record.pop("_state_name", None)
             try:
                 def persist():
                     with _lock(wait=2):
@@ -789,7 +803,7 @@ class Starter:
                 column = self.config.start_column
                 if "move" not in record["steps_done"] and card.column.casefold() != column.casefold():
                     if issue:
-                        self.writer.move(card.ref, column, ask=self.ask_state)
+                        self.writer.move(card.ref, column, ask=self.ask_state, state_name=state_name)
                     else:
                         card = self.store.move(card.ref, column)
                 save("move")
