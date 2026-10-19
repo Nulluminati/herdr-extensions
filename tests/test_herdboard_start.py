@@ -285,6 +285,47 @@ class StartTests(unittest.TestCase):
         self.assertFalse(card.worktree)
         self.assertEqual(card.column, "In progress")
 
+    def reviewed_record(self, head):
+        """A started card whose worktree is the test repository, with a saved agent review of `head`."""
+        self.starter.start(self.card.ref, no_agent=True)
+        path = start.state_dir() / "starts.json"
+        records = json.loads(path.read_text())
+        records[self.card.ref].update(worktree_path=str(self.repo),
+                                      agent_reviewed={"head": head, "findings": "findings.md"})
+        path.write_text(json.dumps(records))
+
+    def head(self):
+        return subprocess.run(["git", "-C", str(self.repo), "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_a_saved_review_of_the_branch_head_marks_the_card_reviewed(self):
+        self.reviewed_record(self.head())
+        card = self.store.show(self.card.ref)
+        start.mark_removed([card])
+        self.assertEqual(card.reviewed, "reviewed")
+
+    def test_commits_after_the_review_mark_new_commits(self):
+        self.reviewed_record(self.head())
+        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                        "commit", "--allow-empty", "-qm", "more"], check=True, capture_output=True)
+        card = self.store.show(self.card.ref)
+        start.mark_removed([card])
+        self.assertEqual(card.reviewed, "new commits")
+
+    def test_a_card_without_a_saved_review_or_a_git_error_is_not_reviewed(self):
+        self.starter.start(self.card.ref, no_agent=True)
+        card = self.store.show(self.card.ref)
+        card.reviewed = "reviewed"
+        start.mark_removed([card])
+        self.assertIsNone(card.reviewed)
+        path = start.state_dir() / "starts.json"
+        records = json.loads(path.read_text())
+        records[self.card.ref]["agent_reviewed"] = {"head": "abc", "findings": "findings.md"}
+        path.write_text(json.dumps(records))
+        # The fake worktree is not a Git repository.
+        start.mark_removed([card])
+        self.assertIsNone(card.reviewed)
+
     def test_resume_does_not_repeat_a_completed_move(self):
         self.fake.fail = "agent start"
         with self.assertRaises(start.StartError):

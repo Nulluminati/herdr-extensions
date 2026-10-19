@@ -192,6 +192,106 @@ class AgentLogoTests(unittest.TestCase):
             self.assertFalse(board.agent_font_installed())
 
 
+HERDR_GLYPHS = (("working", "◐", "yellow"), ("blocked", "×", "red"), ("done", "✓", "cyan"),
+                ("idle", "○", "green"), ("unknown", "·", "dim"))
+PHASES = {"planning": ("✎", "\uf040"), "planned": ("☑", "\uf046"), "reviewing": ("⌕", "\uf002"),
+          "reviewed": ("✔", "\uf058"), "new commits": ("↑", "\uf062")}
+
+
+def status_row(item, done=False, **options):
+    return board.card_face(item, False, done=done, **options).status.plain
+
+
+class AgentGlyphTests(unittest.TestCase):
+    def test_the_work_agent_glyph_replaces_the_state_icon(self):
+        for status, glyph, style in HERDR_GLYPHS:
+            with self.subTest(status=status):
+                item = card(worktree=True, agent="claude", agent_status=status)
+                icon = board.card_face(item, False).icon
+                self.assertEqual(icon.plain, glyph)
+                self.assertEqual(str(icon.style), style)
+                logos = board.card_face(item, False, agent_logos=True).icon
+                self.assertEqual(logos.plain, f"{glyph} {board.AGENT_LOGOS['claude']}")
+
+    def test_the_glyphs_are_the_same_for_both_icon_styles(self):
+        item = card(worktree=True, agent_status="working")
+        self.assertEqual(board.card_face(item, False, icon_style="nerd").icon.plain, "◐")
+
+    def test_a_worktree_without_a_live_agent_keeps_the_started_icon(self):
+        icon = board.card_face(card(worktree=True, agent="claude"), False).icon
+        self.assertEqual((icon.plain, str(icon.style)), ("●", "yellow"))
+
+    def test_the_completed_column_shows_done_with_a_live_agent(self):
+        icon = board.card_face(card(worktree=True, agent_status="working"), False, done=True).icon
+        self.assertEqual((icon.plain, str(icon.style)), ("✓", "green"))
+
+    def test_the_phase_icons_show_without_words(self):
+        for style, index in (("plain", 0), ("nerd", 1)):
+            with self.subTest(style=style):
+                icon = {key: glyphs[index] for key, glyphs in PHASES.items()}
+                options = dict(icon_style=style)
+                self.assertEqual(status_row(card(planning="claude", planning_status="working"), **options),
+                                 f"{icon['planning']} ◐ claude")
+                self.assertEqual(status_row(card(planning="claude"), **options), f"{icon['planning']} claude")
+                self.assertEqual(status_row(card(planned=True), **options), icon["planned"])
+                self.assertEqual(status_row(card(agent_review="pi", review_status="blocked"), **options),
+                                 f"{icon['reviewing']} × pi")
+                self.assertEqual(status_row(card(reviewed="reviewed"), **options), icon["reviewed"])
+                self.assertEqual(status_row(card(reviewed="new commits"), **options), icon["new commits"])
+
+    def test_the_agent_logo_replaces_the_agent_name_in_a_phase(self):
+        item = card(planning="claude", planning_status="idle", agent_review="pi", review_status="working")
+        self.assertEqual(status_row(item, agent_logos=True),
+                         f"⌕ ◐ {board.AGENT_LOGOS['pi']} · ✎ ○ {board.AGENT_LOGOS['claude']}")
+        self.assertEqual(status_row(card(agent_review="other"), agent_logos=True), "⌕ other")
+
+    def test_each_agent_glyph_takes_its_herdr_color(self):
+        face = board.card_face(card(planning="claude", planning_status="blocked"), False)
+        glyph = next(span for span in face.status.spans if face.status.plain[span.start:span.end] == "×")
+        self.assertEqual(str(glyph.style), "red")
+
+    def test_the_pr_writer_glyph_follows_pr_writing(self):
+        self.assertEqual(status_row(card(pr_writing=True, pr_write_status="working")), "PR: writing ◐")
+        self.assertEqual(status_row(card(pr_writing=True)), "PR: writing")
+
+    def test_planned_hides_while_a_planner_runs_and_in_the_completed_column(self):
+        self.assertNotIn("☑", status_row(card(planned=True, planning="claude")))
+        self.assertNotIn("☑", status_row(card(planned=True), done=True))
+
+    def test_the_plain_text_has_words_and_no_glyphs(self):
+        item = card(worktree=True, agent_status="working", planned=True, agent_review="pi", review_status="blocked",
+                    pr_writing=True, pr_write_status="done")
+        plain = board.CardWidget(item, False).plain
+        self.assertTrue(plain.startswith("Ship it"), plain)
+        self.assertEqual(plain.splitlines()[-1], "agent review: pi · PR: writing · planned")
+        self.assertEqual(board.CardWidget(card(reviewed="new commits"), False).plain.splitlines()[-1],
+                         "new commits since review")
+        for glyph in ("◐", "×", "✓", "☑", "⌕", "↑"):
+            self.assertNotIn(glyph, plain)
+        self.assertEqual(board.CardWidget(card(planning="claude", planning_status="working"), False).plain,
+                         "Ship it  t123\nplanning: claude")
+
+
+    def test_the_detail_screen_names_each_state_in_words(self):
+        item = card(worktree=True, agent="claude", agent_status="working", planning="pi", planning_status="idle",
+                    agent_review="pi", review_status="blocked", planned=True)
+        meta = board.DetailScreen(item, None)._meta().plain.splitlines()
+        self.assertIn("Agent        ◐ claude: working", meta)
+        self.assertIn("Planner      ✎ ○ pi: idle", meta)
+        self.assertIn("Agent review ⌕ × pi: blocked", meta)
+        self.assertIn("Plan         ☑ planned", meta)
+        for reviewed, words in (("reviewed", "✔ reviewed"), ("new commits", "↑ new commits since review")):
+            meta = board.DetailScreen(card(reviewed=reviewed), None)._meta().plain.splitlines()
+            self.assertIn(f"Agent review {words}", meta)
+        nerd = board.DetailScreen(card(planned=True), None, icon_style="nerd")._meta().plain
+        self.assertIn("Plan         \uf046 planned", nerd)
+
+    def test_the_help_screen_explains_each_glyph(self):
+        icons = dict(next(entries for title, entries in board.HELP_SECTIONS if title == "Icons"))
+        for glyph in ("◐", "×", "✓", "○", "·", "●", "✎", "☑", "⌕", "✔", "↑"):
+            self.assertIn(glyph, icons)
+
+
 class ColumnColorTests(unittest.TestCase):
     def test_columns_take_the_palette_colors_in_turn(self):
         names = [board.column_class(index, ColumnData(f"c{index}")) for index in range(7)]

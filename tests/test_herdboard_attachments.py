@@ -148,9 +148,19 @@ class AttachmentTests(unittest.TestCase):
         cards = [mock.Mock(ref="t3m9", has_attachments=False), mock.Mock(ref="tabc", has_attachments=True)]
         attachments.mark(self.store.config, cards)
         self.assertEqual([card.has_attachments for card in cards], [True, False])
-        with mock.patch.object(attachments, "cards_with_files", side_effect=attachments.IoError("denied")):
+        with mock.patch.object(attachments, "card_files", side_effect=attachments.IoError("denied")):
             attachments.mark(self.store.config, cards)
         self.assertEqual([card.has_attachments for card in cards], [False, False])
+
+    def test_mark_sets_planned_only_when_the_card_has_a_plan(self):
+        attachments.add(self.store, "t3m9", self.doc, name="plan.md")
+        attachments.add(self.store, "tabc", self.doc)
+        cards = [mock.Mock(ref=ref, planned=None) for ref in ("t3m9", "tabc", "tdef")]
+        attachments.mark(self.store.config, cards)
+        self.assertEqual([card.planned for card in cards], [True, False, False])
+        with mock.patch.object(attachments, "card_files", side_effect=attachments.IoError("denied")):
+            attachments.mark(self.store.config, cards)
+        self.assertEqual([card.planned for card in cards], [False, False, False])
 
 
 class AttachCliTests(CliTestCase):

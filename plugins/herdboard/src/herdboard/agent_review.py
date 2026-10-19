@@ -130,6 +130,7 @@ class AgentReviewer(Reviewer):
             branch_diff = _git(worktree, "diff", f"{base}...HEAD")
             uncommitted = _git(worktree, "diff", "HEAD")
             untracked = _git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
+            head = _git(worktree, "rev-parse", "HEAD").strip()
             if not (branch_diff or uncommitted or untracked):
                 raise ReviewError(f"{ref} has no commits since {base} and no uncommitted changes",
                                   "nothing_to_review")
@@ -158,7 +159,9 @@ class AgentReviewer(Reviewer):
                   *reviewer_arguments(kind, prompt, folder, model, thinking),
                   tolerated=("timeout", "agent_not_ready"))
             record["agent_review"] = {"folder": str(folder), "pane_id": pane, "kind": kind, "model": model,
-                                      "then_hunk": then_hunk}
+                                      "then_hunk": then_hunk, "head": head}
+            # A new review replaces the last one, also when it fails.
+            record.pop("agent_reviewed", None)
             persist()
             # The worker reads the review from here: the start record is gone once the card is finished.
             (folder / "review.json").write_text(json.dumps(record["agent_review"]), encoding="utf-8")
@@ -210,8 +213,9 @@ def _notify(title: str, body: str) -> None:
         print(f"herdboard: cannot show a notification: {error}", file=sys.stderr)
 
 
-def _forget(ref: str, folder: Path) -> dict | None:
+def _forget(ref: str, folder: Path, reviewed: dict | None = None) -> dict | None:
     """Remove only this review, returning the start record (None when it is gone).
+    With `reviewed`, save it as the card's last agent review: its HEAD commit and findings.
 
     A late worker must not clear a retry's review from the card's start record.
     """
@@ -226,6 +230,8 @@ def _forget(ref: str, folder: Path) -> dict | None:
             return record
         records = _read(path)
         record.pop("agent_review", None)
+        if reviewed is not None:
+            record["agent_reviewed"] = reviewed
         records[key] = record
         _write(path, records)
         return record
@@ -249,7 +255,9 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         herdr("pane", "close", pane, tolerated=("pane_not_found",))
     except HerdboardError as failure:
         print(f"herdboard: cannot close the reviewer pane {pane}: {failure}", file=sys.stderr)
-    record = _forget(ref, folder)
+    # Only ready findings make the card reviewed; a review from before heads were saved has none.
+    reviewed = {"head": review["head"], "findings": str(findings)} if error is None and review.get("head") else None
+    record = _forget(ref, folder, reviewed)
     if record is None:
         return 0  # The card was finished during the review.
     delivery_error = None

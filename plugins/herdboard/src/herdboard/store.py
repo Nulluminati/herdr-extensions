@@ -90,6 +90,16 @@ class CardView:
     planning: str | None = None
     # Board-only: True when the card has at least one attachment.
     has_attachments: bool = False
+    # Board-only: True when the card has a plan attachment.
+    planned: bool = False
+    # Board-only: "reviewed" while the branch HEAD is the commit of the last agent review, "new commits" after it.
+    reviewed: str | None = None
+    # Board-only Herdr status (working, blocked, done, idle, unknown) of each live agent pane on the card:
+    # the work agent, the planner, the agent reviewer and the pull request writer.
+    agent_status: str | None = None
+    planning_status: str | None = None
+    review_status: str | None = None
+    pr_write_status: str | None = None
     # The card ID of a sub-card's parent, from its `[[#^id]]` link.
     parent: str | None = None
     # Board-only: a Linear card's issue ID, which stays when the identifier changes.

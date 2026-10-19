@@ -342,6 +342,12 @@ class CommandTests(CliTestCase):
         data = self.run_json("show", card["ref"], directory=self.plain)
         self.assertEqual(data["card"]["ref"], card["ref"])
 
+    def test_json_cards_have_no_board_only_agent_fields(self):
+        card = self.run_json("add", "buy", directory=self.plain)["card"]
+        data = self.run_json("show", card["ref"], directory=self.plain)["card"]
+        for name in ("agent_status", "planning_status", "review_status", "pr_write_status", "planned", "reviewed"):
+            self.assertNotIn(name, data)
+
     def test_move_text_and_json(self):
         card = self.run_json("add", "x", directory=self.plain)["card"]
         out, _ = self.run_cli("move", card["ref"], "In progress", directory=self.plain)

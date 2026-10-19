@@ -8,7 +8,7 @@ import importlib.metadata
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 import threading
@@ -41,6 +41,7 @@ from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_writes import LinearWriter
 from .model import HerdboardError, join_title, parse_tags, plain_tags, split_title
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
+from . import agent_states
 from . import start as start_module
 from .config import THINKING_LEVELS, save_display_config
 from . import merge as merge_module
@@ -114,7 +115,14 @@ ICONS = {
     "pr": "\uf407",
     "sub_cards": "\uf0ae",
     "comments": "\uf27b",
+    "phase/planning": "\uf040",
+    "phase/planned": "\uf046",
+    "phase/reviewing": "\uf002",
+    "phase/reviewed": "\uf058",
+    "phase/new commits": PR_STATES["agent:new commits"][0],
 }
+# The plain glyphs of the planning and review phases on a card's status row.
+PHASE_ICONS = {"planning": "✎", "planned": "☑", "reviewing": "⌕", "reviewed": "✔", "new commits": "↑"}
 
 
 # The help screen: a title, then its keys. A screen's keys are in its own section; the keys of
@@ -201,6 +209,20 @@ HELP_SECTIONS = [
         ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
         ("right-click", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
         ("drag", "move the card to the bottom of another column"),
+    ]),
+    ("Icons", [
+        ("◐", "an agent works (yellow), as in the Herdr sidebar"),
+        ("×", "an agent is blocked and waits for you (red)"),
+        ("✓", "an agent is done and you did not look yet (cyan); a card in the completed column (green)"),
+        ("○", "an agent is idle (green); a card that is not started"),
+        ("·", "Herdr does not know the agent's state (dim)"),
+        ("●", "a started card without a live agent (yellow)"),
+        ("✎", "a planner runs, then its state and agent"),
+        ("☑", "the card has a plan"),
+        ("⌕", "an agent review runs, then the reviewer's state and agent"),
+        ("✔", "the agent review findings are ready"),
+        ("↑", "new commits since the agent review"),
+        ("nerd", "with the Nerd Font icon style, the phase icons are Nerd Font glyphs; the agent states stay the same"),
     ]),
 ]
 HELP_KEYS = [entry for _title, entries in HELP_SECTIONS for entry in entries]
@@ -323,6 +345,10 @@ def tag_chip(tag: str, style: str, dark: bool = True) -> Text:
 CARD_ICONS = {"new": "○", "started": "●", "done": "✓"}
 # Terminal palette names, so ANSI themes use the terminal's own green and yellow.
 CARD_ICON_STYLES = {"new": "", "started": "yellow", "done": "green"}
+# The state of an agent pane, with the glyphs and colors of Herdr's `symbols` status indicator set.
+# Herdr shows done in teal; the terminal palette has no teal, so cyan takes its place.
+AGENT_STATUS_ICONS = {"working": "◐", "blocked": "×", "done": "✓", "idle": "○", "unknown": "·"}
+AGENT_STATUS_STYLES = {"working": "yellow", "blocked": "red", "done": "cyan", "idle": "green", "unknown": "dim"}
 # The icon before a column's name: the completed column, the start column, any other column.
 COLUMN_ICONS = {"done": "✓", "started": "●", "other": "○"}
 # How many colors the columns take in turn. The completed column is always green.
@@ -347,6 +373,30 @@ def card_state(card: CardView, done: bool) -> str:
     if card.worktree or card.agent_review or card.pr_writing or card.planning:
         return "started"
     return "new"
+
+
+def agent_glyph(status: str) -> Text:
+    """The Herdr glyph of an agent state, in its color. An unknown state shows as `unknown`."""
+    key = status if status in AGENT_STATUS_ICONS else "unknown"
+    return Text(AGENT_STATUS_ICONS[key], style=AGENT_STATUS_STYLES[key])
+
+
+def phase_icon(key: str, icon_style: str) -> str:
+    """The icon of a planning or review phase: a Nerd Font glyph, or a plain one."""
+    return ICONS[f"phase/{key}"] if icon_style == "nerd" else PHASE_ICONS[key]
+
+
+def phase_item(key: str, icon_style: str, style: str, agent: str | None = None, status: str | None = None,
+               agent_logos: bool = False) -> Text:
+    """A status row item: the phase icon, then the agent's Herdr glyph and its logo, else its name."""
+    item = Text(phase_icon(key, icon_style), style=style)
+    if status:
+        item.append(" ")
+        item.append_text(agent_glyph(status))
+    if agent:
+        logo = AGENT_LOGOS.get(agent) if agent_logos else None
+        item.append(f" {logo or agent}")
+    return item
 
 
 def card_description(card: CardView) -> str:
@@ -443,6 +493,8 @@ class CardFace:
     due: Text
     status: Text
     compact: bool = False
+    # The status row in words, without glyphs, for the card's plain text.
+    words: Text = field(default_factory=Text)
 
     def heading(self) -> Text:
         """The title row of a compact card."""
@@ -479,7 +531,11 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
         title, tags, due = split_title(card.title)
     muted = "dim strike" if done else ""
     state = card_state(card, done)
-    icon = Text(CARD_ICONS[state], style=CARD_ICON_STYLES[state])
+    # A live work agent shows its Herdr state; the completed column always shows done.
+    if card.agent_status and state != "done":
+        icon = agent_glyph(card.agent_status)
+    else:
+        icon = Text(CARD_ICONS[state], style=CARD_ICON_STYLES[state])
     logo = AGENT_LOGOS.get(card.agent) if agent_logos and card.agent else None
     if logo:
         icon.append(f" {logo}")
@@ -502,29 +558,48 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     if card.sub_cards:
         count = Text(icon_label("sub_cards", f"{card.sub_cards[0]}/{card.sub_cards[1]} done", icon_style),
                      style="dim")
-    info = []
+    # Each status item, and its words for the plain text when the item is only glyphs.
+    info: list[tuple[Text, str]] = []
+
+    def add(item: Text, words: str | None = None) -> None:
+        info.append((item, item.plain if words is None else words))
+
     if card.source == "linear" and card.pr:
-        info.append(Text(icon_label("pr", "PR", icon_style), style="bold"))
+        add(Text(icon_label("pr", "PR", icon_style), style="bold"))
     if show_board:
-        info.append(Text(card.board, style="dim"))
+        add(Text(card.board, style="dim"))
     if card.worktree_removed:
-        info.append(Text(icon_label("branch", "worktree removed", icon_style), style="bold yellow"))
+        add(Text(icon_label("branch", "worktree removed", icon_style), style="bold yellow"))
     if card.pr_state:
-        info.append(Text(icon_label("pr", f"PR {card.pr_state}", icon_style),
-                         style=PR_STYLES.get(card.pr_state, "dim")))
+        add(Text(icon_label("pr", f"PR {card.pr_state}", icon_style), style=PR_STYLES.get(card.pr_state, "dim")))
     if card.worktree_left:
-        info.append(Text(icon_label("branch", "worktree still exists", icon_style), style="bold yellow"))
+        add(Text(icon_label("branch", "worktree still exists", icon_style), style="bold yellow"))
     if card.agent_review:
-        info.append(Text(f"agent review: {agent_label(card.agent_review, agent_logos)}", style="bold"))
+        add(phase_item("reviewing", icon_style, "bold", card.agent_review, card.review_status, agent_logos),
+            f"agent review: {agent_label(card.agent_review, agent_logos)}")
+    elif card.reviewed == "reviewed":
+        add(phase_item("reviewed", icon_style, PR_STATES["agent:reviewed"][2]), "reviewed")
+    elif card.reviewed == "new commits":
+        add(phase_item("new commits", icon_style, PR_STATES["agent:new commits"][2]), "new commits since review")
     if card.pr_writing:
-        info.append(Text(icon_label("pr", "PR: writing", icon_style), style="bold"))
+        writing = Text(icon_label("pr", "PR: writing", icon_style), style="bold")
+        words = writing.plain
+        if card.pr_write_status:
+            writing.append(" ")
+            writing.append_text(agent_glyph(card.pr_write_status))
+        add(writing, words)
     if card.planning:
-        info.append(Text(f"planning: {agent_label(card.planning, agent_logos)}", style="bold cyan"))
+        add(phase_item("planning", icon_style, "bold cyan", card.planning, card.planning_status, agent_logos),
+            f"planning: {agent_label(card.planning, agent_logos)}")
+    elif card.planned and not done:
+        add(phase_item("planned", icon_style, "bold cyan"), "planned")
     if card.parent_title:
-        info.append(Text(f"↳ {card.parent_title}", style="dim"))
+        add(Text(f"↳ {card.parent_title}", style="dim"))
+    separator = Text(" · ", style="dim")
     return CardFace(icon, heading, corner, description, chips, count,
                     due_label(due, icon_style=icon_style) if due else Text(),
-                    Text(" · ", style="dim").join(info), card_style == "compact")
+                    separator.join(item for item, _words in info), card_style == "compact",
+                    separator.join(Text(words) for _item, words in info))
 
 
 def card_text(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
@@ -554,7 +629,7 @@ class CardWidget(Static):
         self.rich_text = face.text()
         # The state icon and the agent logo are not card text: `plain` has the title, then the corner.
         first = face.title.plain + (f"  {face.corner.plain}" if face.corner else "")
-        rest = [line.plain for line in face.lines()[1 if face.compact else 2:]]
+        rest = [line.plain for line in replace(face, status=face.words).lines()[1 if face.compact else 2:]]
         self.plain = "\n".join([first, *rest])
         # What a redraw compares: the text with its styles and the classes.
         classes = "card" + (" compact" if card_style == "compact" else "") + (" done" if done else "")
@@ -839,6 +914,16 @@ class DetailScreen(ModalBase):
         title, tags, due = split_title(card.title)
         return title, plain_tags(tags), due
 
+    def _phase(self, key: str, agent: str, status: str | None) -> Text:
+        """A phase icon, the agent's Herdr glyph, and the agent and its state in words."""
+        text = Text(f"{phase_icon(key, self.icon_style)} ")
+        if status:
+            text.append_text(agent_glyph(status))
+            text.append(f" {agent}: {status}")
+        else:
+            text.append(agent)
+        return text
+
     def _meta(self) -> Text:
         card = self.card
         rows = [("Board", card.board), ("Column", card.column), ("ID", card.ref), ("Type", card.type)]
@@ -851,6 +936,21 @@ class DetailScreen(ModalBase):
             rows.append(("Worktree", icon_label("branch", "removed", self.icon_style)))
         elif card.worktree_left:
             rows.append(("Worktree", icon_label("branch", "still exists", self.icon_style)))
+        style = self.icon_style
+        if card.agent_status and card.agent:
+            agent = agent_glyph(card.agent_status)
+            agent.append(f" {card.agent}: {card.agent_status}")
+            rows.append(("Agent", agent))
+        if card.planning:
+            rows.append(("Planner", self._phase("planning", card.planning, card.planning_status)))
+        if card.agent_review:
+            rows.append(("Agent review", self._phase("reviewing", card.agent_review, card.review_status)))
+        elif card.reviewed == "reviewed":
+            rows.append(("Agent review", f"{phase_icon('reviewed', style)} reviewed"))
+        elif card.reviewed == "new commits":
+            rows.append(("Agent review", f"{phase_icon('new commits', style)} new commits since review"))
+        if card.planned:
+            rows.append(("Plan", f"{phase_icon('planned', style)} planned"))
         text = Text()
         for label, value in rows:
             if value:
@@ -859,6 +959,8 @@ class DetailScreen(ModalBase):
                 text.append(f"{label:<13}", style="dim")
                 if label == "Type" and self.icon_style == "nerd":
                     text.append_text(type_badge(value, self.icon_style))
+                elif isinstance(value, Text):
+                    text.append_text(value)
                 else:
                     text.append(str(value))
         return text
@@ -3145,6 +3247,7 @@ class HerdboardApp(App):
             ordered.append(archive)
         mark_planning([card for data in ordered for card in data.cards])
         attachments.mark(self.store.config, [card for data in ordered for card in data.cards])
+        agent_states.mark([card for data in ordered for card in data.cards])
         return ordered
 
     def current_card(self) -> CardView | None:
@@ -3352,7 +3455,8 @@ class HerdboardApp(App):
 
         def status():
             return [(card.worktree_removed, card.worktree, card.worktree_left, card.pr_state, card.agent_review,
-                     card.pr_writing, card.planning, card.has_attachments, card.agent)
+                     card.pr_writing, card.planning, card.has_attachments, card.agent, card.planned, card.reviewed,
+                     card.agent_status, card.planning_status, card.review_status, card.pr_write_status)
                     for card in cards]
 
         old = status()
@@ -3361,6 +3465,7 @@ class HerdboardApp(App):
             await asyncio.to_thread(mark_removed, cards)
             await asyncio.to_thread(mark_planning, cards)
             await asyncio.to_thread(attachments.mark, self.store.config, cards)
+            await asyncio.to_thread(agent_states.mark, cards)
         except HerdboardError as error:
             self.notify(str(error), severity="error")
             return

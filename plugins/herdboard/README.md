@@ -61,7 +61,7 @@ Each column takes a color in turn: blue, magenta, yellow, cyan and green. The co
 
 A card shows, from top to bottom:
 
-- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), and the card ID at the right. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
+- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), and the card ID at the right. While the work agent's pane lives, the state icon is the agent's Herdr state instead (see [Agent states](#agent-states)). The done column always shows the green `✓`. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
 - The title.
 - The first detail line that is not a checklist item, in at most two rows. Cards in the done column strike the title and this line through.
 - The type and the tags.
@@ -169,11 +169,12 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 | `↳ <parent>` | A sub-card. For a Linear sub-issue whose parent is not in the view, the marker shows the parent's identifier, such as `↳ ENG-12` |
 | `2/5 done` | A parent card and the progress of its sub-cards |
 | `≡` (top-right corner) | The card has attachments. Open the card detail to see them. With `icon_style = "nerd"`, a paperclip icon alone |
-| `planning: pi`, `planning: claude` | The card's planner runs. The card keeps its current column |
-| `agent review: pi` | An agent review runs |
-
-When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README.md) plugin is installed, `planning:` and `agent review:` show the agent's logo before its name. A card that `start` started shows the logo of its agent after the state icon, while the worktree exists. The board looks for the font with `fc-match` when it starts.
-| `PR: writing` | An agent writes the pull request description |
+| `✎ ◐ pi` | The card's planner runs: the planning icon, the planner's Herdr state and its agent. The card keeps its current column. It goes away when the planner pane closes |
+| `☑` | The card has a plan (`plan.md` attachment) and no planner runs. It stays until the plan is removed, and does not show in the done column |
+| `⌕ ◐ claude` | An agent review runs: the reviewing icon, the reviewer's Herdr state and its agent |
+| `✔` | The agent review findings are ready, and the branch has no commits since that review |
+| `↑` | The branch has new commits since the agent review. A new agent review replaces it |
+| `PR: writing` | An agent writes the pull request description. The writer's Herdr state follows, such as `PR: writing ◐` |
 | `PR open`, `PR merged`, `PR closed` | The state of the card's pull request. The board reads it at most once a minute |
 | `worktree removed` | The card's worktree folder is gone |
 | `worktree still exists` | The card is in Done, but its worktree is still there. Run `finish` |
@@ -181,6 +182,24 @@ When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README
 The board checks planner panes every two seconds. If Herdr cannot answer, the marker keeps the recorded planner type. A missing or unreadable planning state file hides only the planning markers, not the cards.
 
 The board checks the attachments folder at the same interval. A folder that cannot be read hides only the `≡` markers.
+
+### Agent states
+
+The board shows the state of each agent on a card with the glyphs and colors of the Herdr sidebar (Herdr's `symbols` status indicators). The work agent's state replaces the state icon. The planner, the agent reviewer and the pull request writer each show their state in their status marker.
+
+| Glyph | Agent state |
+|---|---|
+| yellow `◐` | working |
+| red `×` | blocked: it waits for you, such as for a permission |
+| cyan `✓` | done: it finished, and you did not focus its pane yet. Herdr shows teal; the terminal palette has no teal |
+| green `○` | idle |
+| dim `·` | Herdr does not know the state |
+
+The board reads all agent states with one `herdr agent list` call at each check, every two seconds. A board with no agent panes does not call Herdr. When Herdr cannot answer, the board shows no agent glyphs: started cards show `●` and the other markers keep their words. The glyphs are the same for both `icon_style` values.
+
+With `icon_style = "nerd"`, the phase icons are Nerd Font glyphs: a pencil (planning), a checked box (planned), a magnifier (reviewing), a check in a circle (reviewed) and an up arrow (new commits). The card detail gives each state in words, such as `Agent  ◐ claude: working`. The help screen (`?`) lists every glyph.
+
+To find "reviewed", herdboard saves the branch HEAD when an agent review starts, and keeps it when the findings are ready. A failed review saves nothing.
 
 ## Work on a card
 
@@ -678,7 +697,7 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 
 | Path | Content |
 |---|---|
-| `starts.json` | The worktree, branch, base, agent pane and pull request of each started card |
+| `starts.json` | The worktree, branch, base, agent pane and pull request of each started card, and the HEAD commit of its last agent review |
 | `checkouts.json` | The known main checkouts of each repository |
 | `plans.json`, `plans/<id>.log` | The running planner of each card, and the plan worker's output |
 | `reviews/<id>-<time>-<random>/` | Agent review requests and findings |

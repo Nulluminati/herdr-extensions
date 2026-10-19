@@ -177,7 +177,7 @@ class PlanningStatusTests(BoardTestCase):
     def test_no_record_means_no_marker_or_herdr_call(self):
         plan.mark_planning([self.card])
         self.assertIsNone(self.card.planning)
-        self.assertNotIn("planning:", card_text(self.card, False).plain)
+        self.assertNotIn("✎", card_text(self.card, False).plain)
         self.pane_exists.assert_not_called()
 
     def test_stale_and_malformed_records_do_not_show_a_marker(self):
@@ -233,7 +233,7 @@ class PlanningStatusTests(BoardTestCase):
         self.card.source = "linear"
         start._write(start.state_dir() / "plans.json", {"ENG-12": {"kind": "claude", "pane_id": "w1:p7"}})
         plan.mark_planning([self.card])
-        self.assertIn("planning: claude", card_text(self.card, False).plain)
+        self.assertIn("✎ claude", card_text(self.card, False).plain)
         self.assertIn("ENG-12", card_text(self.card, False).plain)
 
     def test_planning_is_board_only_and_leaves_the_cli_schema_unchanged(self):

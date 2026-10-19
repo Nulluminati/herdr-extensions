@@ -300,6 +300,26 @@ class FilterTests(BoardTestCase):
             self.assertEqual(self.visible(app), ["Another doc #docs", "Write release notes #docs"])
 
 
+    async def test_an_agent_status_change_alone_redraws_the_card(self):
+        self.store.add(self.repo_path, "Watch the agent", "Todo")
+        status = {"value": None}
+
+        def mark(cards):
+            for card in cards:
+                card.agent_status = status["value"]
+
+        self.enterContext(mock.patch("herdboard.board.agent_states.mark", side_effect=mark))
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            first = [w for w in app.query(".card") if "Watch the agent" in w.plain][0]
+            self.assertTrue(first.rich_text.plain.startswith("○"), first.rich_text.plain)
+            status["value"] = "blocked"
+            await app.check_files()
+            await pilot.pause()
+            first = [w for w in app.query(".card") if "Watch the agent" in w.plain][0]
+            self.assertTrue(first.rich_text.plain.startswith("×"), first.rich_text.plain)
+
 class NavigationTests(BoardTestCase):
     def setUp(self):
         super().setUp()

@@ -448,7 +448,7 @@ def validate_branch(branch):
 
 def mark_removed(cards):
     """Set the board-only start status of cards: a removed or existing worktree and its agent, a worktree left after Done,
-    the PR state, a running agent review, and a pull request description that an agent writes."""
+    the PR state, a running agent review, a pull request description that an agent writes, and the last agent review."""
     records = _read(state_dir() / "starts.json")
     for card in cards:
         record = records.get(card.ref)
@@ -464,6 +464,18 @@ def mark_removed(cards):
         review = record.get("agent_review")
         card.agent_review = review.get("kind") if isinstance(review, dict) else None
         card.pr_writing = isinstance(record.get("pr_write"), dict)
+        card.reviewed = _reviewed(record) if card.worktree else None
+
+
+def _reviewed(record) -> str | None:
+    """The last agent review: `reviewed` while the worktree HEAD is its commit, `new commits` after it."""
+    saved = record.get("agent_reviewed")
+    if not isinstance(saved, dict) or not saved.get("head"):
+        return None
+    head = _git(Path(record["worktree_path"]), "rev-parse", "HEAD")
+    if not head:
+        return None
+    return "reviewed" if head == saved["head"] else "new commits"
 
 
 class Starter:

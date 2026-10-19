@@ -245,13 +245,23 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         result = self.request(reviewer="pi", model="zai/glm-5.3", then_hunk=True)
         stored = self.records()[self.card.ref]["agent_review"]
+        head = self.git(self.worktree, "rev-parse", "HEAD")
         self.assertEqual(stored, {"folder": result["folder"], "pane_id": result["pane_id"], "kind": "pi",
-                                  "model": "zai/glm-5.3", "then_hunk": True})
+                                  "model": "zai/glm-5.3", "then_hunk": True, "head": head})
         self.assertEqual(self.log(), ["Agent review started: pi (zai/glm-5.3)."])
         self.assertEqual(len(self.workers), 1)
         arguments, log = self.workers[0]
         self.assertEqual(arguments[-4:], ["review-wait", self.card.ref, "--folder", result["folder"]])
         self.assertEqual(log, Path(result["folder"]) / "worker.log")
+
+    def test_a_new_review_removes_the_saved_review(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        records = self.records()
+        records[self.card.ref]["agent_reviewed"] = {"head": "abc", "findings": "old.md"}
+        (start.state_dir() / "starts.json").write_text(json.dumps(records))
+        self.request()
+        self.assertNotIn("agent_reviewed", self.records()[self.card.ref])
 
     def test_a_running_agent_review_blocks_a_second_one(self):
         self.started()
@@ -314,6 +324,20 @@ class WaitTests(AgentReviewTestCase):
         self.assertEqual(notification[2], f"Agent review of {self.card.ref} done")
         self.assertNotIn("agent_review", self.records()[self.card.ref])
         self.assertEqual(self.calls("plugin", "action", "invoke"), [])
+
+    def test_ready_findings_save_the_reviewed_head(self):
+        result = self.request()
+        self.assertEqual(self.wait(), 0)
+        self.assertEqual(self.records()[self.card.ref]["agent_reviewed"],
+                         {"head": self.git(self.worktree, "rev-parse", "HEAD"),
+                          "findings": str(Path(result["folder"]) / "findings.md")})
+
+    def test_a_failed_review_saves_no_reviewed_head(self):
+        self.fake.findings = None
+        self.fake.reviewer_states = ["working", None]
+        self.request()
+        self.assertEqual(self.wait(), 1)
+        self.assertNotIn("agent_reviewed", self.records()[self.card.ref])
 
     def test_a_failed_review_followed_by_a_file_only_retry_delivers_the_second_findings(self):
         self.fake.findings = None
