@@ -306,7 +306,8 @@ class DoctorTests(unittest.TestCase):
 
     def test_human_output_grouped_with_summary(self):
         self.board(body="- [ ] One\n", done=False)
-        text = self.run_doctor(text=True)
+        with patch("herdboard.doctor.check_hunk", return_value=[]):
+            text = self.run_doctor(text=True)
         self.assertLess(text.index("Warning"), text.index("Info"))
         self.assertIn("0 errors, 1 warnings, 2 info", text)
 
