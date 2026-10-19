@@ -309,6 +309,39 @@ def check_starts(path):
     return findings
 
 
+def check_work_folders(config, starts_path):
+    """Card folders of repoless cards, and the ones no start record names."""
+    base = config.todos_dir / ".herdboard" / "work"
+    try:
+        folders = [path for path in base.iterdir() if path.is_dir()]
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        return [finding("error", "state_invalid", f"{base}: cannot read the card folders: {error}")]
+    try:
+        records = _read(starts_path)
+    except HerdboardError:
+        records = {}
+    recorded = set()
+    for key, record in records.items():
+        if not isinstance(record, dict):
+            continue
+        recorded.add(key)
+        if isinstance(record.get("ref"), str):
+            recorded.add(record["ref"])
+        path = record.get("worktree_path")
+        if isinstance(path, str) and path:
+            recorded.add(Path(path).name)
+    findings = []
+    for folder in sorted(folders):
+        if folder.name in recorded:
+            continue
+        findings.append(finding("warning", "work_folder_unused",
+                                f"Card folder {folder} has no start record.", folder,
+                                fix=f"Delete the folder: rm -r {folder}"))
+    return findings
+
+
 def check_checkouts(path):
     findings = []
     try:
@@ -428,6 +461,8 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
         findings.extend(check_linear(config, boards, offline))
     state = linear_source.state_dir()
     findings.extend(check_starts(state / "starts.json"))
+    if config is not None:
+        findings.extend(check_work_folders(config, state / "starts.json"))
     findings.extend(check_checkouts(state / "checkouts.json"))
     store_path = str(config.todos_dir.resolve()) if config is not None else None
     for promotion_path in sorted(state.glob("*/*/promotions.json")):

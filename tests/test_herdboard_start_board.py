@@ -10,10 +10,12 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
-from herdboard.board import ClaudeModelScreen, ModelScreen, HerdboardApp, ReviewKindScreen
+from herdboard.board import AgentScreen, ClaudeModelScreen, ModelScreen, HerdboardApp, ReviewKindScreen, TargetScreen
 from herdboard.config import Config
+from herdboard.identity import RepoIdentity
 from herdboard.store import Store
 from herdboard.start import StartError
+from textual.widgets import Input
 
 class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -398,3 +400,134 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await app.workers.wait_for_complete()
                 await pilot.pause()
                 self.assertTrue(any("No checkout" in str(call) for call in notify.call_args_list))
+
+
+class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
+    """A card without a repository asks where it runs: a repository, a new one, or none."""
+
+    async def asyncSetUp(self):
+        asyncio.get_running_loop().set_debug(False)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.store = Store(Config(todos_dir=root / "todos", projects_dir=root / "Projects"))
+        self.path = self.store.ensure_inbox()
+        self.card = self.store.add(self.path, "Research corvid memory")
+        self.other = self.store.init_board(RepoIdentity("github.com/acme/web", "github.com", ("acme", "web")))
+        self.started = {"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1",
+                        "worktree_path": "/tmp/work", "branch": None, "base": None,
+                        "agent_name": None, "steps_done": [], "mode": "repoless"}
+        self.callback = Mock(side_effect=[StartError("Choose a repository.", "repo_required"), self.started])
+
+    def app(self, **kwargs):
+        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60,
+                           start_card=self.callback, **kwargs)
+        app.animation_level = "none"
+        return app
+
+    async def test_s_on_an_inbox_card_asks_where_it_runs(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertIsInstance(app.screen, TargetScreen)
+            self.assertEqual([path for _, path in app.screen.options], [self.other])
+            self.assertIn("New repository", app.screen.labels)
+            self.assertIn("No repository: a plain folder, output as attachments", app.screen.labels)
+            await pilot.press("escape")
+            await pilot.pause()
+        self.assertEqual(self.callback.call_count, 1)
+
+    async def test_a_repository_board_choice_starts_there(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.assertEqual(self.callback.call_args_list[1].kwargs, {"repo": self.other})
+
+    async def test_no_repository_choice_starts_repoless(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # The repository board, then the new repository, then no repository.
+            await pilot.press("down", "down", "enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.assertEqual(self.callback.call_args_list[1].kwargs, {"no_repo": True})
+
+    async def test_new_repository_choice_asks_for_the_path(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            field = app.screen.query_one("#target-path", Input)
+            self.assertEqual(field.value,
+                             str(Path(self.temp.name) / "Projects" / "research-corvid-memory"))
+            field.value = str(Path(self.temp.name) / "scratch" / "corvid")
+            await pilot.press("enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.assertEqual(self.callback.call_args_list[1].kwargs,
+                         {"new_repo": Path(self.temp.name) / "scratch" / "corvid"})
+
+    async def test_the_new_repository_choice_is_hidden_for_a_linear_card(self):
+        screen = TargetScreen("ENG-5", [("inbox", self.other)], None, linear=True)
+        self.assertNotIn("New repository", screen.labels)
+        self.assertEqual(screen.labels[-1], "No repository: a plain folder, output as attachments")
+        self.assertEqual([kind for kind, _ in screen.choices], ["repo", "repoless"])
+
+    async def test_a_plan_without_a_repository_asks_where_it_runs(self):
+        planned = {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
+                   "checkout": None, "plan": "/plan.md", "workspace_id": "x1",
+                   "worktree_path": "/todos/.herdboard/work/t000", "branch": None,
+                   "base": None, "mode": "repoless"}
+        plan = Mock(side_effect=[StartError("Choose a repository.", "repo_required"), planned])
+        app = self.app(plan_card=plan)
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        async with app.run_test() as pilot:
+            await pilot.press("P")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertIsInstance(app.screen, TargetScreen)
+            await pilot.press("down", "down", "enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.assertEqual(plan.call_args_list[1].kwargs,
+                         {"agent": "claude", "model": None, "thinking": None, "no_repo": True})
+        self.assertIn((f"claude plans {self.card.ref} in its work folder", None), notices)
+
+    async def test_r_on_a_repoless_card_goes_to_the_agent_choice(self):
+        from herdboard import start
+        folder = start.work_folder(self.store.config, self.card.ref)
+        folder.mkdir(parents=True)
+        start._write(start.state_dir() / "starts.json", {self.card.ref: {
+            "ref": self.card.ref, "mode": "repoless", "workspace_id": "x1", "pane_id": "x1:p1",
+            "worktree_path": str(folder)}})
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("R")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, AgentScreen)
+            self.assertEqual(str(app.screen.title_text), "Choose the reviewer")

@@ -47,8 +47,14 @@ def brief_text(
     log: list[dict] = (),
     plan: str | None = None,
     attachments: list[dict] = (),
+    repoless: bool = False,
+    attachments_dir: str | None = None,
 ) -> str:
-    """A Markdown brief: the task, where to work, and how to keep the card current."""
+    """A Markdown brief: the task, where to work, and how to keep the card current.
+
+    Without a repository (`repoless`), the card folder is the whole workspace and its output
+    goes in the card's attachments: herdboard deletes the folder at finish.
+    """
     linear = card.source == "linear"
     ref = card.ref
     lines = [f"# {_title(card)}", ""]
@@ -73,17 +79,30 @@ def brief_text(
     if facts:
         lines += [f"- {fact}" for fact in facts] + [""]
 
-    lines += [
-        "## Where to work",
-        "",
-        f"- Repository: `{repository}`",
-        f"- Worktree: `{worktree}`",
-        f"- Branch: `{branch}`",
-        f"- Base: `{base}`. herdboard merges the branch into it after the review.",
-        "",
-        "Work only in this worktree. Follow the repository's own agent instructions (AGENTS.md or CLAUDE.md).",
-        "",
-    ]
+    if repoless:
+        lines += [
+            "## Where to work",
+            "",
+            f"- Folder: `{worktree}`",
+            f"- Attachments: `{attachments_dir or worktree}`",
+            "",
+            "This card has no repository: this folder is the whole workspace. There is no branch and no "
+            "checkout. herdboard deletes the folder when the card is finished, so copy everything worth "
+            "keeping into the attachments folder.",
+            "",
+        ]
+    else:
+        lines += [
+            "## Where to work",
+            "",
+            f"- Repository: `{repository}`",
+            f"- Worktree: `{worktree}`",
+            f"- Branch: `{branch}`",
+            f"- Base: `{base}`. herdboard merges the branch into it after the review.",
+            "",
+            "Work only in this worktree. Follow the repository's own agent instructions (AGENTS.md or CLAUDE.md).",
+            "",
+        ]
 
     body = list(card.body) if linear else [_unindent(line) for line in card.body]
     while body and not body[-1].strip():
@@ -132,6 +151,20 @@ def brief_text(
     lines.append("- Do not change the card title or details. They are the user's text.")
     if linear:
         lines.append("- Ask the user before you change the Linear issue: its state, title, description or comments.")
+    if repoless:
+        lines += [
+            "## Finish the work",
+            "",
+            f"- Write the result to the attachments folder: `{attachments_dir or worktree}`. "
+            "Name each file clearly, for example `findings.md`.",
+            f"- Record what you did with `{command} --json log {ref} \"...\"`.",
+            f"- When the work is ready for the user to check, run `{command} --json move {ref} Review`",
+            f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
+            "Fix, and move the card back to Review.",
+            "- Do not move the card to Done. The user does that after the review.",
+            "",
+        ]
+        return "\n".join(lines)
     lines += [
         "",
         "## Finish the work",

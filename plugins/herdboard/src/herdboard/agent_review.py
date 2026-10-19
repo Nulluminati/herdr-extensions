@@ -19,7 +19,7 @@ from . import activity, attachments, start as start_module
 from .config import THINKING_LEVELS
 from .model import HerdboardError
 from .review import Reviewer, ReviewError
-from .start import _lock, _read, _write, find_record, herdr, safe_key, state_dir
+from .start import REPOLESS, _lock, _read, _write, find_record, herdr, safe_key, state_dir
 
 REVIEWERS = {"claude": "pi", "pi": "claude"}
 # A review of a large change can take long; the worker gives up after this.
@@ -102,6 +102,42 @@ If you cannot run tests or inspect live screens, state those limits in the findi
 """
 
 
+def repoless_request_text(card, record, folder: Path, files: list[dict]) -> str:
+    plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
+    others = [entry for entry in files if entry is not plan]
+    plan_line = (f"Check the attachments against the plan that the user agreed on: `{plan['path']}`\n"
+                 if plan else "The card has no plan. Check that the attachments answer the card.\n")
+    body = "\n".join(card.body).strip() if card is not None else ""
+    listing = "".join(f"- `{entry['path']}` ({entry['size']} B)\n" for entry in others)
+    return f"""# Review request
+
+Card {record['ref']}: {card.title if card is not None else record['ref']}
+
+{body or "(no description)"}
+
+- Working folder: `{record['worktree_path']}`
+- This card has no repository: there is no branch and no diff.
+- Attachments to review:
+{listing}{plan_line}Look for correctness, gaps, unsupported claims and missing steps.
+Read the files in the working folder when you need context.
+Do not change any file.
+
+Write your findings to `{folder / 'findings.md'}` in this format:
+
+    ## Confirmed problems
+    - [high|medium|low] path:line: problem. Suggested fix.
+
+    ## Risks and questions
+    - path:line: concern.
+
+If you find nothing, write "No findings."
+Finish writing the complete findings file before you end your turn.
+Herdboard automatically delivers the findings path to the card's requesting agent after your turn ends.
+No command execution or notification from you is required. Do not wait for another prompt.
+If you cannot inspect something, state that limit in the findings.
+"""
+
+
 class AgentReviewer(Reviewer):
     def __init__(self, store, directory, writer=None, config_file: Path | None = None):
         super().__init__(store, directory, writer=writer, config_file=config_file)
@@ -125,17 +161,26 @@ class AgentReviewer(Reviewer):
                 raise ReviewError(f"An agent review of {ref} still runs in pane {running['pane_id']}",
                                   "review_running")
             worktree = Path(record["worktree_path"])
-            # A record from before bases were recorded compares with the branch upstream, as merge does.
-            base = record.get("base") or "@{upstream}"
-            branch_diff = _git(worktree, "diff", f"{base}...HEAD")
-            uncommitted = _git(worktree, "diff", "HEAD")
-            untracked = _git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
-            head = _git(worktree, "rev-parse", "HEAD").strip()
-            if not (branch_diff or uncommitted or untracked):
-                raise ReviewError(f"{ref} has no commits since {base} and no uncommitted changes",
-                                  "nothing_to_review")
             # Read before the review folder exists, so a failure leaves no folder behind.
             files = attachments.listing(self.config, ref)
+            if record.get("mode") == REPOLESS:
+                reviewed = [entry for entry in files if entry["name"] != attachments.PLAN_NAME]
+                if not reviewed:
+                    raise ReviewError(f"{ref} has no attachments to review; ask its agent to write its "
+                                      "result to the attachments first", "nothing_to_review")
+                branch_diff = uncommitted = ""
+                untracked = []
+                head = None
+            else:
+                # A record from before bases were recorded compares with the branch upstream, as merge does.
+                base = record.get("base") or "@{upstream}"
+                branch_diff = _git(worktree, "diff", f"{base}...HEAD")
+                uncommitted = _git(worktree, "diff", "HEAD")
+                untracked = _git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
+                if not (branch_diff or uncommitted or untracked):
+                    raise ReviewError(f"{ref} has no commits since {base} and no uncommitted changes",
+                                      "nothing_to_review")
+                head = _git(worktree, "rev-parse", "HEAD").strip()
             # The review runs in the background: the user stays where they are.
             self._ready_agent(card, ref, key, record, persist, focus=False)
             reviews = state_dir() / "reviews"
@@ -143,10 +188,13 @@ class AgentReviewer(Reviewer):
                 reviews.mkdir(parents=True, exist_ok=True)
                 folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-",
                                                dir=reviews))
-                (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
-                (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
-                (folder / "request.md").write_text(request_text(card, record, base, folder, untracked, files),
-                                                   encoding="utf-8")
+                if record.get("mode") == REPOLESS:
+                    request = repoless_request_text(card, record, folder, files)
+                else:
+                    (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
+                    (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
+                    request = request_text(card, record, base, folder, untracked, files)
+                (folder / "request.md").write_text(request, encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
             pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),

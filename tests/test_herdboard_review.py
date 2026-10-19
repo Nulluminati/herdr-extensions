@@ -222,3 +222,20 @@ class ReviewCliTests(CliTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoRepositoryReviewTests(ReviewTestCase):
+    """A repoless card has no branch for Hunk; only an agent review of its attachments applies."""
+
+    def setUp(self):
+        super().setUp()
+        self.card = self.store.add(self.store.ensure_inbox(), "Research corvid memory")
+        self.starter.start(self.card.ref, no_repo=True, agent="pi", no_agent=True)
+
+    def test_human_review_refuses_a_repoless_card(self):
+        with self.assertRaises(review.ReviewError) as raised:
+            self.reviewer.review(self.card.ref)
+        self.assertEqual(raised.exception.code, "no_repository")
+        self.assertIn("--agent", str(raised.exception))
+        self.assertIn("finish", str(raised.exception))
+        self.assertFalse(self.calls("plugin", "action", "invoke"))

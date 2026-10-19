@@ -13,6 +13,7 @@ from herdboard.config import Config, config_path
 from herdboard.identity import repo_identity
 from herdboard.store import Store
 from herdboard import start
+from test_herdboard_cli import CliTestCase
 
 
 class FakeHerdr:
@@ -23,6 +24,8 @@ class FakeHerdr:
         self.fail = None
         self.agent = False
         self.branches = {}
+        self.closed = set()
+        self.created = 0
 
     def __call__(self, argv, timeout=120):
         args = argv[1:]
@@ -55,7 +58,16 @@ class FakeHerdr:
             self.worktrees = [w for w in self.worktrees if w["path"] != str(path)]
             self.worktrees.append({"branch": branch, "path": str(path), "open_workspace_id": workspace})
         elif operation == "workspace get":
-            result = {"workspace": {"workspace_id": "w9"}, "root_pane": {"pane_id": "w9:p1"}}
+            if args[2] in self.closed:
+                return subprocess.CompletedProcess(argv, 1, "", '{"error":{"code":"workspace_not_found"}}')
+            result = {"workspace": {"workspace_id": args[2]}, "root_pane": {"pane_id": args[2] + ":p1"}}
+        elif operation == "workspace create":
+            self.created += 1
+            workspace = f"x{self.created}"
+            result = {"workspace": {"workspace_id": workspace}, "root_pane": {"pane_id": workspace + ":p1"}}
+        elif operation == "workspace close":
+            self.closed.add(args[2])
+            result = {"type": "ok"}
         elif operation == "agent get":
             if not self.agent:
                 return subprocess.CompletedProcess(argv, 1, "", '{"error":{"code":"agent_not_found"}}')
@@ -834,5 +846,268 @@ class StartTests(unittest.TestCase):
             self.assertEqual(self.starter._repository(card, self.board.stem), repo_identity(self.repo).identity)
 
 
+class NoRepositoryStartTests(unittest.TestCase):
+    """A card without a repository runs in its own folder, and its output goes in the attachments."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.config = Config(todos_dir=self.root / "todos", projects_dir=self.root / "Projects")
+        self.store = Store(self.config)
+        self.card = self.store.add(self.store.ensure_inbox(), "Research corvid memory #feature")
+        self.fake = FakeHerdr(self.root)
+        self.runner = patch.object(start, "command", self.fake)
+        self.runner.start()
+        self.addCleanup(self.runner.stop)
+        self.starter = start.Starter(self.store, self.root)
+
+    def folder(self):
+        return start.work_folder(self.config, self.card.ref)
+
+    def brief(self, ref=None):
+        return (start.state_dir() / "briefs" / f"{ref or self.card.ref}.md").read_text(encoding="utf-8")
+
+    def record(self, key=None):
+        return json.loads((start.state_dir() / "starts.json").read_text())[key or self.card.ref]
+
+    def test_no_repo_creates_the_card_folder_and_opens_it(self):
+        result = self.starter.start(self.card.ref, no_repo=True)
+        self.assertEqual(self.folder().is_dir(), True)
+        self.assertEqual(result["worktree_path"], str(self.folder()))
+        self.assertIsNone(result["branch"])
+        self.assertIsNone(result["base"])
+        create = next(c for c in self.fake.calls if c[:2] == ["workspace", "create"])
+        self.assertEqual(create[create.index("--cwd") + 1], str(self.folder()))
+        self.assertEqual(create[create.index("--label") + 1], self.card.ref)
+        self.assertIn("--focus", create)
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+        self.assertEqual(self.record()["mode"], "repoless")
+        self.assertEqual(self.record()["steps_done"], [])
+        agent = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
+        self.assertIn(str(self.card.ref), " ".join(agent))
+
+    def test_a_repoless_start_uses_the_repoless_brief(self):
+        self.starter.start(self.card.ref, no_repo=True)
+        text = self.brief()
+        self.assertIn(f"Folder: `{self.folder()}`", text)
+        self.assertIn("Attachments:", text)
+        self.assertIn("deletes the folder", text)
+        self.assertIn("findings.md", text)
+        self.assertNotIn("Commit every change", text)
+        self.assertNotIn("Repository:", text)
+
+    def test_a_second_start_reuses_the_open_workspace(self):
+        self.starter.start(self.card.ref, no_repo=True)
+        again = self.starter.start(self.card.ref, no_repo=True)
+        self.assertEqual(again["workspace_id"], "x1")
+        self.assertEqual(sum(c[:2] == ["workspace", "create"] for c in self.fake.calls), 1)
+        self.assertEqual(sum(c[:2] == ["agent", "start"] for c in self.fake.calls), 1)
+
+    def test_a_stored_repoless_mode_needs_no_flag(self):
+        self.starter.start(self.card.ref, no_repo=True)
+        self.starter.start(self.card.ref)
+        self.assertEqual(self.record()["mode"], "repoless")
+        self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
+
+    def test_a_repository_is_still_required_without_flags(self):
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(self.card.ref)
+        self.assertEqual(raised.exception.code, "repo_required")
+        self.assertIn("--no-repo", str(raised.exception))
+        self.assertIn("--new-repo", str(raised.exception))
+
+    def test_a_prompt_chooses_the_target(self):
+        prompt = unittest.mock.Mock(return_value=("repoless", None))
+        starter = start.Starter(self.store, self.root, prompt_target=prompt)
+        result = starter.start(self.card.ref)
+        prompt.assert_called_once()
+        self.assertEqual(result["mode"], "repoless")
+
+    def test_conflicting_flags_are_usage(self):
+        for options in ({"new_repo": self.root / "new", "no_repo": True},
+                        {"new_repo": self.root / "new", "repo": "board"}):
+            with self.subTest(options=options), self.assertRaises(start.StartError) as raised:
+                self.starter.start(self.card.ref, **options)
+            self.assertEqual(raised.exception.code, "usage")
+
+    def test_new_repo_is_usage_on_a_repository_board(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, capture_output=True)
+        board = self.store.init_board(repo_identity(repo))
+        card = self.store.add(board, "On a repository board")
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(card.ref, new_repo=self.root / "new")
+        self.assertEqual(raised.exception.code, "usage")
+
+    def test_new_repo_is_usage_for_a_linear_issue(self):
+        with self.assertRaises(start.StartError) as raised:
+            self.starter._new_repo_path(self.card, self.root / "new", {"id": "issue-1"})
+        self.assertEqual(raised.exception.code, "usage")
+
+    def test_go_to_workspace_focuses_the_card_folder_workspace(self):
+        self.starter.start(self.card.ref, no_repo=True, no_agent=True)
+        self.fake.calls.clear()
+        self.assertEqual(start.go_to_workspace(self.card.ref), {"ref": self.card.ref, "workspace_id": "x1"})
+        self.assertIn(["workspace", "focus", "x1"], self.fake.calls)
+
+    def test_mark_removed_reads_the_card_folder(self):
+        self.starter.start(self.card.ref, no_repo=True, no_agent=True)
+        card = self.store.show(self.card.ref)
+        start.mark_removed([card])
+        self.assertTrue(card.worktree)
+        self.assertFalse(card.worktree_removed)
+        self.folder().rmdir()
+        start.mark_removed([card])
+        self.assertTrue(card.worktree_removed)
+
+    def test_archive_blocker_names_the_work_folder(self):
+        self.starter.start(self.card.ref, no_repo=True, no_agent=True)
+        reason = start.archive_blocker(self.card.ref)
+        self.assertIn("work folder", reason)
+        self.assertIn(str(self.folder()), reason)
+
+
+class NewRepositoryStartTests(unittest.TestCase):
+    """`--new-repo` creates a local repository and its board, then starts like any card."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.config = Config(todos_dir=self.root / "todos", projects_dir=self.root / "Projects")
+        self.store = Store(self.config)
+        self.inbox = self.store.ensure_inbox()
+        self.card = self.store.add(self.inbox, "Build corvid tracker #feature")
+        self.fake = FakeHerdr(self.root)
+        self.runner = patch.object(start, "command", self.fake)
+        self.runner.start()
+        self.addCleanup(self.runner.stop)
+        self.starter = start.Starter(self.store, self.root)
+
+    def git(self, directory, *args):
+        return subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def test_a_new_repository_is_created_and_the_card_moves_to_its_board(self):
+        path = self.root / "corvid-tracker"
+        result = self.starter.start(self.card.ref, new_repo=path)
+        self.assertTrue(path.is_dir())
+        self.assertEqual(self.git(path, "symbolic-ref", "--short", "HEAD"), "main")
+        self.assertEqual(len(self.git(path, "rev-list", "--count", "HEAD").split()), 1)
+        board = self.store.board_for_repo(repo_identity(path))
+        self.assertIsNotNone(board)
+        moved = self.store.show(self.card.ref)
+        self.assertEqual(moved.path.resolve(), board.resolve())
+        self.assertEqual(moved.column, "In progress")
+        self.assertEqual(result["base"], "main")
+        self.assertTrue(result["branch"].startswith(self.card.ref))
+        self.assertEqual(result["mode"], "repo")
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual(record["mode"], "repo")
+        self.assertNotIn("new_repo_path", record)
+
+    def test_the_default_path_comes_from_the_card_title(self):
+        result = self.starter.start(self.card.ref, new_repo=True)
+        self.assertTrue((self.root / "Projects" / "build-corvid-tracker").is_dir())
+        self.assertEqual(result["mode"], "repo")
+
+    def test_a_non_empty_folder_is_refused(self):
+        path = self.root / "taken"
+        path.mkdir()
+        (path / "file.txt").write_text("x")
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(self.card.ref, new_repo=path)
+        self.assertEqual(raised.exception.code, "path_exists")
+        self.assertFalse((path / ".git").exists())
+
+    def test_an_empty_folder_is_used(self):
+        path = self.root / "empty"
+        path.mkdir()
+        self.starter.start(self.card.ref, new_repo=path, no_agent=True)
+        self.assertEqual(self.git(path, "symbolic-ref", "--short", "HEAD"), "main")
+
+    def test_a_card_with_sub_cards_is_refused(self):
+        self.store.add(self.inbox, "Child task", parent=self.card.ref)
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(self.card.ref, new_repo=self.root / "new")
+        self.assertEqual(raised.exception.code, "new_repo_family")
+        self.assertFalse((self.root / "new").exists())
+
+    def test_a_sub_card_is_refused(self):
+        parent = self.store.add(self.inbox, "Parent task")
+        child = self.store.add(self.inbox, "Child task", parent=parent.ref)
+        with self.assertRaises(start.StartError) as raised:
+            self.starter.start(child.ref, new_repo=self.root / "new")
+        self.assertEqual(raised.exception.code, "new_repo_family")
+
+    def test_a_failure_after_the_repository_resumes_on_the_next_start(self):
+        path = self.root / "resume"
+        self.fake.fail = "agent start"
+        with self.assertRaises(start.StartError):
+            self.starter.start(self.card.ref, new_repo=path)
+        self.assertTrue((path / ".git").is_dir())
+        self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
+        self.starter.start(self.card.ref)
+        self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+
+    def test_planning_first_records_the_path(self):
+        path = self.root / "planned"
+        prepared = self.starter.prepare(self.card, None, self.card.ref, new_repo=path, move_parent=False,
+                                       check_column=False)
+        self.assertEqual(prepared["mode"], "new_repo")
+        self.assertEqual(prepared["new_repo_path"], str(path))
+        self.assertTrue(start.work_folder(self.config, self.card.ref).is_dir())
+        self.assertFalse(path.exists())
+        self.starter.start(self.card.ref)
+        self.assertTrue((path / ".git").is_dir())
+        self.assertFalse(start.work_folder(self.config, self.card.ref).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartCliTests(CliTestCase):
+    """`start` and `plan` pass the new flags, and print a repoless start without a branch."""
+
+    STARTED = {"ref": "t123", "workspace_id": "x1", "pane_id": "x1:p1",
+               "worktree_path": "/todos/.herdboard/work/t123", "branch": None, "base": None,
+               "agent_name": None, "steps_done": [], "mode": "repoless"}
+
+    def test_start_no_repo_reaches_the_starter_and_prints_the_folder(self):
+        with patch("herdboard.cli.Starter") as starter:
+            starter.return_value.start.return_value = self.STARTED
+            out, _ = self.run_cli("start", "t123", "--no-repo", directory=self.plain)
+        self.assertTrue(starter.return_value.start.call_args.kwargs["no_repo"])
+        self.assertEqual(out, "t123: no repository, in /todos/.herdboard/work/t123\n"
+                              "Workspace: x1; pane: x1:p1; agent: none\n"
+                              "Steps done: \n")
+
+    def test_start_new_repo_passes_the_path(self):
+        with patch("herdboard.cli.Starter") as starter:
+            starter.return_value.start.return_value = {**self.STARTED, "mode": "repo", "branch": "t123-x"}
+            self.run_json("start", "t123", "--new-repo", "/tmp/x", directory=self.plain)
+            self.assertEqual(starter.return_value.start.call_args.kwargs["new_repo"], "/tmp/x")
+            self.run_json("start", "t123", "--new-repo", directory=self.plain)
+            self.assertIs(starter.return_value.start.call_args.kwargs["new_repo"], True)
+
+    def test_plan_passes_the_new_flags(self):
+        planned = {"ref": "t123", "agent": "claude", "model": None, "pane_id": "x1:p2",
+                   "checkout": None, "plan": "/p/plan.md", "workspace_id": "x1",
+                   "worktree_path": "/todos/.herdboard/work/t123", "branch": None, "base": None,
+                   "mode": "repoless"}
+        with patch("herdboard.cli.Planner") as planner:
+            planner.return_value.plan.return_value = planned
+            self.run_json("plan", "t123", "--no-repo", directory=self.plain)
+            self.assertTrue(planner.return_value.plan.call_args.kwargs["no_repo"])
+            self.run_json("plan", "t123", "--new-repo", "/tmp/x", directory=self.plain)
+            self.assertEqual(planner.return_value.plan.call_args.kwargs["new_repo"], "/tmp/x")

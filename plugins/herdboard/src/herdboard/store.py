@@ -77,6 +77,8 @@ class CardView:
     worktree_removed: bool = False
     # Board-only: True while the card's worktree exists, so the card menu offers the started-card actions.
     worktree: bool = False
+    # Board-only: True when the card runs without a repository, in its own folder.
+    repoless: bool = False
     # Board-only start status: a worktree still there after Done, and the pull request state.
     worktree_left: bool = False
     pr_state: str | None = None

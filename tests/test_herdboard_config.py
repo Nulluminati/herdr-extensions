@@ -30,6 +30,7 @@ class ConfigTest(unittest.TestCase):
     def test_defaults_without_file(self):
         config = load_config()
         self.assertEqual(config.todos_dir, self.dir / "home" / "todos")
+        self.assertEqual(config.projects_dir, self.dir / "home" / "Projects")
         self.assertEqual(config.columns, ["Backlog", "Todo", "In progress", "Review", "Done"])
         self.assertEqual(config.complete_markers, ["Complete"])
         self.assertIsNone(config.vault_root)
@@ -253,6 +254,22 @@ class ConfigTest(unittest.TestCase):
         with mock.patch("os.getcwd", return_value=str(self.dir / "work")):
             config = load_config(path)
         self.assertEqual(config.todos_dir, self.dir / "work" / "t")
+
+    def test_projects_dir_from_file(self):
+        path = self.write(self.dir / "a.toml", 'projects_dir = "~/src"\n')
+        config = load_config(path)
+        self.assertEqual(config.projects_dir, self.dir / "home" / "src")
+
+    def test_a_relative_projects_dir_becomes_absolute(self):
+        path = self.write(self.dir / "a.toml", 'projects_dir = "p"\n')
+        with mock.patch("os.getcwd", return_value=str(self.dir / "work")):
+            config = load_config(path)
+        self.assertEqual(config.projects_dir, self.dir / "work" / "p")
+
+    def test_projects_dir_must_be_a_path(self):
+        path = self.write(self.dir / "a.toml", "projects_dir = 3\n")
+        with self.assertRaises(HerdboardError):
+            load_config(path)
 
     def test_all_values(self):
         path = self.write(self.dir / "a.toml", 'complete_markers = ["Complete", "Shipped"]\n')

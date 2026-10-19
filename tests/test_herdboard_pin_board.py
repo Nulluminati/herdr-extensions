@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard.board import BoardChoiceScreen, ConfigScreen, IssueSearchScreen  # noqa: E402
+from herdboard.board import BoardChoiceScreen, ConfigScreen, IssueSearchScreen, TargetScreen  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear import LinearError  # noqa: E402
 from herdboard.linear_pins import IssuePin  # noqa: E402
@@ -192,11 +192,11 @@ class StartRepositoryTests(PinBoardCase):
             self.select(app, "ENG-5")
             await pilot.press("s")
             await settle(pilot)
-            self.assertIsInstance(app.screen, BoardChoiceScreen)
+            self.assertIsInstance(app.screen, TargetScreen)
             self.assertEqual([path for _, path in app.screen.options], sorted([self.repo_path, other]))
             await pilot.press("enter")
             await settle(pilot)
-            self.assertNotIsInstance(app.screen, BoardChoiceScreen)
+            self.assertNotIsInstance(app.screen, TargetScreen)
         self.assertEqual([c.args for c in app.start_card.call_args_list], [("ENG-5", None), ("ENG-5", None)])
         self.assertEqual(app.start_card.call_args_list[1].kwargs, {"repo": self.repo_path})
 
@@ -218,7 +218,7 @@ class StartRepositoryTests(PinBoardCase):
             self.select(app, "ENG-5")
             await pilot.press("s")
             await settle(pilot)
-            self.assertNotIsInstance(app.screen, BoardChoiceScreen)
+            self.assertNotIsInstance(app.screen, TargetScreen)
             self.assertIn(("No checkout", "error"), self.notifications(app))
 
     async def test_a_repository_still_required_after_the_choice_only_notifies(self):
@@ -230,7 +230,7 @@ class StartRepositoryTests(PinBoardCase):
             await settle(pilot)
             await pilot.press("enter")
             await settle(pilot)
-            self.assertNotIsInstance(app.screen, BoardChoiceScreen)
+            self.assertNotIsInstance(app.screen, TargetScreen)
             self.assertIn(("Choose a repository.", "error"), self.notifications(app))
         self.assertEqual(app.start_card.call_count, 2)
 

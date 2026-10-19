@@ -217,6 +217,22 @@ class DoctorTests(unittest.TestCase):
         self.state_file("starts.json", {"t123": {"worktree_path": str(self.root / "gone")}})
         self.assertEqual(self.findings("worktree_missing")[0]["level"], "info")
 
+    def test_a_card_folder_without_a_start_record_is_a_warning(self):
+        folder = self.todos / ".herdboard" / "work" / "t123"
+        folder.mkdir(parents=True)
+        self.state_file("starts.json", {})
+        found = self.findings("work_folder_unused")[0]
+        self.assertEqual(found["level"], "warning")
+        self.assertEqual(found["path"], str(folder))
+        self.assertIn(str(folder), found["fix"])
+
+    def test_a_repoless_card_folder_belongs_to_its_start_record(self):
+        folder = self.todos / ".herdboard" / "work" / "t123"
+        folder.mkdir(parents=True)
+        self.state_file("starts.json", {"t123": {"mode": "repoless", "worktree_path": str(folder)}})
+        self.assertEqual(self.findings("work_folder_unused"), [])
+        self.assertFalse(self.findings("worktree_missing"))
+
     def test_missing_checkout(self):
         self.state_file("checkouts.json", {"github.com/acme/api": [{"path": str(self.root / "gone"), "last_seen": 1}]})
         self.assertEqual(self.findings("checkout_stale")[0]["level"], "info")

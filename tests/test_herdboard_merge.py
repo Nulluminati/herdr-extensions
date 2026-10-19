@@ -605,3 +605,46 @@ class PrSyncCliTests(CliTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoRepositoryFinishTests(MergeTestCase):
+    """A repoless card finishes by deleting its card folder; it has no branch to merge."""
+
+    def setUp(self):
+        super().setUp()
+        self.card = self.store.add(self.store.ensure_inbox(), "Research corvid memory")
+        result = self.starter.start(self.card.ref, no_repo=True, agent="pi", no_agent=True)
+        self.folder = Path(result["worktree_path"])
+
+    def test_merge_refuses_a_repoless_card(self):
+        with self.assertRaises(merge.MergeError) as raised:
+            self.merger.merge(self.card.ref)
+        self.assertEqual(raised.exception.code, "no_repository")
+        self.assertIn("--agent", str(raised.exception))
+        self.assertIn("finish", str(raised.exception))
+        self.assertTrue(self.folder.is_dir())
+
+    def test_finish_closes_the_workspace_and_deletes_a_non_empty_folder(self):
+        (self.folder / "scratch.txt").write_text("work in progress\n")
+        result = self.merger.finish(self.card.ref)
+        self.assertEqual(result, {"ref": self.card.ref, "worktree_removed": True, "branch_deleted": False,
+                                  "mode": "repoless"})
+        self.assertFalse(self.folder.exists())
+        self.assertIn(["workspace", "close", "x1"], self.fake.calls)
+        card = self.store.show(self.card.ref)
+        self.assertTrue(card.checked)
+        self.assertEqual(card.column, "Done")
+        self.assertEqual(self.records(), {})
+        self.assertIn("Finished.", self.log())
+
+    def test_finish_works_when_the_folder_is_gone(self):
+        shutil.rmtree(self.folder)
+        result = self.merger.finish(self.card.ref)
+        self.assertTrue(result["worktree_removed"])
+        self.assertEqual(self.records(), {})
+
+    def test_finish_tolerates_a_closed_workspace(self):
+        self.fake.closed.add("x1")
+        result = self.merger.finish(self.card.ref)
+        self.assertTrue(result["worktree_removed"])
+        self.assertFalse(self.folder.exists())

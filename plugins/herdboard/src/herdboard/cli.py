@@ -170,6 +170,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--model", help="the agent's model, such as openai-codex/gpt-6.1-sol or opus")
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
+    sub.add_argument("--no-repo", action="store_true",
+                     help="run the card in its own folder, without a repository; write the result as attachments")
+    sub.add_argument("--new-repo", nargs="?", const=True, default=None, metavar="PATH",
+                     help="create a local repository at PATH (default: projects_dir/<title>) and start the card there")
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
@@ -179,6 +183,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
+    sub.add_argument("--no-repo", action="store_true",
+                     help="plan the card in its own folder, without a repository")
+    sub.add_argument("--new-repo", nargs="?", const=True, default=None, metavar="PATH",
+                     help="plan the card in its own folder; `start` later creates the repository at PATH")
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
@@ -287,7 +295,7 @@ def _card_dict(card: CardView) -> dict:
     del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"], data["agent_review"]
     del data["pr_writing"], data["planning"], data["has_attachments"], data["issue_id"], data["worktree"], data["agent"]
     del data["planned"], data["reviewed"], data["agent_status"], data["planning_status"], data["review_status"]
-    del data["pr_write_status"]
+    del data["pr_write_status"], data["repoless"]
     data["path"] = str(card.path) if card.path is not None else None
     return data
 
@@ -790,27 +798,72 @@ def _prompt_checkout(identity: str) -> str | None:
     return sys.stdin.readline().strip() or None
 
 
+def _prompt_target(store):
+    """Ask in a terminal where a card without a repository runs. Returns a `Starter.prompt_target`."""
+    from .start import repo_slug
+
+    def ask(card):
+        try:
+            boards = sorted((path for path in store.board_paths() if store.board_meta(path).repo),
+                            key=store.board_name)
+        except HerdboardError:
+            boards = []
+        print(f"Where does {card.ref} run?", file=sys.stderr)
+        for number, path in enumerate(boards, 1):
+            print(f"  {number}. {store.board_name(path)} ({store.board_meta(path).repo})", file=sys.stderr)
+        number = len(boards) + 1
+        new_number = None
+        if card.source != "linear":
+            new_number = number
+            print(f"  {new_number}. A new repository", file=sys.stderr)
+            number += 1
+        plain_number = number
+        print(f"  {plain_number}. No repository: a plain folder, output as attachments", file=sys.stderr)
+        print("Number: ", end="", file=sys.stderr, flush=True)
+        answer = sys.stdin.readline().strip()
+        if answer.isdigit():
+            choice = int(answer)
+            if 1 <= choice <= len(boards):
+                return "repo", boards[choice - 1]
+            if new_number is not None and choice == new_number:
+                default = Path(store.config.projects_dir) / repo_slug(card)
+                print(f"Path [{default}]: ", end="", file=sys.stderr, flush=True)
+                typed = sys.stdin.readline().strip()
+                return "new_repo", Path(typed).expanduser() if typed else default
+            if choice == plain_number:
+                return "repoless", None
+            return None
+        # Another answer names a board or a checkout path.
+        return ("repo", answer) if answer else None
+
+    return ask
+
+
 def _cmd_start(ctx: _Context) -> dict:
     args = ctx.args
+    interactive = not args.json and _interactive()
     starter = Starter(
         ctx.store, ctx.directory,
         writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
         ask_state=ctx.ask(),
-        prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
+        prompt_checkout=_prompt_checkout if interactive else None,
+        prompt_target=_prompt_target(ctx.store) if interactive else None,
         config_file=config_path(args.config),
     )
     return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
                          repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking,
-                         base=args.base)
+                         base=args.base, no_repo=args.no_repo, new_repo=args.new_repo)
 
 
 def _cmd_plan(ctx: _Context) -> dict:
     args = ctx.args
+    interactive = not args.json and _interactive()
     planner = Planner(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
-                      prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
+                      prompt_checkout=_prompt_checkout if interactive else None,
+                      prompt_target=_prompt_target(ctx.store) if interactive else None,
                       config_file=config_path(args.config))
     return planner.plan(args.ref, agent=args.agent, model=args.model, thinking=args.thinking, repo=args.repo,
-                        checkout=args.checkout, base=args.base)
+                        checkout=args.checkout, base=args.base, no_repo=args.no_repo, new_repo=args.new_repo)
 
 
 def _cmd_plan_wait(ctx: _Context) -> dict:
@@ -866,6 +919,8 @@ def _cmd_finish(ctx: _Context) -> dict:
 
 
 def _finish_line(result: dict) -> str:
+    if result.get("mode") == "repoless":
+        return f"{result['ref']}: finished; card folder removed"
     worktree = "worktree removed" if result["worktree_removed"] else "no worktree to remove"
     branch = "branch deleted" if result["branch_deleted"] else "branch kept"
     return f"{result['ref']}: finished; {worktree}; {branch}"
@@ -1284,6 +1339,11 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     if command == "start":
         if as_json:
             _emit_json(result)
+        elif result.get("mode") == "repoless":
+            print(f"{result['ref']}: no repository, in {result['worktree_path']}")
+            print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
+                  f"agent: {result['agent_name'] or 'none'}")
+            print("Steps done: " + ", ".join(result["steps_done"]))
         else:
             print(f"{result['ref']}: {result['branch']} in {result['worktree_path']}")
             if result.get("base"):

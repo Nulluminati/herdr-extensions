@@ -13,8 +13,8 @@ import time
 from . import activity
 from .linear_cards import LINEAR_REF
 from .model import HerdboardError
-from .start import (Starter, StartError, _lock, _read, _write, agent_live, fetch_linear_card, find_record,
-                    herdr, safe_key, state_dir)
+from .start import (REPOLESS, Starter, StartError, _lock, _read, _write, agent_live, fetch_linear_card,
+                    find_record, herdr, safe_key, state_dir)
 
 HUNK_PLUGIN = "jhochenbaum.hunkdiff"
 REVIEW_NOTE = "The card is in review. Review feedback follows. Wait for it."
@@ -107,7 +107,15 @@ class Reviewer:
         With focus False the workspace opens in the background.
         Returns True when a new agent started. The caller holds the card's start lock."""
         starter = Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file)
-        record.update(starter._workspace(Path(record["checkout"]), record["branch"], record, focus=focus))
+        if record.get("mode") == REPOLESS:
+            folder = Path(record["worktree_path"])
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise ReviewError(f"{folder}: cannot create the card folder: {error}", "io") from error
+            record.update(starter._repoless_workspace(ref, folder, record, focus=focus))
+        else:
+            record.update(starter._workspace(Path(record["checkout"]), record["branch"], record, focus=focus))
         persist()
         if agent_live(record):
             return False
@@ -121,6 +129,10 @@ class Reviewer:
 
     def review(self, ref):
         card, ref, key, record = self._started(ref)
+        if record.get("mode") == REPOLESS:
+            raise ReviewError(f"{ref} has no repository, so Hunk has no branch to show. "
+                              f"Review its attachments with `herdboard review {ref} --agent`, "
+                              f"then run `herdboard finish {ref}`.", "no_repository")
         persist = self._persister(key, record)
         with _lock(".start-" + safe_key(key) + ".lock"):
             restarted = self._ready_agent(card, ref, key, record, persist)

@@ -1356,6 +1356,56 @@ class ClaudeModelScreen(ModalBase):
         self.dismiss((self.MODELS[event.option_index],))
 
 
+class TargetScreen(ModalBase):
+    """Choose where a card without a repository runs.
+
+    The choices are the repository boards, a new repository at a path, or no repository.
+    It returns `(mode, value)`, where mode is `"repo"`, `"new_repo"` or `"repoless"`.
+    """
+
+    def __init__(self, ref: str, options: list[tuple[str, Path]], default_path: Path | None = None,
+                 linear: bool = False, title: str | None = None):
+        super().__init__()
+        self.ref = ref
+        self.options = options
+        self.default_path = default_path
+        self.linear = linear
+        self.title_text = title or f"Where does {ref} run?"
+        self.choices: list[tuple[str, object]] = [("repo", path) for _label, path in options]
+        self.labels = [label for label, _ in options]
+        if not linear:
+            self.choices.append(("new_repo", None))
+            self.labels.append("New repository")
+        self.choices.append(("repoless", None))
+        self.labels.append("No repository: a plain folder, output as attachments")
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(self.title_text)
+            yield OptionList(*self.labels, id="target-choice")
+            if not self.linear and self.default_path is not None:
+                yield Label("New repository path")
+                yield Input(value=str(self.default_path), placeholder="path of the new repository",
+                            id="target-path")
+            yield Label("enter: choose a repository"
+                        + (" · type a path and press enter for a new repository" if not self.linear else "")
+                        + " · escape: cancel", classes="dim")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        kind, value = self.choices[event.option_index]
+        if kind == "new_repo":
+            self.query_one("#target-path", Input).focus()
+            return
+        self.dismiss((kind, value))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        typed = event.value.strip()
+        path = Path(typed).expanduser() if typed else self.default_path
+        self.dismiss(("new_repo", path))
+
+
 class BoardChoiceScreen(ModalBase):
     """Choose the board that a todo moves to, or another board for `prompt`."""
 
@@ -3349,8 +3399,9 @@ class HerdboardApp(App):
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
         self.starting = False
-        # The last start's arguments: (ref, agent, model, thinking, repository board).
-        self.start_request: tuple = ("", None, None, None, None)
+        # The last start or plan arguments, for the question that asks where a card without a
+        # repository runs. A dict, so a target chosen later adds one option.
+        self.target_request: dict = {}
         self.linear_results: dict[str, LinearResult] = {}
         self.linear_state = "loading" if self.linear_active else "off"
         # One Linear fetch runs at a time. A refresh asked meanwhile waits as one queued fetch.
@@ -3844,7 +3895,7 @@ class HerdboardApp(App):
             elif event.state == WorkerState.ERROR:
                 error = worker.error
             if error:
-                if not self._ask_start_repository(error):
+                if not self._ask_target(error):
                     self.notify(str(error), severity="error")
             elif result:
                 self.notify(result.get("notice") or
@@ -4244,12 +4295,15 @@ class HerdboardApp(App):
         await self.reload()
 
     def _start_card(self, ref: str, agent: str | None, model: str | None = None,
-                    thinking: str | None = None, repo: Path | None = None) -> None:
+                    thinking: str | None = None, repo: Path | None = None, no_repo: bool = False,
+                    new_repo: Path | None = None) -> None:
         """Start a card in a thread. `repo` is a board that names the card's repository."""
         if self.starting or self.writing:
             self.notify("Busy: a card change is in progress", severity="warning")
             return
-        self.start_request = (ref, agent, model, thinking, repo)
+        self.target_request = {"kind": "start", "ref": ref, "agent": agent, "model": model,
+                               "thinking": thinking, "repo": repo, "no_repo": no_repo,
+                               "new_repo": new_repo}
 
         def guarded():
             try:
@@ -4257,40 +4311,64 @@ class HerdboardApp(App):
                     options = {"model": model, "thinking": thinking} if model or thinking else {}
                     if repo is not None:
                         options["repo"] = repo
+                    if no_repo:
+                        options["no_repo"] = True
+                    if new_repo is not None:
+                        options["new_repo"] = new_repo
                     return self.start_card(ref, agent, **options), None
                 starter = Starter(self.store, self.directory, writer=self.linear_writer,
                                   ask_state=self.ask_state, repository_view=self.view == "repo",
                                   config_file=self.config_file)
                 board = repo or (self.repo_board if self.view == "repo" else None)
-                return starter.start(ref, agent=agent, repo=board, model=model, thinking=thinking), None
+                return starter.start(ref, agent=agent, repo=board, model=model, thinking=thinking,
+                                     no_repo=no_repo, new_repo=new_repo), None
             except HerdboardError as error:
                 return None, error
 
         self.starting = True
         self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
 
-    def _ask_start_repository(self, error: HerdboardError) -> bool:
-        """After a Linear start failed for want of a repository, ask for a repository board.
+    def _ask_target(self, error: HerdboardError) -> bool:
+        """After a start or a plan failed for want of a repository, ask where the card runs.
 
-        The start then runs again with the chosen board. False when there is nothing to ask:
-        another error, a todo, a start that had a board already, or no repository board.
+        The action then runs again with the chosen repository, a new repository, or no repository.
+        False when there is nothing to ask: another error, or a choice was made already.
         """
-        ref, agent, model, thinking, repo = self.start_request
-        if getattr(error, "code", None) != "repo_required" or repo is not None or not LINEAR_REF.match(ref):
+        request = self.target_request
+        if getattr(error, "code", None) != "repo_required" or not request:
             return False
+        if request["repo"] is not None or request["no_repo"] or request["new_repo"] is not None:
+            return False
+        ref = request["ref"]
+        linear = bool(LINEAR_REF.match(ref))
         try:
+            card = None if linear else self.store.show(ref)
             boards = [path for path in self.store.board_paths() if self.store.board_meta(path).repo]
         except HerdboardError:
             return False
-        if not boards:
-            return False
         options = [(self.store.board_name(path), path) for path in sorted(boards, key=self.store.board_name)]
+        default = None
+        if card is not None:
+            default = Path(self.store.config.projects_dir) / start_module.repo_slug(card)
 
-        def chosen(path: Path | None) -> None:
-            if path is not None:
-                self._start_card(ref, agent, model, thinking, repo=path)
+        def chosen(answer) -> None:
+            if answer is None:
+                return
+            mode, value = answer
+            arguments = {"agent": request["agent"], "model": request["model"],
+                         "thinking": request["thinking"]}
+            if mode == "repo":
+                arguments["repo"] = value
+            elif mode == "new_repo":
+                arguments["new_repo"] = value
+            else:
+                arguments["no_repo"] = True
+            if request["kind"] == "plan":
+                self._plan(ref, **arguments)
+            else:
+                self._start_card(ref, **arguments)
 
-        self.push_screen(BoardChoiceScreen(None, options, prompt=f"Start {ref} in the repository of"), chosen)
+        self.push_screen(TargetScreen(ref, options, default, linear=linear), chosen)
         return True
 
     def _card_action(self, run: Callable[[], dict], notice: Callable[[dict], str]) -> None:
@@ -4314,6 +4392,11 @@ class HerdboardApp(App):
         if card is None:
             return
         ref = card.ref
+        if card.repoless:
+            # A repoless card has no branch for Hunk, so only an agent review applies.
+            self.push_screen(AgentScreen("Choose the reviewer"),
+                             lambda reviewer: self._chosen_reviewer(ref, reviewer, False))
+            return
 
         def chosen(kind: str | None) -> None:
             if kind == "human":
@@ -4371,17 +4454,27 @@ class HerdboardApp(App):
 
         self.push_screen(AgentScreen("Choose the planner"), chosen_agent)
 
-    def _plan(self, ref: str, agent: str, model: str | None, thinking: str | None) -> None:
+    def _plan(self, ref: str, agent: str, model: str | None, thinking: str | None, repo: Path | None = None,
+              no_repo: bool = False, new_repo: Path | None = None) -> None:
         options = {"agent": agent, "model": model, "thinking": thinking}
+        self.target_request = {"kind": "plan", "ref": ref, "agent": agent, "model": model,
+                               "thinking": thinking, "repo": repo, "no_repo": no_repo,
+                               "new_repo": new_repo}
+        if self.plan_card:
+            for name, value in (("repo", repo), ("no_repo", no_repo), ("new_repo", new_repo)):
+                if value:
+                    options[name] = value
 
         def run() -> dict:
             if self.plan_card:
                 return self.plan_card(ref, **options)
-            return self._planner().plan(ref, repo=self.repo_board if self.view == "repo" else None, **options)
+            board = repo or (self.repo_board if self.view == "repo" else None)
+            return self._planner().plan(ref, repo=board, no_repo=no_repo, new_repo=new_repo, **options)
 
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
-            return f"{result['agent']}{model_text} plans {result['ref']} in a tab in its worktree"
+            where = "its work folder" if result.get("mode") == "repoless" else "a tab in its worktree"
+            return f"{result['agent']}{model_text} plans {result['ref']} in {where}"
 
         self._card_action(run, notice)
 
@@ -4413,6 +4506,11 @@ class HerdboardApp(App):
                 writer = result["writer"][0].upper() + result["writer"][1:]
                 return f"{writer} writes the pull request description of {result['ref']}"
             return f"Merged {result['ref']} into {result['base']} at {result['commit'][:7]}, then finished it"
+
+        if card.repoless:
+            # There is no branch to merge: the merge refuses, and the board shows why.
+            self._card_action(run_merge, notice)
+            return
 
         def rewrite(answer: bool) -> None:
             self._card_action(lambda: run_merge(rewrite=bool(answer)), notice)
@@ -4446,13 +4544,15 @@ class HerdboardApp(App):
         run = (lambda: self.finish_card(ref)) if self.finish_card else (lambda: self._merger().finish(ref))
 
         def notice(result: dict) -> str:
+            if result.get("mode") == "repoless":
+                return f"Finished {result['ref']}; card folder removed"
             return f"Finished {result['ref']}; branch {'deleted' if result['branch_deleted'] else 'kept'}"
 
-        self.push_screen(
-            ConfirmScreen(f"Finish {ref}: {card.title}?",
-                          "The worktree and the merged branch are removed, and the card moves to Done."),
-            lambda answer: self._card_action(run, notice) if answer else None,
-        )
+        detail = ("The card folder is deleted, with everything in it, and the card moves to Done."
+                  if card.repoless else
+                  "The worktree and the merged branch are removed, and the card moves to Done.")
+        self.push_screen(ConfirmScreen(f"Finish {ref}: {card.title}?", detail),
+                         lambda answer: self._card_action(run, notice) if answer else None)
 
     def action_go(self) -> None:
         card = self.current_card()

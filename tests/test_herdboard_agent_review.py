@@ -490,3 +490,60 @@ class AgentReviewCliTests(CliTestCase):
         self.assertIsNotNone(calls[0][5])
         self.assertIn("t123: agent review by claude (opus) in pane w9:p2", out)
         self.assertIn("Hunk opens when the findings are ready", out)
+
+
+class NoRepositoryAgentReviewTests(AgentReviewTestCase):
+    """An agent review of a repoless card reads its attachments instead of a diff."""
+
+    def setUp(self):
+        super().setUp()
+        self.card = self.store.add(self.store.ensure_inbox(), "Research corvid memory")
+        self.result = self.starter.start(self.card.ref, no_repo=True, agent="pi", no_agent=True)
+        self.card_folder = start.work_folder(self.config, self.card.ref)
+        self.final = ""
+
+    def attach(self, name: str, text: str) -> None:
+        source = self.root / name
+        source.write_text(text, encoding="utf-8")
+        attachments.add(self.store, self.card.ref, source)
+
+    def request(self, **options):
+        result = self.reviewer.request(self.card.ref, **options)
+        self.fake.review_folder = self.folder = Path(result["folder"])
+        return result
+
+    def test_a_repoless_card_without_attachments_has_nothing_to_review(self):
+        with self.assertRaises(review.ReviewError) as raised:
+            self.reviewer.request(self.card.ref)
+        self.assertEqual(raised.exception.code, "nothing_to_review")
+        self.assertFalse(self.calls("pane", "split"))
+
+    def test_a_plan_alone_is_not_a_reviewed_result(self):
+        self.attach("plan.md", "# Plan\n\nDo the research.\n")
+        with self.assertRaises(review.ReviewError) as raised:
+            self.reviewer.request(self.card.ref)
+        self.assertEqual(raised.exception.code, "nothing_to_review")
+
+    def test_the_review_lists_the_attachments_and_runs_in_the_card_folder(self):
+        self.attach("plan.md", "# Plan\n\nDo the research.\n")
+        self.attach("findings.md", "# Findings\n\nCorvids cache food.\n")
+        result = self.request()
+        self.assertEqual(result["reviewer"], "pi")
+        split = self.calls("pane", "split")[0]
+        self.assertEqual(split[split.index("--cwd") + 1], str(self.card_folder))
+        request = (self.folder / "request.md").read_text(encoding="utf-8")
+        attachment = attachments.folder(self.config, self.card.ref) / "findings.md"
+        self.assertIn(f"- `{attachment}`", request)
+        self.assertIn(f"Working folder: `{self.card_folder}`", request)
+        self.assertIn("no repository", request)
+        self.assertIn("plan.md", request)
+        self.assertFalse((self.folder / "branch.patch").exists())
+        self.assertFalse((self.folder / "uncommitted.patch").exists())
+
+    def test_the_findings_reach_the_card_agent(self):
+        self.attach("findings.md", "# Findings\n\nCorvids cache food.\n")
+        self.request()
+        code = self.wait()
+        self.assertEqual(code, 0, self.errors.getvalue())
+        prompt = next(c for c in self.calls("agent", "prompt") if c[2] == self.result["pane_id"])
+        self.assertIn("findings.md", prompt[-1])

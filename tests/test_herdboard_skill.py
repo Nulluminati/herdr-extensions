@@ -119,6 +119,7 @@ class SkillTests(unittest.TestCase):
         known |= {"parent_missing", "parent_nested", "children_open", "parent_not_promoted"}
         known |= {"review_running", "nothing_to_review", "worker_failed", "pr_writing", "plan_running"}
         known |= {"no_pr", "no_description"}
+        known |= {"no_repository", "new_repo_family", "path_exists", "new_repo_failed"}
         known |= {ArchivedError.code, CardActiveError.code, cli.LinearArchiveError.code, "has_sub_cards"}
         known.add(UnknownTypeError.code)
         known |= {"remote_unknown", "branch_exists", "agent_running", "workspace_closed", "worktree_missing",

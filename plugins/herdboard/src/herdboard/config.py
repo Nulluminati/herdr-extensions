@@ -59,6 +59,8 @@ class LinearConfig:
 @dataclass
 class Config:
     todos_dir: Path = field(default_factory=lambda: Path("~/todos").expanduser())
+    # Where `start --new-repo` creates a new repository, under a slug of the card title.
+    projects_dir: Path = field(default_factory=lambda: Path("~/Projects").expanduser())
     columns: list[str] = field(default_factory=lambda: list(DEFAULT_COLUMNS))
     complete_markers: list[str] = field(default_factory=lambda: ["Complete"])
     vault_root: Path | None = None
@@ -239,6 +241,12 @@ def load_config(path: Path | None = None) -> Config:
             config.todos_dir = Path(todos_dir).expanduser().absolute()
         except RuntimeError as error:
             raise HerdboardError(f"{path}: invalid todos_dir: {error}") from error
+    projects_dir = _string(path, data, "projects_dir")
+    if projects_dir is not None:
+        try:
+            config.projects_dir = Path(projects_dir).expanduser().absolute()
+        except RuntimeError as error:
+            raise HerdboardError(f"{path}: invalid projects_dir: {error}") from error
     columns = _string_list(path, data, "columns")
     if columns is not None:
         if not columns:

@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import time
 
@@ -19,8 +20,8 @@ from . import activity, pr_write
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
 from .model import HerdboardError
-from .start import (Starter, StartError, _lock, _read, _write, agent_live, card_changed, close_review_pane,
-                    fetch_linear_card, find_record, herdr, safe_key, state_dir)
+from .start import (REPOLESS, Starter, StartError, _lock, _read, _write, agent_live, card_changed,
+                    close_review_pane, fetch_linear_card, find_record, herdr, safe_key, state_dir)
 
 
 # The board reads the state of an open pull request at most this often.
@@ -140,9 +141,14 @@ class Merger:
             card = self.store.show(ref)
             ref = card.ref
         found = find_record(ref)
-        if found is None or not found[1].get("branch") or not found[1].get("checkout"):
+        if found is None:
             raise MergeError(f"{ref} has no started work; run `herdboard start {ref}` first", "not_started")
         key, record = found
+        if record.get("mode") == REPOLESS:
+            # A repoless card has no branch and no base: only `finish` applies.
+            return card, ref, key, record
+        if not record.get("branch") or not record.get("checkout"):
+            raise MergeError(f"{ref} has no started work; run `herdboard start {ref}` first", "not_started")
         if not record.get("base"):
             # A record from before `start` recorded the base: the branch upstream is the base,
             # when it is a local branch.
@@ -203,6 +209,10 @@ class Merger:
 
     def merge(self, ref, mode=None, force=False, rewrite=False):
         card, ref, key, record = self._started(ref)
+        if record.get("mode") == REPOLESS:
+            raise MergeError(f"{ref} has no repository, so there is no branch to merge. "
+                             f"Review its attachments with `herdboard review {ref} --agent`, "
+                             f"then run `herdboard finish {ref}`.", "no_repository")
         if card is not None and not force:
             open_children = [child.ref for child in self.store.children(ref) if not child.checked]
             if open_children:
@@ -278,6 +288,8 @@ class Merger:
         return {"ref": ref, **result}
 
     def _finish(self, card, ref, key, record, force):
+        if record.get("mode") == REPOLESS:
+            return self._finish_repoless(card, ref, key, record)
         branch, base, checkout = record["branch"], record["base"], Path(record["checkout"])
         exists = _commit(checkout, f"refs/heads/{branch}") is not None
         pr_url = record.get("pr_url")
@@ -315,6 +327,28 @@ class Merger:
             records.pop(key, None)
             _write(state_dir() / "starts.json", records)
         return {"worktree_removed": present, "branch_deleted": deleted}
+
+    def _finish_repoless(self, card, ref, key, record):
+        """Close the card's workspace, delete its card folder, and move the card to Done."""
+        folder = Path(record["worktree_path"]) if record.get("worktree_path") else None
+        close_review_pane(ref)
+        if record.get("workspace_id"):
+            herdr("workspace", "close", record["workspace_id"], tolerated=("workspace_not_found",))
+        if folder is not None and (folder.exists() or folder.is_symlink()):
+            try:
+                if folder.is_symlink():
+                    folder.unlink()
+                else:
+                    shutil.rmtree(folder)
+            except OSError as error:
+                raise MergeError(f"{folder}: cannot remove the card folder: {error}", "worktree_dirty") from error
+        self._done(card, ref)
+        activity.append(self.store, ref, "Finished.", "herdboard")
+        with _lock(wait=2):
+            records = _read(state_dir() / "starts.json")
+            records.pop(key, None)
+            _write(state_dir() / "starts.json", records)
+        return {"worktree_removed": True, "branch_deleted": False, "mode": REPOLESS}
 
     def _remove_worktree(self, record, worktree):
         try:

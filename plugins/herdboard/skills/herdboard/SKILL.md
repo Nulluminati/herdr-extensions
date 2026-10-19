@@ -94,6 +94,9 @@ Ask the user first before these. They change shared Linear data, open workspaces
 ```bash
 herdboard --json start tep3 --agent pi        # worktree, workspace, card to In progress, pi with the card
 herdboard --json start tep3 --no-agent        # the same, but no agent starts
+herdboard --json start tep3 --no-repo         # no repository: the card runs in its own folder
+herdboard --json start tep3 --new-repo ~/Projects/corvid   # create a local repository first, then start
+herdboard --json plan tep3 --no-repo          # plan in the card folder, without a repository
 herdboard --json pin ENG-123                  # show the issue on this repository's board
 herdboard --json pin ENG-123 --remove         # remove the pin
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
@@ -119,6 +122,14 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 
 `start` without `--agent` starts the default agent (Claude, unless the user's config says otherwise). `--no-agent` still creates the worktree and moves the card. Without `--base`, the card starts from the branch of the main checkout.
 
+A card on the inbox can run without a repository. `start` and `plan` then fail with `repo_required` unless the user picks one:
+
+- A repository board: `--repo BOARD`. The card moves to that board if it is not there.
+- A new repository: `--new-repo [PATH]`. herdboard runs `git init -b main` and a first commit at PATH, creates the board, moves the card, then starts as usual. Without PATH it uses `projects_dir/<title>`; the default is `~/Projects`. The path must not exist, or must be an empty folder. Only todos can do this, and not a card with a parent or sub-cards (`new_repo_family`).
+- No repository: `--no-repo`. herdboard creates `<todos>/.herdboard/work/<id>/` and opens a workspace there. There is no Git, no branch and no worktree.
+
+A repoless card writes its result to the card's attachments (for example `findings.md`). Review it with `review <id> --agent`; Hunk and `merge` refuse with `no_repository`. `finish` closes the workspace, deletes the card folder with everything in it, and moves the card to Done. The start record keeps the choice, so a later `start` or `plan` asks nothing.
+
 `doctor` without `--fix-ids` only reads, and you can run it to explain a problem.
 
 A pull request reviewer only adds notes to the Hunk session. The user submits the review from Hunk. Never submit, approve or comment on GitHub for them.
@@ -136,6 +147,8 @@ A pull request reviewer only adds notes to the Hunk session. The user submits th
 7. When an agent review arrives, read the findings file. For each finding, say if you agree or disagree, and why. Record the answer with `herdboard --json log <id> "..."`. Do not change code. Wait for the user to decide what to fix.
 8. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
 9. Do not run `done`. The user moves the card to Done.
+
+A repoless card has no repository and no branch. Work in its card folder, write the result to the card's attachments, and do not commit. herdboard deletes the folder at `finish`, so everything worth keeping goes in the attachments.
 
 You may run `pr-sync <id>` for your own card. It pushes your branch and sends `pr.md` to the open pull request. When the user asks to change the PR title or description, edit the `pr.md` you wrote when you know its path. Otherwise, run `pr-sync <id> --fetch`, which names a new `pr.md`. Edit that file, then run `pr-sync <id>`.
 
@@ -204,6 +217,10 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `parent_nested` | Sub-cards go one level deep: the parent is a sub-card, or the card has sub-cards. Tell the user. |
 | `parent_not_promoted` | `promote` takes the parent card; its sub-cards become sub-issues. Ask the user before you promote the parent. |
 | `children_open` | `merge` of a parent card found sub-cards that are not done. Tell the user; `merge --force` merges anyway. |
-| `repo_required` | Ask the user which repository, then use `--repo`. |
+| `repo_required` | The card has no repository. Ask the user: a repository board (`--repo`), a new local repository (`--new-repo [PATH]`), or no repository (`--no-repo`). |
+| `no_repository` | The card runs without a repository, so there is no branch. Review with `review <id> --agent`, then run `finish <id>`. Tell the user. |
+| `new_repo_family` | The card has a parent or sub-cards, and their cards must stay on one board. Tell the user; run it with `--no-repo` instead. |
+| `path_exists` | The new repository path exists and is not an empty folder. Ask the user for another path. |
+| `new_repo_failed` | herdboard could not create the repository or its first commit. Tell the user the message; a missing git `user.name` or `user.email` is the usual cause. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |
 | `herdr_unavailable`, `herdr_error` | `start` needs a running Herdr, or a Herdr command failed. Tell the user the message. Running `start` again continues from the step that failed. |

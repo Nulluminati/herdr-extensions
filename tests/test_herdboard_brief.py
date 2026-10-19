@@ -122,6 +122,27 @@ class BriefTests(unittest.TestCase):
                           command="'/opt/py 3/bin/python' -m herdboard")
         self.assertIn("'/opt/py 3/bin/python' -m herdboard --json show t83k", text)
 
+    def test_a_repoless_brief_names_the_card_folder_and_the_attachments(self):
+        text = brief_text(todo(), notes=[], repository="", worktree="/todos/.herdboard/work/t83k",
+                          branch="", base="", command="herdboard", repoless=True,
+                          attachments_dir="/todos/.herdboard/attachments/t83k")
+        for part in [
+            "## Where to work",
+            "- Folder: `/todos/.herdboard/work/t83k`",
+            "- Attachments: `/todos/.herdboard/attachments/t83k`",
+            "This card has no repository",
+            "deletes the folder when the card is finished",
+            "## Details",
+            "herdboard --json log t83k",
+            "findings.md",
+            "herdboard --json move t83k Review",
+            "Do not move the card to Done",
+        ]:
+            self.assertIn(part, text)
+        for part in ["- Repository:", "- Branch:", "Commit every change", "Use conventional commit messages",
+                     "Do not push, merge", "Follow the repository's own agent instructions"]:
+            self.assertNotIn(part, text)
+
     def test_linear_brief_has_the_issue_and_its_description(self):
         text = self.brief(issue())
         for part in [

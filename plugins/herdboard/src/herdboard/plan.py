@@ -78,16 +78,26 @@ def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model
 
 def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, work_agent: bool,
                notes: list[dict], plan: str | None, files: list[dict], log: list[dict], plan_file: Path,
-               command: str) -> str:
+               command: str, repoless: bool = False, new_repo_path: Path | None = None) -> str:
     linear = card.source == "linear"
     lines = [f"# Plan: {_title(card)}", "",
              f"Plan {'Linear issue' if linear else 'herdboard card'} `{card.ref}` (board `{card.board}`, "
              f"column `{card.column}`) with the user. You do not do the work. A later agent does the work "
-             "from your plan, and it does not see this conversation.", "",
-             f"- Worktree: `{worktree}` on branch `{branch}` (base `{base}`). You may change code and run "
-             "commands here to test ideas. Do not commit. Before planning ends, revert every change you "
-             "made, so the worktree is as it was when you started. Do not touch changes that were there "
-             "before you."]
+             "from your plan, and it does not see this conversation.", ""]
+    if repoless or new_repo_path is not None:
+        if new_repo_path is not None:
+            lines += [f"- Working folder: `{worktree}`. There is no repository yet: `start` creates one at "
+                      f"`{new_repo_path}` after the plan is done, and the work happens there. Plan the "
+                      "first steps of the project."]
+        else:
+            lines += [f"- Working folder: `{worktree}`. This card has no repository and no code to read. "
+                      "Ask the user what the plan needs."]
+        lines += ["- Do not commit anything. herdboard deletes the folder when the card is finished."]
+    else:
+        lines += [f"- Worktree: `{worktree}` on branch `{branch}` (base `{base}`). You may change code and run "
+                  "commands here to test ideas. Do not commit. Before planning ends, revert every change you "
+                  "made, so the worktree is as it was when you started. Do not touch changes that were there "
+                  "before you."]
     if work_agent:
         lines += ["- A work agent works in this worktree too. It can change files while you plan. "
                   "Revert only your own changes."]
@@ -129,7 +139,8 @@ def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, wor
         "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one.",
         "4. Write the plan when the main questions have answers. Write it again each time a decision changes.",
         "5. Tell the user when the plan is saved. herdboard records each save in the card's log.",
-        "6. Revert your code changes. Check with `git status` that the worktree is as it was.",
+        *([] if repoless or new_repo_path is not None else
+          ["6. Revert your code changes. Check with `git status` that the worktree is as it was."]),
         "",
         f"Write the plan to `{plan_file}` and to no other file. Do not change the card title or details: "
         "they are the user's text.",
@@ -157,7 +168,7 @@ def _plans_path() -> Path:
 
 class Planner:
     def __init__(self, store, directory, writer=None, prompt_checkout=None, repository_view=True,
-                 config_file: Path | None = None):
+                 config_file: Path | None = None, prompt_target=None):
         self.store = store
         self.config = store.config
         self.directory = Path(directory)
@@ -165,6 +176,8 @@ class Planner:
         self.prompt_checkout = prompt_checkout
         self.repository_view = repository_view
         self.config_file = config_file
+        # Asks where a card without a repository runs, as `Starter` does.
+        self.prompt_target = prompt_target
 
     def _card(self, ref):
         """The card, and the Linear issue when it is one. A Linear card needs a connection."""
@@ -181,7 +194,8 @@ class Planner:
             card = self.store.ensure_id(card.ref)
         return card, None
 
-    def plan(self, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None):
+    def plan(self, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None,
+             no_repo=False, new_repo=None):
         kind = agent or self.config.start_agent
         if kind not in ("claude", "pi"):
             raise PlanError("The planner must be claude or pi", "usage")
@@ -198,7 +212,8 @@ class Planner:
         # The record key matches `start`, so a later start finds the same worktree.
         key = issue["id"] if issue else ref
         starter = Starter(self.store, self.directory, writer=self.writer, prompt_checkout=self.prompt_checkout,
-                          repository_view=self.repository_view, config_file=self.config_file)
+                          repository_view=self.repository_view, config_file=self.config_file,
+                          prompt_target=self.prompt_target)
         with _lock(".plan-" + safe_key(ref) + ".lock"):
             with _lock(wait=2):
                 running = _read(_plans_path()).get(ref)
@@ -207,9 +222,12 @@ class Planner:
             if _planner_pane(running) is not None:
                 raise PlanError(f"A planner for {ref} still runs in pane {running['pane_id']}", "plan_running")
             record = starter.prepare(card, issue, key, repo=repo, checkout=checkout, base=base,
-                                     move_parent=False, check_column=False)
+                                     move_parent=False, check_column=False, no_repo=no_repo,
+                                     new_repo=new_repo)
             workspace = record["workspace_id"]
             worktree = Path(record["worktree_path"])
+            no_repository = record.get("mode") in (start_module.REPOLESS, start_module.NEW_REPO)
+            new_repo_path = Path(record["new_repo_path"]) if record.get("new_repo_path") else None
             plan_file = attachments.plan_path(self.config, ref)
             notes = []
             if card.source != "linear":
@@ -217,7 +235,7 @@ class Planner:
                     notes = self.store.notes_for(card) or []
                 except HerdboardError:
                     notes = []
-            status = _git(worktree, "status", "--short") or ""
+            status = "" if no_repository else (_git(worktree, "status", "--short") or "")
             work_agent = False
             if record.get("agent_name"):
                 try:
@@ -225,10 +243,12 @@ class Planner:
                 except HerdboardError:
                     work_agent = False
             brief = write_brief(safe_key(ref) + "-plan", brief_text(
-                card, worktree=worktree, branch=record["branch"], base=record["base"], status=status,
-                work_agent=work_agent, notes=notes, plan=attachments.plan_for_agent(self.store, ref),
+                card, worktree=worktree, branch=record.get("branch") or "", base=record.get("base") or "",
+                status=status, work_agent=work_agent, notes=notes,
+                plan=attachments.plan_for_agent(self.store, ref),
                 files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
-                plan_file=plan_file, command=herdboard_command(self.config_file)))
+                plan_file=plan_file, command=herdboard_command(self.config_file),
+                repoless=record.get("mode") == start_module.REPOLESS, new_repo_path=new_repo_path))
             # Read before the launch: the agent can save the plan while `agent start` waits for it.
             plan_mtime = _mtime(plan_file)
             prompt = _one_line(f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "
@@ -261,9 +281,10 @@ class Planner:
             # The planner still works without the worker; only the log of its saves is missing.
             activity.append(self.store, ref, f"The plan saves are not logged: the worker did not start: {error}",
                             "herdboard")
-        return {"ref": ref, "agent": kind, "model": model, "pane_id": pane, "checkout": record["checkout"],
-                "plan": str(plan_file), "workspace_id": workspace, "worktree_path": str(worktree),
-                "branch": record["branch"], "base": record["base"]}
+        return {"ref": ref, "agent": kind, "model": model, "pane_id": pane,
+                "checkout": record.get("checkout"), "plan": str(plan_file), "workspace_id": workspace,
+                "worktree_path": str(worktree), "branch": record.get("branch"), "base": record.get("base"),
+                "mode": record.get("mode") or start_module.REPO}
 
 
 def _pane_exists(pane: str) -> bool:

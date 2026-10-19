@@ -97,6 +97,11 @@ class PlanHerdr:
             if not (self.panes.pop(0) if self.panes else True):
                 return self.reply(argv, error="pane_not_found")
             return self.reply(argv, {"pane": {"pane_id": args[2]}})
+        if operation == "workspace create":
+            return self.reply(argv, {"workspace": {"workspace_id": "x1"},
+                                     "root_pane": {"pane_id": "x1:p1"}})
+        if operation == "workspace close":
+            return self.reply(argv, {"type": "ok"})
         if operation == "agent start" and self.on_start:
             self.on_start()
         return self.reply(argv, {"type": "ok"})
@@ -173,7 +178,8 @@ class RequestTests(PlanTestCase):
         self.assertEqual(result, {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
                                   "checkout": str(self.repo), "plan": str(self.plan_file),
                                   "workspace_id": "w9", "worktree_path": worktree,
-                                  "branch": start.todo_branch(self.card), "base": self.checkout_branch()})
+                                  "branch": start.todo_branch(self.card), "base": self.checkout_branch(),
+                                  "mode": "repo"})
 
     def test_the_start_record_has_the_setup_and_no_agent(self):
         self.planner.plan(self.card.ref)
@@ -391,6 +397,76 @@ class RequestTests(PlanTestCase):
         self.assertEqual(len(self.fake.find("tab", "create")), 1)
 
 
+class NoRepositoryPlanTests(PlanTestCase):
+    """Planning a card without a repository happens in the card folder."""
+
+    def setUp(self):
+        super().setUp()
+        self.inbox_card = self.store.add(self.store.ensure_inbox(), "Research corvid memory #feature")
+        self.plan_file = attachments.plan_path(self.config, self.inbox_card.ref)
+
+    def folder(self):
+        return start.work_folder(self.config, self.inbox_card.ref)
+
+    def brief_for(self, ref):
+        call = self.planner_start()
+        message = call[call.index("--") + 1]
+        return Path(message.split("Read the brief at ")[1].split(" first")[0]).read_text()
+
+    def test_plan_without_a_repository_opens_a_tab_in_the_card_folder(self):
+        result = self.planner.plan(self.inbox_card.ref, no_repo=True)
+        self.assertTrue(self.folder().is_dir())
+        self.assertEqual(result["worktree_path"], str(self.folder()))
+        self.assertEqual(result["mode"], "repoless")
+        self.assertIsNone(result["checkout"])
+        self.assertEqual(self.fake.find("tab", "create"),
+                         [["tab", "create", "--workspace", "x1", "--cwd", str(self.folder()),
+                           "--label", f"plan {self.inbox_card.ref}", "--no-focus"]])
+        self.assertFalse(self.fake.find("worktree", "create"))
+        text = self.brief_for(self.inbox_card.ref)
+        self.assertIn("Working folder", text)
+        self.assertIn("no repository", text)
+        self.assertNotIn("Revert your code changes", text)
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.inbox_card.ref]
+        self.assertEqual(record["mode"], "repoless")
+        self.assertEqual(record["worktree_path"], str(self.folder()))
+
+    def test_a_later_start_uses_the_stored_repoless_choice(self):
+        self.planner.plan(self.inbox_card.ref, no_repo=True)
+        self.fake.calls.clear()
+        starter = start.Starter(self.store, self.repo)
+        result = starter.start(self.inbox_card.ref, no_agent=True)
+        self.assertEqual(result["mode"], "repoless")
+        self.assertEqual(result["worktree_path"], str(self.folder()))
+        self.assertFalse(self.fake.find("worktree", "create"))
+
+    def test_plan_with_a_new_repository_path_creates_no_repository(self):
+        path = self.root / "Projects" / "corvid"
+        result = self.planner.plan(self.inbox_card.ref, new_repo=path)
+        self.assertEqual(result["mode"], "new_repo")
+        self.assertFalse(path.exists())
+        self.assertTrue(self.folder().is_dir())
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.inbox_card.ref]
+        self.assertEqual(record["mode"], "new_repo")
+        self.assertEqual(record["new_repo_path"], str(path))
+        text = self.brief_for(self.inbox_card.ref)
+        self.assertIn("Working folder", text)
+        self.assertIn(f"`{path}`", text)
+
+    def test_a_later_start_creates_the_planned_repository(self):
+        path = self.root / "Projects" / "corvid"
+        self.planner.plan(self.inbox_card.ref, new_repo=path)
+        # The user closes the planner, and its worker forgets it.
+        plan._forget(self.inbox_card.ref, "w1:p7")
+        self.fake.calls.clear()
+        starter = start.Starter(self.store, self.repo)
+        result = starter.start(self.inbox_card.ref, no_agent=True)
+        self.assertEqual(result["mode"], "repo")
+        self.assertTrue((path / ".git").is_dir())
+        self.assertEqual(self.store.show(self.inbox_card.ref).column, "In progress")
+        self.assertFalse(self.folder().exists())
+
+
 class WaitTests(PlanTestCase):
     def wait(self, pane="w1:p7"):
         errors = io.StringIO()
@@ -546,8 +622,10 @@ class PlanCliTests(CliTestCase):
     def test_plan_passes_the_options(self):
         calls = []
 
-        def fake_plan(planner, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None):
-            calls.append((ref, agent, model, thinking, repo, checkout, base, planner.config_file))
+        def fake_plan(planner, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None,
+                      no_repo=False, new_repo=None):
+            calls.append((ref, agent, model, thinking, repo, checkout, base, planner.config_file,
+                          no_repo, new_repo))
             return {"ref": ref, "agent": agent or "claude", "model": model, "pane_id": "w1:p7",
                     "checkout": "/repo", "workspace_id": "w9", "worktree_path": "/repo/work",
                     "branch": "t123-fix", "base": "main", "plan": "/todos/.herdboard/attachments/t123/plan.md"}
@@ -557,8 +635,13 @@ class PlanCliTests(CliTestCase):
                                  "--repo", "api", directory=self.plain)
             self.assertEqual(data["pane_id"], "w1:p7")
             out, _ = self.run_cli("plan", "t123", "--model", "opus", "--base", "feature-x", directory=self.plain)
+            self.run_json("plan", "t123", "--no-repo", directory=self.plain)
+            self.run_json("plan", "t123", "--new-repo", "/tmp/new", directory=self.plain)
         self.assertEqual([c[:7] for c in calls], [("t123", "pi", "zai/glm-5.3", "high", "api", None, None),
-                                                  ("t123", None, "opus", None, None, None, "feature-x")])
+                                                  ("t123", None, "opus", None, None, None, "feature-x"),
+                                                  ("t123", None, None, None, None, None, None),
+                                                  ("t123", None, None, None, None, None, None)])
+        self.assertEqual([c[8:] for c in calls], [(False, None), (False, None), (True, None), (False, "/tmp/new")])
         self.assertIsNotNone(calls[0][7])
         self.assertEqual(out, "t123: claude (opus) plans in pane w1:p7, in /repo/work.\n"
                               "The plan: /todos/.herdboard/attachments/t123/plan.md\n")

@@ -87,12 +87,12 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `z` | Show or hide the archive column |
 | `T` | Promote the todo to a Linear issue: choose its team and project. See [promote](#promote) |
 | `p` | Set or remove the todo's parent |
-| `s` | Start work with the default agent |
+| `s` | Start work with the default agent. A card without a repository asks where it runs |
 | `S` | Choose claude or pi, the model and pi's thinking level, then start work |
 | `P` | Plan the card with an agent: choose claude or pi and the model |
 | `g` | Go to the started card's Herdr workspace, when Herdr has it open |
-| `R` | Review a started card: in Hunk, by another agent, or both |
-| `m` | Merge the card, after you confirm |
+| `R` | Review a started card: in Hunk, by another agent, or both. A repoless card offers the agent review only |
+| `m` | Merge the card, after you confirm. A repoless card has nothing to merge |
 | `f` | Finish a merged card, after you confirm |
 | `v` | Change the view: repo, inbox, all, mine |
 | `t` | Hide or show Linear cards |
@@ -236,7 +236,7 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 
 `herdboard start <id>` does these steps:
 
-1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. An inbox todo needs `--repo`, which takes a board name or a path in a checkout.
+1. Find the repository. For a repository board, it is that repository. For a Linear issue, it is the repository of the current view, or `--repo`. An inbox todo needs a choice: `--repo` takes a board name or a path in a checkout, `--new-repo [PATH]` creates a repository, and `--no-repo` runs the card without one. See [Cards without a repository](#cards-without-a-repository).
 2. Find the local checkout. herdboard records every main checkout that it runs in. When it knows none, it asks for a path, or `--checkout PATH` gives one.
 3. Choose the branch. A Linear issue uses its own branch name. A todo uses its ID and a short name from its title, such as `t3m9-fix-login-timeout`. A typed todo's branch starts with the commit type, such as `fix/t3m9-fix-login-timeout`.
 4. Choose the base: `--base`, else the recorded base of an earlier start, else the parent's branch for a sub-card, else the branch of the main checkout. A Linear sub-issue does not use its parent's branch, because the parent can belong to another repository.
@@ -263,6 +263,18 @@ When planning ends with a changed plan and the card's work agent still runs, the
 `--agent claude|pi`, `--model`, `--thinking` (pi only) and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
 
 A planned card that will not be worked on is dropped with `herdboard finish <id>`: a branch with no commits counts as merged. Add `--force` when the branch has commits.
+
+### Cards without a repository
+
+An inbox card is sometimes research, or the start of a new project, and it has no repository. `start` and `plan` then fail with `repo_required`. There are three ways to continue:
+
+- **A repository board.** `--repo BOARD` starts the card in that board's repository. On the board, the question lists the repository boards first.
+- **A new repository.** `--new-repo [PATH]` creates a local Git repository, its board, and then starts the card as usual. Without PATH, herdboard uses `<projects_dir>/<title>`, such as `~/Projects/corvid-tracker`. The path must not exist, or must be an empty folder. herdboard runs `git init -b main` and makes one empty first commit. The new board merges locally (`local`) and has no remote: add one with `git remote add origin` when you have it. Only todos can create a repository, and not a card with a parent or sub-cards: their cards must stay on one board.
+- **No repository.** `--no-repo` runs the card in `<todos_dir>/.herdboard/work/<id>/`, a plain folder with no Git, no branch and no worktree. herdboard opens a Herdr workspace there, in front of you, because there is no worktree to visit later. The brief tells the agent to write its result to the card's attachments, such as `findings.md`: press `o` on the card to read them.
+
+The choice is kept in the card's start record, so a later `start` or `plan` does not ask again. On the board, `s`, `S` and `P` ask the question in a dialog. In a terminal, `start` and `plan` ask too, unless `--json` is set.
+
+A repoless card has limits. `review` opens nothing: only `review --agent` works, and the reviewer checks the attachments against `plan.md`. `merge` fails with `no_repository`. `finish` closes the workspace, deletes the card folder even when it is not empty, and moves the card to Done. The brief says so, so the agent copies everything worth keeping into the attachments.
 
 ### Attachments
 
@@ -346,6 +358,8 @@ A sync replaces the GitHub title and body, and so overwrites edits made on the G
 4. Move the card to its done column and log `Finished.`
 
 A worktree with uncommitted or untracked files always stops `finish`. `--force` finishes a card that is not merged, but keeps its branch.
+
+For a card without a repository, `finish` closes the card's workspace, deletes the card folder with everything in it, and moves the card to Done. There is no branch to check.
 
 The board never runs `finish` itself.
 
@@ -451,7 +465,7 @@ A Linear project can hold issues for many repositories, and a team can hold thou
 - `herdboard search "login timeout"` lists the open issues of your teams that match. An identifier such as `ENG-123` finds that issue in any team and any state.
 - On the board, `I` opens a search. Type words and press enter: Linear allows only 30 searches per minute, so typing does not search. Press enter on a result to pin it. Outside a repository, the board first asks which repository board to pin to.
 - `u` on a pinned card removes its pin. `c` lists the pinned issues: press enter on one to mark it for removal.
-- `start` on a Linear issue pins it to the board of the repository it starts in. It does not pin an issue that a linked project of that board already shows. When the board cannot tell the repository of an issue (for example in the `mine` view), `s` asks which repository board to start it in.
+- `start` on a Linear issue pins it to the board of the repository it starts in. It does not pin an issue that a linked project of that board already shows. When the board cannot tell the repository of an issue (for example in the `mine` view), `s` asks where it runs: a repository board, or no repository. A Linear issue cannot create a new repository (`--new-repo` fails with `usage`).
 
 A pinned issue goes off the board like other done issues, after `linear.done_days`. A canceled issue does not show. The pin stays in the board file until you remove it. A pin does not bring the issue's sub-issues: pin each one by itself. The pins live in the `linear-issues:` frontmatter of the board.
 
@@ -510,11 +524,11 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's first line, its indented lines, its parent or its type. `--body ""` removes the indented lines |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
-| `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree |
+| `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
-| `herdboard start <id> [--agent claude\|pi] [--model] [--thinking] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card |
+| `herdboard start <id> [--agent claude\|pi] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
 | `herdboard pr-sync <id> [--fetch]` | Push the card branch, then replace the open pull request's title and description with `pr.md`. `--fetch` writes the GitHub text to a new `pr.md` instead, and changes nothing |
@@ -580,6 +594,7 @@ The config file is `~/.config/herdboard/config.toml`. `HERDBOARD_CONFIG` or `--c
 
 ```toml
 todos_dir = "~/todos"
+projects_dir = "~/Projects"   # where `start --new-repo` creates a repository
 columns = ["Backlog", "Todo", "In progress", "Review", "Done"]   # for new boards
 complete_markers = []      # added to the English "Complete"
 archive_titles = []        # added to the English "Archive"
@@ -641,6 +656,7 @@ These settings affect display only. Stored Markdown, filters and command-line ou
     acme-api.md
   .herdboard/log/              # activity logs
   .herdboard/attachments/      # card attachments, such as plan.md
+  .herdboard/work/<id>/        # the folder of a card without a repository; deleted at `finish`
 ```
 
 A board file uses the format of the Obsidian Kanban plugin:
