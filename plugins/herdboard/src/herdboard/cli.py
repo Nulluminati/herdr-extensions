@@ -218,6 +218,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("--folder", type=Path, required=True)
 
+    sub = command("pr-sync", "send the card's pr.md to its open pull request: push the branch, then replace "
+                              "the title and description")
+    sub.add_argument("ref")
+    sub.add_argument("--fetch", action="store_true",
+                     help="write the pull request's GitHub title and description to a new pr.md, and change nothing")
+
     sub = command("finish", "remove a merged card's worktree and branch, and move the card to Done")
     sub.add_argument("ref")
     sub.add_argument("--force", action="store_true",
@@ -848,6 +854,10 @@ def _cmd_pr_wait(ctx: _Context) -> dict:
     return {"ref": ref, "exit_code": code}
 
 
+def _cmd_pr_sync(ctx: _Context) -> dict:
+    return _merger(ctx).sync_pr(ctx.args.ref, fetch=ctx.args.fetch)
+
+
 def _cmd_finish(ctx: _Context) -> dict:
     return _merger(ctx).finish(ctx.args.ref, force=ctx.args.force)
 
@@ -1219,6 +1229,7 @@ COMMANDS = {
     "review": _cmd_review,
     "review-wait": _cmd_review_wait,
     "pr-wait": _cmd_pr_wait,
+    "pr-sync": _cmd_pr_sync,
     "merge": _cmd_merge,
     "finish": _cmd_finish,
     "init": _cmd_init,
@@ -1279,6 +1290,15 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
     if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait"):
+        return
+    if command == "pr-sync":
+        if as_json:
+            _emit_json(result)
+        elif result["action"] == "updated":
+            print(f"{result['ref']}: updated {result['pr_url']}")
+        else:
+            print(f"{result['ref']}: wrote {result['path']}. "
+                  f"Edit it, then run herdboard pr-sync {result['ref']}.")
         return
     if command in ("prs", "pr-review", "pr-review-refresh", "pr-review-go", "pr-review-finish"):
         if as_json:

@@ -71,8 +71,17 @@ class SkillTests(unittest.TestCase):
     def test_review_merge_and_finish_are_documented(self):
         commands = skill_commands()
         for argv in (["--json", "review", "tep3"], ["--json", "merge", "tep3"], ["--json", "merge", "tep3", "--pr"],
-                     ["--json", "merge", "tep3", "--pr", "--rewrite"], ["--json", "finish", "tep3"]):
+                     ["--json", "merge", "tep3", "--pr", "--rewrite"], ["--json", "finish", "tep3"],
+                     ["--json", "pr-sync", "tep3"], ["--json", "pr-sync", "tep3", "--fetch"]):
             self.assertIn(argv, commands)
+
+    def test_the_card_agent_may_sync_its_own_pull_request_description(self):
+        text = SKILL.read_text(encoding="utf-8")
+        handed = text[text.index("## When a card was handed to you"):text.index("## Errors")]
+        self.assertIn("pr-sync <id>", handed)
+        self.assertIn("pr-sync <id> --fetch", handed)
+        guarded = text[text.index("Ask the user first"):text.index("```bash")]
+        self.assertNotIn("`pr-sync`", guarded)
 
     def test_agent_review_is_documented(self):
         commands = skill_commands()
@@ -106,6 +115,7 @@ class SkillTests(unittest.TestCase):
         known |= {"gh_unavailable", "push_failed", "pr_failed"}
         known |= {"parent_missing", "parent_nested", "children_open", "parent_not_promoted"}
         known |= {"review_running", "nothing_to_review", "worker_failed", "pr_writing", "plan_running"}
+        known |= {"no_pr", "no_description"}
         known |= {ArchivedError.code, CardActiveError.code, cli.LinearArchiveError.code, "has_sub_cards"}
         known.add(UnknownTypeError.code)
         known |= {"remote_unknown", "branch_exists", "agent_running", "workspace_closed", "worktree_missing",

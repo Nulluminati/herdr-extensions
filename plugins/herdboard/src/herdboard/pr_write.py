@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -76,7 +77,7 @@ def card_text(card) -> tuple[str, str]:
     return split_title(card.title)[0] or card.title, "\n".join(_unindent(line) for line in card.body).strip()
 
 
-def request_text(card, data: dict, folder: Path, templates: list[Path], entries: list[dict]) -> str:
+def request_text(card, ref: str, data: dict, folder: Path, templates: list[Path], entries: list[dict]) -> str:
     title, description = card_text(card)
     log = "\n".join(f"- {e['time']} · {e['author']} · {e['message']}" for e in entries) or "- (none)"
     if len(templates) == 1:
@@ -114,12 +115,16 @@ Write `{folder / 'pr.md'}`. Its first line is the title. The rest is the descrip
   When nothing shows testing, say that the change has no tests.
 - Do not name the tools, the agent or the task card. Do not add a Linear link.
 - Do not run `gh`, push, or change any file other than `{folder / 'pr.md'}`.
+- To change the description after the pull request opens, edit `{folder / 'pr.md'}` and run
+  `herdboard pr-sync {ref}`.
 """
 
 
-def prompt_text(folder: Path) -> str:
+def prompt_text(folder: Path, ref: str) -> str:
     return (f"Write the pull request title and description for this work. Read {folder / 'request.md'} "
             f"and follow it. Write the result to {folder / 'pr.md'} and nowhere else. "
+            f"To change the description after the pull request opens, edit {folder / 'pr.md'} "
+            f"and run `herdboard pr-sync {ref}`. "
             "Do not run gh, push, or change code.")
 
 
@@ -147,7 +152,7 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
         requests.mkdir(parents=True, exist_ok=True)
         folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-", dir=requests))
         (folder / "branch.patch").write_text(patch, encoding="utf-8")
-        (folder / "request.md").write_text(request_text(card, data, folder, find_templates(worktree), entries),
+        (folder / "request.md").write_text(request_text(card, ref, data, folder, find_templates(worktree), entries),
                                            encoding="utf-8")
     except OSError as error:
         raise merge.MergeError(f"{requests}: cannot write the pull request request: {error}", "io") from error
@@ -163,7 +168,7 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
         thinking = config.start_thinking if kind == "pi" else None
         # A startup prompt waits for the user, and a busy writer never looks ready: the worker watches it.
         herdr("agent", "start", f"hb-{ref.lower()}-pr", "--kind", kind, "--pane", pane, "--",
-              *reviewer_arguments(kind, prompt_text(folder), folder, config.start_model, thinking),
+              *reviewer_arguments(kind, prompt_text(folder, ref), folder, config.start_model, thinking),
               tolerated=("timeout", "agent_not_ready"))
         own, writer = True, f"a {kind} writer agent"
     data.update(folder=str(folder), pane_id=pane, kind=kind, own_pane=own, rewrite_url=rewrite_url,
@@ -215,6 +220,15 @@ def parse(text: str, linear_url: str | None) -> tuple[str, str]:
     return title, body + "\n" if body else ""
 
 
+# The Linear link that `parse` appends. A fetched GitHub body already has it, at its end.
+LINEAR_LINE = re.compile(r"\n*^Linear: https?://\S+\s*$", re.MULTILINE)
+
+
+def strip_linear_link(text: str) -> str:
+    """The body without its `Linear: <url>` line, so a sync adds the link once, at the end."""
+    return LINEAR_LINE.sub("", text).strip()
+
+
 def _settle(ref: str, **updates) -> dict | None:
     """Remove the request from the card's start record and apply `updates`. None when the record is gone."""
     path = state_dir() / "starts.json"
@@ -231,17 +245,30 @@ def _settle(ref: str, **updates) -> dict | None:
         return record
 
 
-def _open(data: dict, folder: Path) -> tuple[str, str]:
-    """Push the branch and open or edit the pull request. Returns its URL and the log text."""
-    title, body = parse((folder / "pr.md").read_text(encoding="utf-8"), data.get("linear_url"))
-    worktree, branch, base = Path(data["worktree"]), data["branch"], data["base"]
+def _push_text(worktree: Path, branch: str, base: str, folder: Path,
+               linear_url: str | None) -> tuple[str, Path]:
+    """Parse `pr.md`, push the branch, and write the GitHub body next to it. Returns the title and body file."""
+    title, body = parse((folder / "pr.md").read_text(encoding="utf-8"), linear_url)
     merge.push_branch(worktree, branch, base)
     body_file = folder / "body.md"
     body_file.write_text(body, encoding="utf-8")
+    return title, body_file
+
+
+def _sync_text(worktree: Path, branch: str, base: str, url: str, folder: Path,
+               linear_url: str | None) -> None:
+    """Push the branch, then replace the open pull request's title and description with `pr.md`."""
+    title, body_file = _push_text(worktree, branch, base, folder, linear_url)
+    merge._gh_output(worktree, "pr", "edit", url, "--title", title, "--body-file", str(body_file))
+
+
+def _open(data: dict, folder: Path) -> tuple[str, str]:
+    """Push the branch and open or edit the pull request. Returns its URL and the log text."""
+    worktree, branch, base = Path(data["worktree"]), data["branch"], data["base"]
     if data.get("rewrite_url"):
-        merge._gh_output(worktree, "pr", "edit", data["rewrite_url"], "--title", title,
-                         "--body-file", str(body_file))
+        _sync_text(worktree, branch, base, data["rewrite_url"], folder, data.get("linear_url"))
         return data["rewrite_url"], "PR description rewritten"
+    title, body_file = _push_text(worktree, branch, base, folder, data.get("linear_url"))
     created = merge._gh_output(worktree, "pr", "create", "--draft", "--base", base, "--head", branch,
                                "--title", title, "--body-file", str(body_file))
     return created.strip().splitlines()[-1], "PR opened"
@@ -262,7 +289,7 @@ def wait(store, ref, folder: Path, writer=None) -> int:
             start_module.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", pane,
                                   "--until", "idle", "--timeout", str(WRITE_TIMEOUT_SECONDS * 1000)],
                                  timeout=WRITE_TIMEOUT_SECONDS + 60)
-            herdr("agent", "prompt", pane, prompt_text(folder))
+            herdr("agent", "prompt", pane, prompt_text(folder, ref))
         _wait_for_text(folder / "pr.md", pane, who)
         error = None
     except (HerdboardError, OSError, subprocess.TimeoutExpired) as failure:
@@ -285,7 +312,73 @@ def wait(store, ref, folder: Path, writer=None) -> int:
         activity.append(store, ref, f"PR not opened: {error}", "herdboard")
         _notify(f"PR for {ref} not opened", str(error))
         return 1
-    _settle(ref, pr_url=url, pr_state="open", pr_checked=time.time())
+    _settle(ref, pr_url=url, pr_state="open", pr_checked=time.time(), pr_folder=str(folder))
     activity.append(store, ref, f"{done}: {url}", "herdboard")
     _notify(f"PR for {ref} {'opened' if done == 'PR opened' else 'rewritten'}", url)
     return 0
+
+
+def open_url(worktree: Path, branch: str, record: dict) -> str | None:
+    """The open pull request of the branch: from the record, else from GitHub."""
+    if record.get("pr_state") == "open" and record.get("pr_url"):
+        return record["pr_url"]
+    listed = json.loads(merge._gh_output(worktree, "pr", "list", "--head", branch, "--state", "open",
+                                         "--json", "url") or "[]")
+    return listed[0]["url"] if listed else None
+
+
+def _fetch_description(merger, ref: str, key: str, record: dict, worktree: Path, url: str) -> dict:
+    """Write the pull request's GitHub title and body to a new `pr.md`, for the agent to edit."""
+    viewed = json.loads(merge._gh_output(worktree, "pr", "view", url, "--json", "title,body"))
+    title = str(viewed.get("title") or "").strip()
+    body = strip_linear_link(str(viewed.get("body") or ""))
+    text = f"{title}\n\n{body}\n" if body else f"{title}\n"
+    requests = state_dir() / "prs"
+    try:
+        requests.mkdir(parents=True, exist_ok=True)
+        folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-", dir=requests))
+        (folder / "pr.md").write_text(text, encoding="utf-8")
+    except OSError as error:
+        raise merge.MergeError(f"{requests}: cannot write the pull request description: {error}", "io") from error
+    record.update(pr_url=url, pr_state="open", pr_checked=time.time(), pr_folder=str(folder))
+    merger._persist(key, record)
+    return {"ref": ref, "pr_url": url, "path": str(folder / "pr.md"), "action": "fetched"}
+
+
+def sync(merger, ref: str, fetch: bool = False) -> dict:
+    """Send the card's `pr.md` to its open pull request: push the branch, then replace the title and body.
+
+    `fetch` instead writes the current GitHub title and body to a new `pr.md` and changes nothing real.
+    """
+    card, ref, key, record = merger._started(ref)
+    worktree = Path(record.get("worktree_path") or "")
+    if not record.get("worktree_path") or not worktree.exists():
+        raise merge.MergeError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again",
+                               "not_started")
+    check_running(ref, record)
+    branch, base = record["branch"], record["base"]
+    with _lock(".start-" + safe_key(key) + ".lock"):
+        url = open_url(worktree, branch, record)
+        if url is None:
+            raise merge.MergeError(f"{ref} has no open pull request. "
+                                   f"Press m or run `herdboard merge {ref} --pr` first", "no_pr")
+        if fetch:
+            return _fetch_description(merger, ref, key, record, worktree, url)
+        folder = Path(record.get("pr_folder") or "")
+        file = folder / "pr.md"
+        if not record.get("pr_folder") or not file.exists():
+            raise merge.MergeError(f"{ref} has no written pull request description; "
+                                   f"run `herdboard pr-sync {ref} --fetch` first", "no_description")
+        if merge._dirty(worktree):
+            raise merge.MergeError(f"{worktree} has uncommitted changes. The agent must commit them first.",
+                                   "worktree_dirty")
+        # A Linear card's link is not in the record after the writer settled, so read the issue for it.
+        # A Linear ref has no card here, and no todo URL, so only then is the issue worth a read.
+        linear_url = card.url if card is not None and card.source == "linear" else None
+        if linear_url is None and card is None:
+            linear_url = merger._card(None, ref).url
+        _sync_text(worktree, branch, base, url, folder, linear_url)
+        record.update(pr_url=url, pr_state="open", pr_checked=time.time(), pr_folder=str(folder))
+        merger._persist(key, record)
+        activity.append(merger.store, ref, f"PR description updated: {url}", "herdboard")
+        return {"ref": ref, "pr_url": url, "path": str(file), "action": "updated"}

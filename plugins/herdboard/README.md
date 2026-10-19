@@ -305,6 +305,14 @@ When the branch already has an open pull request, `merge --pr` only pushes the n
 
 A failure logs `PR not opened: <reason>` and shows a notification.
 
+### pr-sync
+
+`herdboard pr-sync <id>` sends a started card's written description to its open pull request. It runs `merge.push_branch`, then replaces the GitHub title and description with the card's `pr.md`. The card's agent may run it for its own card, so the user can ask the agent for text changes after `m` opened the draft. The agent edits `pr.md` and runs `pr-sync`.
+
+The start record keeps the folder of the last written `pr.md`. Without one, the command fails with `no_description`. `herdboard pr-sync <id> --fetch` writes the current GitHub title and body to a new `pr.md` first, and prints its path: the agent edits that file and runs `pr-sync` again. `--fetch` changes nothing on GitHub. It covers a pull request that opened before this command existed, or one opened by hand.
+
+A sync replaces the GitHub title and body, and so overwrites edits made on the GitHub web page. Both modes stop when the worktree has uncommitted or untracked files (`worktree_dirty`), when an agent still writes the description (`pr_writing`), and when the branch has no open pull request (`no_pr`).
+
 ### finish
 
 `herdboard finish <id>` checks that the work is merged: the base contains the branch, or `gh` reports the pull request merged. Then it does these steps:
@@ -478,6 +486,7 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard start <id> [--agent claude\|pi] [--model] [--thinking] [--no-agent] [--repo] [--checkout PATH] [--base BRANCH]` | Start work on a card |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
+| `herdboard pr-sync <id> [--fetch]` | Push the card branch, then replace the open pull request's title and description with `pr.md`. `--fetch` writes the GitHub text to a new `pr.md` instead, and changes nothing |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move it to Done |
 | `herdboard board --prs` | Open the board on its pull request list |
 | `herdboard prs [--search TEXT] [--page N]` | List the open GitHub pull requests of the repository, 50 to a page, with review markers. `--search` takes GitHub search words and qualifiers |

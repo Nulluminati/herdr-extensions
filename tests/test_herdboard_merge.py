@@ -284,6 +284,8 @@ class FakeGh:
         self.state = "OPEN"
         self.missing = False
         self.url = "https://github.com/acme/api/pull/7"
+        self.title = "fix: keep sessions for 30 minutes"
+        self.body = "## Why\nSessions ended too soon.\n"
         # The text of each --body-file, read when gh runs.
         self.bodies = []
 
@@ -300,7 +302,11 @@ class FakeGh:
         elif args[:2] == ("pr", "edit"):
             out = self.url + "\n"
         elif args[:2] == ("pr", "view"):
-            out = json.dumps({"state": self.state})
+            fields = args[args.index("--json") + 1].split(",") if "--json" in args else []
+            if "title" in fields or "body" in fields:
+                out = json.dumps({"title": self.title, "body": self.body})
+            else:
+                out = json.dumps({"state": self.state})
         else:
             raise AssertionError(args)
         return subprocess.CompletedProcess(["gh", *args], 0, out, "")
@@ -556,6 +562,40 @@ class MergeCliTests(CliTestCase):
         with patch.object(pr_write, "wait", return_value=1) as wait:
             self.run_cli("pr-wait", "t123", "--folder", "/f", directory=self.plain, expect=1)
         self.assertEqual(wait.call_args.args[1:], ("t123", Path("/f")))
+
+
+class PrSyncCliTests(CliTestCase):
+    def card(self):
+        return self.run_json("add", "Fix it", directory=self.plain)["card"]["ref"]
+
+    def test_pr_sync_text(self):
+        ref = self.card()
+        url = "https://github.com/acme/api/pull/7"
+        with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": url, "path": "/p/pr.md",
+                                                        "action": "updated"}
+            out, _ = self.run_cli("pr-sync", ref, directory=self.plain)
+            self.assertEqual(out, f"{ref}: updated {url}\n")
+            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": None, "path": "/p/pr.md",
+                                                        "action": "fetched"}
+            out, _ = self.run_cli("pr-sync", ref, "--fetch", directory=self.plain)
+            self.assertEqual(out, f"{ref}: wrote /p/pr.md. Edit it, then run herdboard pr-sync {ref}.\n")
+            merger.return_value.sync_pr.assert_called_with(ref, fetch=True)
+
+    def test_pr_sync_json(self):
+        ref = self.card()
+        with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": None, "path": "/p/pr.md",
+                                                        "action": "fetched"}
+            data = self.run_json("pr-sync", ref, "--fetch", directory=self.plain)
+        self.assertEqual(data, {"ref": ref, "pr_url": None, "path": "/p/pr.md", "action": "fetched"})
+
+    def test_a_missing_description_has_its_code(self):
+        ref = self.card()
+        with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.sync_pr.side_effect = merge.MergeError("no description", "no_description")
+            data = self.run_json("pr-sync", ref, directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "no_description")
 
 
 if __name__ == "__main__":

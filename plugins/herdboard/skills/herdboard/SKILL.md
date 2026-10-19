@@ -85,7 +85,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `start` (creates a worktree and starts an agent).
 - `plan` (opens a Herdr tab and starts a planner agent).
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
-- `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
+- `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on. `pr-sync` is not in this list: you may run it for your own card.
 - `pr-review` (opens a workspace and Hunk, and starts a reviewer agent), `pr-review-refresh` (moves `pr/<N>` and reopens Hunk) and `pr-review-finish` (removes the PR's worktree and branch).
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `archive --done` (archives every card in the board's done column).
@@ -104,6 +104,8 @@ herdboard --json review tep3 --both           # an agent review first, then Hunk
 herdboard --json merge tep3                   # the repository's mode: local (rebase, fast-forward, finish) or PR
 herdboard --json merge tep3 --pr              # an agent writes the description, then a draft PR opens; the card stays in Review
 herdboard --json merge tep3 --pr --rewrite    # an open PR: an agent rewrites its description (without --rewrite: push only)
+herdboard --json pr-sync tep3                 # push the branch, then send the card's pr.md to the open PR
+herdboard --json pr-sync tep3 --fetch         # write the PR's GitHub title and body to a new pr.md; change nothing
 herdboard --json finish tep3                  # after a merge: remove the worktree and branch, card to Done
 herdboard --json prs                          # the open GitHub PRs of this repository, with review markers
 herdboard --json prs --search "author:octo" --page 2   # GitHub search qualifiers; 50 PRs to a page
@@ -134,6 +136,8 @@ A pull request reviewer only adds notes to the Hunk session. The user submits th
 7. When an agent review arrives, read the findings file. For each finding, say if you agree or disagree, and why. Record the answer with `herdboard --json log <id> "..."`. Do not change code. Wait for the user to decide what to fix.
 8. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
 9. Do not run `done`. The user moves the card to Done.
+
+You may run `pr-sync <id>` for your own card. It pushes your branch and sends `pr.md` to the open pull request. When the user asks to change the PR title or description: edit the card's `pr.md` and run `pr-sync <id>`. You do not know that path after `merge --pr` settles, so run `pr-sync <id> --fetch` first. Edit the file that it names, then run `pr-sync <id>`.
 
 The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
 
@@ -186,7 +190,9 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `nothing_to_review` | The card branch has no commits since its base and no uncommitted changes. Tell the user. |
 | `worker_failed` | The agent review or pull request worker did not start, and its agent was closed. Tell the user the message. |
 | `pr_writing` | An agent still writes the card's pull request description. Wait; the PR opens when it is done. |
-| `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. For `pr-review-refresh`, the PR worktree has changes: tell the user. For `pr-review-finish`, the PR worktree has changes: tell the user to commit or remove them, or to finish with force. |
+| `no_pr` | The card's branch has no open pull request. Press `m`, or ask the user to run `merge <id> --pr`. |
+| `no_description` | No written `pr.md` for the card. Run `pr-sync <id> --fetch` first, edit the file that it names, then run `pr-sync <id>`. |
+| `worktree_dirty` | The card's worktree has uncommitted changes. Tell the user; the card's agent must commit them. For `pr-sync`, the same: the agent must commit before it syncs. For `pr-review-refresh`, the PR worktree has changes: tell the user. For `pr-review-finish`, the PR worktree has changes: tell the user to commit or remove them, or to finish with force. |
 | `nothing_to_merge` | The card branch has no commits ahead of its base. Tell the user. |
 | `base_dirty` | The checkout of the base branch has uncommitted changes. Tell the user to commit or stash them. |
 | `rebase_conflict` | The rebase conflicted, and herdboard sent the conflict to the card's agent. Tell the user. Do not merge again until the card is back in Review. |

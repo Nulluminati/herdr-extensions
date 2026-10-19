@@ -5,6 +5,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -309,3 +310,171 @@ class StartedTimeTests(PrWriteTestCase):
         before = time.time()
         self.request()
         self.assertGreaterEqual(self.records()[self.card.ref]["pr_write"]["started"], before)
+
+    def test_the_request_tells_the_agent_how_to_sync_later(self):
+        self.request()
+        text = (self.folder / "request.md").read_text()
+        self.assertIn(f"herdboard pr-sync {self.card.ref}", text)
+        self.assertIn("Do not run `gh`", text)
+        prompt = pr_write.prompt_text(self.folder, self.card.ref)
+        self.assertIn(f"herdboard pr-sync {self.card.ref}", prompt)
+        self.assertIn("Do not run gh", prompt)
+
+
+class SyncTests(PrWriteTestCase):
+    def opened(self):
+        """Open the draft pull request, then forget what opening it called."""
+        self.request()
+        self.assertEqual(self.wait(), 0)
+        self.gh.calls.clear()
+        self.gh.bodies.clear()
+        return self.records()[self.card.ref]
+
+    def sync(self, fetch=False):
+        return pr_write.sync(self.merger, self.card.ref, fetch=fetch)
+
+    def stored(self, **changes):
+        records = self.records()
+        record = records[self.card.ref]
+        for name, value in changes.items():
+            if value is None:
+                record.pop(name, None)
+            else:
+                record[name] = value
+        (start.state_dir() / "starts.json").write_text(json.dumps(records))
+
+    def test_the_worker_keeps_the_folder_of_the_written_description(self):
+        record = self.opened()
+        self.assertEqual(record["pr_folder"], str(self.folder))
+
+    def test_a_sync_pushes_the_branch_and_replaces_the_title_and_body(self):
+        self.opened()
+        (self.folder / "pr.md").write_text("feat: new title\n\nNew body.\n")
+        head = self.commit(self.worktree, "b.txt", "b\n", "feat: b")
+        result = self.sync()
+        self.assertEqual(result["ref"], self.card.ref)
+        self.assertEqual(result["action"], "updated")
+        self.assertEqual(result["pr_url"], self.gh.url)
+        self.assertEqual(result["path"], str(self.folder / "pr.md"))
+        [edit] = [c for c in self.gh.calls if c[:2] == ["pr", "edit"]]
+        self.assertEqual(edit[2], self.gh.url)
+        self.assertEqual(edit[edit.index("--title") + 1], "feat: new title")
+        self.assertEqual(self.gh.bodies, ["New body.\n"])
+        self.assertEqual(self.git(self.origin, "rev-parse", self.branch), head)
+        self.assertEqual(self.git(self.repo, "rev-parse", "--abbrev-ref", self.branch + "@{u}"),
+                         self.main_branch())
+        self.assertEqual(self.log()[-1], f"PR description updated: {self.gh.url}")
+        record = self.records()[self.card.ref]
+        self.assertEqual((record["pr_url"], record["pr_state"]), (self.gh.url, "open"))
+        self.assertGreaterEqual(record["pr_checked"], time.time() - 5)
+
+    def test_a_linear_card_gets_the_linear_link_once(self):
+        self.opened()
+        (self.folder / "pr.md").write_text("feat: x\n\nBody.\n")
+        with self.linear():
+            self.sync()
+        self.assertEqual(self.gh.bodies,
+                         ["Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
+
+    def linear(self):
+        """`sync` sees a Linear card with the issue URL, as a real ENG- ref does."""
+        card = SimpleNamespace(source="linear", url="https://linear.app/acme/issue/ENG-7")
+        key, stored = self.card.ref, self.records()[self.card.ref]
+        return patch.object(merge.Merger, "_started", lambda merger, ref: (card, ref, key, stored))
+
+    def test_a_todo_card_syncs_without_a_linear_issue_read(self):
+        self.opened()
+        (self.folder / "pr.md").write_text("feat: x\n\nBody.\n")
+        with patch.object(merge.Merger, "_card", side_effect=AssertionError("no Linear read")):
+            self.sync()
+        self.assertEqual(self.gh.bodies, ["Body.\n"])
+
+    def test_the_pull_request_is_found_by_its_branch(self):
+        self.opened()
+        self.stored(pr_url=None)
+        self.gh.existing = ["https://github.com/acme/api/pull/9"]
+        result = self.sync()
+        self.assertEqual(result["pr_url"], "https://github.com/acme/api/pull/9")
+        self.assertEqual(self.records()[self.card.ref]["pr_url"], "https://github.com/acme/api/pull/9")
+
+    def test_a_fetch_writes_the_github_text_without_pushing_or_editing(self):
+        self.opened()
+        head = self.git(self.origin, "rev-parse", self.branch)
+        self.gh.title = "fix: old title"
+        self.gh.body = "## Why\nSessions ended too soon.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"
+        result = self.sync(fetch=True)
+        self.assertEqual(result["action"], "fetched")
+        self.assertEqual(result["ref"], self.card.ref)
+        written = Path(result["path"])
+        self.assertEqual(written.parent.parent, start.state_dir() / "prs")
+        self.assertEqual(written.read_text(),
+                         "fix: old title\n\n## Why\nSessions ended too soon.\n")
+        self.assertEqual(self.records()[self.card.ref]["pr_folder"], str(written.parent))
+        self.assertFalse(any(c[:2] == ["pr", "edit"] for c in self.gh.calls))
+        self.assertEqual(self.git(self.origin, "rev-parse", self.branch), head)
+
+    def test_a_fetched_description_syncs_once_with_the_linear_link(self):
+        self.opened()
+        self.gh.body = "Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"
+        with self.linear():
+            result = self.sync(fetch=True)
+            self.gh.calls.clear()
+            self.gh.bodies.clear()
+            self.sync()
+        self.assertEqual(self.gh.bodies,
+                         ["Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
+        self.assertNotIn("Linear:", Path(result["path"]).read_text())
+
+    def test_without_an_open_pull_request_the_sync_stops(self):
+        self.opened()
+        self.stored(pr_url=None, pr_state=None)
+        self.gh.existing = []
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "no_pr")
+        self.assertIn("m", str(raised.exception))
+
+    def test_without_a_written_description_the_sync_stops(self):
+        self.opened()
+        self.stored(pr_folder=None)
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "no_description")
+        self.assertIn("--fetch", str(raised.exception))
+
+    def test_a_missing_description_file_stops_the_sync(self):
+        self.opened()
+        (self.folder / "pr.md").unlink()
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "no_description")
+
+    def test_a_dirty_worktree_stops_the_sync(self):
+        self.opened()
+        (self.worktree / "b.txt").write_text("uncommitted\n")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "worktree_dirty")
+        self.assertEqual(self.gh.calls, [])
+
+    def test_a_writer_that_still_runs_stops_the_sync(self):
+        self.request()
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "pr_writing")
+
+    def test_an_empty_title_stops_the_sync(self):
+        self.opened()
+        (self.folder / "pr.md").write_text("\n\n")
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "pr_failed")
+
+    def test_a_card_without_a_worktree_cannot_sync(self):
+        self.opened()
+        records = self.records()
+        records[self.card.ref]["worktree_path"] = str(self.root / "gone")
+        (start.state_dir() / "starts.json").write_text(json.dumps(records))
+        with self.assertRaises(merge.MergeError) as raised:
+            self.sync()
+        self.assertEqual(raised.exception.code, "not_started")

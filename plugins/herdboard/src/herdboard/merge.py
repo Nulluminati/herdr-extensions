@@ -229,15 +229,15 @@ class Merger:
             finished = self._finish(card, ref, key, record, force=False)
         return {"ref": ref, "mode": "local", "base": base, "commit": commit, **finished}
 
+    def sync_pr(self, ref, fetch=False):
+        """Send the card's written description to its open pull request (see `pr_write.sync`)."""
+        return pr_write.sync(self, ref, fetch=fetch)
+
     def _merge_pr(self, card, ref, key, record, worktree, branch, base, rewrite):
         """Push to an open pull request, or have an agent write the description of a new one (or of the
         open one, with `rewrite`)."""
         pr_write.check_running(ref, record)
-        url = record.get("pr_url") if record.get("pr_state") == "open" else None
-        if url is None:
-            listed = json.loads(_gh_output(worktree, "pr", "list", "--head", branch, "--state", "open",
-                                           "--json", "url") or "[]")
-            url = listed[0]["url"] if listed else None
+        url = pr_write.open_url(worktree, branch, record)
         if url is not None and not rewrite:
             push_branch(worktree, branch, base)
             record.update(pr_url=url, pr_state="open", pr_checked=time.time())
