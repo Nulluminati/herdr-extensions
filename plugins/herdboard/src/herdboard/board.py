@@ -176,7 +176,7 @@ HELP_SECTIONS = [
         ("escape", "close the search box, else clear the search, else go back to the board"),
         ("n", "the next page of 50"),
         ("p", "the previous page of 50"),
-        ("s", "choose an agent and its model; it reviews the PR with notes in Hunk"),
+        ("R", "choose an agent and its model; it reviews the PR with notes in Hunk"),
         ("g", "go to its review workspace"),
         ("u", "Update: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
         ("f", "finish the review: close the workspace, remove the worktree and pr/N branch"),
@@ -185,7 +185,7 @@ HELP_SECTIONS = [
         ("G", "go back to the board"),
     ]),
     ("Pull request detail", [
-        ("s", "review the pull request with an agent"),
+        ("R", "review the pull request with an agent"),
         ("g", "go to its review workspace"),
         ("u", "fetch new commits"),
         ("f", "finish the review"),
@@ -2095,7 +2095,7 @@ class PullRequestDetailScreen(ModalBase):
     screen opens. The action keys close the screen and return the action, which the list then runs."""
 
     BINDINGS = [
-        Binding("s", "act('review')", "Review"),
+        Binding("R", "act('review')", "Review"),
         Binding("g", "act('go')", "Go to workspace"),
         Binding("u", "act('refresh')", "New commits"),
         Binding("f", "act('finish')", "Finish"),
@@ -2245,7 +2245,7 @@ class PullRequestDetailScreen(ModalBase):
             meta.append_text(Text(" ").join(label_chip(label) for label in pr.labels))
         dialog = VerticalScroll(classes="dialog detail pr-detail")
         # In the border, so the keys stay in view when the description scrolls.
-        dialog.border_subtitle = "s review · g go · u new commits · f finish · o browser · esc close"
+        dialog.border_subtitle = "R review · g go · u new commits · f finish · o browser · esc close"
         with dialog:
             yield self._static(title, id="pr-detail-title")
             yield self._static(meta, id="pr-detail-meta")
@@ -2319,7 +2319,7 @@ class PullRequestsScreen(Screen):
         Binding("slash", "search", "Search"),
         Binding("n", "page(1)", "Next"),
         Binding("p", "page(-1)", "Prev"),
-        Binding("s", "review", "Review"),
+        Binding("R", "review", "Review"),
         Binding("g", "go", "Go"),
         Binding("u", "refresh", "Update"),
         Binding("f", "finish", "Finish"),

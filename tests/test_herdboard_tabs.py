@@ -72,7 +72,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(bar.active, "prs")
             self.assertEqual(bar.tab_labels(), ["▦ Board G", "⑂ Pull requests 0"])
             keys = " ".join(self.keys(app).keys_text().plain.split())
-            for part in ("/ Search", "n Next", "s Review", "esc Back"):
+            for part in ("/ Search", "n Next", "R Review", "esc Back"):
                 self.assertIn(part, keys)
             self.assertNotIn("a Add", keys)
             self.assertEqual(self.keys(app).region.bottom, 30)

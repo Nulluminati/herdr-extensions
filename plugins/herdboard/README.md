@@ -335,7 +335,7 @@ The flow:
    In a window narrower than about 115 columns, a PR keeps three rows: the GitHub and agent reviews move under the title, and CI, the counts and the update time go to the right.
 
    The lines above the list show the repository, the total, the page and the search, then count what needs you on the page, by GitHub, CI and agent.
-2. Press `s` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
+2. Press `R` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
 5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
@@ -350,7 +350,7 @@ Keys on the list:
 | Key | Action |
 |---|---|
 | `enter` or a click | Show the PR's details: its branches, size and labels, each CI check (failed first), the issues it closes, the GitHub reviews by reviewer, the local agent review and the description. herdboard reads the checks, issues, reviews and description only then. The action keys below also work there |
-| `s` | Choose an agent and a model, then review the PR |
+| `R` | Choose an agent and a model, then review the PR |
 | `g` | Go to the PR's review workspace |
 | `u` | Fetch new commits, open Hunk again with the old notes, and offer a new agent review |
 | `f` | Finish the review, after you confirm |
@@ -387,7 +387,7 @@ Limits:
 - A note on a line that is no longer in the diff is dropped. When Hunk refuses a note for another reason, herdboard keeps it in the saved notes and stops with `hunk_failed`. Press `u` to apply it again. `f` counts these saved notes too.
 - When Git does not delete `pr/<N>`, `f` stops with `git_failed` and keeps the review. Fix the branch, then press `f` again.
 - `u` saves the notes to `pr-reviews/<PR>.notes.json` in the state folder before it closes Hunk. When the new Hunk does not open, the next `u` or review puts them back.
-- A review (`s`) of a PR whose worktree is behind the PR head stops with `new_commits`. On the list, herdboard then offers to fetch the new commits first.
+- A review (`R`) of a PR whose worktree is behind the PR head stops with `new_commits`. On the list, herdboard then offers to fetch the new commits first.
 - `f` removes the worktree first. When Herdr or Git refuses, Hunk and its notes stay open.
 - Only github.com, and only PRs of the current repository.
 - herdboard does not remove the workspaces of merged or closed PRs by itself. Use `f`.

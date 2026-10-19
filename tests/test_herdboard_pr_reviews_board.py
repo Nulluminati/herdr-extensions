@@ -242,7 +242,7 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.screen.pr.number, 8)
             self.assertIn("3 notes", app.screen.text())
 
-    async def test_s_in_the_details_reviews(self):
+    async def test_R_in_the_details_reviews(self):
         app = self.app()
         async with app.run_test() as pilot:
             await self.open(app, pilot)
@@ -250,13 +250,24 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await pilot.press("s")
             await pilot.pause()
+            self.assertIsInstance(app.screen, PullRequestDetailScreen)
+            await pilot.press("R")
+            await pilot.pause()
             self.assertIsInstance(app.screen, AgentScreen)
 
-    async def test_s_chooses_claude_and_its_model_then_reviews(self):
+    async def test_s_does_not_review(self):
         app = self.app()
         async with app.run_test() as pilot:
             await self.open(app, pilot)
             await pilot.press("s")
+            await pilot.pause()
+            self.assertNotIsInstance(app.screen, AgentScreen)
+
+    async def test_R_chooses_claude_and_its_model_then_reviews(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            await pilot.press("R")
             await pilot.pause()
             self.assertIsInstance(app.screen, AgentScreen)
             await pilot.press("enter")
@@ -267,12 +278,12 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.service.review.assert_called_once_with(7, "claude", "sonnet", None)
         self.assertIn(("PR #7: claude (sonnet) reviews in workspace w9", None), self.notices)
 
-    async def test_s_with_pi_takes_its_model_and_thinking(self):
+    async def test_R_with_pi_takes_its_model_and_thinking(self):
         app = self.app()
         with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
             async with app.run_test() as pilot:
                 await self.open(app, pilot)
-                await pilot.press("j", "s")
+                await pilot.press("j", "R")
                 await pilot.pause()
                 await pilot.press("down", "enter")
                 await pilot.pause()
@@ -318,7 +329,7 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         app = self.app()
         async with app.run_test() as pilot:
             await self.open(app, pilot)
-            await pilot.press("s")
+            await pilot.press("R")
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
