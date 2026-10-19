@@ -128,7 +128,7 @@ A card on the inbox can run without a repository. `start` and `plan` then fail w
 - A new repository: `--new-repo [PATH]`. herdboard runs `git init -b main` and a first commit at PATH, creates the board, moves the card, then starts as usual. Without PATH it uses `projects_dir/<title>`; the default is `~/Projects`. The path must not exist, or must be an empty folder; a folder that a stopped start left with only an unborn repository is reused. Only todos can do this, and not a card with a parent or sub-cards (`new_repo_family`).
 - No repository: `--no-repo`. herdboard creates `<todos>/.herdboard/work/<id>/` and opens a workspace there. There is no Git, no branch and no worktree.
 
-A repoless card writes its result to the card's attachments (for example `findings.md`). Review it with `review <id> --agent`; Hunk and `merge` refuse with `no_repository`. `finish` closes the workspace, deletes the card folder with everything in it, and moves the card to Done. The start record keeps the choice, so a later `start` or `plan` asks nothing.
+A repoless card writes its result to the card's attachments (for example `findings.md`). Review it with `review <id> --agent`; Hunk and `merge` refuse with `no_repository`. `finish` closes the workspace, deletes the card folder with everything in it, and moves the card to Done. `finish` also drops a card that was planned with `--new-repo` before its repository exists. The start record keeps the choice, so a later `start` or `plan` asks nothing. `--checkout` and `--base` need a repository that the card already has, so `--no-repo` and `--new-repo` refuse them with `usage`.
 
 `doctor` without `--fix-ids` only reads, and you can run it to explain a problem.
 

@@ -543,6 +543,13 @@ class MergeCliTests(CliTestCase):
             self.assertEqual(out, f"{ref}: finished; worktree removed; branch kept\n")
             merger.return_value.finish.assert_called_with(ref, force=True)
 
+    def test_finish_text_for_a_card_without_a_repository(self):
+        with patch("herdboard.cli.Merger") as merger:
+            merger.return_value.finish.return_value = {"ref": "t123", "worktree_removed": True,
+                                                       "branch_deleted": False, "mode": "new_repo"}
+            out, _ = self.run_cli("finish", "t123", directory=self.plain)
+        self.assertEqual(out, "t123: finished; card folder removed\n")
+
     def test_a_conflict_exits_with_code_2(self):
         ref = self.card()
         with patch("herdboard.cli.Merger") as merger:

@@ -20,9 +20,9 @@ from . import activity, pr_write
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
 from .model import HerdboardError
-from .start import (REPOLESS, Starter, StartError, _lock, _read, _write, agent_live, card_changed,
-                    close_review_pane, fetch_linear_card, find_record, herdr, safe_key, state_dir,
-                    work_folder)
+from .start import (NEW_REPO, REPOLESS, Starter, StartError, _lock, _read, _write, agent_live,
+                    card_changed, close_review_pane, fetch_linear_card, find_record, herdr, safe_key,
+                    state_dir, work_folder)
 
 
 # The board reads the state of an open pull request at most this often.
@@ -145,8 +145,8 @@ class Merger:
         if found is None:
             raise MergeError(f"{ref} has no started work; run `herdboard start {ref}` first", "not_started")
         key, record = found
-        if record.get("mode") == REPOLESS:
-            # A repoless card has no branch and no base: only `finish` applies.
+        if record.get("mode") in (REPOLESS, NEW_REPO):
+            # The card has no branch and no base: only `finish` applies.
             return card, ref, key, record
         if not record.get("branch") or not record.get("checkout"):
             raise MergeError(f"{ref} has no started work; run `herdboard start {ref}` first", "not_started")
@@ -214,6 +214,9 @@ class Merger:
             raise MergeError(f"{ref} has no repository, so there is no branch to merge. "
                              f"Review its attachments with `herdboard review {ref} --agent`, "
                              f"then run `herdboard finish {ref}`.", "no_repository")
+        if record.get("mode") == NEW_REPO:
+            raise MergeError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
+                             f"Run `herdboard finish {ref}` to drop the card instead.", "no_repository")
         if card is not None and not force:
             open_children = [child.ref for child in self.store.children(ref) if not child.checked]
             if open_children:
@@ -289,7 +292,7 @@ class Merger:
         return {"ref": ref, **result}
 
     def _finish(self, card, ref, key, record, force):
-        if record.get("mode") == REPOLESS:
+        if record.get("mode") in (REPOLESS, NEW_REPO):
             return self._finish_repoless(card, ref, key, record)
         branch, base, checkout = record["branch"], record["base"], Path(record["checkout"])
         exists = _commit(checkout, f"refs/heads/{branch}") is not None
@@ -354,7 +357,7 @@ class Merger:
             records = _read(state_dir() / "starts.json")
             records.pop(key, None)
             _write(state_dir() / "starts.json", records)
-        return {"worktree_removed": True, "branch_deleted": False, "mode": REPOLESS}
+        return {"worktree_removed": True, "branch_deleted": False, "mode": record.get("mode") or REPOLESS}
 
     def _remove_worktree(self, record, worktree):
         try:

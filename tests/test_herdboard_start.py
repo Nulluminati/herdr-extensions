@@ -140,6 +140,19 @@ class StartTests(unittest.TestCase):
         self.assertEqual(record["branch"], result["branch"])
         self.assertFalse((self.root / "new").exists())
 
+    def test_a_prompt_cannot_replace_a_live_worktree(self):
+        card = self.store.add(self.store.ensure_inbox(), "Global task")
+        result = self.starter.start(card.ref, repo=self.board.stem, no_agent=True)
+        prompt = unittest.mock.Mock(return_value=("new_repo", self.root / "new"))
+        starter = start.Starter(self.store, self.repo, prompt_target=prompt)
+        with self.assertRaises(start.StartError) as raised:
+            starter.start(card.ref, no_agent=True)
+        prompt.assert_called_once()
+        self.assertEqual(raised.exception.code, "usage")
+        record = json.loads((start.state_dir() / "starts.json").read_text())[card.ref]
+        self.assertEqual(record["branch"], result["branch"])
+        self.assertFalse((self.root / "new").exists())
+
     def test_go_to_workspace_focuses_the_open_workspace(self):
         self.starter.start(self.card.ref, no_agent=True)
         self.fake.calls.clear()
@@ -948,6 +961,16 @@ class NoRepositoryStartTests(unittest.TestCase):
         result = starter.start(self.card.ref)
         prompt.assert_called_once()
         self.assertEqual(result["mode"], "repoless")
+
+    def test_checkout_and_base_need_an_existing_repository(self):
+        for options in ({"no_repo": True, "base": "main"}, {"no_repo": True, "checkout": self.root},
+                        {"new_repo": self.root / "n1", "base": "main"},
+                        {"new_repo": self.root / "n2", "checkout": self.root}):
+            with self.subTest(options=options), self.assertRaises(start.StartError) as raised:
+                self.starter.start(self.card.ref, **options)
+            self.assertEqual(raised.exception.code, "usage")
+        self.assertFalse((self.root / "n1").exists())
+        self.assertFalse((self.root / "n2").exists())
 
     def test_conflicting_flags_are_usage(self):
         for options in ({"new_repo": self.root / "new", "no_repo": True},

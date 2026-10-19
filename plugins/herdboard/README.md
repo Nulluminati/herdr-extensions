@@ -272,7 +272,7 @@ An inbox card is sometimes research, or the start of a new project, and it has n
 - **A new repository.** `--new-repo [PATH]` creates a local Git repository, its board, and then starts the card as usual. Without PATH, herdboard uses `<projects_dir>/<title>`, such as `~/Projects/corvid-tracker`. The path must not exist, or must be an empty folder. A folder that a stopped start left with only an unborn repository is reused. herdboard runs `git init -b main` and makes one empty first commit. The new board merges locally (`local`) and has no remote: add one with `git remote add origin` when you have it. Only todos can create a repository, and not a card with a parent or sub-cards: their cards must stay on one board.
 - **No repository.** `--no-repo` runs the card in `<todos_dir>/.herdboard/work/<id>/`, a plain folder with no Git, no branch and no worktree. herdboard opens a Herdr workspace there, in front of you, because there is no worktree to visit later. The brief tells the agent to write its result to the card's attachments, such as `findings.md`: press `o` on the card to read them.
 
-A card that already has a worktree refuses `--no-repo` and `--new-repo` with `usage`, so a start record is never replaced by accident. Finish the card first.
+A card that already has a worktree refuses `--no-repo` and `--new-repo` with `usage`, so a start record is never replaced by accident. Finish the card first. `--checkout` and `--base` need a repository that the card already has, so `--no-repo` and `--new-repo` refuse them too.
 
 The choice is kept in the card's start record, so a later `start` or `plan` does not ask again. On the board, `s`, `S` and `P` ask the question in a dialog. In a terminal, `start` and `plan` ask too, unless `--json` is set.
 
@@ -361,7 +361,7 @@ A sync replaces the GitHub title and body, and so overwrites edits made on the G
 
 A worktree with uncommitted or untracked files always stops `finish`. `--force` finishes a card that is not merged, but keeps its branch.
 
-For a card without a repository, `finish` closes the card's workspace, deletes the card folder with everything in it, and moves the card to Done. There is no branch to check.
+For a card without a repository, `finish` closes the card's workspace, deletes the card folder with everything in it, and moves the card to Done. There is no branch to check. This also drops a card that was planned with `--new-repo` before its repository exists.
 
 The board never runs `finish` itself.
 

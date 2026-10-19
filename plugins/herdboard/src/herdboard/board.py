@@ -4545,7 +4545,7 @@ class HerdboardApp(App):
         run = (lambda: self.finish_card(ref)) if self.finish_card else (lambda: self._merger().finish(ref))
 
         def notice(result: dict) -> str:
-            if result.get("mode") == "repoless":
+            if result.get("mode") in ("repoless", "new_repo"):
                 return f"Finished {result['ref']}; card folder removed"
             return f"Finished {result['ref']}; branch {'deleted' if result['branch_deleted'] else 'kept'}"
 

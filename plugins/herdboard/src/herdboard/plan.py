@@ -88,11 +88,13 @@ def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, wor
         if new_repo_path is not None:
             lines += [f"- Working folder: `{worktree}`. There is no repository yet: `start` creates one at "
                       f"`{new_repo_path}` after the plan is done, and the work happens there. Plan the "
-                      "first steps of the project."]
+                      "first steps of the project.",
+                      "- Do not commit anything. This folder is not kept: only the plan attachment carries "
+                      "over to the new repository."]
         else:
             lines += [f"- Working folder: `{worktree}`. This card has no repository and no code to read. "
-                      "Ask the user what the plan needs."]
-        lines += ["- Do not commit anything. herdboard deletes the folder when the card is finished."]
+                      "Ask the user what the plan needs.",
+                      "- Do not commit anything. herdboard deletes the folder when the card is finished."]
     else:
         lines += [f"- Worktree: `{worktree}` on branch `{branch}` (base `{base}`). You may change code and run "
                   "commands here to test ideas. Do not commit. Before planning ends, revert every change you "

@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard import activity, attachments, plan, start  # noqa: E402
+from herdboard import activity, agent_review, attachments, merge, plan, review, start  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.identity import repo_identity  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -465,6 +465,46 @@ class NoRepositoryPlanTests(PlanTestCase):
         self.assertTrue((path / ".git").is_dir())
         self.assertEqual(self.store.show(self.inbox_card.ref).column, "In progress")
         self.assertFalse(self.folder().exists())
+
+    def test_a_planned_new_repository_card_can_be_finished(self):
+        path = self.root / "Projects" / "corvid"
+        self.planner.plan(self.inbox_card.ref, new_repo=path)
+        merger = merge.Merger(self.store, self.repo)
+        with self.assertRaises(merge.MergeError) as raised:
+            merger.merge(self.inbox_card.ref)
+        self.assertEqual(raised.exception.code, "no_repository")
+        # The user closes the planner, so only the card folder still blocks an archive.
+        plan._forget(self.inbox_card.ref, "w1:p7")
+        self.assertIn("work folder", start.archive_blocker(self.inbox_card.ref))
+        result = merger.finish(self.inbox_card.ref)
+        self.assertEqual(result["mode"], "new_repo")
+        self.assertFalse(self.folder().exists())
+        self.assertTrue(self.store.show(self.inbox_card.ref).checked)
+        records = json.loads((start.state_dir() / "starts.json").read_text())
+        self.assertNotIn(self.inbox_card.ref, records)
+
+    def test_go_to_the_planned_new_repository_folder(self):
+        self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
+        self.fake.calls.clear()
+        self.assertEqual(start.go_to_workspace(self.inbox_card.ref),
+                         {"ref": self.inbox_card.ref, "workspace_id": "x1"})
+        self.assertIn(["workspace", "focus", "x1"], self.fake.calls)
+
+    def test_review_of_a_planned_new_repository_card_says_to_start_it(self):
+        self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
+        with self.assertRaises(review.ReviewError) as raised:
+            review.Reviewer(self.store, self.repo).review(self.inbox_card.ref)
+        self.assertEqual(raised.exception.code, "not_started")
+        self.assertIn("creates", str(raised.exception))
+        with self.assertRaises(review.ReviewError) as raised:
+            agent_review.AgentReviewer(self.store, self.repo).request(self.inbox_card.ref)
+        self.assertEqual(raised.exception.code, "not_started")
+
+    def test_the_new_repository_plan_brief_does_not_promise_a_finished_folder(self):
+        self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
+        text = self.brief_for(self.inbox_card.ref)
+        self.assertNotIn("deletes the folder", text)
+        self.assertIn("only the plan attachment carries over", text)
 
 
 class WaitTests(PlanTestCase):

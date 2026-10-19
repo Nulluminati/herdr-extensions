@@ -19,7 +19,7 @@ from . import activity, attachments, start as start_module
 from .config import THINKING_LEVELS
 from .model import HerdboardError
 from .review import Reviewer, ReviewError
-from .start import REPOLESS, _lock, _read, _write, find_record, herdr, safe_key, state_dir
+from .start import NEW_REPO, REPOLESS, _lock, _read, _write, find_record, herdr, safe_key, state_dir
 
 REVIEWERS = {"claude": "pi", "pi": "claude"}
 # A review of a large change can take long; the worker gives up after this.
@@ -150,6 +150,9 @@ class AgentReviewer(Reviewer):
         if thinking is not None and thinking not in THINKING_LEVELS:
             raise ReviewError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
         card, ref, key, record = self._started(ref)
+        if record.get("mode") == NEW_REPO:
+            raise ReviewError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
+                              "Start the card, then review it.", "not_started")
         kind = reviewer or REVIEWERS[record.get("agent") or self.config.start_agent]
         if thinking and kind != "pi":
             raise ReviewError("--thinking works only with a pi reviewer", "usage")

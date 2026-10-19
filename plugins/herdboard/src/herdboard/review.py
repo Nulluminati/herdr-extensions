@@ -13,8 +13,8 @@ import time
 from . import activity
 from .linear_cards import LINEAR_REF
 from .model import HerdboardError
-from .start import (REPOLESS, Starter, StartError, _lock, _read, _write, agent_live, fetch_linear_card,
-                    find_record, herdr, safe_key, state_dir)
+from .start import (NEW_REPO, REPOLESS, Starter, StartError, _lock, _read, _write, agent_live,
+                    fetch_linear_card, find_record, herdr, safe_key, state_dir)
 
 HUNK_PLUGIN = "jhochenbaum.hunkdiff"
 REVIEW_NOTE = "The card is in review. Review feedback follows. Wait for it."
@@ -129,6 +129,9 @@ class Reviewer:
 
     def review(self, ref):
         card, ref, key, record = self._started(ref)
+        if record.get("mode") == NEW_REPO:
+            raise ReviewError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
+                              "Start the card, then review it.", "not_started")
         if record.get("mode") == REPOLESS:
             raise ReviewError(f"{ref} has no repository, so Hunk has no branch to show. "
                               f"Review its attachments with `herdboard review {ref} --agent`, "

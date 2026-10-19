@@ -232,7 +232,7 @@ def go_to_workspace(ref):
     """Focus the Herdr workspace of a started card's worktree. Stops when Herdr has none open."""
     found = find_record(ref)
     record = found[1] if found else {}
-    if record.get("mode") == REPOLESS:
+    if record.get("mode") in (REPOLESS, NEW_REPO):
         path = record.get("worktree_path")
         workspace = record.get("workspace_id")
         if not path or not workspace or not Path(path).exists():
@@ -322,7 +322,7 @@ def archive_blocker(ref) -> str | None:
     record = found[1]
     path = record.get("worktree_path")
     if path and Path(path).exists():
-        if record.get("mode") == REPOLESS:
+        if record.get("mode") in (REPOLESS, NEW_REPO):
             return f"its work folder still exists at {path}. Finish the card first"
         return f"its worktree still exists at {path}. Finish the card first"
     if agent_live(record):
@@ -602,7 +602,7 @@ class Starter:
         raise StartError(f"{card.ref} has a worktree at {path}. Finish the card with "
                          f"`herdboard finish {card.ref}` first, then use {option}.", "usage")
 
-    def _target(self, card, repo, no_repo, new_repo, issue):
+    def _target(self, card, repo, no_repo, new_repo, issue, checkout=None, base=None):
         """Where the card runs: `("repo", identity)`, `("new_repo", path)` or `("repoless", None)`.
 
         The explicit flags win, then the choice a record keeps, then the repository of the card.
@@ -610,6 +610,12 @@ class Starter:
         """
         if new_repo is not None and (no_repo or repo):
             raise StartError("--new-repo cannot be used with --no-repo or --repo", "usage")
+        if no_repo or new_repo is not None:
+            if checkout is not None:
+                raise StartError("--checkout works only with a repository that the card already has",
+                                 "usage")
+            if base:
+                raise StartError("--base works only with a repository that the card already has", "usage")
         if new_repo is not None:
             self._refuse_over_live_worktree(card, "--new-repo")
             return NEW_REPO, self._new_repo_path(card, new_repo, issue)
@@ -635,6 +641,7 @@ class Starter:
                 raise
             mode, value = answer
             if mode == NEW_REPO:
+                self._refuse_over_live_worktree(card, "--new-repo")
                 return NEW_REPO, self._new_repo_path(card, value, issue)
             if mode == REPOLESS:
                 self._refuse_over_live_worktree(card, "--no-repo")
@@ -874,7 +881,7 @@ class Starter:
         `new_repo` names where a later `start` creates the repository.
         """
         with _lock(".start-" + safe_key(key) + ".lock"):
-            mode, target = self._target(card, repo, no_repo, new_repo, issue)
+            mode, target = self._target(card, repo, no_repo, new_repo, issue, checkout, base)
             if mode == REPO:
                 return self._prepare(card, issue, key, repo, checkout, base, move_parent, check_column,
                                      identity=target)
@@ -1121,7 +1128,7 @@ class Starter:
             key = card.ref
         lock_key = safe_key(key)
         with _lock(".start-" + lock_key + ".lock"):
-            mode, target = self._target(card, repo, no_repo, new_repo, issue)
+            mode, target = self._target(card, repo, no_repo, new_repo, issue, checkout, base)
             if mode == REPOLESS:
                 # The card has no worktree, so its folder workspace opens in front of the user.
                 record = self._prepare_workspace(card, key, REPOLESS, focus=True)

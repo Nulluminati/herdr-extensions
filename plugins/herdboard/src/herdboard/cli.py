@@ -919,7 +919,7 @@ def _cmd_finish(ctx: _Context) -> dict:
 
 
 def _finish_line(result: dict) -> str:
-    if result.get("mode") == "repoless":
+    if result.get("mode") in ("repoless", "new_repo"):
         return f"{result['ref']}: finished; card folder removed"
     worktree = "worktree removed" if result["worktree_removed"] else "no worktree to remove"
     branch = "branch deleted" if result["branch_deleted"] else "branch kept"
