@@ -937,9 +937,10 @@ class DetailScreen(ModalBase):
         elif card.worktree_left:
             rows.append(("Worktree", icon_label("branch", "still exists", self.icon_style)))
         style = self.icon_style
-        if card.agent_status and card.agent:
+        if card.agent_status:
             agent = agent_glyph(card.agent_status)
-            agent.append(f" {card.agent}: {card.agent_status}")
+            # An agent that the user started by hand in the card's pane has no recorded kind.
+            agent.append(f" {card.agent or 'agent'}: {card.agent_status}")
             rows.append(("Agent", agent))
         if card.planning:
             rows.append(("Planner", self._phase("planning", card.planning, card.planning_status)))

@@ -286,6 +286,10 @@ class AgentGlyphTests(unittest.TestCase):
         nerd = board.DetailScreen(card(planned=True), None, icon_style="nerd")._meta().plain
         self.assertIn("Plan         \uf046 planned", nerd)
 
+    def test_the_detail_screen_names_an_agent_without_a_recorded_kind(self):
+        item = card(worktree=True, agent_status="blocked")
+        self.assertIn("Agent        × agent: blocked", board.DetailScreen(item, None)._meta().plain.splitlines())
+
     def test_the_help_screen_explains_each_glyph(self):
         icons = dict(next(entries for title, entries in board.HELP_SECTIONS if title == "Icons"))
         for glyph in ("◐", "×", "✓", "○", "·", "●", "✎", "☑", "⌕", "✔", "↑"):
