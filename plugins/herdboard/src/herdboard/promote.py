@@ -66,12 +66,14 @@ class Promoter:
         ask: Ask = refuse,
         state_name: str | None = None,
         project: str | None = None,
+        again: str | None = None,
     ) -> Promotion:
         """Create the issue and sub-issues for a todo, then move the todo to its done column.
 
         `target` is called only when a new promotion starts. A todo with a record continues
         that record and creates only what Linear does not have. `team`, `project` and
         `state_name` that differ from the record become warnings; the record wins.
+        `again` tells how to finish after a failure; `{ref}` in it is the todo ID.
         """
         if LINEAR_REF.match(ref):
             raise NotATodoError(f"{ref} is a Linear issue, not a todo")
@@ -80,10 +82,10 @@ class Promoter:
             records = PromotionRecords(self.writer.source.account_dir(), store)
             with records.lock():
                 return self._promote(
-                    client, records, ref, team, target, ask, state_name, project
+                    client, records, ref, team, target, ask, state_name, project, again
                 )
 
-    def _promote(self, client, records, ref, team, target, ask, state_name, project) -> Promotion:
+    def _promote(self, client, records, ref, team, target, ask, state_name, project, again) -> Promotion:
         self._refuse_if_marked(records, self.store.show(ref))
         todo_id = self.store.ensure_id(ref).ref
         snapshot = self.store.todo_snapshot(todo_id)
@@ -101,7 +103,7 @@ class Promoter:
             records.put(todo_id, record)
         else:
             warnings = self._differences(record, team, project, state_name)
-        again = f"Run `herdboard promote {todo_id}` again to finish"
+        again = (again or "Run `herdboard promote {ref}` again to finish").format(ref=todo_id)
         try:
             found = self._create_missing(client, records, todo_id, record, resuming)
         except LinearError as error:

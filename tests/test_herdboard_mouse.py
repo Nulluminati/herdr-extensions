@@ -298,8 +298,8 @@ class CardActionTests(MouseTestCase):
 
     def test_a_todo_without_a_worktree(self):
         self.assertEqual(self.actions(self.first),
-                         ["detail", "done", "edit", "move_board", "delete", "archive", "start", "choose_agent",
-                          "plan", "parent"])
+                         ["detail", "done", "edit", "move_board", "delete", "archive", "promote", "start",
+                          "choose_agent", "plan", "parent"])
 
     def test_a_todo_with_a_worktree(self):
         self.assertEqual(self.actions(self.first, worktree=True),

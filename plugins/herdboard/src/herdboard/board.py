@@ -48,6 +48,9 @@ from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
 from .plan import Planner, mark_planning
+from .linear_states import StateCancelledError
+from .promote import Promoter
+from .promote_convert import promoted_identifier
 from .review import Reviewer
 from .start import Starter, mark_removed, pi_model_choices
 from .views import LinearResult
@@ -157,6 +160,8 @@ HELP_SECTIONS = [
         ("x", "delete the todo, after you confirm"),
         ("A", "archive the todo; in the archive column, move it back to the done column (an archived parent too, after you confirm)"),
         ("D", "archive every card in the done column, after you confirm"),
+        ("T", "promote the todo to a Linear issue: choose its team and project; its checklist and sub-cards "
+              "become sub-issues, and the todo moves to Done"),
         ("z", "show or hide the archive column"),
         ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
     ]),
@@ -1460,6 +1465,159 @@ class IssueSearchScreen(ModalBase):
         self.dismiss(self.results[event.option_index])
 
 
+class PromoteScreen(ModalBase):
+    """Choose the Linear team and project of a todo's promotion. Nothing starts chosen.
+
+    The teams, then the projects of the chosen team, load in threads. A list that a newer
+    team choice made obsolete is dropped. Ctrl+s returns (team, project or None); escape None.
+    """
+
+    BINDINGS = [Binding("ctrl+s", "promote", "Promote")]
+
+    def __init__(self, ref: str, title: str, load_teams: Callable[[], list[dict]],
+                 load_projects: Callable[[str], list[dict]]):
+        super().__init__()
+        self.ref = ref
+        self.title_text = title
+        self.load_teams = load_teams
+        self.load_projects = load_projects
+        self.teams: list[dict] | None = None
+        self.projects: list[dict] | None = None
+        self.team: dict | None = None
+        self.project: dict | None = None
+        # True once a project option, "No project" too, was chosen for the current team.
+        self.project_chosen = False
+        # True when the last list failed to load.
+        self.failed = False
+        # Counts the loads. Only the result of the newest load is shown.
+        self.sequence = 0
+
+    def compose(self) -> ComposeResult:
+        note = (f"This creates Linear issues for {self.title_text}, its checklist and its sub-cards, "
+                "then moves the todo to Done.")
+        with Vertical(classes="dialog"):
+            yield Label(f"Promote {self.title_text} to Linear")
+            yield RichStatic(Text(note), id="promote-note", classes="dim")
+            yield Label("Team")
+            yield OptionList(id="promote-teams")
+            yield Label("Project")
+            yield OptionList(id="promote-projects", disabled=True)
+            yield RichStatic(Text("Loading teams…"), id="promote-status", classes="dim")
+            yield Label("enter or click: choose · ctrl+s: promote · escape: cancel", classes="dim")
+
+    def on_mount(self) -> None:
+        # Textual also runs ModalBase.on_mount, which adds the key bar.
+        self._load(self.load_teams)
+
+    @property
+    def ready(self) -> bool:
+        return self.team is not None and self.project_chosen
+
+    def key_applies(self, action: str) -> bool:
+        return action != "promote" or self.ready
+
+    def _status(self, message: str, error: bool = False) -> None:
+        status = self.query_one("#promote-status", RichStatic)
+        status.rich_text = Text(message)
+        status.plain = message
+        status.set_class(error, "error")
+        status.set_class(not error, "dim")
+        status.update(status.rich_text)
+
+    def _load(self, load: Callable[[], list[dict]]) -> None:
+        self.sequence += 1
+        sequence = self.sequence
+
+        def guarded() -> tuple[int, list[dict] | None, HerdboardError | None]:
+            try:
+                return sequence, load(), None
+            except HerdboardError as error:
+                return sequence, None, error
+
+        self.run_worker(guarded, thread=True, exit_on_error=False)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+            return
+        if event.state == WorkerState.ERROR:
+            self.failed = True
+            self._status(str(event.worker.error), error=True)
+        if event.state != WorkerState.SUCCESS:
+            return
+        sequence, found, error = event.worker.result
+        if sequence != self.sequence:
+            return
+        if error is not None:
+            self.failed = True
+            self._status(str(error), error=True)
+            return
+        self.failed = False
+        if self.team is None:
+            self._show_teams(found)
+        else:
+            self._show_projects(found)
+
+    def _show_teams(self, teams: list[dict]) -> None:
+        self.teams = teams
+        options = self.query_one("#promote-teams", OptionList)
+        options.add_options([f"{team['key']}  {team['name']}" for team in teams])
+        if not teams:
+            self._status("Your Linear account has no Linear teams.", error=True)
+            return
+        self._status("Choose a team.")
+        options.focus()
+
+    def _show_projects(self, projects: list[dict]) -> None:
+        self.projects = projects
+        names = [project["name"].casefold() for project in projects]
+        labels = ["No project"]
+        for project in projects:
+            label = project["name"]
+            if names.count(project["name"].casefold()) > 1:
+                teams = ", ".join(team["key"] for team in project["teams"])
+                label += f"  ({teams} · {project['id']})"
+            labels.append(label)
+        options = self.query_one("#promote-projects", OptionList)
+        options.add_options(labels)
+        options.disabled = False
+        team = self.team["key"]
+        self._status(f"Choose a project of {team}, or No project." if projects
+                     else f"Team {team} has no projects. Choose No project.")
+        options.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        if event.option_list.id == "promote-teams":
+            self._choose_team(self.teams[event.option_index])
+            return
+        if self.projects is None:
+            return
+        self.project = None if event.option_index == 0 else self.projects[event.option_index - 1]
+        self.project_chosen = True
+        name = self.project["name"] if self.project else "no project"
+        self._status(f"Team {self.team['key']}, {name}. Press ctrl+s to promote.")
+        self.refresh_bindings()
+
+    def _choose_team(self, team: dict) -> None:
+        self.team = team
+        self.projects = None
+        self.project = None
+        self.project_chosen = False
+        projects = self.query_one("#promote-projects", OptionList)
+        projects.clear_options()
+        projects.disabled = True
+        self._status(f"Loading the projects of {team['key']}…")
+        self.refresh_bindings()
+        load = self.load_projects
+        self._load(lambda: load(team["id"]))
+
+    def action_promote(self) -> None:
+        if not self.ready:
+            self.notify("Choose a team and a project, or No project.", severity="warning")
+            return
+        self.dismiss((self.team, self.project))
+
+
 class ParentScreen(ModalBase):
     """Choose the parent of a todo: another todo on its board, or no parent."""
 
@@ -1489,6 +1647,7 @@ MENU_ENTRIES = [
     ("move_board", "b", "Board"),
     ("delete", "x", "Delete"),
     ("archive", "A", "Archive"),
+    ("promote", "T", "Promote to Linear"),
     ("start", "s", "Start"),
     ("choose_agent", "S", "Choose agent"),
     ("go", "g", "Go to workspace"),
@@ -1502,6 +1661,36 @@ MENU_ENTRIES = [
 
 # The board keys that act on the selected card. Without a card, the key bar dims them.
 CARD_KEY_ACTIONS = {action for action, _key, _label in MENU_ENTRIES} | {"move", "shift"}
+
+
+def promote_refusal(card: CardView) -> str | None:
+    """Why the card cannot be promoted to Linear, or None. Sub-cards with a worktree are checked apart."""
+    name = split_title(card.title)[0] or card.title
+    if card.source == "linear" or card.read_only:
+        return "Only a local todo can be promoted to Linear."
+    if card.archived:
+        return f"{name} is archived. Unarchive it before you promote it."
+    if card.parent:
+        return f"{name} is a sub-card. Promote its parent: sub-cards become sub-issues."
+    done = promoted_identifier(card.title)
+    if done:
+        return f"{name} was already promoted to {done}."
+    if card.worktree:
+        return f"{name} has a worktree. Finish the card before you promote it."
+    return None
+
+
+def family_refusal(card: CardView, children: list[CardView]) -> str | None:
+    """Why the card cannot be promoted, its sub-cards included: promotion completes them too."""
+    refusal = promote_refusal(card)
+    if refusal is not None:
+        return refusal
+    for child in children:
+        if child.worktree:
+            name = split_title(child.title)[0] or child.title
+            return (f"Its sub-card {name} has a worktree. "
+                    "Finish the sub-card before you promote the parent.")
+    return None
 
 
 def card_actions(card: CardView) -> list[tuple[str, str]]:
@@ -1525,6 +1714,8 @@ def card_actions(card: CardView) -> list[tuple[str, str]]:
             wanted |= {"start", "choose_agent", "plan"}
             if todo:
                 wanted.add("archive")
+        if promote_refusal(card) is None:
+            wanted.add("promote")
         if card.checked and card.worktree_left:
             wanted.add("finish")
     return [(f"{key}  {'Unarchive' if action == 'archive' and card.archived else label}", action)
@@ -3062,6 +3253,7 @@ class HerdboardApp(App):
         Binding("A", "archive", "Archive"),
         Binding("D", "archive_done", "Archive done", show=False),
         Binding("z", "toggle_archive", "Show archive", show=False),
+        Binding("T", "promote", "Promote", show=False),
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
         Binding("g", "go", "Go to workspace"),
@@ -3844,6 +4036,81 @@ class HerdboardApp(App):
                 self._start_write(lambda: self.store.set_parent(ref, answer[1]))
 
         self.push_screen(ParentScreen(card, options), chosen)
+
+    def action_promote(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        children = [other for data in self.loaded for other in data.cards
+                    if other.parent == card.ref and other.source != "linear"]
+        refusal = family_refusal(card, children)
+        if refusal is not None:
+            self.notify(refusal, severity="warning")
+            return
+        if self.linear_writer is None:
+            self.notify(LINEAR_WRITER_MESSAGE, severity="warning")
+            return
+        writer = self.linear_writer
+
+        def load_teams() -> list[dict]:
+            with writer.online() as client:
+                return client.teams()
+
+        def load_projects(team_id: str) -> list[dict]:
+            with writer.online() as client:
+                return client.projects_for_team(team_id)
+
+        def chosen(choice: tuple[dict, dict | None] | None) -> None:
+            if choice is not None:
+                self.submit_promote(card.ref, choice)
+
+        title = split_title(card.title)[0] or card.title
+        self.push_screen(PromoteScreen(card.ref, title, load_teams, load_projects), chosen)
+
+    def submit_promote(self, ref: str, choice: tuple[dict, dict | None]) -> None:
+        """Promote the todo in the write worker with the form's team and project."""
+        team, project = choice
+        writer = self.linear_writer
+        if writer is None:
+            self.notify(LINEAR_WRITER_MESSAGE, severity="warning")
+            return
+
+        def target(client, _view) -> tuple[dict | None, list[str]]:
+            if project is None:
+                return None, []
+            found = client.project_for_write(project["id"])
+            if found is None or team["id"] not in {t["id"] for t in found["teams"]}:
+                raise HerdboardError(f"Linear project {project['name']} is not a project of team "
+                                     f"{team['key']}. Press T and choose the project again")
+            return found, []
+
+        def change() -> CardView | None:
+            # The card can change while the form is open: check it again, with its start records.
+            view = self.store.show(ref)
+            children = self.store.children(view.ref)
+            mark_removed([view, *children])
+            refusal = family_refusal(view, children)
+            if refusal is not None:
+                raise HerdboardError(refusal)
+            try:
+                promotion = Promoter(self.store.config, self.store, writer).promote(
+                    ref, team=team["key"], target=target, ask=self.ask_state,
+                    project=project["name"] if project else None,
+                    again="Press T on the todo again to finish",
+                )
+            except StateCancelledError:
+                self.call_from_thread(self.notify, "Promotion cancelled: no Linear issue was created.",
+                                      severity="warning")
+                return None
+            count = len(promotion.sub_issues)
+            subs = f" with {count} sub-issue{'s' if count != 1 else ''}" if count else ""
+            self.call_from_thread(self.notify, f"Promoted to {promotion.issue['identifier']}{subs}")
+            for warning in promotion.warnings:
+                # The service words its warnings for the command line's options.
+                self.call_from_thread(self.notify, warning.removeprefix("--"), severity="warning")
+            return promotion.todo
+
+        self._start_write(change, refetch=True)
 
     def action_move_board(self) -> None:
         card = self.current_card()

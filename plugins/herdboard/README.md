@@ -85,6 +85,7 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `A` | Archive the todo. In the archive column, move it back to the done column |
 | `D` | Archive every card in the done column, after you confirm |
 | `z` | Show or hide the archive column |
+| `T` | Promote the todo to a Linear issue: choose its team and project. See [promote](#promote) |
 | `p` | Set or remove the todo's parent |
 | `s` | Start work with the default agent |
 | `S` | Choose claude or pi, the model and pi's thinking level, then start work |
@@ -484,6 +485,14 @@ Linear cards follow Linear's manual order, after the local cards of the column. 
 - Anything that herdboard cannot convert goes into the description as text.
 
 After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on its first line. The todo is not deleted. herdboard records each step first, so a second `promote` after a failure creates only the missing issues.
+
+On the board, press `T` on a todo, or choose "Promote to Linear" in the card menu:
+
+1. Choose a team. The form lists every team that your API key can see. No team is chosen at the start.
+2. Choose a project of that team, or "No project". The board's linked project is not chosen for you, and its labels are not added. Projects with the same name show their teams and ID.
+3. Press ctrl+s. Escape closes the form and creates nothing.
+
+When the column matches more than one workflow state, the state dialog asks, as for a move. Escape there cancels the promotion. The board refuses Linear cards, sub-cards, archived todos, and a todo that has a worktree, or a sub-card with one: finish that card first. After a failure, press `T` on the todo again. herdboard finishes the recorded promotion. Another team or project on that second try is ignored, with a warning.
 
 ## Commands
 
