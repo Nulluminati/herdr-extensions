@@ -472,6 +472,16 @@ class AgentReviewCliTests(CliTestCase):
         data = self.run_json("review", "t123", "--model", "opus", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "usage")
 
+    def test_both_on_the_command_line_is_refused(self):
+        card = self.run_json("add", "Research corvid memory", directory=self.plain)["card"]
+        folder = self.todos / ".herdboard" / "work" / card["ref"]
+        folder.mkdir(parents=True)
+        start._write(start.state_dir() / "starts.json", {card["ref"]: {
+            "ref": card["ref"], "mode": "repoless", "workspace_id": "x1", "pane_id": "x1:p1",
+            "worktree_path": str(folder)}})
+        data = self.run_json("review", card["ref"], "--both", directory=self.plain, expect=1)
+        self.assertEqual(data["error"]["code"], "no_repository")
+
     def test_agent_and_both_pass_the_reviewer_choice(self):
         calls = []
 
@@ -523,6 +533,12 @@ class NoRepositoryAgentReviewTests(AgentReviewTestCase):
         with self.assertRaises(review.ReviewError) as raised:
             self.reviewer.request(self.card.ref)
         self.assertEqual(raised.exception.code, "nothing_to_review")
+
+    def test_both_is_refused_before_the_reviewer_starts(self):
+        with self.assertRaises(review.ReviewError) as raised:
+            self.reviewer.request(self.card.ref, then_hunk=True)
+        self.assertEqual(raised.exception.code, "no_repository")
+        self.assertFalse(self.calls("pane", "split"))
 
     def test_the_review_lists_the_attachments_and_runs_in_the_card_folder(self):
         self.attach("plan.md", "# Plan\n\nDo the research.\n")

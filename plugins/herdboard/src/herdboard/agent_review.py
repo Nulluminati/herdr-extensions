@@ -153,6 +153,9 @@ class AgentReviewer(Reviewer):
         if record.get("mode") == NEW_REPO:
             raise ReviewError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
                               "Start the card, then review it.", "not_started")
+        if then_hunk and record.get("mode") == REPOLESS:
+            raise ReviewError(f"{ref} has no repository, so Hunk cannot open. "
+                              f"Use `herdboard review {ref} --agent`.", "no_repository")
         kind = reviewer or REVIEWERS[record.get("agent") or self.config.start_agent]
         if thinking and kind != "pi":
             raise ReviewError("--thinking works only with a pi reviewer", "usage")

@@ -1126,6 +1126,46 @@ class NewRepositoryStartTests(unittest.TestCase):
         self.assertEqual(self.git(path, "rev-list", "--count", "HEAD"), "1")
         self.assertEqual(self.git(path, "symbolic-ref", "--short", "HEAD"), "main")
 
+    def test_a_registration_failure_after_the_first_commit_resumes(self):
+        from herdboard.model import ConflictError
+        path = self.root / "resume-register"
+        real = start._remember
+        failed = []
+
+        def flaky(directory, expected=None):
+            if not failed:
+                failed.append(True)
+                raise ConflictError("Another start is in progress; retry")
+            return real(directory, expected)
+
+        with patch.object(start, "_remember", flaky):
+            with self.assertRaises(ConflictError):
+                self.starter.start(self.card.ref, new_repo=path)
+        self.assertEqual(self.git(path, "rev-list", "--count", "HEAD"), "1")
+        self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(self.git(path, "rev-list", "--count", "HEAD"), "1")
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+
+    def test_a_move_that_is_not_saved_resumes_on_the_new_board(self):
+        path = self.root / "resume-board"
+        with patch.object(start.Starter, "_forget_card_folder",
+                          side_effect=start.StartError("stopped", "io")):
+            with self.assertRaises(start.StartError):
+                self.starter.start(self.card.ref, new_repo=path)
+        self.assertEqual(self.store.show(self.card.ref).board, "resume-board")
+        self.starter.start(self.card.ref, no_agent=True)
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual(record["mode"], "repo")
+        self.assertTrue(Path(record["worktree_path"]).exists())
+
+    def test_a_new_repository_board_merges_locally_even_with_global_pr(self):
+        self.store.config.merge = "pr"
+        path = self.root / "local-merge"
+        self.starter.start(self.card.ref, new_repo=path, no_agent=True)
+        board = self.store.board_for_repo(repo_identity(path))
+        self.assertEqual(self.store.board_meta(board).merge, "local")
+
     def test_planning_a_new_repository_for_a_card_with_sub_cards_is_refused(self):
         self.store.add(self.inbox, "Child task", parent=self.card.ref)
         with self.assertRaises(start.StartError) as raised:

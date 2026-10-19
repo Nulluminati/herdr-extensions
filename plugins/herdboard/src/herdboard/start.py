@@ -506,7 +506,6 @@ def create_repository(path) -> RepoIdentity:
     if _git(path, "commit", "--allow-empty", "-m", "chore: initial commit") is None:
         raise StartError(f"{path}: cannot make the first commit. Set git user.name and user.email",
                          "new_repo_failed")
-    _remember(path)
     identity = repo_identity(path)
     if identity is None:
         raise StartError(f"{path}: the new repository has no identity", "new_repo_failed")
@@ -575,15 +574,18 @@ class Starter:
         """Where `--new-repo` without a path creates the repository."""
         return Path(self.config.projects_dir) / repo_slug(card)
 
+    def _refuse_new_repo_family(self, card):
+        if card.parent or self.store.children(card.ref):
+            raise StartError(f"{card.ref} has a parent or sub-cards; their cards must stay on one board. "
+                             "Run it without a repository with --no-repo", "new_repo_family")
+
     def _new_repo_path(self, card, new_repo, issue):
         """Resolve and check the path of a new repository: it must be a todo on a board without one."""
         if issue is not None:
             raise StartError("A Linear issue cannot create a repository; use --no-repo", "usage")
         if card.path is not None and self.store.board_meta(card.path).repo:
             raise StartError(f"{card.board} already has a repository; use --repo to pick another one", "usage")
-        if card.parent or self.store.children(card.ref):
-            raise StartError(f"{card.ref} has a parent or sub-cards; their cards must stay on one board. "
-                             "Run it without a repository with --no-repo", "new_repo_family")
+        self._refuse_new_repo_family(card)
         if new_repo is True or new_repo is None:
             path = self.default_repo_path(card)
         else:
@@ -601,6 +603,14 @@ class Starter:
             return
         raise StartError(f"{card.ref} has a worktree at {path}. Finish the card with "
                          f"`herdboard finish {card.ref}` first, then use {option}.", "usage")
+
+    def _on_own_new_repo_board(self, card, record) -> bool:
+        """True when the card already sits on the board of the repository that its start created."""
+        repository = record.get("repository")
+        if card.path is None or not repository or not record.get("new_repo_path"):
+            return False
+        own = self.store.board_meta(card.path).repo
+        return bool(own) and _canonical_identity(own) == _canonical_identity(repository)
 
     def _target(self, card, repo, no_repo, new_repo, issue, checkout=None, base=None):
         """Where the card runs: `("repo", identity)`, `("new_repo", path)` or `("repoless", None)`.
@@ -629,6 +639,10 @@ class Starter:
         if stored.get("mode") == REPOLESS:
             return REPOLESS, None
         if stored.get("mode") == NEW_REPO:
+            if self._on_own_new_repo_board(card, stored):
+                # A start stopped after the board move, before it saved the new mode: resume there.
+                self._refuse_new_repo_family(card)
+                return NEW_REPO, Path(stored["new_repo_path"]).expanduser()
             path = stored.get("new_repo_path")
             return NEW_REPO, self._new_repo_path(card, path or True, issue)
         try:
@@ -972,9 +986,11 @@ class Starter:
                 if identity is None:
                     raise StartError(f"{path} is no longer a Git repository", "new_repo_failed")
                 record["repository"] = identity.identity
+            # Register the checkout only after the step is saved: a failure here is retried.
+            _remember(path)
             board = self.store.board_for_repo(identity)
             if board is None:
-                board = self.store.init_board(identity)
+                board = self.store.init_board(identity, merge="local")
             save("board")
             current = self.store.show(card.ref)
             if current.path is None or current.path.resolve() != board.resolve():
