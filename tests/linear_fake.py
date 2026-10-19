@@ -213,6 +213,9 @@ class FakeLinear:
             if "name" in filt:
                 name = filt["name"]["eqIgnoreCase"].casefold()
                 nodes = [p for p in nodes if p["name"].casefold() == name]
+            elif "accessibleTeams" in filt:
+                team = filt["accessibleTeams"]["some"]["id"]["eq"]
+                nodes = [p for p in nodes if any(t["id"] == team for t in p["teams"])]
             else:
                 nodes = [p for p in nodes if p["id"] == filt["id"]["eq"]]
             return {"projects": page(nodes)}

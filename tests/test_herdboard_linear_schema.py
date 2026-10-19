@@ -55,6 +55,10 @@ class SchemaTests(unittest.TestCase):
             "filter": {"team": {"id": {"in": ["t"]}},
                        "state": {"type": {"nin": ["completed", "canceled"]}}}}), [])
 
+    def test_project_team_filter_matches_the_schema(self):
+        self.assertEqual(validation_errors(linear.PROJECTS_QUERY, {
+            "first": 10, "filter": {"accessibleTeams": {"some": {"id": {"eq": "t"}}}}}), [])
+
     def test_validation_catches_a_bad_filter(self):
         bad = {"first": 10, "filter": {"completedAt": {"gte": 5, "bogus": True}}}
         self.assertNotEqual(validation_errors(linear.ISSUES_QUERY, bad), [])

@@ -93,6 +93,25 @@ class LinearTests(unittest.TestCase):
         self.assertEqual(self.fake.requests[0]["variables"]["filter"],
                          {"name": {"eqIgnoreCase": "platform"}})
 
+    def test_projects_for_team_filters_by_team_and_pages_projects_and_teams(self):
+        found = self.client.projects_for_team("t1")
+        # "other" has no team, so the filter leaves it out.
+        self.assertEqual(found, PROJECTS[:5])
+        self.assert_pages("Projects")
+        self.assertEqual(self.fake.requests[0]["variables"]["filter"],
+                         {"accessibleTeams": {"some": {"id": {"eq": "t1"}}}})
+        requests = [r for r in self.fake.requests if r["operationName"] == "ProjectTeams"]
+        self.assertEqual(len(requests), 10)
+
+    def test_projects_for_team_keeps_projects_with_the_same_name_apart(self):
+        found = self.client.projects_for_team("t1")
+        self.assertEqual(len({p["id"] for p in found}), 5)
+        self.assertEqual({p["name"].casefold() for p in found}, {"platform"})
+
+    def test_projects_for_a_team_without_projects_is_empty(self):
+        self.fixtures["projects"] = [p for p in self.fixtures["projects"] if p["id"] == "other"]
+        self.assertEqual(self.client.projects_for_team("t1"), [])
+
     def test_project(self):
         self.assertEqual(self.client.project("p0"), {"id": "p0", "name": "PLATFORM"})
 

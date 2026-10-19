@@ -446,6 +446,15 @@ class LinearClient:
                                           PROJECT_TEAMS_QUERY, "projects")
         return projects
 
+    def projects_for_team(self, team_id) -> list[dict]:
+        """The projects of one team, each with all its teams."""
+        projects = self._pages("Projects", PROJECTS_QUERY, ("projects",),
+                               {"filter": {"accessibleTeams": {"some": {"id": {"eq": team_id}}}}})
+        for project in projects:
+            project["teams"] = self._rest(project, "teams", "ProjectTeams",
+                                          PROJECT_TEAMS_QUERY, "projects")
+        return projects
+
     def project(self, project_id) -> dict | None:
         # The filtered connection returns no nodes for missing or inaccessible
         # projects, without the non-null direct project query's error response.
