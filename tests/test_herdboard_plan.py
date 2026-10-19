@@ -22,9 +22,10 @@ from test_herdboard_cli import CliTestCase  # noqa: E402
 
 
 class PlanHerdr:
-    """Fake Herdr: a new tab, a planner agent whose status follows a script, and notifications."""
+    """Fake Herdr: worktree workspaces, a new plan tab, a planner agent on a script, and notifications."""
 
-    def __init__(self):
+    def __init__(self, root=None):
+        self.root = root
         self.calls = []
         # Each status poll takes the next state; None means the planner pane is gone, and "error" that
         # Herdr did not answer.
@@ -37,6 +38,9 @@ class PlanHerdr:
         self.panes = []
         # Panes and names of live work agents, which `start` recorded.
         self.work_agents = set()
+        # Worktree workspaces that Herdr has open, as `start` records them.
+        self.worktrees = []
+        self.branches = {}
 
     def reply(self, argv, result=None, error=None):
         if error:
@@ -49,6 +53,35 @@ class PlanHerdr:
         operation = " ".join(args[:2])
         if operation == "tab create":
             return self.reply(argv, {"tab": {"tab_id": "w1:t4"}, "root_pane": {"pane_id": "w1:p7"}})
+        if operation == "workspace list":
+            return self.reply(argv, {"workspaces": []})
+        if operation == "worktree list":
+            return self.reply(argv, {"worktrees": self.worktrees})
+        if operation in ("worktree create", "worktree open"):
+            branch = args[args.index("--branch") + 1] if "--branch" in args else args[args.index("--path") + 1]
+            if branch not in self.branches:
+                self.branches[branch] = len(self.branches)
+            index = self.branches[branch]
+            path = self.root / ("work" if index == 0 else f"work-{index}")
+            if "--path" in args:
+                path = Path(args[args.index("--path") + 1])
+            workspace = f"w{9 + index}"
+            if operation == "worktree create":
+                # A real worktree, so `git status` and the upstream work in the tests.
+                cwd = args[args.index("--cwd") + 1]
+                base = args[args.index("--base") + 1] if "--base" in args else "HEAD"
+                subprocess.run(["git", "-C", cwd, "worktree", "add", "-qb", branch, str(path), base],
+                               check=True, capture_output=True)
+            result = {"workspace": {"workspace_id": workspace}, "root_pane": {"pane_id": workspace + ":p1"},
+                      "worktree": {"path": str(path)}}
+            self.worktrees = [w for w in self.worktrees if w["path"] != str(path)]
+            self.worktrees.append({"branch": branch, "path": str(path), "open_workspace_id": workspace})
+            return self.reply(argv, result)
+        if operation == "workspace get":
+            return self.reply(argv, {"workspace": {"workspace_id": args[2]},
+                                     "root_pane": {"pane_id": args[2] + ":p1"}})
+        if operation == "pane list":
+            return self.reply(argv, {"panes": [{"pane_id": args[3] + ":p1"}]})
         if operation == "agent get" and args[2] in self.work_agents:
             return self.reply(argv, {"agent": {"agent_status": "working", "pane_id": args[2]}})
         if operation == "agent get":
@@ -88,7 +121,7 @@ class PlanTestCase(unittest.TestCase):
         self.board = self.store.init_board(repo_identity(self.repo))
         self.card = self.store.add(self.board, "Fix login timeout #bug")
         self.card = self.store.edit(self.card.ref, body=["\tThe session ends after 5 minutes."])
-        self.fake = PlanHerdr()
+        self.fake = PlanHerdr(self.root)
         self.enterContext(patch.object(start, "command", self.fake))
         self.workers = []
         self.enterContext(patch.object(plan, "start_worker",
@@ -101,6 +134,17 @@ class PlanTestCase(unittest.TestCase):
     def planner_start(self):
         return self.fake.find("agent", "start")[0]
 
+    def record(self):
+        return json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+
+    def checkout_branch(self):
+        return subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "--short", "HEAD"],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def upstream(self, branch):
+        return subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--abbrev-ref", branch + "@{u}"],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
     def brief(self):
         call = self.planner_start()
         message = call[call.index("--") + 1]
@@ -112,43 +156,123 @@ class PlanTestCase(unittest.TestCase):
 
 
 class RequestTests(PlanTestCase):
-    def test_the_planner_starts_in_a_new_tab_in_the_main_checkout(self):
+    def test_the_planner_creates_the_worktree_and_plans_in_a_tab_in_it(self):
         result = self.planner.plan(self.card.ref)
+        creates = self.fake.find("worktree", "create")
+        self.assertEqual(len(creates), 1)
+        self.assertIn("--no-focus", creates[0])
+        self.assertEqual(creates[0][creates[0].index("--base") + 1], self.checkout_branch())
+        worktree = self.record()["worktree_path"]
         self.assertEqual(self.fake.find("tab", "create"),
-                         [["tab", "create", "--cwd", str(self.repo), "--label", f"plan {self.card.ref}", "--focus"]])
+                         [["tab", "create", "--workspace", "w9", "--cwd", worktree,
+                           "--label", f"plan {self.card.ref}", "--no-focus"]])
         call = self.planner_start()
         self.assertEqual(call[2], f"hb-{self.card.ref}-plan")
         self.assertEqual(call[call.index("--kind") + 1], "claude")
         self.assertEqual(call[call.index("--pane") + 1], "w1:p7")
         self.assertEqual(result, {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
-                                  "checkout": str(self.repo), "plan": str(self.plan_file)})
+                                  "checkout": str(self.repo), "plan": str(self.plan_file),
+                                  "workspace_id": "w9", "worktree_path": worktree,
+                                  "branch": start.todo_branch(self.card), "base": self.checkout_branch()})
 
-    def test_claude_reads_freely_and_writes_only_the_attachments(self):
+    def test_the_start_record_has_the_setup_and_no_agent(self):
+        self.planner.plan(self.card.ref)
+        record = self.record()
+        self.assertEqual(record["repository"], repo_identity(self.repo).identity)
+        self.assertEqual(record["checkout"], str(self.repo))
+        self.assertEqual(record["branch"], start.todo_branch(self.card))
+        self.assertEqual(record["base"], self.checkout_branch())
+        self.assertEqual(record["workspace_id"], "w9")
+        self.assertEqual(record["worktree_path"], str(self.root / "work"))
+        self.assertIn("upstream", record["steps_done"])
+        self.assertNotIn("agent_name", record)
+
+    def test_claude_edits_the_worktree_and_the_attachments(self):
         self.planner.plan(self.card.ref, model="opus")
         call = self.planner_start()
         args = call[call.index("--") + 1:]
         self.assertIn("Plan herdboard card", args[0])
         folder = attachments.folder(self.config, self.card.ref)
+        worktree = self.record()["worktree_path"]
         self.assertEqual(args[1:], ["--model", "opus", "--allowedTools", "Read", "Grep", "Glob",
-                                    f"Edit(/{folder}/**)"])
+                                    f"Edit(/{worktree}/**)", f"Write(/{worktree}/**)",
+                                    f"Edit(/{folder}/**)", f"Write(/{folder}/**)"])
         self.assertNotIn("dontAsk", args, "the user is there to answer permission prompts")
 
-    def test_pi_gets_read_and_write_tools_but_no_shell(self):
+    def test_pi_gets_read_write_and_shell_tools(self):
         self.planner.plan(self.card.ref, agent="pi", model="zai/glm-5.3", thinking="high")
         call = self.planner_start()
         args = call[call.index("--") + 1:]
-        self.assertEqual(args[:-2], ["--tools", "read,grep,find,ls,write,edit", "--model", "zai/glm-5.3",
+        self.assertEqual(args[:-2], ["--tools", "read,grep,find,ls,write,edit,bash", "--model", "zai/glm-5.3",
                                      "--thinking", "high"])
         self.assertEqual(args[-2], "--")
 
     def test_the_brief_has_the_card_where_to_write_and_how_to_plan(self):
         self.planner.plan(self.card.ref)
         text = self.brief()
-        for part in ("# Plan: Fix login timeout", "The session ends after 5 minutes.", str(self.repo),
-                     str(self.plan_file), "Ask the user", "## Goal", "## Decisions", "## Steps", "## Testing",
-                     "## Open questions", "Do not change the code"):
+        worktree = self.record()["worktree_path"]
+        for part in ("# Plan: Fix login timeout", "The session ends after 5 minutes.",
+                     f"Worktree: `{worktree}` on branch `{start.todo_branch(self.card)}` "
+                     f"(base `{self.checkout_branch()}`)",
+                     "You may change code and run commands here to test ideas", "Do not commit",
+                     "revert every change you made", str(self.plan_file), "Ask the user",
+                     "## Goal", "## Decisions", "## Steps", "## Testing", "## Open questions",
+                     "6. Revert your code changes", "git status"):
             self.assertIn(part, text)
         self.assertNotIn("A plan exists", text)
+        self.assertNotIn("## Changes already in the worktree", text)
+
+    def test_the_brief_lists_changes_that_were_already_in_the_worktree(self):
+        self.planner.plan(self.card.ref)
+        (Path(self.record()["worktree_path"]) / "scratch.txt").write_text("wip\n")
+        self.fake.panes = [False]
+        self.planner.plan(self.card.ref)
+        text = self.brief()
+        self.assertIn("## Changes already in the worktree", text)
+        self.assertIn("scratch.txt", text)
+        self.assertIn("These changes are not yours", text)
+        self.assertIn("do not revert them", text)
+
+    def test_a_card_with_a_worktree_plans_in_its_workspace_without_a_second_worktree(self):
+        self.planner.plan(self.card.ref)
+        worktree = self.record()["worktree_path"]
+        self.fake.panes = [False]  # the plan tab is closed; the worktree workspace stays open
+        self.fake.calls.clear()
+        self.planner.plan(self.card.ref)
+        self.assertEqual(self.fake.find("worktree", "create"), [])
+        tab = self.fake.find("tab", "create")[0]
+        self.assertEqual(tab[tab.index("--workspace") + 1], "w9")
+        self.assertEqual(tab[tab.index("--cwd") + 1], worktree)
+
+    def test_a_closed_workspace_of_the_worktree_reopens(self):
+        self.planner.plan(self.card.ref)
+        self.fake.worktrees[0]["open_workspace_id"] = None
+        self.fake.panes = [False]
+        self.fake.calls.clear()
+        self.planner.plan(self.card.ref)
+        self.assertTrue(any(c[:2] == ["worktree", "open"] for c in self.fake.calls))
+
+    def test_a_chosen_base_is_recorded_and_a_later_start_keeps_it(self):
+        subprocess.run(["git", "-C", str(self.repo), "branch", "feature-x"], check=True, capture_output=True)
+        result = self.planner.plan(self.card.ref, base="feature-x")
+        self.assertEqual(result["base"], "feature-x")
+        record = self.record()
+        self.assertEqual(record["base"], "feature-x")
+        self.assertEqual(self.upstream(record["branch"]), "feature-x")
+        self.fake.panes = [False]
+        started = start.Starter(self.store, self.repo).start(self.card.ref)
+        self.assertEqual(started["base"], "feature-x")
+        self.assertEqual(started["worktree_path"], record["worktree_path"])
+        self.assertEqual(started["pane_id"], "w9:p1", "the work agent takes the root pane, not the plan tab")
+
+    def test_a_parent_without_a_branch_is_prepared_without_an_agent_or_a_move(self):
+        parent = self.store.add(self.board, "Billing v2")
+        child = self.store.add(self.board, "Add invoice table", parent=parent.ref)
+        self.planner.plan(child.ref)
+        records = json.loads((start.state_dir() / "starts.json").read_text())
+        self.assertEqual(records[parent.ref]["branch"], start.todo_branch(parent))
+        self.assertNotIn("agent_name", records[parent.ref])
+        self.assertEqual(self.store.show(parent.ref).column, parent.column)
 
     def test_the_brief_command_uses_the_planner_config_file(self):
         custom = self.root / "custom.toml"
@@ -192,6 +316,7 @@ class RequestTests(PlanTestCase):
             self.planner.plan(self.card.ref)
         self.assertEqual(raised.exception.code, "plan_running")
         self.assertEqual(len(self.fake.find("tab", "create")), 1)
+        self.assertEqual(len(self.fake.find("worktree", "create")), 1)
 
     def test_a_planner_that_is_gone_does_not_block(self):
         self.planner.plan(self.card.ref)
@@ -199,7 +324,7 @@ class RequestTests(PlanTestCase):
         self.planner.plan(self.card.ref)
         self.assertEqual(len(self.fake.find("tab", "create")), 2)
 
-    def test_a_planner_that_cannot_start_closes_its_tab(self):
+    def test_a_planner_that_cannot_start_closes_its_tab_and_keeps_the_worktree(self):
         original = self.fake.__call__
 
         def failing(argv, timeout=120):
@@ -213,6 +338,19 @@ class RequestTests(PlanTestCase):
         self.assertEqual(self.fake.find("pane", "close"), [["pane", "close", "w1:p7"]])
         self.assertFalse((start.state_dir() / "plans.json").exists())
         self.assertEqual(self.workers, [])
+        record = self.record()
+        self.assertTrue(Path(record["worktree_path"]).exists())
+        self.assertEqual(self.fake.find("workspace", "remove"), [])
+
+    def test_the_plan_pane_exports_a_config_file_that_is_not_the_default(self):
+        custom = self.root / "custom.toml"
+        plan.Planner(self.store, self.repo, config_file=custom).plan(self.card.ref)
+        export = self.fake.find("pane", "run")
+        self.assertEqual(export, [["pane", "run", "w1:p7", f"export HERDBOARD_CONFIG={custom}"]])
+        self.assertLess(self.fake.calls.index(export[0]), self.fake.calls.index(self.planner_start()))
+        self.fake.panes = [False]  # the first plan tab is gone
+        self.planner.plan(self.card.ref)
+        self.assertEqual(len(self.fake.find("pane", "run")), 1, "the default config needs no export")
 
     def test_a_tab_without_a_root_pane_is_a_herdr_error(self):
         original = self.fake.__call__
@@ -353,7 +491,8 @@ class WaitTests(PlanTestCase):
 
     def start_work_agent(self):
         start._write(start.state_dir() / "starts.json",
-                     {self.card.ref: {"ref": self.card.ref, "pane_id": "w9:p1", "agent_name": f"hb-{self.card.ref}"}})
+                     {self.card.ref: {"ref": self.card.ref, "pane_id": "w9:p1", "steps_done": [],
+                                      "agent_name": f"hb-{self.card.ref}"}})
         self.fake.work_agents = {"w9:p1", f"hb-{self.card.ref}"}
 
     def test_a_changed_plan_goes_to_the_card_agent_when_planning_ends(self):
@@ -395,20 +534,21 @@ class PlanCliTests(CliTestCase):
     def test_plan_passes_the_options(self):
         calls = []
 
-        def fake_plan(planner, ref, agent=None, model=None, thinking=None, repo=None, checkout=None):
-            calls.append((ref, agent, model, thinking, repo, checkout, planner.config_file))
+        def fake_plan(planner, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None):
+            calls.append((ref, agent, model, thinking, repo, checkout, base, planner.config_file))
             return {"ref": ref, "agent": agent or "claude", "model": model, "pane_id": "w1:p7",
-                    "checkout": "/repo", "plan": "/todos/.herdboard/attachments/t123/plan.md"}
+                    "checkout": "/repo", "workspace_id": "w9", "worktree_path": "/repo/work",
+                    "branch": "t123-fix", "base": "main", "plan": "/todos/.herdboard/attachments/t123/plan.md"}
 
         with patch.object(plan.Planner, "plan", fake_plan):
             data = self.run_json("plan", "t123", "--agent", "pi", "--model", "zai/glm-5.3", "--thinking", "high",
                                  "--repo", "api", directory=self.plain)
             self.assertEqual(data["pane_id"], "w1:p7")
-            out, _ = self.run_cli("plan", "t123", "--model", "opus", directory=self.plain)
-        self.assertEqual([c[:6] for c in calls], [("t123", "pi", "zai/glm-5.3", "high", "api", None),
-                                                  ("t123", None, "opus", None, None, None)])
-        self.assertIsNotNone(calls[0][6])
-        self.assertEqual(out, "t123: claude (opus) plans in pane w1:p7, in /repo.\n"
+            out, _ = self.run_cli("plan", "t123", "--model", "opus", "--base", "feature-x", directory=self.plain)
+        self.assertEqual([c[:7] for c in calls], [("t123", "pi", "zai/glm-5.3", "high", "api", None, None),
+                                                  ("t123", None, "opus", None, None, None, "feature-x")])
+        self.assertIsNotNone(calls[0][7])
+        self.assertEqual(out, "t123: claude (opus) plans in pane w1:p7, in /repo/work.\n"
                               "The plan: /todos/.herdboard/attachments/t123/plan.md\n")
 
     def test_the_board_gets_the_config_file_for_its_workers(self):

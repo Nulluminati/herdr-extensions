@@ -155,7 +155,7 @@ HELP_SECTIONS = [
     ("Agents and branches", [
         ("s", "start work with the default agent"),
         ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
-        ("P", "plan the card with an agent in a new tab; the plan goes to the work agent's brief"),
+        ("P", "plan the card with an agent in a tab in its worktree; the plan goes to the work agent's brief"),
         ("g", "go to the started card's Herdr workspace"),
         ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
         ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
@@ -4007,7 +4007,7 @@ class HerdboardApp(App):
 
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
-            return f"{result['agent']}{model_text} plans {result['ref']} in a new tab"
+            return f"{result['agent']}{model_text} plans {result['ref']} in a tab in its worktree"
 
         self._card_action(run, notice)
 

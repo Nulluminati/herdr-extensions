@@ -1,4 +1,5 @@
 """Plan a Linear issue: the planner needs a Linear connection, and its brief has the issue description."""
+import json
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -19,7 +20,7 @@ class PlanLinearTests(WriteCliCase):
         git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
             "commit", "--allow-empty", "-qm", "init")
         start.register_checkout(self.repo)
-        self.fake_herdr = PlanHerdr()
+        self.fake_herdr = PlanHerdr(Path(self.tmp.name))
         self.enterContext(patch.object(start, "command", self.fake_herdr))
         self.workers = []
         self.enterContext(patch.object(plan, "start_worker",
@@ -41,6 +42,18 @@ class PlanLinearTests(WriteCliCase):
         self.assertEqual(self.workers[0][0][-4:], ["plan-wait", "ENG-1", "--pane", "w1:p7"])
         # Planning writes nothing to Linear.
         self.assertEqual(self.requests("IssueUpdate"), [])
+
+    def test_a_linear_issue_plans_in_a_worktree_keyed_by_its_issue_id(self):
+        result = self.run_json("plan", "ENG-1", directory=self.repo)
+        records = json.loads((start.state_dir() / "starts.json").read_text())
+        self.assertIn("i1", records, "the record key is the issue ID, so a later start finds it")
+        record = records["i1"]
+        self.assertEqual(record["branch"], "nate/eng-1")
+        self.assertEqual(result["branch"], "nate/eng-1")
+        self.assertEqual(record["ref"], "ENG-1")
+        tab = self.fake_herdr.find("tab", "create")[0]
+        self.assertIn("--workspace", tab)
+        self.assertEqual(tab[tab.index("--cwd") + 1], record["worktree_path"])
 
     def test_a_linear_issue_needs_a_linear_connection(self):
         import os

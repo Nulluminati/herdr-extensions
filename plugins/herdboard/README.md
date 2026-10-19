@@ -187,10 +187,11 @@ The board checks the attachments folder at the same interval. A folder that cann
 ### Plan before the work
 
 1. Select the card and press `P`, or run `herdboard plan t3m9`.
-2. Choose the planner (claude or pi) and its model. A new Herdr tab opens in the repository's main checkout, with the planner in it.
-3. The planner reads the card and the code. It asks you about the unknowns, then writes the plan.
+2. Choose the planner (claude or pi) and its model. herdboard creates the card's worktree and branch when the card has none. A `plan <id>` tab opens in the worktree's workspace, in the background: you stay on the board.
+3. The planner reads the card and the code. It may change code and run commands in the worktree to test ideas; it reverts its own changes and does not commit. It asks you about the unknowns, then writes the plan.
 4. Answer its questions in the tab. Close the tab when the plan is complete.
-5. Start the work with `s`. The agent gets the plan in its brief.
+5. Start the work with `s`. The agent starts in the same worktree and gets the plan in its brief.
+6. To drop a planned card that will not be worked on, run `herdboard finish t3m9`. A branch with no commits counts as merged; add `--force` when the branch has commits.
 
 ### Cards into main
 
@@ -229,9 +230,9 @@ A failed `start` reports the steps that worked. Run `start` again to continue fr
 
 ### plan
 
-`herdboard plan <id>` starts a planner agent in a new Herdr tab, in the main checkout of the card's repository. It finds the repository and the checkout as `start` does, and takes the same `--repo` and `--checkout`. It creates no worktree or branch, and the card stays in its column.
+`herdboard plan <id>` starts a planner agent in a `plan <id>` tab in the card's worktree. It creates the worktree and the branch when the card has none, as `start` does, and finds the repository and the checkout the same way. It takes the same `--repo`, `--checkout` and `--base`. The card stays in its column, and the worktree stays open: `herdboard start <id>` later starts the work agent in the same worktree.
 
-The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. Claude can read the repository and edit the card's attachments without a question. For other tools, it follows your default permission mode. pi gets only read, search and write tools, and no shell. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
+The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. It may change code and run commands in the worktree to test ideas. Before planning ends, it reverts its own changes, so the work agent starts clean; it does not commit. When the worktree is not clean, the brief names the changes that were already there. Claude can read the repository and edit the worktree and the card's attachments without a question. For other tools, it follows your default permission mode. pi gets read, search, write and shell tools. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
 
 A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours, but a planner that still runs still blocks a second one.
 
@@ -239,7 +240,9 @@ When planning ends with a changed plan and the card's work agent still runs, the
 
 `plan` on a card that has a plan gives the planner the current plan to revise. A second `plan` for a card whose planner still runs fails with `plan_running`.
 
-`--agent claude|pi`, `--model` and `--thinking` (pi only) choose the planner. On the board, `P` asks for them.
+`--agent claude|pi`, `--model`, `--thinking` (pi only) and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
+
+A planned card that will not be worked on is dropped with `herdboard finish <id>`: a branch with no commits counts as merged. Add `--force` when the branch has commits.
 
 ### Attachments
 
@@ -479,7 +482,7 @@ After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on 
 | `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's first line, its indented lines, its parent or its type. `--body ""` removes the indented lines |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
-| `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--checkout PATH]` | Plan the card with an agent in a new Herdr tab |
+| `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |

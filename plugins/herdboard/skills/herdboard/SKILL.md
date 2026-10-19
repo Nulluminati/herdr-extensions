@@ -83,7 +83,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 
 - `add --linear` (creates a Linear issue), `promote` (turns a todo into a Linear issue), and `move` or `done` on a Linear issue.
 - `start` (creates a worktree and starts an agent).
-- `plan` (opens a Herdr tab and starts a planner agent).
+- `plan` (creates the card's worktree when needed, and starts a planner agent in a tab in it).
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `pr-review` (opens a workspace and Hunk, and starts a reviewer agent), `pr-review-refresh` (moves `pr/<N>` and reopens Hunk) and `pr-review-finish` (removes the PR's worktree and branch).
@@ -143,7 +143,7 @@ The Herdr sidebar shows the card next to your agent row, and it follows the card
 
 ## When you plan a card
 
-`herdboard plan` opens you in the repository's main checkout. Your first message names the card and a brief file. Read the brief, then plan the work with the user: read the code, ask about the unknowns, and write the plan to the `plan.md` path that the brief gives. Do not change the code or the card text. herdboard logs each save of the plan.
+`herdboard plan` opens you in a tab in the card's worktree; herdboard creates the worktree when the card has none. Your first message names the card and a brief file. Read the brief, then plan the work with the user: read the code, ask about the unknowns, and write the plan to the `plan.md` path that the brief gives. You may change code and run commands in the worktree to test ideas. Revert every change you made before you end, and do not commit. Do not change the card text. herdboard logs each save of the plan.
 
 ## Errors
 

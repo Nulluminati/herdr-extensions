@@ -203,6 +203,25 @@ class StartTests(unittest.TestCase):
         self.starter.start(self.card.ref, no_agent=True)
         self.assertTrue(any(c[:2] == ["worktree", "open"] for c in self.fake.calls))
 
+    def test_start_after_a_plan_reuses_the_worktree_and_its_root_pane(self):
+        branch = start.todo_branch(self.card)
+        base = self.git("symbolic-ref", "--short", "HEAD")
+        path = self.root / "work"
+        subprocess.run(["git", "-C", str(self.repo), "worktree", "add", "-qb", branch, str(path), base],
+                       check=True, capture_output=True)
+        start._write(start.state_dir() / "starts.json", {self.card.ref: {
+            "ref": self.card.ref, "repository": repo_identity(self.repo).identity, "checkout": str(self.repo),
+            "branch": branch, "base": base, "workspace_id": "w9", "worktree_path": str(path),
+            "steps_done": ["repository", "checkout", "branch", "base", "worktree", "upstream"]}})
+        self.fake.worktrees = [{"branch": branch, "path": str(path), "open_workspace_id": "w9"}]
+        self.fake.calls.clear()
+        result = self.starter.start(self.card.ref)
+        self.assertEqual(result["worktree_path"], str(path))
+        self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+        agent = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
+        self.assertEqual(agent[agent.index("--pane") + 1], "w9:p1", "the agent takes the root pane, not the plan tab")
+
     def test_existing_git_worktree_opens(self):
         path = self.root / "existing"
         branch = start.todo_branch(self.card)

@@ -173,13 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
-    sub = command("plan", "plan a card with an agent in a new tab; the plan becomes the card's plan.md attachment")
+    sub = command("plan", "plan a card with an agent in a tab in the card's worktree; the plan becomes the card's plan.md attachment")
     sub.add_argument("ref")
     sub.add_argument("--agent", choices=["claude", "pi"])
     sub.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--checkout", type=Path)
+    sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
     sub = command("plan-wait", "log each save of the plan until the planner ends (run by plan)")
     sub.add_argument("ref")
@@ -807,7 +808,7 @@ def _cmd_plan(ctx: _Context) -> dict:
                       prompt_checkout=_prompt_checkout if not args.json and _interactive() else None,
                       config_file=config_path(args.config))
     return planner.plan(args.ref, agent=args.agent, model=args.model, thinking=args.thinking, repo=args.repo,
-                        checkout=args.checkout)
+                        checkout=args.checkout, base=args.base)
 
 
 def _cmd_plan_wait(ctx: _Context) -> dict:
@@ -1311,7 +1312,8 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             _emit_json(result)
         else:
             model = f" ({result['model']})" if result["model"] else ""
-            print(f"{result['ref']}: {result['agent']}{model} plans in pane {result['pane_id']}, in {result['checkout']}.")
+            print(f"{result['ref']}: {result['agent']}{model} plans in pane {result['pane_id']}, "
+                  f"in {result['worktree_path']}.")
             print(f"The plan: {result['plan']}")
         return
     if command == "review" and "reviewer" in result:

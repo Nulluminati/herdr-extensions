@@ -562,11 +562,18 @@ class Starter:
                 return _remember(Path(answer).expanduser(), identity)
         raise StartError(f"No local checkout for {identity}; use --checkout PATH", "checkout_unknown")
 
-    def _parent_branch(self, card, repo, checkout):
+    def _parent_branch(self, card, repo, checkout, move_parent=True):
         """A sub-card starts from its parent's branch. A parent without one starts first, with no agent."""
         found = find_record(card.parent)
         if found is None or not found[1].get("branch"):
-            self.start(card.parent, no_agent=True, repo=repo, checkout=checkout)
+            if move_parent:
+                self.start(card.parent, no_agent=True, repo=repo, checkout=checkout)
+            else:
+                # The caller only prepares, so the parent is prepared too: no move and no agent.
+                parent = self.store.show(card.parent)
+                if TEMP_REF.match(parent.ref):
+                    parent = self.store.ensure_id(parent.ref)
+                self.prepare(parent, None, parent.ref, repo=repo, checkout=checkout, move_parent=False)
             found = find_record(card.parent)
         return found[1]["branch"]
 
@@ -658,6 +665,82 @@ class Starter:
         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
               tolerated=("timeout", "agent_not_ready"))
 
+    def prepare(self, card, issue, key, repo=None, checkout=None, base=None, move_parent=True):
+        """Set a card up for work: repository, pin, checkout, branch, base, worktree and upstream.
+
+        It writes the card's `starts.json` record and takes the card's start lock. It moves no card
+        and starts no agent: `start` calls it and then moves the card and starts the agent, and
+        `plan` calls it with `move_parent=False`, so a sub-card's parent is only prepared. The
+        finished steps stay in the record, so a failed run resumes at the first failed step.
+        Returns the record.
+        """
+        with _lock(".start-" + safe_key(key) + ".lock"):
+            return self._prepare(card, issue, key, repo, checkout, base, move_parent)
+
+    def _prepare(self, card, issue, key, repo, checkout, base, move_parent):
+        state_path = state_dir() / "starts.json"
+        record = {"steps_done": []}
+        try:
+            herdr("workspace", "list")
+            with _lock(wait=2):
+                record = _read(state_path).get(key, {"steps_done": []})
+            if not isinstance(record, dict) or not isinstance(record.get("steps_done"), list):
+                record = {"steps_done": []}
+                raise IoError(f"{state_path}: invalid start record")
+            if record.get("worktree_path") and not Path(record["worktree_path"]).exists():
+                # The worktree is gone; keep where the card's repository lives.
+                record = {"steps_done": [], **{k: record[k] for k in ("repository", "checkout") if k in record}}
+            record["ref"] = card.ref
+
+            def save(step):
+                if step not in record["steps_done"]:
+                    record["steps_done"].append(step)
+                persist()
+
+            def persist():
+                with _lock(wait=2):
+                    records = _read(state_path)
+                    records[key] = record
+                    _write(state_path, records)
+
+            identity = self._repository(card, repo, issue)
+            if record.get("repository") not in (None, identity):
+                record = {"steps_done": [], "ref": card.ref}
+            record["repository"] = identity
+            save("repository")
+            if issue:
+                self._pin(identity, issue)
+            local = self._checkout(identity, checkout, record)
+            record["checkout"] = str(local)
+            save("checkout")
+            branch = record.get("branch") or (issue.get("branchName") if issue else todo_branch(card))
+            validate_branch(branch)
+            record["branch"] = branch
+            save("branch")
+            column = self.config.start_column
+            if issue:
+                with self.writer.online() as client:
+                    team = issue["team"]
+                    resolve_state(self.config, StateChoices(self.writer.source.account_dir()),
+                                  team, client.team_states(team["id"]), column, self.ask_state)
+            elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
+                raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
+            # A Linear sub-issue can belong to another repository, so only todos start from a parent.
+            if not base and not record.get("base") and card.parent and not issue:
+                base = self._parent_branch(card, repo, checkout, move_parent=move_parent)
+            record["base"] = self._base(local, base or record.get("base"), branch)
+            save("base")
+            record.update(self._workspace(local, branch, record, focus=False))
+            save("worktree")
+            # Hunk and `git status` compare a branch with its upstream, so the base is the upstream.
+            if _git(local, "branch", f"--set-upstream-to={record['base']}", branch) is None:
+                raise StartError(f"Cannot set {record['base']} as the upstream of {branch}", "upstream_failed")
+            save("upstream")
+            return record
+        except HerdboardError as error:
+            error.steps_done = list(record.get("steps_done", []))
+            raise
+
     def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None,
               base=None):
         agent = agent or self.config.start_agent
@@ -690,67 +773,23 @@ class Starter:
             key = card.ref
         lock_key = safe_key(key)
         with _lock(".start-" + lock_key + ".lock"):
-            record = {"steps_done": []}
+            record = self._prepare(card, issue, key, repo, checkout, base, move_parent=True)
             try:
-                herdr("workspace", "list")
-                with _lock(wait=2):
-                    record = _read(state_path).get(key, {"steps_done": []})
-                if not isinstance(record, dict) or not isinstance(record.get("steps_done"), list):
-                    record = {"steps_done": []}
-                    raise IoError(f"{state_path}: invalid start record")
-                if record.get("worktree_path") and not Path(record["worktree_path"]).exists():
-                    # The worktree is gone; keep where the card's repository lives.
-                    record = {"steps_done": [], **{k: record[k] for k in ("repository", "checkout") if k in record}}
-                record["ref"] = card.ref
-
-                def save(step):
-                    if step not in record["steps_done"]:
-                        record["steps_done"].append(step)
-                    persist()
-
                 def persist():
                     with _lock(wait=2):
                         records = _read(state_path)
                         records[key] = record
                         _write(state_path, records)
 
-                identity = self._repository(card, repo, issue)
-                if record.get("repository") not in (None, identity):
-                    record = {"steps_done": [], "ref": card.ref}
-                record["repository"] = identity
-                save("repository")
-                if issue:
-                    self._pin(identity, issue)
-                local = self._checkout(identity, checkout, record)
-                record["checkout"] = str(local)
-                save("checkout")
-                branch = record.get("branch") or (issue.get("branchName") if issue else todo_branch(card))
-                validate_branch(branch)
-                record["branch"] = branch
-                save("branch")
+                def save(step):
+                    if step not in record["steps_done"]:
+                        record["steps_done"].append(step)
+                    persist()
+
                 column = self.config.start_column
-                state = None
-                if issue:
-                    with self.writer.online() as client:
-                        team = issue["team"]
-                        state = resolve_state(self.config, StateChoices(self.writer.source.account_dir()),
-                                              team, client.team_states(team["id"]), column, self.ask_state)
-                elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
-                    raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
-                # A Linear sub-issue can belong to another repository, so only todos start from a parent.
-                if not base and not record.get("base") and card.parent and not issue:
-                    base = self._parent_branch(card, repo, checkout)
-                record["base"] = self._base(local, base or record.get("base"), branch)
-                save("base")
-                record.update(self._workspace(local, branch, record, focus=False))
-                save("worktree")
-                # Hunk and `git status` compare a branch with its upstream, so the base is the upstream.
-                if _git(local, "branch", f"--set-upstream-to={record['base']}", branch) is None:
-                    raise StartError(f"Cannot set {record['base']} as the upstream of {branch}", "upstream_failed")
-                save("upstream")
                 if "move" not in record["steps_done"] and card.column.casefold() != column.casefold():
                     if issue:
-                        self.writer.move(card.ref, column, ask=self.ask_state, state_name=state["name"])
+                        self.writer.move(card.ref, column, ask=self.ask_state)
                     else:
                         card = self.store.move(card.ref, column)
                 save("move")

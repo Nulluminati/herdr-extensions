@@ -148,7 +148,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
         self.plan.assert_called_once_with(self.card.ref, agent="claude", model="opus", thinking=None)
         self.callback.assert_not_called()
-        self.assertIn((f"claude (opus) plans {self.card.ref} in a new tab", None), notices)
+        self.assertIn((f"claude (opus) plans {self.card.ref} in a tab in its worktree", None), notices)
 
     async def test_shift_p_plans_with_pi(self):
         app = self.app()
