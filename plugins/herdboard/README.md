@@ -99,7 +99,7 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `i` | Create the board for this repository |
 | `I` | Search Linear and pin an issue to this repository's board. The search runs when you press enter |
 | `u` | Remove the pin of a pinned Linear issue (repo view) |
-| `c` | Configure global display styles and this board's merge mode, linked Linear projects and pinned issues. ctrl+s saves |
+| `c` | Configure the global settings of all boards, and this board's merge mode, linked Linear projects and pinned issues. ctrl+s saves both tabs |
 | `r` | Reload, and fetch Linear again |
 | `G` | Open the list of the repository's open GitHub pull requests (see [Pull request reviews](#pull-request-reviews)) |
 | `?` | Help |
@@ -632,11 +632,24 @@ canceled = "Done"
 
 To make pull requests the default for one repository, add `merge: pr` to the frontmatter of its board, or press `c` on the board and choose `pr`.
 
+### The configuration dialog
+
+Press `c` to open configuration. It has two tabs. Switch tabs with a click, or focus the tab row with shift+tab and press left or right.
+
+- **Global (all boards)** sets values in the config file: theme, agent, model, thinking level, merge mode, icons, tags and cards. It works outside a repository too.
+- **Current board** shows the board name. It sets the board's merge mode, linked Linear projects and pinned issues in the board's frontmatter. Without a repository board, it tells you how to create one.
+
+The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. "Agent default" removes `start_model`, so the agent uses its own default. A saved model that is not in the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking level applies to pi only, so it is off for Claude, but Claude keeps the saved level.
+
+The board's merge option "Global default" shows the global mode. A board without `merge:` follows the global mode; a board with `merge:` keeps it.
+
+Press `ctrl+s` in either tab to save the changes of both tabs. Press `escape` to cancel without saving. Herdboard saves global changes in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. They apply at once in this board: the theme, the cards and the next start, plan, review or merge. Other open herdboard processes read the saved values when they start again. A running agent does not change.
+
+The board file and the config file save separately. If the board saves and the config file does not, the dialog says "Board settings saved; global settings not saved" and stays open. Fix the cause and press `ctrl+s` again.
+
+Saves keep a `.<config name>.lock` file beside the configuration file (`.config.toml.lock` by default). Leave it in place; it coordinates concurrent saves.
+
 ### Display icons
-
-Press `c` to open configuration. Use `Icons (all boards)`, `Tags (all boards)` and `Cards (all boards)` to select display styles. Press `ctrl+s` to save. Changes apply immediately in this session. Herdboard saves them in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. The controls also work outside a repository. Press `escape` to cancel without saving.
-
-Display saves keep a `.<config name>.lock` file beside the configuration file (`.config.toml.lock` by default). Leave it in place; it coordinates concurrent saves.
 
 `icon_style = "plain"` is the default. Dates use a `Due` label, and cards with attachments show `files` at the right edge.
 

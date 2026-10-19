@@ -30,7 +30,7 @@ from textual.errors import NoWidget
 from textual.message import Message
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, TextArea
+from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, TabbedContent, TabPane, TextArea
 from textual.worker import Worker, WorkerState
 
 from . import activity, attachments, pr_reviews
@@ -43,7 +43,7 @@ from .model import HerdboardError, join_title, parse_tags, plain_tags, split_tit
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import agent_states
 from . import start as start_module
-from .config import THINKING_LEVELS, save_display_config
+from .config import THINKING_LEVELS, save_global_config
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
@@ -1865,26 +1865,30 @@ class ModelScreen(ModalBase):
 
 
 class ConfigScreen(ModalBase):
-    """Global display settings and a board's merge mode, Linear project links and pinned issues.
+    """Two tabs: the global settings of all boards, and a board's merge mode, Linear project links
+    and pinned issues.
 
-    Enter on a link or a pin marks it for removal, or keeps it again. ctrl+s writes every change.
+    Enter on a link or a pin marks it for removal, or keeps it again. ctrl+s writes the changes of
+    both tabs.
     """
 
     BINDINGS = [Binding("ctrl+s", "save", "Save")]
-    AUTO_FOCUS = "#config-merge"
+    AUTO_FOCUS = "#config-theme"
+    # The global settings that the Global tab shows, in the order of its fields.
+    GLOBAL_KEYS = ("theme", "start_agent", "start_model", "start_thinking", "merge", "icon_style",
+                   "tag_style", "card_style")
 
-    def __init__(self, path: Path | None, meta: BoardMeta, default_merge: str, can_link: bool,
-                 icon_style: str = "plain", tag_style: str = "outline", card_style: str = "full"):
+    def __init__(self, path: Path | None, meta: BoardMeta, can_link: bool, settings: dict[str, str | None],
+                 themes: list[str], pi_choices: tuple[str | None, list[str]]):
         super().__init__()
         self.path = path
         self.meta = meta
-        self.default_merge = default_merge
         self.can_link = can_link
-        self.icon_style = icon_style
-        self.tag_style = tag_style
-        self.card_style = card_style
-        if path is None:
-            self.AUTO_FOCUS = "#config-icon-style"
+        # The saved global settings; a save writes only the ones that differ.
+        self.settings = dict(settings)
+        self.themes = themes
+        self.pi_choices = pi_choices
+        self.agent = settings["start_agent"]
         self.removed: set[str] = set()
         self.removed_pins: set[str] = set()
 
@@ -1909,51 +1913,111 @@ class ConfigScreen(ModalBase):
         widget.border_title = title
         return widget
 
+    def _model_options(self, agent: str) -> list[tuple[str, str]]:
+        """The models that a start offers for `agent`, after "default" for the agent's own model.
+
+        The saved model stays an option for the saved agent, so a save of other settings keeps it.
+        """
+        if agent == "pi":
+            default, models = self.pi_choices
+            first = f"Agent default ({default})" if default else "Agent default"
+        else:
+            first, models = "Agent default", [model for model in ClaudeModelScreen.MODELS if model]
+        options = [(first, "default")]
+        for model in models:
+            if model not in (value for _, value in options):
+                options.append((model, model))
+        saved = self.settings["start_model"]
+        if agent == self.settings["start_agent"] and saved and saved not in (value for _, value in options):
+            options.append((f"{saved} (current configured model)", saved))
+        return options
+
+    def _board_merge_options(self, default: str) -> list[tuple[str, str]]:
+        return [(f"Global default ({default})", "default"),
+                ("local: merge into the base branch", "local"),
+                ("pr: open a draft pull request", "pr")]
+
     def compose(self) -> ComposeResult:
-        modes = [(f"config default ({self.default_merge})", "default"),
-                 ("local: merge into the base branch", "local"),
-                 ("pr: open a draft pull request", "pr")]
-        with VerticalScroll(classes="dialog card-form config", can_focus=False):
-            heading = f"Config of {self.path.stem}" if self.path else "Herdboard config"
-            yield RichStatic(Text(heading, style="bold"), id="config-heading")
-            if self.path:
-                if self.meta.repo:
-                    yield Label(f"repo: {self.meta.repo}", classes="dim")
-                yield self._titled(Select(modes, value=self.meta.merge or "default", allow_blank=False,
-                                          id="config-merge"), "Merge")
-            else:
-                yield Label("No repository board. Press i in a repository to create one.",
-                            id="config-board-hint", classes="dim")
-            yield self._titled(Select([("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
-                                      value=self.icon_style, allow_blank=False,
-                                      id="config-icon-style"), "Icons (all boards)")
-            yield self._titled(Select([("outline: text on a tint", "outline"), ("round: Nerd Font ends", "round"),
-                                       ("block: square ends", "block")],
-                                      value=self.tag_style, allow_blank=False,
-                                      id="config-tag-style"), "Tags (all boards)")
-            yield self._titled(Select([("full: a border and a description", "full"),
-                                       ("compact: title, tags and status", "compact")],
-                                      value=self.card_style, allow_blank=False,
-                                      id="config-card-style"), "Cards (all boards)")
-            yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
-            if self.meta.links:
-                yield self._titled(OptionList(*[self._link_label(link) for link in self.meta.links],
-                                              id="config-links"), "Linear projects")
-            elif self.path:
-                yield Label("No Linear projects are linked.", classes="dim")
-            if self.meta.pins:
-                yield self._titled(OptionList(*[self._pin_label(pin) for pin in self.meta.pins],
-                                              id="config-pins"), "Pinned Linear issues")
-            if self.can_link:
-                with Horizontal(classes="form-row"):
-                    yield self._titled(Input(placeholder="API Platform", id="config-project",
-                                             select_on_focus=False), "Link a Linear project")
-                    yield self._titled(Input(placeholder="repo:api, bug", id="config-labels",
-                                             select_on_focus=False), "Labels")
+        settings = self.settings
+        thinking = [("Agent default", "default"), *((level, level) for level in THINKING_LEVELS)]
+        with Vertical(classes="dialog card-form config"):
+            yield RichStatic(Text("Herdboard config", style="bold"), id="config-heading")
+            with TabbedContent(initial="config-global", id="config-tabs"):
+                with TabPane("Global (all boards)", id="config-global"):
+                    with VerticalScroll(classes="config-pane", can_focus=False):
+                        yield self._titled(Select([(name, name) for name in self.themes], value=settings["theme"],
+                                                  allow_blank=False, id="config-theme"), "Theme")
+                        yield self._titled(Select([("claude", "claude"), ("pi", "pi")],
+                                                  value=settings["start_agent"], allow_blank=False,
+                                                  id="config-agent"), "Agent")
+                        yield self._titled(Select(self._model_options(self.agent),
+                                                  value=settings["start_model"] or "default", allow_blank=False,
+                                                  id="config-model"), "Model")
+                        yield self._titled(Select(thinking, value=settings["start_thinking"] or "default",
+                                                  allow_blank=False, disabled=self.agent != "pi",
+                                                  id="config-thinking"), "Thinking (pi only)")
+                        yield self._titled(Select([("local: merge into the base branch", "local"),
+                                                   ("pr: open a draft pull request", "pr")],
+                                                  value=settings["merge"], allow_blank=False,
+                                                  id="config-default-merge"), "Merge")
+                        yield self._titled(Select([("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
+                                                  value=settings["icon_style"], allow_blank=False,
+                                                  id="config-icon-style"), "Icons")
+                        yield self._titled(Select([("outline: text on a tint", "outline"),
+                                                   ("round: Nerd Font ends", "round"),
+                                                   ("block: square ends", "block")],
+                                                  value=settings["tag_style"], allow_blank=False,
+                                                  id="config-tag-style"), "Tags")
+                        yield self._titled(Select([("full: a border and a description", "full"),
+                                                   ("compact: title, tags and status", "compact")],
+                                                  value=settings["card_style"], allow_blank=False,
+                                                  id="config-card-style"), "Cards")
+                        yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
+                with TabPane("Current board", id="config-board"):
+                    with VerticalScroll(classes="config-pane", can_focus=False):
+                        yield from self._compose_board()
             yield RichStatic(Text(""), id="config-error", classes="error")
-            if self.meta.links or self.meta.pins:
-                yield Label("enter on a project or an issue: remove it, or keep it again", classes="dim")
-            yield Label("ctrl+s: save · tab: next field · escape: cancel", classes="dim")
+            yield Label("ctrl+s: save both tabs · tab: next field · escape: cancel", classes="dim")
+
+    def _compose_board(self) -> ComposeResult:
+        if not self.path:
+            yield Label("No repository board. Press i in a repository to create one.",
+                        id="config-board-hint", classes="dim")
+            return
+        yield RichStatic(Text(f"Board: {self.path.stem}", style="bold"), id="config-board-name")
+        if self.meta.repo:
+            yield Label(f"repo: {self.meta.repo}", classes="dim")
+        yield self._titled(Select(self._board_merge_options(self.settings["merge"]),
+                                  value=self.meta.merge or "default", allow_blank=False,
+                                  id="config-merge"), "Merge")
+        if self.meta.links:
+            yield self._titled(OptionList(*[self._link_label(link) for link in self.meta.links],
+                                          id="config-links"), "Linear projects")
+        else:
+            yield Label("No Linear projects are linked.", classes="dim")
+        if self.meta.pins:
+            yield self._titled(OptionList(*[self._pin_label(pin) for pin in self.meta.pins],
+                                          id="config-pins"), "Pinned Linear issues")
+        if self.can_link:
+            with Horizontal(classes="form-row"):
+                yield self._titled(Input(placeholder="API Platform", id="config-project",
+                                         select_on_focus=False), "Link a Linear project")
+                yield self._titled(Input(placeholder="repo:api, bug", id="config-labels",
+                                         select_on_focus=False), "Labels")
+        if self.meta.links or self.meta.pins:
+            yield Label("enter on a project or an issue: remove it, or keep it again", classes="dim")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "config-agent" and event.value != self.agent:
+            # A new agent starts from its own default model. The thinking level stays for pi.
+            self.agent = event.value
+            self.query_one("#config-model", Select).set_options(self._model_options(self.agent))
+            self.query_one("#config-thinking", Select).disabled = self.agent != "pi"
+        elif event.select.id == "config-default-merge" and self.path:
+            board = self.query_one("#config-merge", Select)
+            value = board.value
+            board.set_options(self._board_merge_options(event.value))
+            board.value = value
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1971,8 +2035,8 @@ class ConfigScreen(ModalBase):
         event.stop()
         if event.input.id == "config-project":
             self.query_one("#config-labels", Input).focus()
-            return
-        self.action_save()
+        elif event.input.id == "config-labels":
+            self.action_save()
 
     def show_error(self, message: str) -> None:
         error = self.query_one("#config-error", RichStatic)
@@ -1981,19 +2045,25 @@ class ConfigScreen(ModalBase):
         error.update(error.rich_text)
         self.call_after_refresh(error.scroll_visible, animate=False)
 
+    def global_values(self) -> dict[str, str | None]:
+        """The Global tab's values, with None for an agent default."""
+        values = {}
+        for key, widget in zip(self.GLOBAL_KEYS, ("theme", "agent", "model", "thinking", "default-merge",
+                                                  "icon-style", "tag-style", "card-style")):
+            value = self.query_one(f"#config-{widget}", Select).value
+            values[key] = None if value == "default" else value
+        return values
+
     def action_save(self) -> None:
         merge = self.query_one("#config-merge", Select).value if self.path else "default"
-        display = {}
-        for key in ("icon_style", "tag_style", "card_style"):
-            value = self.query_one(f"#config-{key.replace('_', '-')}", Select).value
-            if value != getattr(self, key):
-                display[key] = value
+        changed = {key: value for key, value in self.global_values().items() if value != self.settings[key]}
         project, labels = "", []
         if self.can_link:
             project = self.query_one("#config-project", Input).value.strip()
             labels = [label.strip() for label in self.query_one("#config-labels", Input).value.split(",")]
         self.app.submit_config(self, None if merge == "default" else merge, set(self.removed),
-                               project, [label for label in labels if label], set(self.removed_pins), display=display)
+                               project, [label for label in labels if label], set(self.removed_pins),
+                               settings=changed)
 
 
 # The two tabs under the header: (tab, label). G switches between them.
@@ -3224,14 +3294,14 @@ class HerdboardApp(App):
     #card-type:focus-within { border: round $primary; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
-    #config-merge, #config-icon-style, #config-tag-style, #config-card-style {
-        border: round $surface-lighten-2; height: auto;
-    }
-    #config-merge > SelectCurrent, #config-icon-style > SelectCurrent, #config-tag-style > SelectCurrent,
-    #config-card-style > SelectCurrent { border: none; }
-    #config-merge:focus-within, #config-icon-style:focus-within, #config-tag-style:focus-within,
-    #config-card-style:focus-within { border: round $primary; }
-    .config, #config-links, #config-pins { scrollbar-size-vertical: 1; }
+    .config Select { border: round $surface-lighten-2; height: auto; }
+    .config Select > SelectCurrent { border: none; }
+    .config Select:focus-within { border: round $primary; }
+    /* A fixed height keeps the dialog still when the tabs switch; the panes scroll in a small terminal. */
+    .config { height: 40; }
+    .config TabbedContent, .config ContentSwitcher, .config TabPane, .config-pane { height: 1fr; }
+    .config TabPane { padding: 0; }
+    .config-pane, #config-links, #config-pins { scrollbar-size-vertical: 1; }
     #config-links, #config-pins { height: auto; max-height: 6; border: round $surface-lighten-2; }
     #config-links:focus, #config-pins:focus { border: round $primary; }
     #issue-search { border: round $surface-lighten-2; }
@@ -4702,21 +4772,28 @@ class HerdboardApp(App):
         if meta.error:
             self.notify(meta.error, severity="error")
             return
-        self.push_screen(ConfigScreen(path, meta, self.store.config.merge,
-                                      path is not None and self.resolve_link is not None,
-                                      self.store.config.icon_style, self.store.config.tag_style,
-                                      self.store.config.card_style))
+        config = self.store.config
+        settings = {key: getattr(config, key) for key in ConfigScreen.GLOBAL_KEYS}
+        self.push_screen(ConfigScreen(path, meta, path is not None and self.resolve_link is not None, settings,
+                                      sorted(self.available_themes), pi_model_choices(config)))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
                       project: str, labels: list[str], removed_pins: set[str] = frozenset(),
-                      display: dict[str, str] | None = None) -> None:
-        """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing."""
-        path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
-        display = dict(display or {})
+                      settings: dict[str, str | None] | None = None) -> None:
+        """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing.
 
-        def apply_display() -> None:
-            for key, value in display.items():
+        `settings` holds the changed global settings. The board file and the config file are
+        separate, so a failed config save after a board save leaves the board change saved.
+        """
+        path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
+        settings = dict(settings or {})
+
+        def apply_settings() -> None:
+            for key, value in settings.items():
                 setattr(self.store.config, key, value)
+            screen.settings.update(settings)
+            if "theme" in settings:
+                self.theme = settings["theme"]
 
         def write() -> None:
             link = resolve(project, labels) if project and resolve else None
@@ -4732,16 +4809,16 @@ class HerdboardApp(App):
                     change_links=change if removed or link else None,
                     change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None)
                 if merge != before:
-                    # A display-save failure leaves the dialog open; retries compare against the saved merge mode.
+                    # A global-save failure leaves the dialog open; retries compare against the saved merge mode.
                     self.call_from_thread(setattr, screen.meta, "merge", merge)
-            if display:
+            if settings:
                 try:
-                    save_display_config(self.config_file, **display)
+                    save_global_config(self.config_file, **settings)
                 except HerdboardError as error:
                     if board_changed:
-                        raise HerdboardError(f"Board settings saved; display settings not saved: {error}") from error
+                        raise HerdboardError(f"Board settings saved; global settings not saved: {error}") from error
                     raise
-                self.call_from_thread(apply_display)
+                self.call_from_thread(apply_settings)
 
         self._start_write(write, add=screen, refetch=bool(removed or project or removed_pins))
 

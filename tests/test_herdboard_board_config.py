@@ -11,9 +11,12 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import kanban_md  # noqa: E402
 from herdboard.board import ConfigScreen, HerdboardApp  # noqa: E402
-from herdboard.config import load_config, save_display_config  # noqa: E402
+from herdboard.config import THINKING_LEVELS, load_config, save_global_config  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink, with_link  # noqa: E402
+from herdboard.linear_pins import IssuePin  # noqa: E402
 from herdboard.model import FormatError, HerdboardError  # noqa: E402
+from herdboard.start import Starter  # noqa: E402
+from textual.widgets import Input, Tab, TabbedContent  # noqa: E402
 from test_herdboard_board import BoardTestCase, settle  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_linear_cli import LinearCliCase  # noqa: E402
@@ -160,15 +163,17 @@ class ConfigScreenTests(BoardTestCase):
             self.assertEqual(icons.value, "nerd")
             self.assertEqual(tags.value, "block")
             rendered = "\n".join(strip.text for strip in screen._compositor.render_strips())
-            self.assertIn("Icons (all boards)", rendered)
-            self.assertIn("Tags (all boards)", rendered)
+            self.assertIn("Global (all boards)", rendered)
 
     async def test_keyboard_navigation_can_change_both_display_styles(self):
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
-            await pilot.press("tab", "enter", "down", "enter")
+            # Theme, agent, model and merge come first; Claude's thinking level is off.
+            await pilot.press("tab", "tab", "tab", "tab")
+            self.assertIs(app.focused, screen.query_one("#config-icon-style"))
+            await pilot.press("enter", "down", "enter")
             self.assertEqual(screen.query_one("#config-icon-style").value, "nerd")
             await pilot.press("tab", "enter", "down", "down", "enter")
             self.assertEqual(screen.query_one("#config-tag-style").value, "block")
@@ -208,7 +213,7 @@ class ConfigScreenTests(BoardTestCase):
 
         def save(*args, **kwargs):
             writes.append(threading.get_ident())
-            save_display_config(*args, **kwargs)
+            save_global_config(*args, **kwargs)
 
         def assign(config, key, value):
             if config is self.config and key in ("icon_style", "tag_style"):
@@ -220,7 +225,7 @@ class ConfigScreenTests(BoardTestCase):
             screen = await self.open_config(pilot)
             screen.query_one("#config-icon-style").value = "nerd"
             screen.query_one("#config-tag-style").value = "block"
-            with mock.patch("herdboard.board.save_display_config", side_effect=save), \
+            with mock.patch("herdboard.board.save_global_config", side_effect=save), \
                     mock.patch.object(type(self.config), "__setattr__", assign):
                 await pilot.press("ctrl+s")
                 await settle(pilot)
@@ -275,7 +280,7 @@ class ConfigScreenTests(BoardTestCase):
             await pilot.press("ctrl+s")
             await settle(pilot)
             self.assertIs(app.screen, screen)
-            self.assertIn("Board settings saved; display settings not saved", screen.query_one("#config-error").plain)
+            self.assertIn("Board settings saved; global settings not saved", screen.query_one("#config-error").plain)
             self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
             self.assertEqual(self.config.icon_style, "plain")
 
@@ -303,8 +308,9 @@ class ConfigScreenTests(BoardTestCase):
                     self.assertEqual(self.store.board_meta(self.repo_path).merge, original)
                     self.assertEqual(load_config(app.config_file).icon_style, "nerd")
 
-    async def test_unchanged_partial_save_retry_keeps_saved_merge_and_links(self):
+    async def test_unchanged_partial_save_retry_keeps_saved_merge_links_and_pins(self):
         self.link(ProjectLink("p1", "Old project"))
+        self.store.update_pins(self.repo_path, lambda _: [IssuePin("i5", "ENG-5"), IssuePin("i6", "ENG-6")])
         app = self.make_app(resolve_link=lambda name, labels: ProjectLink("p2", name))
         app.config_file.write_text("invalid = [")
         async with app.run_test(size=(100, 40)) as pilot:
@@ -314,11 +320,14 @@ class ConfigScreenTests(BoardTestCase):
             screen.query_one("#config-icon-style").value = "nerd"
             screen.query_one("#config-links").focus()
             await pilot.press("enter")
+            screen.query_one("#config-pins").focus()
+            await pilot.press("enter")
             screen.query_one("#config-project").value = "Mobile"
             await pilot.press("ctrl+s")
             await settle(pilot)
             self.assertIs(app.screen, screen)
             self.assertEqual(self.store.board_meta(self.repo_path).links, [ProjectLink("p2", "Mobile")])
+            self.assertEqual(self.store.board_meta(self.repo_path).pins, [IssuePin("i6", "ENG-6")])
             self.assertEqual(screen.meta.merge, "pr")
             app.config_file.write_text("")
             await pilot.press("ctrl+s")
@@ -327,6 +336,7 @@ class ConfigScreenTests(BoardTestCase):
         meta = self.store.board_meta(self.repo_path)
         self.assertEqual(meta.merge, "pr")
         self.assertEqual(meta.links, [ProjectLink("p2", "Mobile")])
+        self.assertEqual(meta.pins, [IssuePin("i6", "ENG-6")])
         self.assertEqual(load_config(app.config_file).icon_style, "nerd")
 
     async def test_display_save_uses_the_environment_selected_config_path(self):
@@ -373,7 +383,7 @@ class ConfigScreenTests(BoardTestCase):
             screen = await self.open_config(pilot)
             self.assertEqual(screen.query_one("#config-card-style").value, "full")
             rendered = "\n".join(strip.text for strip in screen._compositor.render_strips())
-            self.assertIn("Cards (all boards)", rendered)
+            self.assertIn("Cards", rendered)
             screen.query_one("#config-card-style").value = "compact"
             screen.query_one("#config-tag-style").value = "outline"
             await pilot.press("ctrl+s")
@@ -404,7 +414,7 @@ class ConfigScreenTests(BoardTestCase):
         async with app.run_test(size=(100, 40)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
-            self.assertIn(self.repo_path.stem, screen.query_one("#config-heading").plain)
+            self.assertIn(self.repo_path.stem, screen.query_one("#config-board-name").plain)
             self.assertEqual(screen.query_one("#config-merge").value, "pr")
             links = screen.query_one("#config-links")
             self.assertEqual(links.option_count, 1)
@@ -604,13 +614,321 @@ class ConfigScreenTests(BoardTestCase):
             self.assertTrue(any("cannot read board" in m and level == "error" for m, level in messages), messages)
             self.assertTrue(app.is_running)
 
+    def active_tab(self, screen):
+        return screen.query_one(TabbedContent).active
+
+    def rendered(self, screen):
+        return "\n".join(strip.text for strip in screen._compositor.render_strips())
+
+    def options(self, select):
+        return [value for _, value in select._options]
+
+    def labels(self, select):
+        return [str(label) for label, _ in select._options]
+
+    async def test_c_opens_the_global_tab_and_names_the_board_in_its_tab(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            self.assertEqual(self.active_tab(screen), "config-global")
+            self.assertIs(app.focused, screen.query_one("#config-theme"))
+            tabs = [str(tab.label) for tab in screen.query(Tab)]
+            self.assertEqual(tabs, ["Global (all boards)", "Current board"])
+            global_tab, board_tab = screen.query_one("#config-global"), screen.query_one("#config-board")
+            for key in ("theme", "agent", "model", "thinking", "default-merge", "icon-style", "tag-style",
+                        "card-style"):
+                self.assertTrue(global_tab.query(f"#config-{key}"), key)
+            self.assertTrue(board_tab.query("#config-merge"))
+            self.assertFalse(global_tab.query("#config-merge"))
+            self.assertIn(self.repo_path.stem, board_tab.query_one("#config-board-name").plain)
+
+    async def test_keys_and_clicks_switch_the_tabs(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            await pilot.press("shift+tab", "right")
+            await pilot.pause()
+            self.assertEqual(self.active_tab(screen), "config-board")
+            await pilot.press("left")
+            await pilot.pause()
+            self.assertEqual(self.active_tab(screen), "config-global")
+            await pilot.click("#--content-tab-config-board")
+            await pilot.pause()
+            self.assertEqual(self.active_tab(screen), "config-board")
+            self.assertIn(self.repo_path.stem, self.rendered(screen))
+            await pilot.click("#--content-tab-config-global")
+            await pilot.pause()
+            self.assertEqual(self.active_tab(screen), "config-global")
+
+    async def test_every_field_can_scroll_into_view_in_a_small_terminal(self):
+        self.link(ProjectLink("p1", "Platform"))
+        app = self.make_app(resolve_link=lambda name, labels: ProjectLink("p2", name))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            for tab, fields in (("config-global", ("theme", "agent", "model", "default-merge", "icon-style",
+                                                  "tag-style", "card-style")),
+                                ("config-board", ("merge", "links", "project", "labels"))):
+                screen.query_one(TabbedContent).active = tab
+                for name in fields:
+                    with self.subTest(field=name):
+                        widget = screen.query_one(f"#config-{name}")
+                        widget.focus()
+                        await pilot.pause()
+                        visible = screen._compositor.visible_widgets
+                        self.assertIn(widget, visible)
+                        region, clip = visible[widget]
+                        self.assertEqual(region.intersection(clip), region)
+            self.assertIn("ctrl+s: save", self.rendered(screen))
+
+    async def test_save_from_either_tab_writes_both_tabs(self):
+        for active in ("config-global", "config-board"):
+            with self.subTest(active=active):
+                self.store.set_merge(self.repo_path, None)
+                self.config.merge, self.config.start_agent = "local", "claude"
+                app = self.make_app()
+                app.config_file.unlink(missing_ok=True)
+                async with app.run_test(size=(80, 24)) as pilot:
+                    await settle(pilot)
+                    screen = await self.open_config(pilot)
+                    screen.query_one(TabbedContent).active = active
+                    await pilot.pause()
+                    screen.query_one("#config-merge").value = "pr"
+                    screen.query_one("#config-default-merge").value = "pr"
+                    screen.query_one("#config-agent").value = "pi"
+                    await pilot.press("ctrl+s")
+                    await settle(pilot)
+                    self.assertNotIsInstance(app.screen, ConfigScreen)
+                self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
+                config = load_config(app.config_file)
+                self.assertEqual((config.merge, config.start_agent), ("pr", "pi"))
+
+    async def test_escape_writes_and_applies_no_global_or_board_change(self):
+        before = self.repo_path.read_bytes()
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-theme").value = "nord"
+            screen.query_one("#config-agent").value = "pi"
+            screen.query_one("#config-default-merge").value = "pr"
+            screen.query_one("#config-merge").value = "local"
+            await pilot.press("escape")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+            self.assertEqual(app.theme, "ansi-dark")
+        self.assertEqual((self.config.start_agent, self.config.merge), ("claude", "local"))
+        self.assertFalse(app.config_file.exists())
+        self.assertEqual(self.repo_path.read_bytes(), before)
+
+    async def test_theme_choices_save_and_apply_at_once(self):
+        self.store.add(self.repo_path, "Ship it", "Backlog")
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            theme = screen.query_one("#config-theme")
+            self.assertEqual(self.options(theme), sorted(app.available_themes))
+            self.assertEqual(theme.value, "ansi-dark")
+            theme.value = "nord"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+            self.assertEqual(app.theme, "nord")
+            self.assertEqual(self.config.theme, "nord")
+            self.assertTrue(app.query(".card"))
+        self.assertEqual(load_config(app.config_file).theme, "nord")
+
+    async def test_claude_models_and_its_disabled_thinking_level(self):
+        self.config.start_model = "sonnet"
+        self.config.start_thinking = "high"
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            model, thinking = screen.query_one("#config-model"), screen.query_one("#config-thinking")
+            self.assertEqual(self.options(model), ["default", "opus", "sonnet", "haiku"])
+            self.assertEqual(self.labels(model)[0], "Agent default")
+            self.assertEqual(model.value, "sonnet")
+            self.assertEqual(self.options(thinking), ["default", *THINKING_LEVELS])
+            self.assertEqual(thinking.value, "high")
+            self.assertTrue(thinking.disabled)
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        self.assertFalse(app.config_file.exists())
+
+    async def test_pi_models_come_from_the_start_model_choices(self):
+        self.config.start_agent = "pi"
+        self.config.start_model = "zai/glm-5.3"
+        seen = []
+
+        def choices(config):
+            seen.append(config)
+            return "zai/glm-5.3, high", ["zai/glm-5.3", "openai/gpt-5", "zai/glm-5.3"]
+
+        app = self.make_app()
+        with mock.patch("herdboard.board.pi_model_choices", side_effect=choices):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                model = screen.query_one("#config-model")
+                self.assertEqual(self.options(model), ["default", "zai/glm-5.3", "openai/gpt-5"])
+                self.assertEqual(self.labels(model)[0], "Agent default (zai/glm-5.3, high)")
+                self.assertEqual(model.value, "zai/glm-5.3")
+                self.assertFalse(screen.query_one("#config-thinking").disabled)
+        self.assertEqual(seen, [self.config])
+
+    async def test_a_saved_model_outside_the_offered_models_stays_selected(self):
+        self.config.start_agent = "pi"
+        self.config.start_model = "old/model"
+        for models in (["zai/glm-5.3"], []):
+            with self.subTest(models=models):
+                app = self.make_app()
+                app.config_file.write_text('start_agent = "pi"\nstart_model = "old/model"\n')
+                with mock.patch("herdboard.board.pi_model_choices", return_value=(None, models)):
+                    async with app.run_test(size=(80, 24)) as pilot:
+                        await settle(pilot)
+                        screen = await self.open_config(pilot)
+                        model = screen.query_one("#config-model")
+                        self.assertEqual(self.options(model), ["default", *models, "old/model"])
+                        self.assertEqual(self.labels(model)[-1], "old/model (current configured model)")
+                        self.assertEqual(model.value, "old/model")
+                        screen.query_one("#config-default-merge").value = "pr"
+                        await pilot.press("ctrl+s")
+                        await settle(pilot)
+                self.assertEqual(app.config_file.read_text(),
+                                 'start_agent = "pi"\nstart_model = "old/model"\nmerge = "pr"\n')
+                self.config.merge = "local"
+
+    async def test_an_agent_change_resets_the_model_and_keeps_the_thinking_level(self):
+        self.config.start_model = "opus"
+        self.config.start_thinking = "high"
+        app = self.make_app()
+        app.config_file.write_text('start_model = "opus"\nstart_thinking = "high"\n')
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-agent").value = "pi"
+                await pilot.pause()
+                model, thinking = screen.query_one("#config-model"), screen.query_one("#config-thinking")
+                self.assertEqual(self.options(model), ["default", "zai/glm-5.3"])
+                self.assertEqual(model.value, "default")
+                self.assertFalse(thinking.disabled)
+                self.assertEqual(thinking.value, "high")
+                screen.query_one("#config-agent").value = "claude"
+                await pilot.pause()
+                self.assertEqual(model.value, "default")
+                self.assertTrue(thinking.disabled)
+                screen.query_one("#config-agent").value = "pi"
+                await pilot.pause()
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+                self.assertNotIsInstance(app.screen, ConfigScreen)
+        config = load_config(app.config_file)
+        self.assertEqual((config.start_agent, config.start_model, config.start_thinking), ("pi", None, "high"))
+        self.assertEqual((self.config.start_agent, self.config.start_model), ("pi", None))
+
+    async def test_agent_default_thinking_removes_the_saved_level(self):
+        self.config.start_agent = "pi"
+        self.config.start_thinking = "high"
+        app = self.make_app()
+        app.config_file.write_text('start_agent = "pi"\nstart_thinking = "high"\n')
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, [])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-thinking").value = "default"
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        self.assertEqual(app.config_file.read_text(), 'start_agent = "pi"\n')
+        self.assertIsNone(self.config.start_thinking)
+
+    async def test_saved_agent_defaults_reach_the_next_start(self):
+        app = self.make_app()
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-agent").value = "pi"
+                await pilot.pause()
+                screen.query_one("#config-model").value = "zai/glm-5.3"
+                screen.query_one("#config-thinking").value = "low"
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        # Start, plan, review and merge read the store's config when they run.
+        config = Starter(app.store, self.root).config
+        self.assertEqual((config.start_agent, config.start_model, config.start_thinking),
+                         ("pi", "zai/glm-5.3", "low"))
+
+    async def test_the_board_merge_default_follows_the_global_merge_mode(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            board = screen.query_one("#config-merge")
+            self.assertEqual(self.labels(board)[0], "Global default (local)")
+            self.assertEqual(board.value, "default")
+            screen.query_one("#config-default-merge").value = "pr"
+            await pilot.pause()
+            self.assertEqual(self.labels(board)[0], "Global default (pr)")
+            self.assertEqual(board.value, "default")
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        self.assertIsNone(self.store.board_meta(self.repo_path).merge)
+        self.assertEqual(self.config.merge, "pr")
+        self.assertEqual(load_config(app.config_file).merge, "pr")
+
+    async def test_a_global_merge_change_keeps_an_explicit_board_mode(self):
+        self.store.set_merge(self.repo_path, "local")
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-default-merge").value = "pr"
+            await pilot.pause()
+            self.assertEqual(screen.query_one("#config-merge").value, "local")
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        self.assertEqual(self.store.board_meta(self.repo_path).merge, "local")
+        self.assertEqual(self.config.merge, "pr")
+
+    async def test_a_global_only_change_writes_no_board_file(self):
+        before = self.repo_path.read_bytes()
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-agent").value = "pi"
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+        self.assertEqual(self.repo_path.read_bytes(), before)
+        self.assertEqual(load_config(app.config_file).start_agent, "pi")
+
+    async def test_enter_in_a_select_list_does_not_link_a_project(self):
+        asked = []
+        app = self.make_app(resolve_link=lambda name, labels: asked.append(name) or ProjectLink("p3", name))
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            screen.query_one("#config-project").value = "Mobile"
+            screen.post_message(Input.Submitted(Input(id="other"), "x"))
+            await settle(pilot)
+            self.assertIs(app.screen, screen)
+        self.assertEqual(asked, [])
+
     async def test_c_without_a_repository_board_can_save_global_display_settings(self):
         app = self.make_app(view="inbox", repo=False)
+        boards = {path: path.read_bytes() for path in self.store.board_paths()}
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
             self.assertFalse(screen.query("#config-merge"))
             self.assertFalse(screen.query("#config-project"))
+            self.assertEqual(screen.query_one(TabbedContent).active, "config-global")
+            self.assertTrue(screen.query_one("#config-board").query("#config-board-hint"))
             hint = screen.query_one("#config-board-hint").render().plain
             self.assertEqual(hint, "No repository board. Press i in a repository to create one.")
             self.assertEqual(screen.query_one("#config-icon-style").value, "plain")
@@ -619,6 +937,7 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
         self.assertEqual(load_config(app.config_file).icon_style, "nerd")
+        self.assertEqual({path: path.read_bytes() for path in self.store.board_paths()}, boards)
 
 
 def board_arguments(case, *args):
