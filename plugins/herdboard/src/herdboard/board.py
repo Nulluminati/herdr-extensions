@@ -4095,7 +4095,8 @@ class HerdboardApp(App):
             try:
                 promotion = Promoter(self.store.config, self.store, writer).promote(
                     ref, team=team["key"], target=target, ask=self.ask_state,
-                    project=project["name"] if project else None,
+                    # An empty name tells the service that "No project" was chosen.
+                    project=project["name"] if project else "",
                     again="Press T on the todo again to finish",
                 )
             except StateCancelledError:

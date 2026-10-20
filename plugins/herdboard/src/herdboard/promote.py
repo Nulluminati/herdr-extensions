@@ -72,7 +72,8 @@ class Promoter:
 
         `target` is called only when a new promotion starts. A todo with a record continues
         that record and creates only what Linear does not have. `team`, `project` and
-        `state_name` that differ from the record become warnings; the record wins.
+        `state_name` that differ from the record become warnings; the record wins. An empty
+        `project` is an explicit "no project", None no choice.
         `again` tells how to finish after a failure; `{ref}` in it is the todo ID.
         """
         if LINEAR_REF.match(ref):
@@ -163,7 +164,7 @@ class Promoter:
         ):
             if given is not None and given.casefold() != (planned or "").casefold():
                 found.append(
-                    f"--{label} {given} is ignored: the recorded plan uses "
+                    f"--{label} {given or 'none'} is ignored: the recorded plan uses "
                     f"{label} {planned or 'none'}"
                 )
         return found

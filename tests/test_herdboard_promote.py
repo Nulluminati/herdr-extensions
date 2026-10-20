@@ -338,6 +338,20 @@ class PlanOptionTests(PromoteCase):
         for sent in self.creates()[2:]:
             self.assertEqual((sent["teamId"], sent["projectId"]), ("t-eng", "p-plat"))
 
+    def test_an_empty_project_means_no_project_and_warns_against_a_recorded_one(self):
+        project = {"id": "p-plat", "name": "Platform", "teams": [ENG]}
+        self.fake.mutation_failures = [None, "http_500"]
+        with self.assertRaises(LinearWriteUnknownError):
+            self.promote(target=lambda client, view: (project, []), project="Platform")
+        (warning,) = self.promote(project="").warnings
+        self.assertEqual(warning, "--project none is ignored: the recorded plan uses project Platform")
+
+    def test_an_empty_project_matches_a_plan_without_a_project(self):
+        self.fake.mutation_failures = [None, "http_500"]
+        with self.assertRaises(LinearWriteUnknownError):
+            self.promote()
+        self.assertEqual(self.promote(project="").warnings, [])
+
     def test_the_same_options_do_not_warn(self):
         self.fake.mutation_failures = [None, "http_500"]
         with self.assertRaises(LinearWriteUnknownError):

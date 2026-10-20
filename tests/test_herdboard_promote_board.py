@@ -435,6 +435,20 @@ class PromoteTests(PromoteBoardCase):
             warnings = [m for m, s in self.notifications(app) if s == "warning"]
             self.assertTrue(any("team OPS" in m and "ENG" in m for m in warnings), warnings)
 
+    async def test_no_project_on_the_retry_warns_against_the_recorded_project(self):
+        self.store.edit(self.target.ref, title=TITLE, body=["- [ ] Book the plumber"])
+        self.fake.mutation_failures = [None, "http_500"]
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await settle(pilot)
+            await self.promote(pilot, "ENG", "p-plat")
+            app._notifications.clear()
+            await self.promote(pilot, "ENG", None)
+            self.assertTrue(self.card(app, "Renovate").title.endswith("→ ENG-7"))
+            self.assertEqual(self.creates()[-1]["projectId"], "p-plat")
+            warnings = [m for m, s in self.notifications(app) if s == "warning"]
+            self.assertIn("project none is ignored: the recorded plan uses project Platform", warnings)
+
 
 class StateChoiceTests(PromoteBoardCase):
     def setUp(self):
