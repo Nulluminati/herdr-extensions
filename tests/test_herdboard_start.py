@@ -129,6 +129,14 @@ class StartTests(unittest.TestCase):
         self.assertEqual(record["branch"], result["branch"])
         self.assertTrue(Path(result["worktree_path"]).exists())
 
+    def test_a_recorded_repository_is_used_by_a_later_start(self):
+        card = self.store.add(self.store.ensure_inbox(), "Global task")
+        first = self.starter.start(card.ref, repo=self.board.stem, no_agent=True)
+        self.fake.calls.clear()
+        again = self.starter.start(card.ref, no_agent=True)
+        self.assertEqual(again["worktree_path"], first["worktree_path"])
+        self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
+
     def test_new_repo_keeps_a_live_worktree_of_an_inbox_card(self):
         card = self.store.add(self.store.ensure_inbox(), "Global task")
         result = self.starter.start(card.ref, repo=self.board.stem, no_agent=True)
@@ -143,14 +151,20 @@ class StartTests(unittest.TestCase):
     def test_a_prompt_cannot_replace_a_live_worktree(self):
         card = self.store.add(self.store.ensure_inbox(), "Global task")
         result = self.starter.start(card.ref, repo=self.board.stem, no_agent=True)
+        # A recorded repository that no longer resolves makes the next start ask again.
+        state = start.state_dir() / "starts.json"
+        record = json.loads(state.read_text())[card.ref]
+        record["repository"] = "gone.example/acme/nothing"
+        start._write(state, {card.ref: record})
         prompt = unittest.mock.Mock(return_value=("new_repo", self.root / "new"))
         starter = start.Starter(self.store, self.repo, prompt_target=prompt)
         with self.assertRaises(start.StartError) as raised:
             starter.start(card.ref, no_agent=True)
         prompt.assert_called_once()
         self.assertEqual(raised.exception.code, "usage")
-        record = json.loads((start.state_dir() / "starts.json").read_text())[card.ref]
-        self.assertEqual(record["branch"], result["branch"])
+        kept = json.loads(state.read_text())[card.ref]
+        self.assertEqual(kept["branch"], result["branch"])
+        self.assertEqual(kept["repository"], "gone.example/acme/nothing")
         self.assertFalse((self.root / "new").exists())
 
     def test_go_to_workspace_focuses_the_open_workspace(self):

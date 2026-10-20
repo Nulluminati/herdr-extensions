@@ -502,6 +502,49 @@ class AgentReviewCliTests(CliTestCase):
         self.assertIn("Hunk opens when the findings are ready", out)
 
 
+LINEAR_ISSUE = {
+    "id": "i7", "identifier": "ENG-7", "title": "Map corvid caches",
+    "description": "Find where the caches are.\n\nReport the sites.",
+    "state": {"name": "In Progress", "type": "started"},
+    "labels": [], "project": None, "team": {"key": "ENG", "id": "team-eng"},
+    "url": "https://linear.app/acme/issue/ENG-7", "branchName": "nate/eng-7",
+    "sortOrder": 1.0, "attachments": [],
+}
+
+
+class FakeIssueWriter:
+    """A Linear writer that serves one issue without a network."""
+
+    def __init__(self, issue):
+        self._issue = issue
+
+    def online(self):
+        return contextlib.nullcontext(self)
+
+    def issue(self, ref):
+        return self._issue
+
+
+class LinearRequestTests(AgentReviewTestCase):
+    def test_a_repoless_linear_review_reads_the_issue(self):
+        folder = start.work_folder(self.config, "ENG-7")
+        folder.mkdir(parents=True)
+        start._write(start.state_dir() / "starts.json", {"i7": {
+            "ref": "ENG-7", "mode": "repoless", "workspace_id": "x9", "pane_id": "x9:p1",
+            "worktree_path": str(folder), "agent": "claude", "agent_name": "hb-eng-7"}})
+        self.fake.agent = True
+        source = self.root / "findings.md"
+        source.write_text("# Findings\n\nCaches are here.\n", encoding="utf-8")
+        attachments.add(self.store, "ENG-7", source)
+        reviewer = agent_review.AgentReviewer(self.store, self.repo, writer=FakeIssueWriter(LINEAR_ISSUE))
+        result = reviewer.request("ENG-7")
+        request = (Path(result["folder"]) / "request.md").read_text(encoding="utf-8")
+        self.assertIn("Map corvid caches", request)
+        self.assertIn("Find where the caches are.", request)
+        self.assertIn("Report the sites.", request)
+        self.assertIn("no repository", request)
+
+
 class NoRepositoryAgentReviewTests(AgentReviewTestCase):
     """An agent review of a repoless card reads its attachments instead of a diff."""
 

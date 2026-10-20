@@ -124,7 +124,7 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 
 A card on the inbox can run without a repository. `start` and `plan` then fail with `repo_required` unless the user picks one:
 
-- A repository board: `--repo BOARD`. The card moves to that board if it is not there.
+- A repository board: `--repo BOARD`. The card stays on its board; `--repo` only names the repository.
 - A new repository: `--new-repo [PATH]`. herdboard runs `git init -b main` and a first commit at PATH, creates the board, moves the card, then starts as usual. Without PATH it uses `projects_dir/<title>`; the default is `~/Projects`. The path must not exist, or must be an empty folder; a folder that a stopped start left with only an unborn repository is reused. Only todos can do this, and not a card with a parent or sub-cards (`new_repo_family`).
 - No repository: `--no-repo`. herdboard creates `<todos>/.herdboard/work/<id>/` and opens a workspace there. There is no Git, no branch and no worktree.
 

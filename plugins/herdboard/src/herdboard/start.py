@@ -645,8 +645,12 @@ class Starter:
                 return NEW_REPO, Path(stored["new_repo_path"]).expanduser()
             path = stored.get("new_repo_path")
             return NEW_REPO, self._new_repo_path(card, path or True, issue)
+        # A recorded existing repository, unless the card's own board names a repository.
+        recorded = None
+        if stored.get("repository") and (card.path is None or not self.store.board_meta(card.path).repo):
+            recorded = stored["repository"]
         try:
-            return REPO, self._repository(card, None, issue)
+            return REPO, self._repository(card, recorded, issue)
         except StartError as error:
             if error.code != "repo_required" or self.prompt_target is None:
                 raise

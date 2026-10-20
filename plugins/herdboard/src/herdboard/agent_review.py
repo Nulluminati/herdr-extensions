@@ -189,6 +189,9 @@ class AgentReviewer(Reviewer):
                 head = _git(worktree, "rev-parse", "HEAD").strip()
             # The review runs in the background: the user stays where they are.
             self._ready_agent(card, ref, key, record, persist, focus=False)
+            if card is None:
+                # A Linear issue is read here, so the request names the issue and its description.
+                card = start_module.fetch_linear_card(self.writer, self.config, ref)
             reviews = state_dir() / "reviews"
             try:
                 reviews.mkdir(parents=True, exist_ok=True)

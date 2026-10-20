@@ -466,6 +466,15 @@ class NoRepositoryPlanTests(PlanTestCase):
         self.assertEqual(self.store.show(self.inbox_card.ref).column, "In progress")
         self.assertFalse(self.folder().exists())
 
+    def test_a_planned_existing_repository_is_used_by_a_later_start(self):
+        result = self.planner.plan(self.inbox_card.ref, repo=self.board)
+        plan._forget(self.inbox_card.ref, "w1:p7")
+        self.fake.calls.clear()
+        starter = start.Starter(self.store, self.repo)
+        again = starter.start(self.inbox_card.ref, no_agent=True)
+        self.assertEqual(again["worktree_path"], result["worktree_path"])
+        self.assertFalse(self.fake.find("worktree", "create"))
+
     def test_a_planned_new_repository_card_can_be_finished(self):
         path = self.root / "Projects" / "corvid"
         self.planner.plan(self.inbox_card.ref, new_repo=path)
