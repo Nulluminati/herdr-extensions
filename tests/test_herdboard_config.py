@@ -247,6 +247,14 @@ class ConfigTest(unittest.TestCase):
                     save_global_config(path, **values)
                 self.assertEqual(path.read_text(), original)
 
+    def test_check_global_accepts_valid_values_and_rejects_invalid_ones(self):
+        from herdboard.config import check_global_config
+        check_global_config(theme="nord", start_agent="pi", start_model=None, start_thinking=None, merge="pr")
+        for values in ({"start_model": "zai/glm 5"}, {"merge": "squash"}, {"start_agent": None}):
+            with self.subTest(values=values):
+                with self.assertRaises(HerdboardError):
+                    check_global_config(**values)
+
     def test_save_global_does_not_replace_an_invalid_config(self):
         from herdboard.config import save_global_config
         path = self.write(self.dir / "a.toml", "invalid = [")

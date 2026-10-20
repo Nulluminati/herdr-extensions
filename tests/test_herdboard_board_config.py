@@ -895,6 +895,30 @@ class ConfigScreenTests(BoardTestCase):
         self.assertEqual(self.store.board_meta(self.repo_path).merge, "local")
         self.assertEqual(self.config.merge, "pr")
 
+    async def test_an_invalid_global_value_writes_neither_file(self):
+        self.config.start_agent = "pi"
+        before = self.repo_path.read_bytes()
+        asked = []
+        app = self.make_app(resolve_link=lambda name, labels: asked.append(name) or ProjectLink("p3", name))
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm 5"])):
+            async with app.run_test(size=(100, 40)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-model").value = "zai/glm 5"
+                screen.query_one("#config-merge").value = "pr"
+                screen.query_one("#config-project").value = "Mobile"
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+                self.assertIs(app.screen, screen)
+                error = screen.query_one("#config-error").plain
+                self.assertIn("start_model must be one model name", error)
+                self.assertNotIn("Board settings saved", error)
+                self.assertIsNone(screen.meta.merge)
+        self.assertEqual(asked, [])
+        self.assertEqual(self.repo_path.read_bytes(), before)
+        self.assertFalse(app.config_file.exists())
+        self.assertIsNone(self.config.start_model)
+
     async def test_a_global_only_change_writes_no_board_file(self):
         before = self.repo_path.read_bytes()
         app = self.make_app()
@@ -907,7 +931,7 @@ class ConfigScreenTests(BoardTestCase):
         self.assertEqual(self.repo_path.read_bytes(), before)
         self.assertEqual(load_config(app.config_file).start_agent, "pi")
 
-    async def test_enter_in_a_select_list_does_not_link_a_project(self):
+    async def test_submit_from_an_unrelated_input_does_not_save(self):
         asked = []
         app = self.make_app(resolve_link=lambda name, labels: asked.append(name) or ProjectLink("p3", name))
         async with app.run_test(size=(100, 40)) as pilot:

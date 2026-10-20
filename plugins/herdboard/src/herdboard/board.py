@@ -43,7 +43,7 @@ from .model import HerdboardError, join_title, parse_tags, plain_tags, split_tit
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import agent_states
 from . import start as start_module
-from .config import THINKING_LEVELS, save_global_config
+from .config import THINKING_LEVELS, check_global_config, save_global_config
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
@@ -4796,6 +4796,8 @@ class HerdboardApp(App):
                 self.theme = settings["theme"]
 
         def write() -> None:
+            # A global value that cannot save must not leave a board change behind.
+            check_global_config(**settings)
             link = resolve(project, labels) if project and resolve else None
 
             def change(links: list[ProjectLink]) -> list[ProjectLink]:

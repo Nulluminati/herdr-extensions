@@ -149,6 +149,12 @@ def _check_global(key: str, value) -> None:
         raise HerdboardError("start_model must be one model name, such as zai/glm-5.3")
 
 
+def check_global_config(**settings) -> None:
+    """Raise when a value is not valid for `save_global_config`, before any write."""
+    for key, value in settings.items():
+        _check_global(key, value)
+
+
 def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent=UNCHANGED,
                        start_model=UNCHANGED, start_thinking=UNCHANGED, merge=UNCHANGED,
                        icon_style=UNCHANGED, tag_style=UNCHANGED, card_style=UNCHANGED) -> None:
@@ -160,8 +166,7 @@ def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent
         ("theme", theme), ("start_agent", start_agent), ("start_model", start_model),
         ("start_thinking", start_thinking), ("merge", merge), ("icon_style", icon_style),
         ("tag_style", tag_style), ("card_style", card_style)) if value is not UNCHANGED}
-    for key, value in changes.items():
-        _check_global(key, value)
+    check_global_config(**changes)
     if not changes:
         return
     path = config_path(path)
