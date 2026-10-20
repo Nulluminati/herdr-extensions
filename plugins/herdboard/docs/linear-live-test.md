@@ -38,6 +38,7 @@ Write the result next to each check: pass, or the output.
 | 12 | Turn on the network. `hb board`, then `r` | Linear cards in the columns, marked `◆`. The title bar shows `Linear: HH:MM`. | Board fetch worker |
 | 13 | A project that you cannot access: edit the board file, change one `linear-projects` ID to a wrong value, then `hb list` | A warning for that link. The other links still show. | Inaccessible project returns no nodes |
 | 14 | Rate-limit headers: `curl -s -D - -o /dev/null -H "Authorization: $LINEAR_API_KEY" -H 'Content-Type: application/json' --data '{"query":"{ viewer { id } }"}' https://api.linear.app/graphql \| grep -i ratelimit` | Headers named `X-RateLimit-Requests-Reset` and `X-RateLimit-Complexity-Reset`, and `...-Remaining` headers | The header names that the client reads |
+| 15 | Temporarily set `[linear] api_key_command = ["false"]` in the test config. Run `hb list --view mine`. Remove the setting after this check. | Exit 3. The message names `false` and its exit status, without the key. | Command failure takes precedence over the environment key and cached cards. |
 
 ## Write checks
 

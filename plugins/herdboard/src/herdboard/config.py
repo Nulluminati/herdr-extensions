@@ -6,10 +6,13 @@ from dataclasses import dataclass, field
 import fcntl
 import os
 import re
+import shlex
+import subprocess
 from pathlib import Path
 import tempfile
 import tomllib
 
+from .linear import LinearAuthError
 from .model import HerdboardError, IoError, UnknownTypeError
 
 DEFAULT_COLUMNS = ["Backlog", "Todo", "In progress", "Review", "Done"]
@@ -33,12 +36,34 @@ TAG_STYLES = ("outline", "round", "block")
 CARD_STYLES = ("full", "compact")
 
 
+KEY_COMMAND_TIMEOUT = 30
+
+
+def _run_key_command(argv: list[str]) -> str:
+    name = shlex.join(argv)
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True,
+                                timeout=KEY_COMMAND_TIMEOUT, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise LinearAuthError(f"Linear key command {name} timed out after {KEY_COMMAND_TIMEOUT} seconds") from None
+    except OSError as error:
+        raise LinearAuthError(f"Linear key command {name} could not run: {error}") from None
+    if result.returncode:
+        raise LinearAuthError(f"Linear key command {name} exited with status {result.returncode}")
+    key = result.stdout.strip()
+    if not key:
+        raise LinearAuthError(f"Linear key command {name} returned empty stdout")
+    return key
+
+
 @dataclass
 class LinearConfig:
-    """`[linear]` settings. The API key comes from the environment, never from the file."""
+    """`[linear]` settings. The key comes from a command or environment, never the file itself."""
 
-    enabled: bool | None = None  # None: on when the API key variable is set
+    enabled: bool | None = None  # None: on when a key source is configured
     api_key_env: str = "LINEAR_API_KEY"
+    api_key_command: list[str] | None = None
+    _command_key: str | None = field(default=None, init=False, repr=False, compare=False)
     columns: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LINEAR_COLUMNS))
     state_names: dict[str, str] = field(default_factory=lambda: {"In Review": "Review"})
     # Days a completed issue stays visible. The client also accepts None (show every
@@ -47,13 +72,26 @@ class LinearConfig:
 
     @property
     def api_key(self) -> str | None:
+        if self.api_key_command is not None:
+            if self._command_key is None:
+                self._command_key = _run_key_command(self.api_key_command)
+            return self._command_key
         return os.environ.get(self.api_key_env) or None
 
     @property
+    def key_configured(self) -> bool:
+        """Check for a key source without running the command."""
+        return self.api_key_command is not None or bool(os.environ.get(self.api_key_env))
+
+    @property
+    def key_source(self) -> str:
+        return "linear.api_key_command" if self.api_key_command is not None else self.api_key_env
+
+    @property
     def active(self) -> bool:
-        """True when Linear is on and a key is available."""
-        wanted = self.api_key is not None if self.enabled is None else self.enabled
-        return wanted and self.api_key is not None
+        """True when Linear is on and a key source is configured."""
+        wanted = self.key_configured if self.enabled is None else self.enabled
+        return wanted and self.key_configured
 
 
 @dataclass
@@ -245,7 +283,7 @@ def _load_linear(path: Path, data: dict) -> LinearConfig:
     if "api_key" in table:
         raise HerdboardError(
             f"{path}: linear.api_key is not read from the config file; "
-            "set the environment variable named by linear.api_key_env"
+            "set linear.api_key_command, or the environment variable named by linear.api_key_env"
         )
     linear = LinearConfig()
     if "enabled" in table:
@@ -255,6 +293,18 @@ def _load_linear(path: Path, data: dict) -> LinearConfig:
     api_key_env = _string(path, table, "api_key_env")
     if api_key_env is not None:
         linear.api_key_env = api_key_env
+    if "api_key_command" in table:
+        command = table["api_key_command"]
+        if isinstance(command, str):
+            try:
+                command = shlex.split(command)
+            except ValueError as error:
+                raise HerdboardError(f"{path}: invalid linear.api_key_command: {error}") from error
+        if not isinstance(command, list) or not all(isinstance(item, str) and item for item in command):
+            raise HerdboardError(f"{path}: linear.api_key_command must be a string or list of non-empty strings")
+        if not command:
+            raise HerdboardError(f"{path}: linear.api_key_command must not be empty")
+        linear.api_key_command = [os.path.expanduser(command[0]), *command[1:]]
     columns = _string_map(path, table, "columns", "linear.columns")
     unknown = sorted(set(columns) - set(DEFAULT_LINEAR_COLUMNS))
     if unknown:

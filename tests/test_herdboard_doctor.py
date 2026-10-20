@@ -151,6 +151,20 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(self.findings("linear_auth", expect=1)[0]["level"], "error")
             self.assertEqual(fake.requests, [])
 
+    def test_linear_command_failure_is_auth_finding(self):
+        self.config.write_text('[linear]\napi_key_command = ["missing-key-program"]\n')
+        with patch("herdboard.config.subprocess.run", side_effect=FileNotFoundError("missing")):
+            found = doctor.check_linear(load_config(), {}, False)
+        self.assertEqual([(f["code"], f["level"]) for f in found], [("linear_auth", "error")])
+        self.assertIn("missing-key-program", found[0]["message"])
+
+    def test_disabled_or_offline_linear_does_not_run_command(self):
+        with patch("herdboard.config.subprocess.run") as run:
+            for enabled, offline in ((False, False), (True, True)):
+                self.config.write_text(f'[linear]\nenabled = {str(enabled).lower()}\napi_key_command = ["key"]\n')
+                self.assertEqual(doctor.check_linear(load_config(), {}, offline), [])
+            run.assert_not_called()
+
     def test_linear_refused_key(self):
         self.enable_linear("refused")
         with self.server() as fake:

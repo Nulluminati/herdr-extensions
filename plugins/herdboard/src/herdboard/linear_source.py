@@ -152,7 +152,7 @@ class LinearSource:
     def require_active(self) -> None:
         if not self.active:
             raise LinearDisabledError(
-                f"Linear is off: set {self.settings.api_key_env} and do not set "
+                f"Linear is off: set {self.settings.key_source} and do not set "
                 "linear.enabled = false"
             )
 

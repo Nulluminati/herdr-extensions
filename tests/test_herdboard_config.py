@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard.config import config_path, load_config  # noqa: E402
+from herdboard.linear import LinearAuthError  # noqa: E402
+from herdboard.config import LinearConfig, config_path, load_config  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
 
 
@@ -109,7 +111,8 @@ class ConfigTest(unittest.TestCase):
         original = ('# My settings\nicon_style = "plain" # icons\n'
                     "'tag_style' = 'round' # tags\n"
                     'theme = "nord"\n\n[linear]\n# Keep this section\n'
-                    'enabled = false\nicon_style = "unrelated"\n')
+                    'enabled = false\nicon_style = "unrelated"\n'
+                    'api_key_command = "secret-tool lookup service herdboard" # keyring\n')
         path = self.write(self.dir / "a.toml", original)
         path.chmod(0o640)
         save_display_config(path, icon_style="nerd", tag_style="block")
@@ -492,7 +495,7 @@ started = "Doing"
 
     def test_api_key_in_file_is_rejected(self):
         path = self.write(self.dir / "a.toml", '[linear]\napi_key = "lin_api_secret"\n')
-        with self.assertRaisesRegex(HerdboardError, "api_key"):
+        with self.assertRaisesRegex(HerdboardError, "api_key_command"):
             load_config(path)
 
     def test_invalid_values(self):
@@ -502,6 +505,65 @@ started = "Doing"
                 path = self.write(self.dir / "a.toml", text)
                 with self.assertRaises(HerdboardError):
                     load_config(path)
+
+    def test_command_forms_and_expansion(self):
+        for value in ('"~/bin/key lookup \'two words\'"', '["~/bin/key", "lookup", "two words"]'):
+            with self.subTest(value=value):
+                path = self.write(self.dir / "key.toml", f"[linear]\napi_key_command = {value}\n")
+                self.assertEqual(load_config(path).linear.api_key_command,
+                                 [str(self.dir / "home/bin/key"), "lookup", "two words"])
+
+    def test_invalid_commands(self):
+        for value in ('""', '"  "', '[]', '[""]', '[1]', '"\'unclosed"', '1', 'true'):
+            with self.subTest(value=value):
+                path = self.write(self.dir / "key.toml", f"[linear]\napi_key_command = {value}\n")
+                with self.assertRaisesRegex(HerdboardError, "linear.api_key_command"):
+                    load_config(path)
+
+    def test_command_is_lazy_and_can_be_disabled(self):
+        with mock.patch("herdboard.config.subprocess.run") as run:
+            for enabled, active in ((None, True), (False, False), (True, True)):
+                linear = LinearConfig(enabled=enabled, api_key_command=["key"])
+                self.assertTrue(linear.key_configured)
+                self.assertEqual(linear.key_source, "linear.api_key_command")
+                self.assertEqual(linear.active, active)
+            run.assert_not_called()
+
+    def test_command_wins_and_caches_success_without_exposing_key(self):
+        os.environ["LINEAR_API_KEY"] = "environment-key"
+        linear = LinearConfig(api_key_command=["key", "lookup"])
+        with mock.patch("herdboard.config.subprocess.run", return_value=
+                        subprocess.CompletedProcess([], 0, "  command-secret\n", "")) as run:
+            self.assertEqual(linear.api_key, "command-secret")
+            self.assertEqual(linear.api_key, "command-secret")
+            run.assert_called_once_with(["key", "lookup"], capture_output=True, text=True,
+                                        timeout=30, stdin=subprocess.DEVNULL)
+        self.assertNotIn("command-secret", repr(linear))
+        self.assertEqual(linear, LinearConfig(api_key_command=["key", "lookup"]))
+
+    def test_command_real_script(self):
+        script = self.write(self.dir / "key script", "#!/bin/sh\necho lin_api_x\n")
+        script.chmod(0o700)
+        self.assertEqual(LinearConfig(api_key_command=[str(script)]).api_key, "lin_api_x")
+
+    def test_command_failures_are_auth_errors_and_retry(self):
+        failures = (FileNotFoundError("missing"), PermissionError("denied"),
+                    subprocess.TimeoutExpired(["key"], 30, output="stdout-secret"),
+                    subprocess.CompletedProcess([], 1, "stdout-secret", "locked\nsecond line"),
+                    subprocess.CompletedProcess([], 0, " \n", ""))
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__, status=getattr(failure, "returncode", None)):
+                linear = LinearConfig(api_key_command=["key", "two words"])
+                with mock.patch("herdboard.config.subprocess.run", side_effect=[
+                        failure, subprocess.CompletedProcess([], 0, "recovered", "")]) as run:
+                    with self.assertRaises(LinearAuthError) as caught:
+                        _ = linear.api_key
+                    message = str(caught.exception)
+                    self.assertIn("key 'two words'", message)
+                    self.assertNotIn("stdout-secret", message)
+                    self.assertNotIn("second line", message)
+                    self.assertEqual(linear.api_key, "recovered")
+                    self.assertEqual(run.call_count, 2)
 
     def test_done_days(self):
         self.assertEqual(load_config().linear.done_days, 14)

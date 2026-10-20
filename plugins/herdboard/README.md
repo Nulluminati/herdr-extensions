@@ -441,7 +441,7 @@ Limits:
 
 ## Linear
 
-Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal API key.
+Linear is optional. It turns on when `linear.api_key_command` is set or `LINEAR_API_KEY` holds a Linear personal API key. Set `linear.enabled = false` to keep it off.
 
 | herdboard | Linear |
 |---|---|
@@ -452,6 +452,61 @@ Linear is optional. It turns on when `LINEAR_API_KEY` holds a Linear personal AP
 | `#type/bug` | The label `bug` (any letter case) |
 | `📅` date | Due date |
 | Card ID (`t7k2`) | Identifier (`ENG-123`) |
+
+### Keep the key in a keyring
+
+Use `api_key_command` to keep a distinct herdboard key in a secret store, outside the environment and config file.
+
+For Fedora with GNOME Keyring:
+
+1. Run this command and paste the key at the prompt:
+
+   ```bash
+   secret-tool store --label='herdboard Linear' service herdboard
+   ```
+
+2. Add this command under `[linear]` in `~/.config/herdboard/config.toml`:
+
+   ```toml
+   [linear]
+   api_key_command = "secret-tool lookup service herdboard"
+   ```
+
+For macOS Keychain:
+
+1. Run this command and enter the key at the prompt:
+
+   ```bash
+   security add-generic-password -s herdboard -a linear -w
+   ```
+
+2. Set the lookup command:
+
+   ```toml
+   [linear]
+   api_key_command = "security find-generic-password -s herdboard -a linear -w"
+   ```
+
+For `pass`, set `api_key_command = "pass show linear/herdboard"` under `[linear]`.
+`pass` prints the whole entry. Store only the key on one line, or use a script that prints only the key.
+
+A command string uses shell-style word splitting. A list specifies the arguments directly:
+
+```toml
+[linear]
+api_key_command = ["secret-tool", "lookup", "service", "herdboard"]
+```
+
+herdboard runs no shell: pipes and `$VAR` expansion do not work. It expands `~` only in the first word.
+The command must print the key to standard output. herdboard removes surrounding whitespace.
+The timeout is 30 seconds, which allows time for a keyring unlock prompt.
+herdboard runs the command only when it first needs the key. It caches a successful result for the process lifetime.
+Commands that do not use Linear do not run it. Failed commands can run again on the next attempt.
+Restart herdboard after you rotate the key.
+
+The command wins over `api_key_env`. Without a command, herdboard reads the environment variable named by `api_key_env` (default: `LINEAR_API_KEY`).
+Command failures produce an authentication error with exit code 3. Error messages never include standard output.
+Do not put the key itself in `config.toml` or command arguments.
 
 ### Link a repository to Linear projects
 
@@ -614,8 +669,9 @@ icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
 types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
 
 [linear]
-# enabled = true           # default: on when the API key is set
+# enabled = true           # default: on when a key source is configured
 api_key_env = "LINEAR_API_KEY"
+# api_key_command = "secret-tool lookup service herdboard"   # wins over api_key_env
 done_days = 14             # completed issues older than this are hidden
 
 [linear.columns]

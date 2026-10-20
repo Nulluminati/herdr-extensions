@@ -50,6 +50,18 @@ class LinearEnvTestCase(unittest.TestCase):
 
 
 class SourceTests(LinearEnvTestCase):
+    def test_command_key_authenticates_without_environment_key(self):
+        del os.environ["LINEAR_API_KEY"]
+        script = self.root / "key"
+        script.write_text("#!/bin/sh\necho test-key\n")
+        script.chmod(0o700)
+        config = Config(todos_dir=self.root / "todos")
+        config.linear.api_key_command = [str(script)]
+        source = LinearSource(config)
+        self.assertTrue(source.active)
+        self.assertTrue(source.my_issues().data)
+        self.assertTrue(self.requests("Viewer"))
+
     def test_paused_fetch_cannot_restore_cache_after_concurrent_write(self):
         import threading
         from herdboard.linear_writes import LinearWriter

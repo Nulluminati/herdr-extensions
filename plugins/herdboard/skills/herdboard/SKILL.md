@@ -181,7 +181,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `ambiguous_state` | Several Linear states match the column. The error lists `candidates`. Ask the user which one, then run the command again with `--state NAME`. |
 | `linear_unknown` | The write may have happened. Do not run it again. Tell the user to check the issue in Linear. For a new issue, give them `issue_id`. |
 | `linear_offline`, `linear`, `linear_rejected` | Linear is not reachable or refused the request, and nothing changed. Tell the user. |
-| `linear_disabled` | Linear is off (no `LINEAR_API_KEY`, or `linear.enabled = false` in the config). Tell the user the message. |
+| `linear_disabled` | Linear is off (neither `linear.api_key_command` nor an environment key is set, or `linear.enabled = false`). The default environment variable is `LINEAR_API_KEY`. Tell the user the message. |
 | `team_required` | Ask the user which Linear team, then use `--team KEY`. |
 | `already_promoted` | The todo already has a Linear issue (`→ ENG-123`). Tell the user. |
 | `not_a_todo` | `promote` takes a todo, not a Linear issue. |

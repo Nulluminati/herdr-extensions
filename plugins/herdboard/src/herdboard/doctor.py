@@ -213,11 +213,11 @@ def fix_ids(store, before):
 
 def check_linear(config, boards, offline):
     settings = config.linear
-    enabled = settings.api_key is not None if settings.enabled is None else settings.enabled
+    enabled = settings.key_configured if settings.enabled is None else settings.enabled
     if offline or not enabled:
         return []
-    if not settings.api_key:
-        return [finding("error", "linear_auth", f"Linear is enabled but {settings.api_key_env} is not set.")]
+    if not settings.key_configured:
+        return [finding("error", "linear_auth", f"Linear is enabled but {settings.key_source} is not set.")]
     findings = []
     try:
         client = linear_source.build_client(settings.api_key)
