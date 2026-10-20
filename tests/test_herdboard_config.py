@@ -541,6 +541,47 @@ started = "Doing"
         self.assertNotIn("command-secret", repr(linear))
         self.assertEqual(linear, LinearConfig(api_key_command=["key", "lookup"]))
 
+    def test_concurrent_command_reads_share_one_lookup(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        import threading
+
+        linear = LinearConfig(api_key_command=["key"])
+        first_started = threading.Event()
+        second_started = threading.Event()
+        release = threading.Event()
+
+        def lookup(argv):
+            if not first_started.is_set():
+                first_started.set()
+                self.assertTrue(release.wait(5))
+            return "command-secret"
+
+        def second_read():
+            second_started.set()
+            return linear.api_key
+
+        with mock.patch("herdboard.config._run_key_command", side_effect=lookup) as run:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(lambda: linear.api_key)
+                try:
+                    self.assertTrue(first_started.wait(5))
+                    second = pool.submit(second_read)
+                    self.assertTrue(second_started.wait(5))
+                    with self.assertRaises(TimeoutError):
+                        second.result(timeout=0.2)
+                finally:
+                    release.set()
+                self.assertEqual(first.result(timeout=5), "command-secret")
+                self.assertEqual(second.result(timeout=5), "command-secret")
+            run.assert_called_once_with(["key"])
+
+    def test_command_with_embedded_null_is_auth_error(self):
+        path = self.write(self.dir / "key.toml", '[linear]\napi_key_command = "key\\u0000name"\n')
+        with self.assertRaises(LinearAuthError) as caught:
+            _ = load_config(path).linear.api_key
+        self.assertEqual(caught.exception.exit_code, 3)
+        self.assertIn("key\0name", str(caught.exception))
+
     def test_command_real_script(self):
         script = self.write(self.dir / "key script", "#!/bin/sh\necho lin_api_x\n")
         script.chmod(0o700)
@@ -548,6 +589,8 @@ started = "Doing"
 
     def test_command_failures_are_auth_errors_and_retry(self):
         failures = (FileNotFoundError("missing"), PermissionError("denied"),
+                    ValueError("stdout-secret"),
+                    UnicodeDecodeError("utf-8", b"stdout-secret\xff", 13, 14, "stdout-secret"),
                     subprocess.TimeoutExpired(["key"], 30, output="stdout-secret"),
                     subprocess.CompletedProcess([], 1, "stdout-secret", "locked\nsecond line"),
                     subprocess.CompletedProcess([], 0, " \n", ""))
@@ -559,6 +602,7 @@ started = "Doing"
                     with self.assertRaises(LinearAuthError) as caught:
                         _ = linear.api_key
                     message = str(caught.exception)
+                    self.assertEqual(caught.exception.exit_code, 3)
                     self.assertIn("key 'two words'", message)
                     self.assertNotIn("stdout-secret", message)
                     self.assertNotIn("second line", message)

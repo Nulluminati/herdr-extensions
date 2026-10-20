@@ -10,6 +10,7 @@ import shlex
 import subprocess
 from pathlib import Path
 import tempfile
+import threading
 import tomllib
 
 from .linear import LinearAuthError
@@ -46,6 +47,10 @@ def _run_key_command(argv: list[str]) -> str:
                                 timeout=KEY_COMMAND_TIMEOUT, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         raise LinearAuthError(f"Linear key command {name} timed out after {KEY_COMMAND_TIMEOUT} seconds") from None
+    except UnicodeDecodeError:
+        raise LinearAuthError(f"Linear key command {name} returned undecodable output") from None
+    except ValueError:
+        raise LinearAuthError(f"Linear key command {name} has invalid arguments") from None
     except OSError as error:
         raise LinearAuthError(f"Linear key command {name} could not run: {error}") from None
     if result.returncode:
@@ -64,6 +69,7 @@ class LinearConfig:
     api_key_env: str = "LINEAR_API_KEY"
     api_key_command: list[str] | None = None
     _command_key: str | None = field(default=None, init=False, repr=False, compare=False)
+    _command_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
     columns: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LINEAR_COLUMNS))
     state_names: dict[str, str] = field(default_factory=lambda: {"In Review": "Review"})
     # Days a completed issue stays visible. The client also accepts None (show every
@@ -73,9 +79,10 @@ class LinearConfig:
     @property
     def api_key(self) -> str | None:
         if self.api_key_command is not None:
-            if self._command_key is None:
-                self._command_key = _run_key_command(self.api_key_command)
-            return self._command_key
+            with self._command_lock:
+                if self._command_key is None:
+                    self._command_key = _run_key_command(self.api_key_command)
+                return self._command_key
         return os.environ.get(self.api_key_env) or None
 
     @property
