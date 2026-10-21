@@ -18,8 +18,10 @@ from .model import HerdboardError, IoError
 FOLDER = "notes"
 # The note of the inbox board is the global note.
 GLOBAL = "inbox"
-# The first line of a fenced code block, or its last line.
+# The first line of a fenced code block, or its last line. A closing line has nothing but
+# spaces after the fence.
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+CLOSING_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,}) *$")
 # The marker of a list item and the spaces after it, up to the item's text.
 LIST_ITEM = re.compile(r"^( *)([-*+]|\d{1,9}[.)])( {1,4})(?=\S)")
 # A paragraph of one no-break space: one empty row in the preview.
@@ -56,12 +58,14 @@ def preview_markdown(text: str) -> str:
     lines: list[str] = []
     # The open list items, outermost first.
     items: list[_ListItem] = []
+    # The opening fence of the code block that the line is in: a closing fence is the same
+    # character, at least as long.
     fence = None
     after_blank = False
     for index, line in enumerate(source):
-        match = FENCE.match(line)
         if fence is not None:
-            if match and match.group(1)[0] == fence:
+            closing = CLOSING_FENCE.match(line)
+            if closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= len(fence):
                 fence = None
         elif not line.strip():
             following = next((later for later in source[index + 1:] if later.strip()), None)
@@ -72,8 +76,9 @@ def preview_markdown(text: str) -> str:
             continue
         else:
             _follow_lists(items, line, after_blank)
+            match = FENCE.match(line)
             if match:
-                fence = match.group(1)[0]
+                fence = match.group(1)
         after_blank = False
         lines.append(line)
     return "\n".join(lines) + end

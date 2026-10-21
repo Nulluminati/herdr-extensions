@@ -150,6 +150,20 @@ class PreviewTests(unittest.TestCase):
         text = "- a\n\n  ```\n  x\n\n  y\n  ```"
         self.assertEqual(notes.preview_markdown(text), "- a\n\n  &nbsp;\n\n  ```\n  x\n\n  y\n  ```")
 
+    def test_a_shorter_fence_does_not_close_a_longer_one(self):
+        text = "````\n```\n\nx\n```\n````\n\nafter"
+        self.assertEqual(notes.preview_markdown(text), "````\n```\n\nx\n```\n````\n\n&nbsp;\n\nafter")
+        tildes = "~~~~\n~~~\n\n~~~~~\n\nafter"
+        self.assertEqual(notes.preview_markdown(tildes), "~~~~\n~~~\n\n~~~~~\n\n&nbsp;\n\nafter")
+
+    def test_a_fence_with_an_info_string_does_not_close_a_fence(self):
+        text = "```\nx\n```py\n\ny\n```  \n\nafter"
+        self.assertEqual(notes.preview_markdown(text), "```\nx\n```py\n\ny\n```  \n\n&nbsp;\n\nafter")
+
+    def test_a_fence_of_the_other_character_does_not_close_a_fence(self):
+        text = "```\n~~~\n\n```"
+        self.assertEqual(notes.preview_markdown(text), text)
+
     def test_an_empty_note_stays_empty(self):
         self.assertEqual(notes.preview_markdown(""), "")
 
