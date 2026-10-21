@@ -6,6 +6,7 @@ user's own text: no agent or command writes it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
@@ -19,6 +20,8 @@ FOLDER = "notes"
 GLOBAL = "inbox"
 # The first line of a fenced code block, or its last line.
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+# The marker of a list item and the spaces after it, up to the item's text.
+LIST_ITEM = re.compile(r"^( *)([-*+]|\d{1,9}[.)])( {1,4})(?=\S)")
 # A paragraph of one no-break space: one empty row in the preview.
 EMPTY_ROW = "&nbsp;"
 
@@ -44,25 +47,83 @@ def preview_markdown(text: str) -> str:
     """The note's Markdown for the preview, with each blank line as an empty paragraph.
 
     Markdown draws a run of blank lines as one gap. The preview shows each blank line as
-    one empty row instead, as the note was typed. Blank lines in a code fence stay."""
+    one empty row instead, as the note was typed. Blank lines in a code fence stay. In a list,
+    the empty paragraph is indented into the list item, so the list and the item stay whole."""
     if not text:
         return ""
     end = "\n" if text.endswith("\n") else ""
+    source = (text[:-1] if end else text).split("\n")
     lines: list[str] = []
+    # The open list items, outermost first.
+    items: list[_ListItem] = []
     fence = None
-    for line in (text[:-1] if end else text).split("\n"):
+    after_blank = False
+    for index, line in enumerate(source):
         match = FENCE.match(line)
-        if fence is None and match:
-            fence = match.group(1)[0]
-        elif fence is not None and match and match.group(1)[0] == fence:
-            fence = None
-        elif fence is None and not line.strip():
+        if fence is not None:
+            if match and match.group(1)[0] == fence:
+                fence = None
+        elif not line.strip():
+            following = next((later for later in source[index + 1:] if later.strip()), None)
             if not lines or lines[-1]:
                 lines.append("")
-            lines.extend([EMPTY_ROW, ""])
+            lines.extend([" " * _empty_row_indent(items, following) + EMPTY_ROW, ""])
+            after_blank = True
             continue
+        else:
+            _follow_lists(items, line, after_blank)
+            if match:
+                fence = match.group(1)[0]
+        after_blank = False
         lines.append(line)
     return "\n".join(lines) + end
+
+
+@dataclass
+class _ListItem:
+    marker_indent: int
+    content_indent: int
+    # The bullet character, or the delimiter of an ordered marker: a new kind starts a new list.
+    kind: str
+
+
+def _list_item(line: str) -> tuple[int, _ListItem | None]:
+    """The line's indent, and the list item that the line starts, if any."""
+    expanded = line.expandtabs(4)
+    indent = len(expanded) - len(expanded.lstrip(" "))
+    match = LIST_ITEM.match(expanded)
+    if match is None:
+        return indent, None
+    marker = match.group(2)
+    return indent, _ListItem(indent, match.end(), marker[-1])
+
+
+def _follow_lists(items: list[_ListItem], line: str, after_blank: bool) -> None:
+    """Close the list items that the line is not part of, and open the item that it starts.
+
+    A plain line straight after another line continues it, even without an indent."""
+    indent, item = _list_item(line)
+    if item is None and not after_blank:
+        return
+    while items and indent < items[-1].content_indent:
+        items.pop()
+    if item is not None:
+        items.append(item)
+
+
+def _empty_row_indent(items: list[_ListItem], following: str | None) -> int:
+    """The indent of an empty row, so it stays in the list item that the next line is part of.
+
+    Before a sibling item, the row goes into the item above it, so the list goes on."""
+    if following is None:
+        return 0
+    indent, item = _list_item(following)
+    if item is not None:
+        for open_item in items:
+            if open_item.marker_indent == indent and open_item.kind == item.kind:
+                return open_item.content_indent
+    inside = [open_item.content_indent for open_item in items if open_item.content_indent <= indent]
+    return inside[-1] if inside else 0
 
 
 def _stamp(path: Path) -> int | None:

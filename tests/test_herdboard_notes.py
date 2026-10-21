@@ -124,6 +124,32 @@ class PreviewTests(unittest.TestCase):
         tilde = "~~~py\nx\n\ny\n~~~"
         self.assertEqual(notes.preview_markdown(tilde), tilde)
 
+    def test_a_blank_line_between_list_items_keeps_the_list(self):
+        # The empty row goes into the item above, so the next item is in the same list.
+        self.assertEqual(notes.preview_markdown("1. a\n\n1. b"), "1. a\n\n   &nbsp;\n\n1. b")
+        self.assertEqual(notes.preview_markdown("- a\n\n\n- b"), "- a\n\n  &nbsp;\n\n  &nbsp;\n\n- b")
+        self.assertEqual(notes.preview_markdown("10) a\n\n11)  b"), "10) a\n\n    &nbsp;\n\n11)  b")
+
+    def test_a_blank_line_in_a_list_item_keeps_the_item(self):
+        self.assertEqual(notes.preview_markdown("- a\n\n  more"), "- a\n\n  &nbsp;\n\n  more")
+        self.assertEqual(notes.preview_markdown("- a\n\n  - b"), "- a\n\n  &nbsp;\n\n  - b")
+        self.assertEqual(notes.preview_markdown("- a\nlazy\n\n  more"), "- a\nlazy\n\n  &nbsp;\n\n  more")
+
+    def test_a_blank_line_in_a_nested_list_goes_into_the_item_at_its_level(self):
+        self.assertEqual(notes.preview_markdown("- a\n  - b\n\n  - c"), "- a\n  - b\n\n    &nbsp;\n\n  - c")
+        self.assertEqual(notes.preview_markdown("- a\n  - b\n\n- c"), "- a\n  - b\n\n  &nbsp;\n\n- c")
+        self.assertEqual(notes.preview_markdown("- a\n  - b\n\n  more"), "- a\n  - b\n\n  &nbsp;\n\n  more")
+
+    def test_a_blank_line_after_a_list_ends_it(self):
+        self.assertEqual(notes.preview_markdown("- a\n\nafter"), "- a\n\n&nbsp;\n\nafter")
+        self.assertEqual(notes.preview_markdown("- a\n\n"), "- a\n\n&nbsp;\n\n")
+        # A new list of another kind is not a sibling item.
+        self.assertEqual(notes.preview_markdown("- a\n\n1. b"), "- a\n\n&nbsp;\n\n1. b")
+
+    def test_a_code_fence_in_a_list_item_keeps_its_blank_lines(self):
+        text = "- a\n\n  ```\n  x\n\n  y\n  ```"
+        self.assertEqual(notes.preview_markdown(text), "- a\n\n  &nbsp;\n\n  ```\n  x\n\n  y\n  ```")
+
     def test_an_empty_note_stays_empty(self):
         self.assertEqual(notes.preview_markdown(""), "")
 

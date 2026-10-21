@@ -132,6 +132,17 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
             top = screen.query_one("#notes-preview").region.y
             self.assertEqual(rows, {"Head": top + 1, "one": top + 3, "two": top + 4, "end": top + 7}, rows)
 
+    async def test_the_preview_keeps_lists_across_blank_lines(self):
+        from textual.widgets._markdown import MarkdownBullet, MarkdownList
+        self.note("acme-api").parent.mkdir(parents=True)
+        self.note("acme-api").write_text("1. a\n\n1. b\n\n   more\n")
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open_notes(app, pilot)
+            await self.settle(app, pilot)
+            self.assertEqual(len(screen.query(MarkdownList)), 1)
+            self.assertEqual([str(bullet.symbol).strip() for bullet in screen.query(MarkdownBullet)], ["1.", "2."])
+
     async def test_the_inbox_view_shows_the_global_note(self):
         app = self.app("inbox")
         async with app.run_test(size=(160, 30)) as pilot:
