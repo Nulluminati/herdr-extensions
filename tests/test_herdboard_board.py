@@ -14,7 +14,7 @@ sys.path.insert(0, str(SRC))
 from herdboard import cli  # noqa: E402
 from herdboard.board import (  # noqa: E402
     HELP_SECTIONS, AddScreen, ConfirmScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp,
-    PullRequestDetailScreen, PullRequestsScreen,
+    NotesScreen, PullRequestDetailScreen, PullRequestsScreen,
 )
 from textual.widgets import Markdown  # noqa: E402
 from herdboard.config import Config  # noqa: E402
@@ -806,7 +806,7 @@ class ActionTests(BoardTestCase):
             await pilot.pause()
             titles = [w.plain for w in app.screen.query(".help-section")]
         self.assertEqual(titles, [title for title, _ in HELP_SECTIONS])
-        for title in ("Board", "Card detail", "Pull requests", "Pull request detail", "Mouse"):
+        for title in ("Board", "Card detail", "Pull requests", "Pull request detail", "Notes", "Mouse"):
             self.assertIn(title, titles)
 
 
@@ -829,6 +829,7 @@ class HelpCoverageTests(unittest.TestCase):
             (DetailScreen, ("Card detail",)),
             (PullRequestsScreen, ("Pull requests",)),
             (PullRequestDetailScreen, ("Pull request detail",)),
+            (NotesScreen, ("Notes",)),
         ]:
             listed = everywhere.union(*(help_keys(title) for title in titles))
             with self.subTest(screen=screen_class.__name__):

@@ -12,7 +12,7 @@ from rich.console import Console
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from herdboard.board import (AGENT_LOGOS, PR_FIELDS, AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
-                             ModelScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago,
+                             ModelScreen, NotesScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago,
                              pr_fields, pr_row_content)
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page, PrReviewError, PullRequest  # noqa: E402
@@ -76,7 +76,7 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(app.screen, PullRequestsScreen)
         return app.screen
 
-    async def test_capital_g_opens_and_closes_the_list(self):
+    async def test_capital_g_opens_the_list_and_goes_on_to_the_notes(self):
         app = self.app()
         async with app.run_test() as pilot:
             screen = await self.open(app, pilot)
@@ -87,6 +87,9 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(rows[0][2].startswith("Fix login timeout"))
             self.assertIn(" bug ", rows[0][2])
             self.assertEqual([len(row) for row in rows], [len(PR_FIELDS)] * 2)
+            await pilot.press("G")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, NotesScreen)
             await pilot.press("G")
             await pilot.pause()
             self.assertIs(app.screen, app.screen_stack[0])

@@ -33,7 +33,7 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, TabbedContent, TabPane, TextArea
 from textual.worker import Worker, WorkerState
 
-from . import activity, attachments, pr_reviews
+from . import activity, attachments, notes, pr_reviews
 from .linear import LinearAuthError
 from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
@@ -63,6 +63,7 @@ LINEAR_GROUP = "linear-fetch"
 START_GROUP = "card-start"
 PR_GROUP = "pull-requests"
 PR_SCREEN = "pull-requests"
+NOTES_SCREEN = "notes"
 # How often the pull request list reads GitHub again, the same as the PR state check of the board.
 PR_SECONDS = 60.0
 # Each pull request state: its Nerd Font icon, its plain icon, and its style. The prefix names where
@@ -146,7 +147,7 @@ HELP_SECTIONS = [
         ("u", "remove the pin of a pinned Linear issue"),
         ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
         ("r", "reload, and fetch Linear again"),
-        ("G", "switch between the Board and Pull requests tabs; a click on a tab or on a key in the top row works too"),
+        ("G", "go to the next tab: Board, Pull requests, Notes; a click on a tab opens it"),
     ]),
     ("Cards", [
         ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
@@ -195,6 +196,16 @@ HELP_SECTIONS = [
         ("f", "finish the review: close the workspace, remove the worktree and pr/N branch"),
         ("o", "open it in the browser"),
         ("r", "read GitHub again"),
+        ("G", "go to the Notes tab"),
+    ]),
+    ("Notes", [
+        ("e, enter", "edit the note; it saves 2 seconds after the last change"),
+        ("t", "show the global note, or go back to the board's note"),
+        ("up, k", "scroll up"),
+        ("down, j", "scroll down"),
+        ("r", "read the note file again"),
+        ("escape", "in the editor, save and show the note; else go back to the board"),
+        ("ctrl+s", "in the editor, save now"),
         ("G", "go back to the board"),
     ]),
     ("Pull request detail", [
@@ -205,7 +216,7 @@ HELP_SECTIONS = [
         ("o", "open it in the browser"),
     ]),
     ("Everywhere", [
-        ("?", "this help, on the board and on the pull request list"),
+        ("?", "this help, on the board, on the pull request list and on the notes"),
         ("escape", "close a screen or cancel input"),
         ("q", "quit"),
     ]),
@@ -2066,13 +2077,13 @@ class ConfigScreen(ModalBase):
                                settings=changed)
 
 
-# The two tabs under the header: (tab, label). G switches between them.
-TABS = [("board", "Board"), ("prs", "Pull requests")]
+# The tabs under the header: (tab, label). G goes to the next tab, and from the last to the first.
+TABS = [("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes")]
 TAB_KEY = "G"
 # Each tab's icon: its Nerd Font icon and its plain icon.
-TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂")}
+TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂"), "notes": ("\uf249", "✎")}
 # The actions that the tabs show, so the key list leaves them out.
-TAB_ACTIONS = {"pull_requests", "close"}
+TAB_ACTIONS = {"pull_requests", "next_tab"}
 
 
 def herdboard_version() -> str:
@@ -2114,8 +2125,8 @@ class HeaderBar(Horizontal):
 
 
 class TabBar(Horizontal):
-    """The row under the header: the Board and Pull requests tabs, each with its icon, and the
-    open pull request count once the list has read it. A click on the other tab switches to it."""
+    """The row under the header: the Board, Pull requests and Notes tabs, each with its icon, and the
+    open pull request count once the list has read it. A click on another tab switches to it."""
 
     def __init__(self, active: str):
         super().__init__(id="tab-bar")
@@ -2145,19 +2156,24 @@ class TabBar(Horizontal):
             return None
 
     def _tab_text(self, tab: str, label: str) -> Text:
-        """The tab's icon, label and count. The current tab keeps the switch key's place blank, so a
-        switch neither resizes the tab nor moves its text. The current tab's bold comes from the style
-        sheet."""
+        """The tab's icon, label and count. The next tab shows the switch key; the others keep its
+        place blank, so a switch neither resizes a tab nor moves its text. The current tab's bold comes
+        from the style sheet."""
         text = Text(f"{self._icon(tab)} {label}")
         count = self._count(tab)
         if count is not None:
             text.append(f" {count}", style="bold")
         text.append(" ")
-        if tab != self.active:
+        if tab == self.next_tab():
             text.append(TAB_KEY, style="bold yellow")
         else:
             text.append(" " * len(TAB_KEY))
         return text
+
+    def next_tab(self) -> str:
+        """The tab that the switch key goes to."""
+        names = [tab for tab, _label in TABS]
+        return names[(names.index(self.active) + 1) % len(names)]
 
     def show_counts(self) -> None:
         for (tab, label), widget in zip(TABS, self.query(".tab")):
@@ -2176,7 +2192,7 @@ class TabBar(Horizontal):
         tab = (widget.id or "").removeprefix("tab-") if widget is not None else ""
         if tab in dict(TABS) and tab != self.active:
             event.stop()
-            self.app.simulate_key(TAB_KEY)
+            self.app.show_tab(tab)
 
 
 class KeyBar(Static):
@@ -2765,7 +2781,7 @@ class PullRequestsScreen(Screen):
 
     BINDINGS = [
         Binding("escape", "back", "Back"),
-        Binding("G", "close", "Board", show=False),
+        Binding("G", "next_tab", "Notes", show=False),
         Binding("enter", "detail", "Details"),
         Binding("slash", "search", "Search"),
         Binding("n", "page(1)", "Next"),
@@ -3035,7 +3051,10 @@ class PullRequestsScreen(Screen):
         self.run_worker(guarded, thread=True, group=PR_GROUP, exit_on_error=False)
 
     def action_close(self) -> None:
-        self.app.pop_screen()
+        self.app.show_tab("board")
+
+    def action_next_tab(self) -> None:
+        self.app.show_tab("notes")
 
     def action_cursor(self, step: int) -> None:
         listing = self.query_one("#pr-list", PullRequestList)
@@ -3159,6 +3178,276 @@ class PullRequestsScreen(Screen):
             self.app.notify(f"Cannot open {pr.url} with {opener}: {error}", severity="error")
             return
         threading.Thread(target=watch_opener, args=(self.app, pr.url, opener, process), daemon=True).start()
+
+
+class NoteChangedScreen(ModalBase):
+    """The note changed on disk during an edit: o writes the edit over it, r reads it again and drops
+    the edit, escape keeps editing."""
+
+    BINDINGS = [
+        Binding("o", "answer('overwrite')", "Overwrite"),
+        Binding("r", "answer('reload')", "Reload"),
+    ]
+
+    def __init__(self, path: Path):
+        super().__init__()
+        self.path = path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("The note changed on disk while you edited it.")
+            yield Label(str(self.path), classes="dim")
+            yield Label("o: overwrite the file with your edit · r: reload the file and drop your edit · "
+                        "escape: keep editing", classes="dim")
+
+    def action_answer(self, answer: str) -> None:
+        self.dismiss(answer)
+
+
+class NotesScreen(Screen):
+    """The scratchpad of a board, or the global note: Markdown, shown as a preview and edited in place.
+
+    An edit saves itself a moment after the last change, on escape, on a tab switch and when the
+    board quits. The preview reads the file again when it changes on disk; the editor does not."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+        Binding("escape", "done", "Done"),
+        Binding("G", "next_tab", "Board", show=False),
+        Binding("e", "edit", "Edit"),
+        Binding("enter", "edit", "Edit", show=False),
+        Binding("t", "toggle", "Global note"),
+        Binding("r", "load", "Reload"),
+        Binding("ctrl+s", "save", "Save"),
+        Binding("down,j", "scroll(1)", "Down", show=False),
+        Binding("up,k", "scroll(-1)", "Up", show=False),
+        Binding("question_mark", "help", "Help"),
+    ]
+    # The keys of the preview. In the editor these keys type text.
+    PREVIEW_ACTIONS = {"back", "next_tab", "edit", "toggle", "load", "scroll", "help"}
+    EDIT_ACTIONS = {"done", "save"}
+    EMPTY = "Empty note. e: edit"
+    AUTOSAVE_SECONDS = 2.0
+    # The preview has no focus, so its keys reach the screen; the hidden editor takes none.
+    AUTO_FOCUS = ""
+
+    def __init__(self, board: str = notes.GLOBAL):
+        super().__init__()
+        # The note on screen, and the board note that `t` goes back to from the global note.
+        self.board = self.home = board
+        self.path: Path | None = None
+        # The note's text as read or last saved.
+        self.saved = ""
+        # The file's modification time as read, so a save sees an outside edit.
+        self.stamp: int | None = None
+        self.editing = False
+        # True while the outside edit question shows.
+        self.asking = False
+        self.autosave_seconds = self.AUTOSAVE_SECONDS
+        self.autosave = None
+
+    def compose(self) -> ComposeResult:
+        yield HeaderBar("Notes", self.app.view)
+        yield TabBar("notes")
+        title = Static("", id="notes-title")
+        title.plain = ""
+        yield title
+        status = Static("", id="notes-status", classes="error")
+        status.plain = ""
+        status.display = False
+        yield status
+        with VerticalScroll(id="notes-preview", can_focus=False):
+            empty = Static(Text(self.EMPTY), id="notes-empty", classes="dim")
+            yield empty
+            yield Markdown("", id="notes-markdown")
+        editor = TextArea(id="notes-editor", soft_wrap=True)
+        if "markdown" in editor.available_languages:
+            editor.language = "markdown"
+        editor.display = False
+        yield editor
+        with Vertical(classes="bottom-dock"):
+            yield KeyBar()
+
+    def on_mount(self) -> None:
+        self.load()
+        self.timer = self.set_interval(self.app.reload_interval, self.check_file)
+
+    def on_screen_suspend(self) -> None:
+        self.timer.pause()
+
+    def on_screen_resume(self) -> None:
+        self.timer.resume()
+        self.check_file()
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        if action in self.PREVIEW_ACTIONS:
+            return not self.editing
+        if action in self.EDIT_ACTIONS:
+            return self.editing
+        return True
+
+    def text(self) -> str:
+        """The screen's text, for tests."""
+        title = self.query_one("#notes-title", Static).plain
+        return "\n".join([title, self.status_text(), self.saved or self.EMPTY])
+
+    def status_text(self) -> str:
+        return self.query_one("#notes-status", Static).plain
+
+    def editor_text(self) -> str:
+        return self.query_one("#notes-editor", TextArea).text
+
+    def _status(self, message: str) -> None:
+        status = self.query_one("#notes-status", Static)
+        status.plain = message
+        status.update(Text(message))
+        status.display = bool(message)
+
+    def _show(self) -> None:
+        """Draw the title and the mode: the preview of the note as read, or the editor."""
+        name = "Global note" if self.board == notes.GLOBAL else f"Note: {self.board}"
+        title = Text(name, style="bold")
+        title.append(f"  {self.path}", style="dim")
+        widget = self.query_one("#notes-title", Static)
+        widget.plain = title.plain
+        widget.update(title)
+        self.query_one(HeaderBar).show(name, self.app.view)
+        self.query_one("#notes-preview").display = not self.editing
+        self.query_one("#notes-editor").display = self.editing
+        self.query_one("#notes-empty").display = not self.saved.strip()
+        markdown = self.query_one("#notes-markdown", Markdown)
+        markdown.display = bool(self.saved.strip())
+        markdown.update(self.saved)
+        self.refresh_bindings()
+
+    def load(self) -> None:
+        """Read the note from disk. An edit in progress is dropped."""
+        self.editing = False
+        self._stop_autosave()
+        self.path = notes.note_path(self.app.store.config, self.board)
+        try:
+            self.saved, self.stamp = notes.read_note(self.path)
+            self._status("")
+        except HerdboardError as error:
+            self.saved = ""
+            self._status(str(error))
+        self._show()
+
+    def check_file(self) -> None:
+        """In the preview, read the note again when it changed on disk."""
+        if self.editing or self.path is None:
+            return
+        try:
+            _text, stamp = notes.read_note(self.path)
+        except HerdboardError:
+            stamp = -1
+        if stamp != self.stamp:
+            self.load()
+
+    def set_board(self, board: str, home: bool = True) -> bool:
+        """Show the note of `board`. An edit saves first; when it cannot, the note stays."""
+        if not self.save():
+            return False
+        if home:
+            self.home = board
+        self.board = board
+        if self.is_mounted:
+            self.load()
+        return True
+
+    def leave(self) -> bool:
+        """Save the edit and go back to the preview, before another tab shows. False keeps the tab."""
+        if not self.save():
+            return False
+        if self.editing:
+            self.editing = False
+            self._show()
+        return True
+
+    def _stop_autosave(self) -> None:
+        if self.autosave is not None:
+            self.autosave.stop()
+            self.autosave = None
+
+    def save(self, force: bool = False) -> bool:
+        """Write the edit when it changed. False when it is not saved: the status line or a
+        question says why, and the edit stays."""
+        self._stop_autosave()
+        if not self.editing:
+            return True
+        if self.asking:
+            return False
+        text = self.editor_text()
+        if text == self.saved and not force:
+            return True
+        try:
+            self.stamp = notes.write_note(self.path, text, self.stamp, force=force)
+        except notes.NoteChanged:
+            self._ask_changed()
+            return False
+        except HerdboardError as error:
+            self._status(str(error))
+            return False
+        self.saved = text
+        self._status("")
+        return True
+
+    def _ask_changed(self) -> None:
+        self.asking = True
+
+        def answered(answer: str | None) -> None:
+            self.asking = False
+            if answer == "overwrite":
+                self.save(force=True)
+            elif answer == "reload":
+                self.load()
+            if self.editing:
+                self.query_one("#notes-editor", TextArea).focus()
+
+        self.app.push_screen(NoteChangedScreen(self.path), answered)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if not self.editing:
+            return
+        self._stop_autosave()
+        self.autosave = self.set_timer(self.autosave_seconds, self.save)
+
+    def action_edit(self) -> None:
+        editor = self.query_one("#notes-editor", TextArea)
+        editor.load_text(self.saved)
+        self.editing = True
+        self._show()
+        editor.focus()
+        editor.move_cursor(editor.document.end)
+
+    def action_done(self) -> None:
+        if self.leave():
+            self.set_focus(None)
+
+    def action_save(self) -> None:
+        self.save()
+
+    def action_back(self) -> None:
+        self.app.show_tab("board")
+
+    def action_next_tab(self) -> None:
+        self.app.show_tab("board")
+
+    def action_toggle(self) -> None:
+        target = notes.GLOBAL if self.board != notes.GLOBAL else self.home
+        if target == self.board:
+            self.app.notify("This board's note is the global note")
+            return
+        self.set_board(target, home=False)
+
+    def action_load(self) -> None:
+        self.load()
+
+    def action_scroll(self, step: int) -> None:
+        self.query_one("#notes-preview", VerticalScroll).scroll_relative(y=step, animate=False)
+
+    def action_help(self) -> None:
+        self.app.push_screen(HelpScreen())
 
 
 # The column colors in turn, as (color, ANSI color), and the completed column's green.
@@ -3309,6 +3598,16 @@ class HerdboardApp(App):
     #issue-results { height: auto; max-height: 12; border: round $surface-lighten-2; }
     #issue-results:focus { border: round $primary; }
     #config-project { width: 2fr; }
+    #notes-title { height: 1; padding: 0 1; }
+    #notes-status { height: auto; padding: 0 1; }
+    #notes-preview { height: 1fr; padding: 0 1; scrollbar-size-vertical: 1; }
+    #notes-preview Markdown { margin: 0; padding: 0; }
+    #notes-preview MarkdownH1, #notes-preview MarkdownH2, #notes-preview MarkdownH3 {
+        margin: 0; padding: 0; content-align: left middle; text-align: left;
+    }
+    #notes-editor { height: 1fr; border: round $primary; }
+    App:ansi #notes-editor { border: round ansi_magenta; }
+    App:ansi #notes-title { color: ansi_default; }
     #pr-repo { height: 1; padding: 0 1; color: $accent; }
     #pr-status { height: 1; padding: 0 1; color: $text-muted; }
     #pr-list { height: 1fr; scrollbar-size-vertical: 1; }
@@ -3798,7 +4097,7 @@ class HerdboardApp(App):
         # Modal screens handle their own keys: the board's own key actions stop
         # behind a dialog. Textual's actions, such as tab to the next field, stay.
         # The pull request list is a full screen with its own keys, so the board's stop there too.
-        if isinstance(self.screen, (ModalScreen, PullRequestsScreen)) and action in BOARD_ACTIONS:
+        if isinstance(self.screen, (ModalScreen, PullRequestsScreen, NotesScreen)) and action in BOARD_ACTIONS:
             return False
         return True
 
@@ -4903,10 +5202,61 @@ class HerdboardApp(App):
         self.push_screen(HelpScreen())
 
     def action_pull_requests(self) -> None:
-        # One installed screen keeps the list, its page, search and selection while the board shows.
-        if not self.is_screen_installed(PR_SCREEN):
-            self.install_screen(PullRequestsScreen(self.pr_service), name=PR_SCREEN)
-        self.push_screen(PR_SCREEN)
+        self.show_tab("prs")
+
+    def current_tab(self) -> str:
+        if isinstance(self.screen, PullRequestsScreen):
+            return "prs"
+        if isinstance(self.screen, NotesScreen):
+            return "notes"
+        return "board"
+
+    def show_tab(self, tab: str) -> None:
+        """Show a tab. The tab screens are installed once, so the pull request list keeps its page,
+        search and selection, and at most one of them sits on the board."""
+        current = self.current_tab()
+        if tab == current:
+            return
+        if current == "notes" and not self.get_screen(NOTES_SCREEN).leave():
+            return
+        if tab == "board":
+            self.pop_screen()
+            return
+        if tab == "prs":
+            name = PR_SCREEN
+            if not self.is_screen_installed(PR_SCREEN):
+                self.install_screen(PullRequestsScreen(self.pr_service), name=PR_SCREEN)
+        else:
+            name = NOTES_SCREEN
+            if not self.is_screen_installed(NOTES_SCREEN):
+                self.install_screen(NotesScreen(self.notes_board()), name=NOTES_SCREEN)
+            elif not self.get_screen(NOTES_SCREEN).set_board(self.notes_board()):
+                return
+        if current == "board":
+            self.push_screen(name)
+        else:
+            self.switch_screen(name)
+
+    def notes_board(self) -> str:
+        """The board whose note the Notes tab shows: the repository board, else the board of the
+        selected todo; the inbox, whose note is the global note, without one."""
+        if self.view == "repo" and self.repo_board is not None:
+            return self.store.board_name(self.repo_board)
+        card = self.current_card()
+        if self.view != "inbox" and card is not None and card.source != "linear" and card.path is not None:
+            return self.store.board_name(card.path)
+        return notes.GLOBAL
+
+    async def action_quit(self) -> None:
+        """Save a note edit first. When it cannot be saved, ask before the edit is lost."""
+        if self.is_screen_installed(NOTES_SCREEN):
+            screen = self.get_screen(NOTES_SCREEN)
+            if not screen.save():
+                if not screen.asking:
+                    self.push_screen(ConfirmScreen("Quit without saving the note?", screen.status_text()),
+                                     lambda answer: answer and self.exit())
+                return
+        self.exit()
 
 
 # The board's own key actions, without parameters. Quit stays available in dialogs.

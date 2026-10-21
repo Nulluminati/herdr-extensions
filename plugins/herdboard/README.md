@@ -55,7 +55,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 ## The board
 
-The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are two tabs, **Board** and **Pull requests**. `G` or a click on the other tab switches between them. The Pull requests tab shows the open PR count after the list reads GitHub. A search does not change the count. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it. A dialog, such as the card detail, shows its own keys there. A key that has nothing to act on is dimmed: for example Merge on a card without a worktree, Check on a card without a checklist, or Go on a PR without a local review. A dimmed key still runs and says why it did nothing.
+The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are three tabs: **Board**, **Pull requests** and **Notes**. `G` goes to the next tab, and from Notes back to the board. The tab that `G` goes to shows a yellow `G`. A click on a tab opens it. The Pull requests tab shows the open PR count after the list reads GitHub. A search does not change the count. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it. A dialog, such as the card detail, shows its own keys there. A key that has nothing to act on is dimmed: for example Merge on a card without a worktree, Check on a card without a checklist, or Go on a PR without a local review. A dimmed key still runs and says why it did nothing.
 
 Each column takes a color in turn: blue, magenta, yellow, cyan and green. The column's scrollbar has its color too. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and an underlined header. The selected card has a heavy border in the text color.
 
@@ -101,7 +101,7 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `u` | Remove the pin of a pinned Linear issue (repo view) |
 | `c` | Configure the global settings of all boards, and this board's merge mode, linked Linear projects and pinned issues. ctrl+s saves both tabs |
 | `r` | Reload, and fetch Linear again |
-| `G` | Open the list of the repository's open GitHub pull requests (see [Pull request reviews](#pull-request-reviews)) |
+| `G` | Go to the next tab: the list of the repository's open GitHub pull requests (see [Pull request reviews](#pull-request-reviews)) |
 | `?` | Help |
 | `q` | Quit |
 
@@ -406,7 +406,7 @@ Keys on the list:
 | `/` | Search GitHub for open PRs: words match the title and the description, and GitHub qualifiers such as `author:octo`, `draft:true`, `label:bug` or `review-requested:@me` work. `enter` searches from page 1 |
 | `r` | Read GitHub again. The list also reads the current page once a minute |
 | `escape` | Close the search box, else clear the search, else go back to the board |
-| `G` | Back to the board tab |
+| `G` | Go to the Notes tab (see [Notes](#notes)) |
 
 The icons follow `icon_style` in the config: Nerd Font icons with `nerd`, plain symbols (● ◌ ◆ … ✓ ✗ ↑) otherwise. When the "Herdr Agent Icons Max" font of the [agent-icons](../agent-icons/README.md) plugin is installed, a local agent review shows the logo of its agent.
 
@@ -438,6 +438,37 @@ Limits:
 - `f` removes the worktree first. When Herdr or Git refuses, Hunk and its notes stay open.
 - Only github.com, and only PRs of the current repository.
 - herdboard does not remove the workspaces of merged or closed PRs by itself. Use `f`.
+
+## Notes
+
+The Notes tab is a scratchpad for quick notes and ideas next to the board. Each board has one note, and the inbox's note is the global note. Press `G` twice on the board, or click the Notes tab.
+
+The notes are plain Markdown files in the todos folder, so Obsidian shows them:
+
+- `~/todos/notes/<board>.md` for a board, such as `~/todos/notes/acme-api.md`.
+- `~/todos/notes/inbox.md` for the global note.
+
+herdboard creates a note file on its first save. It does not delete note files.
+
+The tab shows the note of the board that the board tab shows. In the repo view, that is the repository's board. In the inbox view, it is the global note. In the all and mine views, it is the board of the selected card. Without a selected todo, such as on a Linear card, it is the global note.
+
+The tab shows the note as Markdown. Press `e` to edit it as text. herdboard saves the edit 2 seconds after your last change, on `escape`, on `ctrl+s`, when you go to another tab and when you quit.
+
+| Key | Action |
+|---|---|
+| `e` or enter | Edit the note |
+| `t` | Show the global note, or go back to the board's note |
+| `j` / `k` | Scroll |
+| `r` | Read the file again |
+| `escape` | In the editor: save and show the note. Else: back to the board |
+| `ctrl+s` | In the editor: save now |
+| `G` | Back to the board tab |
+
+When you edit a note file in another application, such as Obsidian, the tab shows the change within 2 seconds. In the editor, the tab does not read the file. When the file changed on disk during your edit, a save asks: `o` writes your edit over the file, `r` reads the file and drops your edit, and `escape` keeps editing.
+
+When a save fails, for example because the disk is full, the error shows above the note and your edit stays. The tab stays open until the save works. `q` then asks before it quits without the edit.
+
+Agents do not read or write the notes.
 
 ## Linear
 

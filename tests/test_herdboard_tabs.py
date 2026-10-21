@@ -1,4 +1,4 @@
-"""The tab bar at the top, with the Board and Pull requests tabs, and the keys of the current tab at the bottom."""
+"""The tab bar at the top, with the Board, Pull requests and Notes tabs, and the keys of the current tab at the bottom."""
 import asyncio
 import os
 from pathlib import Path
@@ -53,7 +53,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             bar = self.bar(app)
             self.assertEqual(bar.active, "board")
-            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests G"])
+            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests G", "✎ Notes"])
             keys = " ".join(self.keys(app).keys_text().plain.split())
             for part in ("a Add", "/ Filter", "s Start", "? Help", "q Quit"):
                 self.assertIn(part, keys)
@@ -70,7 +70,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, PullRequestsScreen)
             bar = self.bar(app)
             self.assertEqual(bar.active, "prs")
-            self.assertEqual(bar.tab_labels(), ["▦ Board G", "⑂ Pull requests 0"])
+            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes G"])
             keys = " ".join(self.keys(app).keys_text().plain.split())
             for part in ("/ Search", "n Next", "R Review", "esc Back"):
                 self.assertIn(part, keys)
@@ -98,7 +98,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("G")
             await self.settle(app, pilot)
             first = app.screen
-            await pilot.press("G")
+            await pilot.press("G", "G")
             await self.settle(app, pilot)
             await pilot.press("G")
             await self.settle(app, pilot)
@@ -108,7 +108,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
     async def test_switching_back_after_a_minute_reads_github_again(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
-            await pilot.press("G")
+            await pilot.press("G", "G")
             await self.settle(app, pilot)
             await pilot.press("G")
             await self.settle(app, pilot)
@@ -179,26 +179,27 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(board.herdboard_version(), "")
             self.assertEqual(HeaderBar("acme-api", "repo").plain, "herdboard │ acme-api │ repo")
 
-    async def test_the_current_tab_has_an_accent_border_and_both_keep_their_size(self):
+    async def test_the_current_tab_has_an_accent_border_and_all_keep_their_size(self):
+        tabs = ("board", "prs", "notes")
         for theme in ("textual-dark", "ansi-dark"):
             app = self.app()
             app.theme = theme
             async with app.run_test(size=(160, 30)) as pilot:
                 await pilot.press("G")
                 await self.settle(app, pilot)
-                await pilot.press("G")
-                await self.settle(app, pilot)
-                sizes = {tab: app.screen.query_one(f"#tab-{tab}").region.size for tab in ("board", "prs")}
-                await pilot.press("G")
-                await self.settle(app, pilot)
-                active = app.screen.query_one(".tab.active")
-                other = next(tab for tab in app.screen.query(".tab") if not tab.has_class("active"))
-                self.assertEqual(active.id, "tab-prs")
-                self.assertEqual(active.styles.border_top[0], "round")
-                self.assertNotEqual(active.styles.border_top[1], other.styles.border_top[1], theme)
-                self.assertTrue(active.query_one(".tab-label").visual_style.bold, theme)
-                for tab in ("board", "prs"):
-                    self.assertEqual(app.screen.query_one(f"#tab-{tab}").region.size, sizes[tab], (theme, tab))
+                sizes = {tab: app.screen.query_one(f"#tab-{tab}").region.size for tab in tabs}
+                for active_tab in ("notes", "board", "prs"):
+                    await pilot.press("G")
+                    await self.settle(app, pilot)
+                    active = app.screen.query_one(".tab.active")
+                    other = next(tab for tab in app.screen.query(".tab") if not tab.has_class("active"))
+                    self.assertEqual(active.id, f"tab-{active_tab}")
+                    self.assertEqual(active.styles.border_top[0], "round")
+                    self.assertNotEqual(active.styles.border_top[1], other.styles.border_top[1], theme)
+                    self.assertTrue(active.query_one(".tab-label").visual_style.bold, theme)
+                    for tab in tabs:
+                        self.assertEqual(app.screen.query_one(f"#tab-{tab}").region.size, sizes[tab],
+                                         (theme, active_tab, tab))
 
     async def test_the_pull_request_tab_shows_the_open_count_after_a_read(self):
         from herdboard.pr_reviews import PullRequest
@@ -207,20 +208,20 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests G"])
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests G", "✎ Notes"])
             await pilot.press("G")
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board G", "⑂ Pull requests 7"])
-            await pilot.press("G")
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7", "✎ Notes G"])
+            await pilot.press("G", "G")
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7 G"])
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7 G", "✎ Notes"])
 
     async def test_the_tabs_use_nerd_icons_only_in_nerd_mode(self):
         self.store.config.icon_style = "nerd"
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["\uf0db Board", "\uf407 Pull requests G"])
+            self.assertEqual(self.bar(app).tab_labels(), ["\uf0db Board", "\uf407 Pull requests G", "\uf249 Notes"])
 
     async def test_a_key_and_its_description_stay_on_one_line(self):
         for width in (50, 90, 160):
@@ -249,12 +250,15 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.screen.query_one("#pr-search").region.bottom, self.keys(app).region.y)
 
     async def test_the_label_does_not_move_when_a_tab_is_selected(self):
-        # The current tab keeps the G's place blank, so its text stays where it was.
-        for tab, label in (("board", "Board"), ("prs", "Pull requests")):
+        # Only the next tab shows the G; the others keep its place blank, so their text stays where it was.
+        previous = {"board": "notes", "prs": "board", "notes": "prs"}
+        for tab, label in (("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes")):
             current = TabBar(tab)._tab_text(tab, label)
-            other = TabBar("board" if tab == "prs" else "prs")._tab_text(tab, label)
-            self.assertIn("G", other.plain)
-            self.assertEqual(current.plain, other.plain.replace("G", " "), tab)
+            before = TabBar(previous[tab])._tab_text(tab, label)
+            other = TabBar(previous[previous[tab]])._tab_text(tab, label)
+            self.assertIn("G", before.plain)
+            self.assertEqual(current.plain, before.plain.replace("G", " "), tab)
+            self.assertEqual(other.plain, current.plain, tab)
 
     async def test_the_pull_request_rows_fill_the_width_and_cut_long_titles(self):
         from herdboard.board import PullRequestRow
