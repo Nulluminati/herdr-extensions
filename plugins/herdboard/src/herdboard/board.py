@@ -3317,7 +3317,7 @@ class NotesScreen(Screen):
         self.query_one("#notes-empty").display = not self.saved.strip()
         markdown = self.query_one("#notes-markdown", Markdown)
         markdown.display = bool(self.saved.strip())
-        markdown.update(self.saved)
+        markdown.update(notes.preview_markdown(self.saved))
         self.refresh_bindings()
 
     def load(self) -> None:
@@ -3602,6 +3602,8 @@ class HerdboardApp(App):
     #notes-status { height: auto; padding: 0 1; }
     #notes-preview { height: 1fr; padding: 0 1; scrollbar-size-vertical: 1; }
     #notes-preview Markdown { margin: 0; padding: 0; }
+    /* Each blank line of the note is an empty paragraph, so the blocks have no gaps of their own. */
+    #notes-preview MarkdownBlock { margin-top: 0; margin-bottom: 0; }
     #notes-preview MarkdownH1, #notes-preview MarkdownH2, #notes-preview MarkdownH3 {
         margin: 0; padding: 0; content-align: left middle; text-align: left;
     }

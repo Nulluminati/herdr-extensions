@@ -115,6 +115,23 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Repo ideas", screen.text())
             self.assertIn(str(self.note("acme-api")), screen.text())
 
+    async def test_the_preview_keeps_each_blank_line(self):
+        from textual.widgets._markdown import MarkdownBlock
+        self.note("acme-api").parent.mkdir(parents=True)
+        self.note("acme-api").write_text("\n# Head\n\n- one\n- two\n\n\nend\n")
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open_notes(app, pilot)
+            await self.settle(app, pilot)
+            rows = {}
+            for block in screen.query(MarkdownBlock):
+                text = str(block._content).strip() if hasattr(block, "_content") else ""
+                for word in ("Head", "one", "two", "end"):
+                    if text == word or text.endswith(word) and word not in rows:
+                        rows.setdefault(word, block.region.y)
+            top = screen.query_one("#notes-preview").region.y
+            self.assertEqual(rows, {"Head": top + 1, "one": top + 3, "two": top + 4, "end": top + 7}, rows)
+
     async def test_the_inbox_view_shows_the_global_note(self):
         app = self.app("inbox")
         async with app.run_test(size=(160, 30)) as pilot:

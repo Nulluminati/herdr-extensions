@@ -71,6 +71,20 @@ class NoteTests(unittest.TestCase):
         with self.assertRaises(notes.NoteChanged):
             notes.write_note(path, "mine", stamp)
 
+    def test_a_new_note_follows_the_umask(self):
+        umask = os.umask(0o022)
+        self.addCleanup(os.umask, umask)
+        path = notes.note_path(self.config, "acme")
+        notes.write_note(path, "one", None)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+    def test_a_save_keeps_the_mode_of_the_file(self):
+        path = notes.note_path(self.config, "acme")
+        notes.write_note(path, "one", None)
+        path.chmod(0o600)
+        notes.write_note(path, "two", path.stat().st_mtime_ns)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def test_a_write_error_is_an_io_error(self):
         path = notes.note_path(self.config, "acme")
         with patch("herdboard.notes.os.replace", side_effect=PermissionError("denied")):
@@ -85,6 +99,33 @@ class NoteTests(unittest.TestCase):
         path.write_bytes(b"\xff\xfe bad")
         with self.assertRaises(IoError):
             notes.read_note(path)
+
+
+class PreviewTests(unittest.TestCase):
+    """The preview shows each blank line of the note as an empty row."""
+
+    def test_each_blank_line_becomes_an_empty_paragraph(self):
+        self.assertEqual(notes.preview_markdown("one\n\n\ntwo"),
+                         "one\n\n&nbsp;\n\n&nbsp;\n\ntwo")
+
+    def test_leading_and_trailing_blank_lines_stay(self):
+        self.assertEqual(notes.preview_markdown("\n# Head\n\n- 1\n"),
+                         "\n&nbsp;\n\n# Head\n\n&nbsp;\n\n- 1\n")
+
+    def test_lines_without_a_blank_line_between_stay_as_they_are(self):
+        self.assertEqual(notes.preview_markdown("# Head\n- 1\n- 2"), "# Head\n- 1\n- 2")
+
+    def test_a_blank_line_of_spaces_counts_as_blank(self):
+        self.assertEqual(notes.preview_markdown("a\n  \nb"), "a\n\n&nbsp;\n\nb")
+
+    def test_blank_lines_in_a_code_fence_stay(self):
+        text = "```\nx\n\n\ny\n```\n\nafter"
+        self.assertEqual(notes.preview_markdown(text), "```\nx\n\n\ny\n```\n\n&nbsp;\n\nafter")
+        tilde = "~~~py\nx\n\ny\n~~~"
+        self.assertEqual(notes.preview_markdown(tilde), tilde)
+
+    def test_an_empty_note_stays_empty(self):
+        self.assertEqual(notes.preview_markdown(""), "")
 
 
 if __name__ == "__main__":
