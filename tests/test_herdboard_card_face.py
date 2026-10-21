@@ -199,7 +199,13 @@ PHASES = {"planning": ("✎", "\uf040"), "planned": ("☑", "\uf046"), "reviewin
 
 
 def status_row(item, done=False, **options):
+    """The bottom status row of a card: the markers that do not follow the state icon."""
     return board.card_face(item, False, done=done, **options).status.plain
+
+
+def mark_row(item, done=False, **options):
+    """The planning and review markers, which follow the state icon in the first row."""
+    return " · ".join(mark.plain for mark in board.card_face(item, False, done=done, **options).marks)
 
 
 class AgentGlyphTests(unittest.TestCase):
@@ -230,24 +236,59 @@ class AgentGlyphTests(unittest.TestCase):
             with self.subTest(style=style):
                 icon = {key: glyphs[index] for key, glyphs in PHASES.items()}
                 options = dict(icon_style=style)
-                self.assertEqual(status_row(card(planning="claude", planning_status="working"), **options),
+                self.assertEqual(mark_row(card(planning="claude", planning_status="working"), **options),
                                  f"{icon['planning']} ◐ claude")
-                self.assertEqual(status_row(card(planning="claude"), **options), f"{icon['planning']} claude")
-                self.assertEqual(status_row(card(planned=True), **options), icon["planned"])
-                self.assertEqual(status_row(card(agent_review="pi", review_status="blocked"), **options),
+                self.assertEqual(mark_row(card(planning="claude"), **options), f"{icon['planning']} claude")
+                self.assertEqual(mark_row(card(planned=True), **options), icon["planned"])
+                self.assertEqual(mark_row(card(agent_review="pi", review_status="blocked"), **options),
                                  f"{icon['reviewing']} × pi")
-                self.assertEqual(status_row(card(reviewed="reviewed"), **options), icon["reviewed"])
-                self.assertEqual(status_row(card(reviewed="new commits"), **options), icon["new commits"])
+                self.assertEqual(mark_row(card(reviewed="reviewed"), **options), icon["reviewed"])
+                self.assertEqual(mark_row(card(reviewed="new commits"), **options), icon["new commits"])
+
+    def test_the_phase_markers_follow_the_state_icon_and_leave_the_status_row(self):
+        item = card(planning="claude", planning_status="working", reviewed="reviewed", pr_state="open",
+                    parent_title="Billing")
+        lines = rendered(board.CardWidget(item, False), width=40)
+        self.assertEqual([line.rstrip() for line in lines],
+                         ["●  ✔ · ✎ ◐ claude".ljust(36) + "t123", "Ship it", "PR open · ↳ Billing"])
+        face = board.card_face(item, False)
+        self.assertEqual(face.icon.plain, "●")
+        self.assertEqual(face.status.plain, "PR open · ↳ Billing")
+        self.assertIn("✔", board.card_text(item, False).plain.splitlines()[0])
+
+    def test_a_narrow_card_cuts_the_phase_markers_and_keeps_the_id_whole(self):
+        item = card(planning="claude", planning_status="working", agent_review="pi", review_status="blocked")
+        for width in range(16, 40):
+            with self.subTest(width=width):
+                first = rendered(board.CardWidget(item, False), width=width)[0].rstrip()
+                self.assertTrue(first.endswith(" t123"), first)
+                self.assertLessEqual(len(first), width, first)
+        self.assertTrue(rendered(board.CardWidget(item, False), width=24)[0].rstrip().endswith("… t123"))
+
+    def test_a_narrow_card_without_marks_keeps_its_state_icon(self):
+        first = rendered(board.CardWidget(card(), False), width=20)[0].rstrip()
+        self.assertEqual(first, "○               t123")
+        item = card(planning="claude")
+        first = rendered(board.CardWidget(item, False), width=12)[0].rstrip()
+        self.assertTrue(first.startswith("●  "), first)
+        self.assertTrue(first.endswith("… t123"), first)
+
+    def test_compact_cards_show_the_phase_markers_after_the_title(self):
+        item = card(planned=True, reviewed="reviewed")
+        self.assertEqual(rendered(board.CardWidget(item, False, card_style="compact"), width=40),
+                         ["○ Ship it  ✔ · ☑                    t123"])
+        self.assertEqual(board.CardWidget(item, False, card_style="compact").plain, "Ship it  t123\nreviewed · planned")
 
     def test_the_agent_logo_replaces_the_agent_name_in_a_phase(self):
         item = card(planning="claude", planning_status="idle", agent_review="pi", review_status="working")
-        self.assertEqual(status_row(item, agent_logos=True),
+        self.assertEqual(mark_row(item, agent_logos=True),
                          f"⌕ ◐ {board.AGENT_LOGOS['pi']} · ✎ ○ {board.AGENT_LOGOS['claude']}")
-        self.assertEqual(status_row(card(agent_review="other"), agent_logos=True), "⌕ other")
+        self.assertEqual(mark_row(card(agent_review="other"), agent_logos=True), "⌕ other")
 
     def test_each_agent_glyph_takes_its_herdr_color(self):
         face = board.card_face(card(planning="claude", planning_status="blocked"), False)
-        glyph = next(span for span in face.status.spans if face.status.plain[span.start:span.end] == "×")
+        mark = face.marks[0]
+        glyph = next(span for span in mark.spans if mark.plain[span.start:span.end] == "×")
         self.assertEqual(str(glyph.style), "red")
 
     def test_the_pr_writer_glyph_follows_pr_writing(self):
@@ -255,8 +296,8 @@ class AgentGlyphTests(unittest.TestCase):
         self.assertEqual(status_row(card(pr_writing=True)), "PR: writing")
 
     def test_planned_hides_while_a_planner_runs_and_in_the_completed_column(self):
-        self.assertNotIn("☑", status_row(card(planned=True, planning="claude")))
-        self.assertNotIn("☑", status_row(card(planned=True), done=True))
+        self.assertNotIn("☑", mark_row(card(planned=True, planning="claude")))
+        self.assertNotIn("☑", mark_row(card(planned=True), done=True))
 
     def test_the_plain_text_has_words_and_no_glyphs(self):
         item = card(worktree=True, agent_status="working", planned=True, agent_review="pi", review_status="blocked",

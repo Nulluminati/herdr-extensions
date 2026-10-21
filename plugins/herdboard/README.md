@@ -61,14 +61,16 @@ Each column takes a color in turn: blue, magenta, yellow, cyan and green. The co
 
 A card shows, from top to bottom:
 
-- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), and the card ID at the right. While the work agent's pane lives, the state icon is the agent's Herdr state instead (see [Agent states](#agent-states)). The done column always shows the green `✓`. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
+- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), then the plan and review markers, then the card ID at the right. While the work agent's pane lives, the state icon is the agent's Herdr state instead (see [Agent states](#agent-states)). The done column always shows the green `✓`. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
 - The title.
 - The first detail line that is not a checklist item, in at most two rows. Cards in the done column strike the title and this line through.
 - The type and the tags.
 - The sub-card count (`2/5 done`) at the left and the due date at the right.
-- The markers below, when the card has any.
+- The other markers below, when the card has any.
 
-Set `card_style = "compact"` for cards without a border and without the detail line. A compact card has the state icon, the title and the ID in one row.
+A card that is too narrow for its plan and review markers cuts them with `…`. The ID stays whole.
+
+Set `card_style = "compact"` for cards without a border and without the detail line. A compact card has the state icon, the title, the plan and review markers and the ID in one row.
 
 | Key | Action |
 |---|---|
@@ -165,16 +167,23 @@ An archived card keeps its ID, its log and its attachments. `show` and `log` wor
 
 ### Card markers
 
+The markers after the state icon are the plan and review markers:
+
 | Marker | Meaning |
 |---|---|
-| `↳ <parent>` | A sub-card. For a Linear sub-issue whose parent is not in the view, the marker shows the parent's identifier, such as `↳ ENG-12` |
-| `2/5 done` | A parent card and the progress of its sub-cards |
-| `≡` (top-right corner) | The card has attachments. Open the card detail to see them. With `icon_style = "nerd"`, a paperclip icon alone |
 | `✎ ◐ pi` | The card's planner runs: the planning icon, the planner's Herdr state and its agent. The card keeps its current column. It goes away when the planner pane closes |
 | `☑` | The card has a plan (`plan.md` attachment) and no planner runs. It stays until the plan is removed, and does not show in the done column |
 | `⌕ ◐ claude` | An agent review runs: the reviewing icon, the reviewer's Herdr state and its agent |
 | `✔` | The agent review findings are ready, and the branch has no commits since that review |
 | `↑` | The branch has new commits since the agent review. A new agent review replaces it |
+
+The markers below the card are:
+
+| Marker | Meaning |
+|---|---|
+| `↳ <parent>` | A sub-card. For a Linear sub-issue whose parent is not in the view, the marker shows the parent's identifier, such as `↳ ENG-12` |
+| `2/5 done` | A parent card and the progress of its sub-cards |
+| `≡` (top-right corner) | The card has attachments. Open the card detail to see them. With `icon_style = "nerd"`, a paperclip icon alone |
 | `PR: writing` | An agent writes the pull request description. The writer's Herdr state follows, such as `PR: writing ◐` |
 | `PR open`, `PR merged`, `PR closed` | The state of the card's pull request. The board reads it at most once a minute |
 | `worktree removed` | The card's worktree folder is gone |

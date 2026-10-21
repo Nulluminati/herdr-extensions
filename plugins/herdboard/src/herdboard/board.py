@@ -446,6 +446,36 @@ class ClampedText:
         yield text
 
 
+class StateRow:
+    """The left text and `right` in one row: the left text cut with an ellipsis when the room runs out,
+    then `right` at the right edge, whole. The right text has a space before it."""
+
+    def __init__(self, left: Text, right: Text):
+        self.left = left
+        self.right = right
+
+    def __rich_console__(self, console, options):
+        width = options.max_width
+        left = self.left.copy()
+        if not self.right:
+            if left.cell_len > width:
+                left.truncate(max(width - 1, 0))
+                left.append("…")
+            yield left
+            return
+        room = width - self.right.cell_len - 1
+        if room < 1:
+            yield left
+            yield self.right
+            return
+        if left.cell_len > room:
+            left.truncate(max(room - 1, 0))
+            left.append("…")
+        left.append(" " * (width - left.cell_len - self.right.cell_len))
+        left.append_text(self.right)
+        yield left
+
+
 class TitleLine:
     """The title with `corner` at the right of its first row. The rows after the first use the full width,
     and the corner always has a space before it."""
@@ -497,8 +527,9 @@ class ChipRow:
 
 @dataclass
 class CardFace:
-    """A card's rows as the board shows them. Empty rows stay off the card. A full card has the state icon
-    and the corner in its first row and the title under them; a compact card has them all in one row."""
+    """A card's rows as the board shows them. Empty rows stay off the card. A full card has the state icon,
+    the planning and review markers and the corner in its first row and the title under them; a compact card
+    has them all in one row."""
 
     icon: Text
     title: Text
@@ -509,18 +540,31 @@ class CardFace:
     due: Text
     status: Text
     compact: bool = False
-    # The status row in words, without glyphs, for the card's plain text.
+    # The status rows in words, without glyphs, for the card's plain text.
     words: Text = field(default_factory=Text)
+    # The planning and review markers: they follow the state icon in the first row.
+    marks: list[Text] = field(default_factory=list)
 
     def heading(self) -> Text:
-        """The title row of a compact card."""
+        """The title row of a compact card, with the marks after the title."""
         heading = self.icon.copy()
         heading.append(" ")
         heading.append_text(self.title)
+        if self.marks:
+            heading.append("  ")
+            heading.append_text(Text(" · ", style="dim").join(self.marks))
+        return heading
+
+    def state_heading(self) -> Text:
+        """The first row of a full card: the state icon, then the marks."""
+        heading = self.icon.copy()
+        if self.marks:
+            heading.append("  ")
+            heading.append_text(Text(" · ", style="dim").join(self.marks))
         return heading
 
     def lines(self) -> list[Text]:
-        first = self.heading() if self.compact else self.icon.copy()
+        first = self.heading() if self.compact else self.state_heading()
         if self.corner:
             first.append("  ")
             first.append_text(self.corner)
@@ -539,8 +583,8 @@ class CardFace:
 def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
               card_style: str = "full", done: bool = False, dark: bool = True,
               agent_logos: bool = False) -> CardFace:
-    """A card's rows: the state icon and ID, the title, the description, the type and tags,
-    the sub-card count and due date, then herdboard's status of the card."""
+    """A card's rows: the state icon, the planning and review markers and the ID, the title, the description,
+    the type and tags, the sub-card count and due date, then the other status markers of the card."""
     if card.source == "linear":
         title, tags, due = card.title, card.tags, card.due
     else:
@@ -574,11 +618,15 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     if card.sub_cards:
         count = Text(icon_label("sub_cards", f"{card.sub_cards[0]}/{card.sub_cards[1]} done", icon_style),
                      style="dim")
-    # Each status item, and its words for the plain text when the item is only glyphs.
-    info: list[tuple[Text, str]] = []
+    # The status items: `marks` follow the state icon in the first row, `info` stays in the status row.
+    # Every item also gives its words for the plain text, in the order the items are added.
+    marks: list[Text] = []
+    info: list[Text] = []
+    words: list[str] = []
 
-    def add(item: Text, words: str | None = None) -> None:
-        info.append((item, item.plain if words is None else words))
+    def add(item: Text, words_: str | None = None, mark: bool = False) -> None:
+        words.append(item.plain if words_ is None else words_)
+        (marks if mark else info).append(item)
 
     if card.source == "linear" and card.pr:
         add(Text(icon_label("pr", "PR", icon_style), style="bold"))
@@ -592,30 +640,31 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
         add(Text(icon_label("branch", "worktree still exists", icon_style), style="bold yellow"))
     if card.agent_review:
         add(phase_item("reviewing", icon_style, "bold", card.agent_review, card.review_status, agent_logos),
-            f"agent review: {agent_label(card.agent_review, agent_logos)}")
+            f"agent review: {agent_label(card.agent_review, agent_logos)}", mark=True)
     elif card.reviewed == "reviewed":
-        add(phase_item("reviewed", icon_style, PR_STATES["agent:reviewed"][2]), "reviewed")
+        add(phase_item("reviewed", icon_style, PR_STATES["agent:reviewed"][2]), "reviewed", mark=True)
     elif card.reviewed == "new commits":
-        add(phase_item("new commits", icon_style, PR_STATES["agent:new commits"][2]), "new commits since review")
+        add(phase_item("new commits", icon_style, PR_STATES["agent:new commits"][2]),
+            "new commits since review", mark=True)
     if card.pr_writing:
         writing = Text(icon_label("pr", "PR: writing", icon_style), style="bold")
-        words = writing.plain
+        writing_words = writing.plain
         if card.pr_write_status:
             writing.append(" ")
             writing.append_text(agent_glyph(card.pr_write_status))
-        add(writing, words)
+        add(writing, writing_words)
     if card.planning:
         add(phase_item("planning", icon_style, "bold cyan", card.planning, card.planning_status, agent_logos),
-            f"planning: {agent_label(card.planning, agent_logos)}")
+            f"planning: {agent_label(card.planning, agent_logos)}", mark=True)
     elif card.planned and not done:
-        add(phase_item("planned", icon_style, "bold cyan"), "planned")
+        add(phase_item("planned", icon_style, "bold cyan"), "planned", mark=True)
     if card.parent_title:
         add(Text(f"↳ {card.parent_title}", style="dim"))
     separator = Text(" · ", style="dim")
     return CardFace(icon, heading, corner, description, chips, count,
                     due_label(due, icon_style=icon_style) if due else Text(),
-                    separator.join(item for item, _words in info), card_style == "compact",
-                    separator.join(Text(words) for _item, words in info))
+                    separator.join(info), card_style == "compact",
+                    separator.join(Text(word) for word in words), marks=marks)
 
 
 def card_text(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
@@ -653,7 +702,7 @@ class CardWidget(Static):
         if face.compact:
             rows = [TitleLine(face.heading(), face.corner) if face.corner else face.heading()]
         else:
-            rows = [_two_sided(face.icon, face.corner), face.title]
+            rows = [StateRow(face.state_heading(), face.corner), face.title]
         if face.description:
             rows.append(ClampedText(face.description, DESCRIPTION_ROWS))
         if face.chips:
