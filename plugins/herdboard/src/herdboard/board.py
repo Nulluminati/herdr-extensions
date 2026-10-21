@@ -454,13 +454,21 @@ class StateRow:
         self.left = left
         self.right = right
 
+    @staticmethod
+    def _cut(text: Text, room: int) -> None:
+        """Cut `text` to less than `room` cells and end it with an ellipsis, without a dangling separator."""
+        text.truncate(max(room - 1, 0))
+        # A space or a separator alone before the ellipsis reads as a broken marker. Both take one cell.
+        while text.plain and text.plain[-1] in " ·":
+            text.truncate(max(text.cell_len - 1, 0))
+        text.append("…")
+
     def __rich_console__(self, console, options):
         width = options.max_width
         left = self.left.copy()
         if not self.right:
             if left.cell_len > width:
-                left.truncate(max(width - 1, 0))
-                left.append("…")
+                self._cut(left, width)
             yield left
             return
         room = width - self.right.cell_len - 1
@@ -469,8 +477,7 @@ class StateRow:
             yield self.right
             return
         if left.cell_len > room:
-            left.truncate(max(room - 1, 0))
-            left.append("…")
+            self._cut(left, room)
         left.append(" " * (width - left.cell_len - self.right.cell_len))
         left.append_text(self.right)
         yield left

@@ -263,6 +263,7 @@ class AgentGlyphTests(unittest.TestCase):
                 first = rendered(board.CardWidget(item, False), width=width)[0].rstrip()
                 self.assertTrue(first.endswith(" t123"), first)
                 self.assertLessEqual(len(first), width, first)
+                self.assertNotIn("· …", first)
         self.assertTrue(rendered(board.CardWidget(item, False), width=24)[0].rstrip().endswith("… t123"))
 
     def test_a_narrow_card_without_marks_keeps_its_state_icon(self):
