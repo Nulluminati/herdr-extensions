@@ -563,8 +563,13 @@ class CardFace:
         return heading
 
     def state_heading(self) -> Text:
-        """The first row of a full card: the state icon, then the marks."""
-        heading = self.icon.copy()
+        """The first row of a full card: the state icon, then the marks.
+
+        The row starts from empty text and takes the icon in, so the icon keeps its own style as a span.
+        A row copied from the icon would give its color to the gap, the separators and the ID too.
+        """
+        heading = Text()
+        heading.append_text(self.icon)
         if self.marks:
             heading.append("  ")
             heading.append_text(Text(" · ", style="dim").join(self.marks))

@@ -31,6 +31,14 @@ def rendered(widget: board.CardWidget, width: int = 40) -> list[str]:
     return output.getvalue().splitlines()
 
 
+def first_row(widget: board.CardWidget, width: int = 40) -> list[tuple[str, str]]:
+    """The first row as (text, style) pairs, so a test can read which color each part has."""
+    console = Console(width=width, color_system=None, file=StringIO())
+    row = next(iter(widget.content.renderables))
+    return [(segment.text, str(segment.style)) for line in console.render_lines(row, console.options)
+            for segment in line]
+
+
 class CardFaceTests(unittest.TestCase):
     def test_the_state_icon_shows_not_started_started_and_done(self):
         cases = ((card(), False, "○"), (card(worktree=True), False, "●"), (card(agent_review="pi"), False, "●"),
@@ -244,6 +252,20 @@ class AgentGlyphTests(unittest.TestCase):
                                  f"{icon['reviewing']} × pi")
                 self.assertEqual(mark_row(card(reviewed="reviewed"), **options), icon["reviewed"])
                 self.assertEqual(mark_row(card(reviewed="new commits"), **options), icon["new commits"])
+
+    def test_the_state_row_keeps_the_icon_color_off_the_marks_and_the_id(self):
+        item = card(worktree=True, planning="claude", planning_status="working", reviewed="reviewed")
+        cases = ((False, "yellow", "●"), (True, "green", "✓"))
+        for done, color, icon in cases:
+            with self.subTest(done=done):
+                segments = first_row(board.CardWidget(item, False, done=done))
+                self.assertEqual(segments[0], (icon, color))
+                # The gap and the separators keep their own style, not the icon's color.
+                gaps = [style for text, style in segments if text.strip(" ·") == ""]
+                self.assertEqual(set(gaps), {"none", "dim"})
+                # The ID is plain dim, as it was before the marks moved up; the agent glyph keeps its state color.
+                self.assertEqual(segments[-1], ("t123", "dim"))
+                self.assertIn(("◐", "bold dim yellow"), segments)
 
     def test_the_phase_markers_follow_the_state_icon_and_leave_the_status_row(self):
         item = card(planning="claude", planning_status="working", reviewed="reviewed", pr_state="open",
