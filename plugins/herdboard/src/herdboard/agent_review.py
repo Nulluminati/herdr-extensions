@@ -322,8 +322,8 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         activity.append(store, ref, f"Agent review by {kind} done: {_count_findings(findings)} findings. {findings}",
                         "herdboard")
         message = (f"An agent review of this card by {kind} is ready: {findings}. Read it. "
-                   "Describe each finding in your own words, because the user has not read the file: "
-                   "give its file and line, what is wrong, and why it matters. "
+                   "Describe each finding briefly in your own words, because the user has not read the file: "
+                   "say what the problem is. "
                    "Do not give only the finding's name or number. "
                    "Then say if you agree or disagree, and why. "
                    f"Record your answer with {start_module.herdboard_command(config_file)} log {ref}. "

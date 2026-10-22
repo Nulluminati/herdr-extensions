@@ -94,6 +94,7 @@ class SkillTests(unittest.TestCase):
         self.assertIn("agent review", text)
         self.assertIn("agree or disagree", text)
         self.assertIn("Describe each finding", text)
+        self.assertNotIn("file and line", text)
 
     def test_planning_and_attachments_are_documented(self):
         commands = skill_commands()
