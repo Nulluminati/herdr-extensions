@@ -149,6 +149,19 @@ class RequestTests(PrWriteTestCase):
         self.assertEqual((stored["pane_id"], stored["own_pane"]), (result["pane_id"], True))
         self.assertEqual(self.log(), ["PR description requested from a pi writer agent."])
 
+    def test_a_claude_writer_starts_without_the_browser_rule(self):
+        self.fake.agent = False
+        path = start.state_dir() / "starts.json"
+        records = json.loads(path.read_text())
+        records[self.card.ref]["agent"] = "claude"
+        path.write_text(json.dumps(records))
+        self.request()
+        start_call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
+        self.assertEqual(start_call[start_call.index("--kind") + 1], "claude")
+        args = start_call[start_call.index("--") + 1:]
+        self.assertNotIn("Bash(terminal-browser:*)", args)
+        self.assertNotIn("--tools", args)
+
     def test_a_read_only_writer_gets_no_bash_and_no_browser(self):
         for kind in ("claude", "pi"):
             args = reviewer_arguments(kind, "Read it", Path("/tmp/ask"), None, None)

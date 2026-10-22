@@ -199,9 +199,11 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn("You do not need to run a command or send a notification", request)
         self.assertIn("Do not report that you cannot run tests", request)
         self.assertNotIn("state those limits", request)
+        self.assertIn("When the change has a page", request)
         self.assertIn("terminal-browser open --split right", request)
         self.assertIn("terminal-browser action", request)
         self.assertIn("do not start a server", request)
+        self.assertIn("close the browser pane", request)
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -603,8 +605,10 @@ class NoRepositoryAgentReviewTests(AgentReviewTestCase):
         self.assertIn(f"Working folder: `{self.card_folder}`", request)
         self.assertIn("no repository", request)
         self.assertIn("plan.md", request)
+        self.assertIn("When the change has a page", request)
         self.assertIn("terminal-browser open --split right", request)
         self.assertIn("do not start a server", request)
+        self.assertIn("close the browser pane", request)
         self.assertFalse((self.folder / "branch.patch").exists())
         self.assertFalse((self.folder / "uncommitted.patch").exists())
 

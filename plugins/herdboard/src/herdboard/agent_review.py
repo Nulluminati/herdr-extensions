@@ -91,8 +91,10 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
-To check a page, an HTML file or a server that already runs, use `terminal-browser open --split right <url-or-file>`
-and `terminal-browser action -- <command>`. Run no other command, and do not start a server.
+When the change has a page, an HTML file or a server that already runs, check it with
+`terminal-browser open --split right <url-or-file>` and `terminal-browser action -- <command>`,
+and close the browser pane before you end your turn.
+Run no other command, and do not start a server.
 
 Write your findings to `{folder / 'findings.md'}` in this format:
 
@@ -129,8 +131,10 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 {listing}{plan_line}Look for correctness, gaps, unsupported claims and missing steps.
 Read the files in the working folder when you need context.
 Do not change any file.
-To check a page, an HTML file or a server that already runs, use `terminal-browser open --split right <url-or-file>`
-and `terminal-browser action -- <command>`. Run no other command, and do not start a server.
+When the change has a page, an HTML file or a server that already runs, check it with
+`terminal-browser open --split right <url-or-file>` and `terminal-browser action -- <command>`,
+and close the browser pane before you end your turn.
+Run no other command, and do not start a server.
 
 Write your findings to `{folder / 'findings.md'}` in this format:
 
