@@ -317,8 +317,8 @@ class WaitTests(AgentReviewTestCase):
         self.assertEqual(self.log()[-1], f"Agent review by claude done: 2 findings. {findings}")
         prompt = self.calls("agent", "prompt")[-1]
         self.assertEqual(prompt[2], "w9:p1")
-        for part in (str(findings), "agree or disagree", "herdboard log", "Do not change any code",
-                     "Wait for the user"):
+        for part in (str(findings), "Describe each finding", "what is wrong", "why it matters",
+                     "agree or disagree", "herdboard log", "Do not change any code", "Wait for the user"):
             self.assertIn(part, prompt[3])
         notification = self.calls("notification", "show")[-1]
         self.assertEqual(notification[2], f"Agent review of {self.card.ref} done")
