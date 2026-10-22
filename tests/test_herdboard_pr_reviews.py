@@ -356,6 +356,7 @@ class ReviewerTests(PrReviewTestCase):
         tools = arguments[arguments.index("--allowedTools") + 1:]
         self.assertIn("Bash(hunk session:*)", tools)
         self.assertIn("Bash(gh pr diff:*)", tools)
+        self.assertIn("Bash(terminal-browser:*)", tools)
         self.assertNotIn("Bash", tools)
         self.assertNotIn("Edit", tools)
 
@@ -368,7 +369,8 @@ class ReviewerTests(PrReviewTestCase):
     def test_the_prompt_names_the_session_and_forbids_a_submit(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
         for part in ("s-new", "hunk skill path", f"gh pr diff 7 --repo {REPO}", HEAD, str(self.worktree),
-                     "--author Claude", "Do not submit"):
+                     "--author Claude", "Do not submit", "terminal-browser open --split right",
+                     "terminal-browser action", "do not start a server"):
             self.assertIn(part, text)
 
     def test_start_reviewer_starts_the_agent_and_its_worker(self):

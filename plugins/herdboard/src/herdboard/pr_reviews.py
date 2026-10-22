@@ -469,7 +469,7 @@ def reviewer_arguments(kind: str, prompt: str, model: str | None, thinking: str 
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
             "--allowedTools", "Read", "Grep", "Glob", "Bash(hunk session:*)", "Bash(hunk skill path:*)",
-            "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)"]
+            "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)", "Bash(terminal-browser:*)"]
 
 
 def prompt_text(record: dict, pr: PullRequest, kind: str | None = None) -> str:
@@ -490,16 +490,19 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 2. Read the PR: `gh pr view {number} --repo {repo} --json title,body,author,files,commits,comments,reviews`,
    `gh pr diff {number} --repo {repo}` and `gh pr checks {number} --repo {repo}`.
 3. Read the surrounding code in the checkout when you need context.
-4. Review the change for bugs, security problems, missing tests and unclear code.
-5. Add each finding as one note on the diff line it is about:
+4. To check a web page, an HTML file or a server that already runs, use `terminal-browser open --split right <url-or-file>`
+   and `terminal-browser action -- <command>`.
+5. Review the change for bugs, security problems, missing tests and unclear code.
+6. Add each finding as one note on the diff line it is about:
    `hunk session comment add {session} --file PATH --new-line N --summary "..." --rationale "..." --author {author}`
    Use `--old-line N` for a removed line. Put the severity (high, medium or low) at the start of the summary.
-6. End with a short summary in this chat: the verdict, and the notes you added.
+7. End with a short summary in this chat: the verdict, and the notes you added.
 
 ## Rules
 
 - Do not edit, create or delete files.
-- Do not run tests, builds or any code of the PR.
+- Do not run tests, builds or any code of the PR. Run no command other than the ones above,
+  and do not start a server.
 - Do not change Git state: no checkout, commit, fetch, reset or push.
 - Do not submit, approve or comment on GitHub. Do not run `gh pr review` or `gh pr comment`.
   The user reads your notes and submits the review.

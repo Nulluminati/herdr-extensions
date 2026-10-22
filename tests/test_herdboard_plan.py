@@ -202,7 +202,8 @@ class RequestTests(PlanTestCase):
         worktree = self.record()["worktree_path"]
         self.assertEqual(args[1:], ["--model", "opus", "--allowedTools", "Read", "Grep", "Glob",
                                     f"Edit(/{worktree}/**)", f"Write(/{worktree}/**)",
-                                    f"Edit(/{folder}/**)", f"Write(/{folder}/**)"])
+                                    f"Edit(/{folder}/**)", f"Write(/{folder}/**)",
+                                    "Bash(terminal-browser:*)"])
         self.assertNotIn("dontAsk", args, "the user is there to answer permission prompts")
 
     def test_pi_gets_read_write_and_shell_tools(self):

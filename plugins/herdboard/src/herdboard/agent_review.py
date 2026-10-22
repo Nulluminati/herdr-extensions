@@ -46,14 +46,20 @@ def _git(worktree: Path, *args: str) -> str:
 
 
 def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
-                       thinking: str | None) -> list[str]:
-    """The reviewer's arguments after Herdr's `--`: it reads the repository and writes only its findings."""
+                       thinking: str | None, browser: bool = False) -> list[str]:
+    """The reviewer's arguments after Herdr's `--`: it reads the repository and writes only its findings.
+
+    `browser` also allows terminal-browser (and, for pi, bash): the reviewer may check pages, HTML files
+    and servers that already run. The read-only PR writer starts without it."""
     if kind == "pi":
+        # pi cannot limit bash to some commands: the prompt holds the limits.
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
-        return ["--tools", "read,grep,find,ls,write", *options, "--", prompt]
+        tools = "read,grep,find,ls,write" + (",bash" if browser else "")
+        return ["--tools", tools, *options, "--", prompt]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
+    extra = ["Bash(terminal-browser:*)"] if browser else []
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
-            "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)"]
+            "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)", *extra]
 
 
 def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = ()) -> str:
@@ -85,6 +91,8 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
+To check a page, an HTML file or a server that already runs, use `terminal-browser open --split right <url-or-file>`
+and `terminal-browser action -- <command>`. Run no other command, and do not start a server.
 
 Write your findings to `{folder / 'findings.md'}` in this format:
 
@@ -97,7 +105,7 @@ Write your findings to `{folder / 'findings.md'}` in this format:
 If you find nothing, write "No findings."
 Finish writing the complete findings file before you end your turn.
 Herdboard automatically delivers the findings path to the card's requesting agent after your turn ends.
-No command execution or notification from you is required. Do not wait for another prompt.
+You do not need to run a command or send a notification to deliver the findings. Do not wait for another prompt.
 Do not report that you cannot run tests or inspect live screens.
 """
 
@@ -121,6 +129,8 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 {listing}{plan_line}Look for correctness, gaps, unsupported claims and missing steps.
 Read the files in the working folder when you need context.
 Do not change any file.
+To check a page, an HTML file or a server that already runs, use `terminal-browser open --split right <url-or-file>`
+and `terminal-browser action -- <command>`. Run no other command, and do not start a server.
 
 Write your findings to `{folder / 'findings.md'}` in this format:
 
@@ -133,7 +143,7 @@ Write your findings to `{folder / 'findings.md'}` in this format:
 If you find nothing, write "No findings."
 Finish writing the complete findings file before you end your turn.
 Herdboard automatically delivers the findings path to the card's requesting agent after your turn ends.
-No command execution or notification from you is required. Do not wait for another prompt.
+You do not need to run a command or send a notification to deliver the findings. Do not wait for another prompt.
 If you cannot inspect something, state that limit in the findings.
 """
 
@@ -213,7 +223,7 @@ class AgentReviewer(Reviewer):
             # A startup prompt (such as Claude's folder trust check) waits for the user,
             # and a reviewer busy with its first message never looks ready: the worker watches it.
             herdr("agent", "start", f"hb-{ref.lower()}-review", "--kind", kind, "--pane", pane, "--",
-                  *reviewer_arguments(kind, prompt, folder, model, thinking),
+                  *reviewer_arguments(kind, prompt, folder, model, thinking, browser=True),
                   tolerated=("timeout", "agent_not_ready"))
             record["agent_review"] = {"folder": str(folder), "pane_id": pane, "kind": kind, "model": model,
                                       "then_hunk": then_hunk, "head": head}

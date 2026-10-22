@@ -192,12 +192,16 @@ class RequestTests(AgentReviewTestCase):
         args = start_call[start_call.index("--") + 1:]
         self.assertIn(str(folder / "request.md"), args[0])
         self.assertEqual(args[1:], ["--permission-mode", "dontAsk", "--allowedTools", "Read", "Grep", "Glob",
-                                    f"Edit(/{folder}/**)"])
+                                    f"Edit(/{folder}/**)", "Bash(terminal-browser:*)"])
         self.assertEqual(result["reviewer"], "claude")
-        self.assertIn("Herdboard automatically delivers", (folder / "request.md").read_text())
-        self.assertIn("No command execution", (folder / "request.md").read_text())
-        self.assertIn("Do not report that you cannot run tests", (folder / "request.md").read_text())
-        self.assertNotIn("state those limits", (folder / "request.md").read_text())
+        request = (folder / "request.md").read_text()
+        self.assertIn("Herdboard automatically delivers", request)
+        self.assertIn("You do not need to run a command or send a notification", request)
+        self.assertIn("Do not report that you cannot run tests", request)
+        self.assertNotIn("state those limits", request)
+        self.assertIn("terminal-browser open --split right", request)
+        self.assertIn("terminal-browser action", request)
+        self.assertIn("do not start a server", request)
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -224,7 +228,7 @@ class RequestTests(AgentReviewTestCase):
         self.request(reviewer="pi", model="zai/glm-5.3", thinking="high")
         args = self.reviewer_start()
         args = args[args.index("--") + 1:]
-        self.assertEqual(args[:-2], ["--tools", "read,grep,find,ls,write", "--model", "zai/glm-5.3",
+        self.assertEqual(args[:-2], ["--tools", "read,grep,find,ls,write,bash", "--model", "zai/glm-5.3",
                                      "--thinking", "high"])
         self.assertEqual(args[-2], "--")
 
@@ -599,6 +603,8 @@ class NoRepositoryAgentReviewTests(AgentReviewTestCase):
         self.assertIn(f"Working folder: `{self.card_folder}`", request)
         self.assertIn("no repository", request)
         self.assertIn("plan.md", request)
+        self.assertIn("terminal-browser open --split right", request)
+        self.assertIn("do not start a server", request)
         self.assertFalse((self.folder / "branch.patch").exists())
         self.assertFalse((self.folder / "uncommitted.patch").exists())
 

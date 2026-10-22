@@ -73,7 +73,7 @@ def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model
     return [prompt, *(["--model", model] if model else []),
             "--allowedTools", "Read", "Grep", "Glob",
             f"Edit(/{worktree}/**)", f"Write(/{worktree}/**)",
-            f"Edit(/{folder}/**)", f"Write(/{folder}/**)"]
+            f"Edit(/{folder}/**)", f"Write(/{folder}/**)", "Bash(terminal-browser:*)"]
 
 
 def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, work_agent: bool,

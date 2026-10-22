@@ -217,7 +217,7 @@ To find "reviewed", herdboard saves the branch HEAD when an agent review starts,
 
 1. Select the card and press `P`, or run `herdboard plan t3m9`.
 2. Choose the planner (claude or pi) and its model. herdboard creates the card's worktree and branch when the card has none. A `plan <id>` tab opens in the worktree's workspace, in the background: you stay on the board.
-3. The planner reads the card and the code. It may change code and run commands in the worktree to test ideas; it reverts its own changes and does not commit. It asks you about the unknowns, then writes the plan.
+3. The planner reads the card and the code. It may change code and run commands in the worktree to test ideas; it reverts its own changes and does not commit. It can show you a page, an HTML file or a server that already runs with `terminal-browser`, in a split next to its pane. It asks you about the unknowns, then writes the plan.
 4. Answer its questions in the tab. Close the tab when the plan is complete.
 5. Start the work with `s`. The agent starts in the same worktree and gets the plan in its brief.
 6. To drop a planned card that will not be worked on, run `herdboard finish t3m9`. A branch with no commits counts as merged; add `--force` when the branch has commits.
@@ -322,7 +322,7 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 
 When the card's agent no longer runs, `review` starts a new one of the same kind. Its first message has the card and the full log.
 
-The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It can read the repository, and it can write only its findings file. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent answers with a table: one row for each finding, with its number, a short description, its severity, and whether the agent agrees or disagrees, and why. The agent logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
+The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It can read the repository, and it can write only its findings file. It may use `terminal-browser` to open and check pages, HTML files and servers that already run; it runs no other command. The pi reviewer also gets `bash`, and only its prompt limits it to `terminal-browser`. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent answers with a table: one row for each finding, with its number, a short description, its severity, and whether the agent agrees or disagrees, and why. The agent logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
 
 On the board, `R` asks for Human, Agent or Both. For an agent review, it then asks for the reviewer and the model: `opus`, `sonnet` or `haiku` for Claude, and the pi model list for pi.
 
@@ -431,8 +431,8 @@ description = "herdboard: review pull requests"
 
 What the reviewer can do:
 
-- Claude runs with `--permission-mode dontAsk`. It can use `Read`, `Grep` and `Glob`, and Bash only for `hunk session`, `hunk skill path`, `gh pr view`, `gh pr diff` and `gh pr checks`.
-- pi cannot limit its bash tool to some commands. It gets `read`, `grep`, `find`, `ls` and `bash`, and only its prompt tells it not to edit files, run code, change Git or write to GitHub. Choose pi only for PRs whose code you trust that far.
+- Claude runs with `--permission-mode dontAsk`. It can use `Read`, `Grep` and `Glob`, and Bash only for `hunk session`, `hunk skill path`, `gh pr view`, `gh pr diff`, `gh pr checks` and `terminal-browser`.
+- pi cannot limit its bash tool to some commands. It gets `read`, `grep`, `find`, `ls` and `bash`, and only its prompt tells it not to edit files, run code, change Git or write to GitHub, and to use `terminal-browser` only to open and check pages. Choose pi only for PRs whose code you trust that far.
 - No reviewer runs the tests or the code of the PR.
 
 Limits:

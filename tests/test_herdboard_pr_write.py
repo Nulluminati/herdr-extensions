@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import activity, merge, pr_write, start  # noqa: E402
+from herdboard.agent_review import reviewer_arguments  # noqa: E402
 from test_herdboard_agent_review import ReviewerHerdr  # noqa: E402
 from test_herdboard_merge import PullRequestTestCase  # noqa: E402
 
@@ -147,6 +148,13 @@ class RequestTests(PrWriteTestCase):
         stored = self.records()[self.card.ref]["pr_write"]
         self.assertEqual((stored["pane_id"], stored["own_pane"]), (result["pane_id"], True))
         self.assertEqual(self.log(), ["PR description requested from a pi writer agent."])
+
+    def test_a_read_only_writer_gets_no_bash_and_no_browser(self):
+        for kind in ("claude", "pi"):
+            args = reviewer_arguments(kind, "Read it", Path("/tmp/ask"), None, None)
+            self.assertNotIn("Bash(terminal-browser:*)", args, kind)
+            if kind == "pi":
+                self.assertEqual(args[1], "read,grep,find,ls,write", kind)
 
     def test_a_running_writer_blocks_a_second_request(self):
         self.request()
