@@ -5,6 +5,7 @@ Plugins for [Herdr](https://herdr.dev), the terminal multiplexer for coding agen
 | Plugin | What it does |
 |---|---|
 | [agent-icons](plugins/agent-icons/) | Shows each agent's vendor logo, such as Claude or pi, in the sidebar Agents list. |
+| [auto-title](plugins/auto-title/) | Gives each tab a title from its agent's session name, its herdboard card or its program. Labels you set by hand stay. |
 | [herdboard](plugins/herdboard/) | A kanban board for Markdown todos and Linear issues. A card can start work in its own worktree with an agent, then go through review and merge, locally or as a draft GitHub pull request. |
 | [peer-review](plugins/peer-review/) | Has the other agent review your agent's work: Claude's work goes to pi, and pi's work goes to Claude. It reviews uncommitted changes, else the branch commits since the upstream. |
 

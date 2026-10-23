@@ -1,0 +1,1 @@
+{"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":4242,"foreground_processes":[{"argv":["/usr/bin/fish"],"cmdline":"/usr/bin/fish","cwd":"/home/u/repo","name":"fish","pid":4242}]}}}

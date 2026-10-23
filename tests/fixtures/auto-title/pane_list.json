@@ -1,0 +1,7 @@
+{"id":"cli:pane:list","result":{"panes":[
+{"agent":"claude","agent_status":"working","cwd":"/home/u/repo","focused":false,"label":"Herdboard tveq auto tab titles","pane_id":"w1:p1","tab_id":"w1:t1","terminal_title":"◑ Herdboard tveq auto tab titles","tokens":{"agent_icon":"","claude_session_name":"Herdboard tveq auto tab titles","herdboard_card":"▶ Improve Auto tab titles · In progress"},"workspace_id":"w1"},
+{"agent_status":"unknown","cwd":"/home/u/repo","focused":true,"pane_id":"w1:p2","tab_id":"w1:t1","terminal_title":"~/repo","tokens":{},"workspace_id":"w1"},
+{"agent_status":"unknown","cwd":"/home/u/repo","focused":false,"pane_id":"w1:p3","tab_id":"w1:t2","terminal_title":"~/repo","tokens":{},"workspace_id":"w1"},
+{"agent":"pi","agent_status":"idle","cwd":"/home/u/repo","focused":false,"label":"Codex support plan","pane_id":"w1:p4","tab_id":"w1:t3","terminal_title":"π - Codex support plan","tokens":{"agent_icon":"","pi_session_name":"Codex support plan"},"workspace_id":"w1"},
+{"agent_status":"unknown","cwd":"/home/u/todos","focused":false,"pane_id":"w1:p5","tab_id":"w1:t4","terminal_title":"herdboard","tokens":{},"workspace_id":"w1"}
+]}}

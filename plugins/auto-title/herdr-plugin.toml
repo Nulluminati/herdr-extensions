@@ -1,0 +1,42 @@
+id = "nulluminati.auto-title"
+name = "Auto Title"
+version = "0.1.0"
+# Needs startup commands.
+min_herdr_version = "0.9.0"
+description = "Give each tab a title: the agent's session name, else its pane label or herdboard card, else the program in the pane. Labels you set by hand stay."
+platforms = ["linux", "macos"]
+
+# Herdr runs these from the plugin root. The startup command returns at once and
+# a background poller renames tabs every few seconds.
+[[startup]]
+command = ["python3", "bin/auto_title.py", "start"]
+
+[[actions]]
+id = "reset"
+title = "Auto title: reset this tab"
+contexts = ["global"]
+command = ["python3", "bin/auto_title.py", "reset"]
+
+[[actions]]
+id = "doctor"
+title = "Auto title: explain this tab's title"
+contexts = ["global"]
+command = ["python3", "bin/auto_title.py", "doctor"]
+
+[[actions]]
+id = "pause"
+title = "Auto title: pause"
+contexts = ["global"]
+command = ["python3", "bin/auto_title.py", "pause"]
+
+[[actions]]
+id = "resume"
+title = "Auto title: resume"
+contexts = ["global"]
+command = ["python3", "bin/auto_title.py", "resume"]
+
+[[actions]]
+id = "restart"
+title = "Auto title: restart the poller"
+contexts = ["global"]
+command = ["python3", "bin/auto_title.py", "restart"]
