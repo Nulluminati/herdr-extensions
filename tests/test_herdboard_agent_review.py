@@ -200,10 +200,11 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn("Do not report that you cannot run tests", request)
         self.assertNotIn("state those limits", request)
         self.assertIn("When the change has a page", request)
-        self.assertIn("terminal-browser open --split right", request)
-        self.assertIn("terminal-browser action", request)
+        self.assertIn("terminal-browser open --no-merge --split right", request)
+        self.assertIn("terminal-browser action --browser <key> -- close", request)
+        self.assertIn("Do not run `terminal-browser shutdown`", request)
+        self.assertIn("stays listed", request)
         self.assertIn("do not start a server", request)
-        self.assertIn("close the browser pane", request)
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -606,9 +607,11 @@ class NoRepositoryAgentReviewTests(AgentReviewTestCase):
         self.assertIn("no repository", request)
         self.assertIn("plan.md", request)
         self.assertIn("When the change has a page", request)
-        self.assertIn("terminal-browser open --split right", request)
+        self.assertIn("terminal-browser open --no-merge --split right", request)
+        self.assertIn("terminal-browser action --browser <key> -- close", request)
+        self.assertIn("Do not run `terminal-browser shutdown`", request)
+        self.assertIn("stays listed", request)
         self.assertIn("do not start a server", request)
-        self.assertIn("close the browser pane", request)
         self.assertFalse((self.folder / "branch.patch").exists())
         self.assertFalse((self.folder / "uncommitted.patch").exists())
 

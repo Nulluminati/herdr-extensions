@@ -92,8 +92,11 @@ Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
 When the change has a page, an HTML file or a server that already runs, check it with
-`terminal-browser open --split right <url-or-file>` and `terminal-browser action -- <command>`,
-and close the browser pane before you end your turn.
+`terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
+Before your turn ends, close it with `terminal-browser action --browser <key> -- close`; the key comes from
+the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
+success and leave the browser running, so say so in the findings when it stays listed.
+Do not run `terminal-browser shutdown`: it closes every browser on the machine.
 Run no other command, and do not start a server.
 
 Write your findings to `{folder / 'findings.md'}` in this format:
@@ -132,8 +135,11 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 Read the files in the working folder when you need context.
 Do not change any file.
 When the change has a page, an HTML file or a server that already runs, check it with
-`terminal-browser open --split right <url-or-file>` and `terminal-browser action -- <command>`,
-and close the browser pane before you end your turn.
+`terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
+Before your turn ends, close it with `terminal-browser action --browser <key> -- close`; the key comes from
+the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
+success and leave the browser running, so say so in the findings when it stays listed.
+Do not run `terminal-browser shutdown`: it closes every browser on the machine.
 Run no other command, and do not start a server.
 
 Write your findings to `{folder / 'findings.md'}` in this format:

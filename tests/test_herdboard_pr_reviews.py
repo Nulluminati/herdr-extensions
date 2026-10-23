@@ -369,8 +369,9 @@ class ReviewerTests(PrReviewTestCase):
     def test_the_prompt_names_the_session_and_forbids_a_submit(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
         for part in ("s-new", "hunk skill path", f"gh pr diff 7 --repo {REPO}", HEAD, str(self.worktree),
-                     "--author Claude", "Do not submit", "terminal-browser open --split right",
-                     "terminal-browser action", "do not start a server"):
+                     "--author Claude", "Do not submit", "terminal-browser open --no-merge --split right",
+                     "terminal-browser action", "do not start a server", "Do not open a file from the PR checkout",
+                     "Never run `terminal-browser shutdown`"):
             self.assertIn(part, text)
 
     def test_start_reviewer_starts_the_agent_and_its_worker(self):

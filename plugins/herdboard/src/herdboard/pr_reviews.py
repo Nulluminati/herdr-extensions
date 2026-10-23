@@ -490,8 +490,8 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 2. Read the PR: `gh pr view {number} --repo {repo} --json title,body,author,files,commits,comments,reviews`,
    `gh pr diff {number} --repo {repo}` and `gh pr checks {number} --repo {repo}`.
 3. Read the surrounding code in the checkout when you need context.
-4. To check a web page, an HTML file or a server that already runs, use `terminal-browser open --split right <url-or-file>`
-   and `terminal-browser action -- <command>`.
+4. To check the PR page or a server that already runs, use `terminal-browser open --no-merge --split right <url>`
+   and `terminal-browser action -- <command>`. Do not open a file from the PR checkout: that runs the PR's code.
 5. Review the change for bugs, security problems, missing tests and unclear code.
 6. Add each finding as one note on the diff line it is about:
    `hunk session comment add {session} --file PATH --new-line N --summary "..." --rationale "..." --author {author}`
@@ -503,6 +503,7 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 - Do not edit, create or delete files.
 - Do not run tests, builds or any code of the PR. Run no command other than the ones above,
   and do not start a server.
+- Never run `terminal-browser shutdown`: it closes every browser on the machine.
 - Do not change Git state: no checkout, commit, fetch, reset or push.
 - Do not submit, approve or comment on GitHub. Do not run `gh pr review` or `gh pr comment`.
   The user reads your notes and submits the review.
