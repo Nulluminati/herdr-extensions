@@ -120,13 +120,13 @@ ICONS = {
     "sub_cards": "\uf0ae",
     "comments": "\uf27b",
     "phase/planning": "\uf040",
-    "phase/planned": "\uf046",
+    "phase/planned": "\uf0f6",
     "phase/reviewing": "\uf002",
     "phase/reviewed": "\uf058",
     "phase/new commits": PR_STATES["agent:new commits"][0],
 }
 # The plain glyphs of the planning and review phases on a card's status row.
-PHASE_ICONS = {"planning": "✎", "planned": "☑", "reviewing": "⌕", "reviewed": "✔", "new commits": "↑"}
+PHASE_ICONS = {"planning": "✎", "planned": "▤", "reviewing": "⌕", "reviewed": "✔", "new commits": "↑"}
 
 
 # The help screen: a title, then its keys. A screen's keys are in its own section; the keys of
@@ -234,7 +234,7 @@ HELP_SECTIONS = [
         ("·", "Herdr does not know the agent's state (dim)"),
         ("●", "a started card without a live agent (yellow)"),
         ("✎", "a planner runs, then its state and agent"),
-        ("☑", "the card has a plan"),
+        ("▤", "the card has a plan"),
         ("⌕", "an agent review runs, then the reviewer's state and agent"),
         ("✔", "the agent review findings are ready"),
         ("↑", "new commits since the agent review"),

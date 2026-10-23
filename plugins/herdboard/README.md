@@ -172,7 +172,7 @@ The markers after the state icon are the plan and review markers:
 | Marker | Meaning |
 |---|---|
 | `✎ ◐ pi` | The card's planner runs: the planning icon, the planner's Herdr state and its agent. The card keeps its current column. It goes away when the planner pane closes |
-| `☑` | The card has a plan (`plan.md` attachment) and no planner runs. It stays until the plan is removed, and does not show in the done column |
+| `▤` | The card has a plan (`plan.md` attachment) and no planner runs. It stays until the plan is removed, and does not show in the done column |
 | `⌕ ◐ claude` | An agent review runs: the reviewing icon, the reviewer's Herdr state and its agent |
 | `✔` | The agent review findings are ready, and the branch has no commits since that review |
 | `↑` | The branch has new commits since the agent review. A new agent review replaces it |

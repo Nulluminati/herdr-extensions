@@ -202,7 +202,7 @@ class AgentLogoTests(unittest.TestCase):
 
 HERDR_GLYPHS = (("working", "◐", "yellow"), ("blocked", "×", "red"), ("done", "✓", "cyan"),
                 ("idle", "○", "green"), ("unknown", "·", "dim"))
-PHASES = {"planning": ("✎", "\uf040"), "planned": ("☑", "\uf046"), "reviewing": ("⌕", "\uf002"),
+PHASES = {"planning": ("✎", "\uf040"), "planned": ("▤", "\uf0f6"), "reviewing": ("⌕", "\uf002"),
           "reviewed": ("✔", "\uf058"), "new commits": ("↑", "\uf062")}
 
 
@@ -299,7 +299,7 @@ class AgentGlyphTests(unittest.TestCase):
     def test_compact_cards_show_the_phase_markers_after_the_title(self):
         item = card(planned=True, reviewed="reviewed")
         self.assertEqual(rendered(board.CardWidget(item, False, card_style="compact"), width=40),
-                         ["○ Ship it  ✔ · ☑                    t123"])
+                         ["○ Ship it  ✔ · ▤                    t123"])
         self.assertEqual(board.CardWidget(item, False, card_style="compact").plain, "Ship it  t123\nreviewed · planned")
 
     def test_the_agent_logo_replaces_the_agent_name_in_a_phase(self):
@@ -319,8 +319,8 @@ class AgentGlyphTests(unittest.TestCase):
         self.assertEqual(status_row(card(pr_writing=True)), "PR: writing")
 
     def test_planned_hides_while_a_planner_runs_and_in_the_completed_column(self):
-        self.assertNotIn("☑", mark_row(card(planned=True, planning="claude")))
-        self.assertNotIn("☑", mark_row(card(planned=True), done=True))
+        self.assertNotIn("▤", mark_row(card(planned=True, planning="claude")))
+        self.assertNotIn("▤", mark_row(card(planned=True), done=True))
 
     def test_the_plain_text_has_words_and_no_glyphs(self):
         item = card(worktree=True, agent_status="working", planned=True, agent_review="pi", review_status="blocked",
@@ -330,7 +330,7 @@ class AgentGlyphTests(unittest.TestCase):
         self.assertEqual(plain.splitlines()[-1], "agent review: pi · PR: writing · planned")
         self.assertEqual(board.CardWidget(card(reviewed="new commits"), False).plain.splitlines()[-1],
                          "new commits since review")
-        for glyph in ("◐", "×", "✓", "☑", "⌕", "↑"):
+        for glyph in ("◐", "×", "✓", "▤", "⌕", "↑"):
             self.assertNotIn(glyph, plain)
         self.assertEqual(board.CardWidget(card(planning="claude", planning_status="working"), False).plain,
                          "Ship it  t123\nplanning: claude")
@@ -343,12 +343,12 @@ class AgentGlyphTests(unittest.TestCase):
         self.assertIn("Agent        ◐ claude: working", meta)
         self.assertIn("Planner      ✎ ○ pi: idle", meta)
         self.assertIn("Agent review ⌕ × pi: blocked", meta)
-        self.assertIn("Plan         ☑ planned", meta)
+        self.assertIn("Plan         ▤ planned", meta)
         for reviewed, words in (("reviewed", "✔ reviewed"), ("new commits", "↑ new commits since review")):
             meta = board.DetailScreen(card(reviewed=reviewed), None)._meta().plain.splitlines()
             self.assertIn(f"Agent review {words}", meta)
         nerd = board.DetailScreen(card(planned=True), None, icon_style="nerd")._meta().plain
-        self.assertIn("Plan         \uf046 planned", nerd)
+        self.assertIn("Plan         \uf0f6 planned", nerd)
 
     def test_the_detail_screen_names_an_agent_without_a_recorded_kind(self):
         item = card(worktree=True, agent_status="blocked")
@@ -356,7 +356,7 @@ class AgentGlyphTests(unittest.TestCase):
 
     def test_the_help_screen_explains_each_glyph(self):
         icons = dict(next(entries for title, entries in board.HELP_SECTIONS if title == "Icons"))
-        for glyph in ("◐", "×", "✓", "○", "·", "●", "✎", "☑", "⌕", "✔", "↑"):
+        for glyph in ("◐", "×", "✓", "○", "·", "●", "✎", "▤", "⌕", "✔", "↑"):
             self.assertIn(glyph, icons)
 
 
