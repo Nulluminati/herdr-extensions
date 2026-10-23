@@ -2185,21 +2185,82 @@ class HeaderBar(Horizontal):
             self.query_one("#header-view", Static).update(self._right())
 
 
-class TabBar(Horizontal):
+# The least room that the tabs and the switch key's hint keep between them, before the hint takes its
+# own row above the tabs.
+TAB_HINT_MIN_GAP = 3
+
+
+class TabBar(Vertical):
     """The row under the header: the Board, Pull requests and Notes tabs, each with its icon, and the
-    open pull request count once the list has read it. A click on another tab switches to it."""
+    open pull request count once the list has read it. A click on another tab switches to it.
+
+    The switch key's hint stands on the bar outside the tabs: at the right end of the tab row, or in
+    a row above the tabs when the pane is too narrow for both."""
 
     def __init__(self, active: str):
         super().__init__(id="tab-bar")
         self.active = active
+        # True when the pane is too narrow for the hint beside the tabs.
+        self.narrow = False
 
     def compose(self) -> ComposeResult:
-        for tab, label in TABS:
+        # Both rows mount at once, in the order of a pane that fits both. A narrow pane moves the hint
+        # above the tabs, so no resize removes a widget and its text stays put.
+        yield RichStatic(self._hint(), id="tab-next")
+        with Horizontal(id="tab-row"):
+            for tab, _label in TABS:
+                box = Container(Static("", classes="tab-label"), id=f"tab-{tab}",
+                                classes="tab active" if tab == self.active else "tab")
+                box.plain = ""
+                yield box
+
+    def on_mount(self) -> None:
+        self.place_tabs()
+        self.show_texts()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.place_tabs()
+
+    def place_tabs(self) -> None:
+        """Place the hint and the tab row for the room that the pane has. Every tab takes the widest
+        tab's width, so a short label has room to sit in the middle of its tab."""
+        width = max(self.size.width, self.parent.size.width if self.parent else 0)
+        room = width - self._row_width() - self._hint_width()
+        narrow = room < TAB_HINT_MIN_GAP
+        self.narrow = narrow
+        self.set_class(narrow, "narrow")
+        hint = self.query_one("#tab-next", RichStatic)
+        row = self.query_one("#tab-row", Horizontal)
+        if narrow:
+            # The rows stack, with the hint above the tabs.
+            self.styles.layout = "vertical"
+            self.move_child(hint, before=row)
+            hint.styles.margin = (0, 0, 0, 0)
+        else:
+            # The tabs take the left of the row, and the hint its right end.
+            self.styles.layout = "horizontal"
+            self.move_child(hint, after=row)
+            hint.styles.margin = (0, 0, 0, max(0, room - 1))
+        for box in self.query(".tab"):
+            box.styles.width = self._tab_width()
+
+    def _row_width(self) -> int:
+        """The cells that the tab boxes take, with the cell between each pair of them."""
+        return len(TABS) * (self._tab_width() + 1)
+
+    def _hint_width(self) -> int:
+        """The cells that the hint takes, with its padding."""
+        return len(self._hint().plain) + 2
+
+    def show_texts(self) -> None:
+        """Write every tab's text and the hint, after a count read or a change of icon style. Then
+        place the rows again: a count that adds cells widens every tab."""
+        for (tab, label), box in zip(TABS, self.query(".tab")):
             text = self._tab_text(tab, label)
-            widget = Container(Static(text, classes="tab-label"), id=f"tab-{tab}",
-                               classes="tab active" if tab == self.active else "tab")
-            widget.plain = text.plain
-            yield widget
+            box.plain = text.plain
+            box.query_one(".tab-label", Static).update(text)
+        self.query_one("#tab-next", RichStatic).update(self._hint())
+        self.place_tabs()
 
     def _icon(self, tab: str) -> str:
         nerd, plain = TAB_ICONS[tab]
@@ -2217,19 +2278,22 @@ class TabBar(Horizontal):
             return None
 
     def _tab_text(self, tab: str, label: str) -> Text:
-        """The tab's icon, label and count. The next tab shows the switch key; the others keep its
-        place blank, so a switch neither resizes a tab nor moves its text. The current tab's bold comes
-        from the style sheet."""
+        """The tab's icon, label and count. The style sheet centers the text in the box, and the box is
+        as wide as the widest tab, so the text stays in its place when another tab shows."""
         text = Text(f"{self._icon(tab)} {label}")
         count = self._count(tab)
         if count is not None:
             text.append(f" {count}", style="bold")
-        text.append(" ")
-        if tab == self.next_tab():
-            text.append(TAB_KEY, style="bold yellow")
-        else:
-            text.append(" " * len(TAB_KEY))
         return text
+
+    def _tab_width(self) -> int:
+        """The widest tab text, so every tab box has the same width, and a short label has room to sit
+        in the middle of its tab."""
+        return max(self._tab_text(tab, label).cell_len for tab, label in TABS)
+
+    def _hint(self) -> Text:
+        """The switch key and what it does, on the bar outside the tabs."""
+        return Text(f"{TAB_KEY} next tab", style="bold yellow")
 
     def next_tab(self) -> str:
         """The tab that the switch key goes to."""
@@ -2237,11 +2301,8 @@ class TabBar(Horizontal):
         return names[(names.index(self.active) + 1) % len(names)]
 
     def show_counts(self) -> None:
-        for (tab, label), widget in zip(TABS, self.query(".tab")):
-            text = self._tab_text(tab, label)
-            if widget.plain != text.plain:
-                widget.plain = text.plain
-                widget.query_one(".tab-label", Static).update(text)
+        """Write the texts again after a read of the open count. The boxes keep their width."""
+        self.show_texts()
 
     def tab_labels(self) -> list[str]:
         return [" ".join(widget.plain.split()) for widget in self.query(".tab")]
@@ -3596,9 +3657,17 @@ class HerdboardApp(App):
     .bottom-dock { dock: bottom; height: auto; }
     /* Each tab is a box with its icon and label. The current tab has an accent border and bold text. */
     #tab-bar { height: 3; background: $background; }
+    /* In a narrow pane the hint takes a row of its own, above the tabs. */
+    #tab-bar.narrow { height: 4; }
+    #tab-bar #tab-row { height: 3; width: auto; }
+    /* Each tab takes the widest tab's width, with its text centered, so the tabs read as one row. */
     #tab-bar .tab { width: auto; height: 3; padding: 0 1; margin-right: 1; background: transparent;
                     border: round $surface-lighten-2; }
-    #tab-bar .tab-label { width: auto; height: 1; color: $text-muted; }
+    #tab-bar .tab-label { width: 100%; height: 1; color: $text-muted; content-align: center middle; }
+    /* The hint of the switch key stands outside the tabs, at the right end of the tab row, or above
+       the tabs when the pane is too narrow for both. */
+    #tab-next { width: auto; height: 3; padding: 0 1; content-align: right middle; color: $text-muted; }
+    #tab-bar.narrow #tab-next { width: 100%; height: 1; }
     #tab-bar .tab.active { border: round $accent; }
     #tab-bar .tab.active .tab-label { color: $accent; text-style: bold; }
     #key-bar { height: auto; padding: 0 1; color: $text-muted;
@@ -3606,6 +3675,7 @@ class HerdboardApp(App):
                 link-style-hover: bold; link-color-hover: $text; link-background-hover: $primary 30%; }
     App:ansi #tab-bar .tab { border: round ansi_bright_black; }
     App:ansi #tab-bar .tab-label { color: ansi_default; }
+    App:ansi #tab-next { color: ansi_bright_yellow; }
     App:ansi #tab-bar .tab.active { border: round ansi_magenta; }
     App:ansi #tab-bar .tab.active .tab-label { color: ansi_magenta; text-style: bold; }
     .card { padding: 0 1; height: auto; border: round $surface-lighten-2; }

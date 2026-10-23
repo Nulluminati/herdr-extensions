@@ -53,7 +53,8 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             bar = self.bar(app)
             self.assertEqual(bar.active, "board")
-            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests G", "✎ Notes"])
+            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests", "✎ Notes"])
+            self.assertIn("G", bar.query_one("#tab-next").plain)
             keys = " ".join(self.keys(app).keys_text().plain.split())
             for part in ("a Add", "/ Filter", "s Start", "? Help", "q Quit"):
                 self.assertIn(part, keys)
@@ -70,7 +71,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, PullRequestsScreen)
             bar = self.bar(app)
             self.assertEqual(bar.active, "prs")
-            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes G"])
+            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes"])
             keys = " ".join(self.keys(app).keys_text().plain.split())
             for part in ("/ Search", "n Next", "R Review", "esc Back"):
                 self.assertIn(part, keys)
@@ -208,20 +209,20 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests G", "✎ Notes"])
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests", "✎ Notes"])
             await pilot.press("G")
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7", "✎ Notes G"])
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7", "✎ Notes"])
             await pilot.press("G", "G")
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7 G", "✎ Notes"])
+            self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7", "✎ Notes"])
 
     async def test_the_tabs_use_nerd_icons_only_in_nerd_mode(self):
         self.store.config.icon_style = "nerd"
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["\uf0db Board", "\uf407 Pull requests G", "\uf249 Notes"])
+            self.assertEqual(self.bar(app).tab_labels(), ["\uf0db Board", "\uf407 Pull requests", "\uf249 Notes"])
 
     async def test_a_key_and_its_description_stay_on_one_line(self):
         for width in (50, 90, 160):
@@ -250,15 +251,55 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.screen.query_one("#pr-search").region.bottom, self.keys(app).region.y)
 
     async def test_the_label_does_not_move_when_a_tab_is_selected(self):
-        # Only the next tab shows the G; the others keep its place blank, so their text stays where it was.
-        previous = {"board": "notes", "prs": "board", "notes": "prs"}
+        # The G stands on the bar outside the tabs, so no tab text holds its place and no tab resizes.
         for tab, label in (("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes")):
-            current = TabBar(tab)._tab_text(tab, label)
-            before = TabBar(previous[tab])._tab_text(tab, label)
-            other = TabBar(previous[previous[tab]])._tab_text(tab, label)
-            self.assertIn("G", before.plain)
-            self.assertEqual(current.plain, before.plain.replace("G", " "), tab)
-            self.assertEqual(other.plain, current.plain, tab)
+            texts = {TabBar(active)._tab_text(tab, label).plain for active in ("board", "prs", "notes")}
+            self.assertEqual(len(texts), 1, tab)
+            self.assertNotIn("G", texts.pop())
+
+    async def test_the_tab_text_is_centered_in_a_box_as_wide_as_the_widest_tab(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            boxes = [app.screen.query_one(f"#tab-{tab}") for tab in ("board", "prs", "notes")]
+            self.assertEqual(len({box.region.width for box in boxes}), 1, [box.region.width for box in boxes])
+            for box in boxes:
+                label = box.query_one(".tab-label")
+                self.assertEqual(label.styles.content_align_horizontal, "center", box.id)
+                # The box padding and the centering put the same cells at the left of the text.
+                self.assertEqual(label.region.x - box.region.x - box.styles.padding.left,
+                                 box.region.right - label.region.right - box.styles.padding.right, box.id)
+
+    async def test_the_g_indicator_stands_on_the_bar_outside_the_tabs(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            bar = self.bar(app)
+            hint = bar.query_one("#tab-next")
+            self.assertIn("G", hint.plain)
+            self.assertNotIn("G", "".join(box.plain for box in bar.query(".tab")))
+            # Outside the boxes and to the right of the last one.
+            last = bar.query(".tab").last()
+            self.assertGreaterEqual(hint.region.x, last.region.right)
+            self.assertEqual(hint.region.y, bar.region.y)
+            # It does not change when another tab shows.
+            after = self.bar(app)
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            self.assertEqual(self.bar(app).query_one("#tab-next").plain, after.query_one("#tab-next").plain)
+
+    async def test_a_narrow_pane_puts_the_g_indicator_above_the_tabs(self):
+        # The tabs keep their text and their box, and the hint takes a row of its own above them.
+        app = self.app()
+        async with app.run_test(size=(40, 30)) as pilot:
+            await self.settle(app, pilot)
+            bar = self.bar(app)
+            hint = bar.query_one("#tab-next")
+            first = bar.query(".tab").first()
+            self.assertTrue(bar.narrow)
+            self.assertLessEqual(hint.region.bottom, first.region.y)
+            self.assertIn("G next tab", hint.plain)
+            self.assertEqual(bar.tab_labels(), ["▦ Board", "⑂ Pull requests", "✎ Notes"])
 
     async def test_the_pull_request_rows_fill_the_width_and_cut_long_titles(self):
         from herdboard.board import PullRequestRow
