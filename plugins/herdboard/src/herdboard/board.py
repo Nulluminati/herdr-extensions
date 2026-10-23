@@ -1925,13 +1925,22 @@ class ModelScreen(ModalBase):
         super().__init__()
         self.models = [None, *models]
         self.labels = [f"pi default ({default})" if default else "pi default", *models]
-        # The last level that the user chose for each model; pi's own default model when none is named.
+        # The last level that the user chose for each model.
         self.remembered = dict(remembered or {})
+        # The model that the unnamed row runs: `agent_model` of the config that opened the dialog.
         self.default_model = default_model
+        # True once the user chose a level, so that a later cursor move keeps that choice.
+        self.chosen = False
+        # The level that the dialog itself put in the field, so its own change is not a user choice.
+        self.shown = self.remembered_level(0)
+
+    def model_at(self, index: int) -> str | None:
+        """The model that row `index` runs: the named one, or the model that an unnamed one runs."""
+        model = self.models[index] if index < len(self.models) else None
+        return model or self.default_model
 
     def remembered_level(self, index: int) -> str:
-        model = self.models[index] if index < len(self.models) else None
-        return self.remembered.get(model or self.default_model or "", "default")
+        return self.remembered.get(self.model_at(index) or "", "default")
 
     def compose(self) -> ComposeResult:
         levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
@@ -1943,10 +1952,25 @@ class ModelScreen(ModalBase):
             yield thinking
             yield Label("enter: start · tab: thinking level · escape: cancel", classes="dim")
 
+    def _show_level(self, level: str) -> None:
+        """Set the field here, and remember the value, so its `Changed` does not read as a user choice."""
+        self.shown = level
+        self.query_one("#thinking", Select).value = level
+
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        """Show the level of the model under the cursor, so a start keeps that model's choice."""
+        """Show the level of the model under the cursor, so a start keeps that model's choice.
+
+        A level that the user chose stays, because a later cursor move must not undo their choice.
+        """
         event.stop()
-        self.query_one("#thinking", Select).value = self.remembered_level(event.option_index)
+        if not self.chosen:
+            self._show_level(self.remembered_level(event.option_index))
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """A level that differs from the one the dialog set is the user's choice."""
+        if event.select.id == "thinking" and event.value != self.shown:
+            event.stop()
+            self.chosen = True
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1955,9 +1979,12 @@ class ModelScreen(ModalBase):
 
 
 def pi_model_screen(config) -> ModelScreen:
-    """The pi model dialog for `config`: its model list, and the thinking level of each model."""
+    """The pi model dialog for `config`: its model list, and the thinking level of each model.
+
+    The unnamed row shows the level of the model that it runs, which `agent_model` resolves.
+    """
     default, models = pi_model_choices(config)
-    return ModelScreen(default, models, config.thinking, start_module.pi_default_model())
+    return ModelScreen(default, models, config.thinking, start_module.agent_model(config, None))
 
 
 class ConfigScreen(ModalBase):
@@ -1975,8 +2002,8 @@ class ConfigScreen(ModalBase):
                    "tag_style", "card_style")
 
     def __init__(self, path: Path | None, meta: BoardMeta, can_link: bool, settings: dict[str, str | None],
-                 themes: list[str], pi_choices: tuple[str | None, list[str]], remembered: dict[str, str] | None = None,
-                 default_model: str | None = None):
+                 themes: list[str], pi_choices: tuple[str | None, list[str]],
+                 remembered: dict[str, str] | None = None):
         super().__init__()
         self.path = path
         self.meta = meta
@@ -1988,9 +2015,8 @@ class ConfigScreen(ModalBase):
         self.agent = settings["start_agent"]
         # The model that the Global tab shows, and the level that its Thinking field shows.
         self.model = settings["start_model"]
-        # The thinking level that the user last chose for each model, and pi's own default model.
+        # The thinking level that the user last chose for each model.
         self.remembered = dict(remembered or {})
-        self.default_model = default_model
         # The level that the Thinking field showed last, so an unchanged field writes nothing.
         self.shown_thinking = self._effective_thinking()
         self.removed: set[str] = set()
@@ -2188,8 +2214,9 @@ class ConfigScreen(ModalBase):
         The key is the chosen model, or `""` for the agent default, whose level is the global
         `start_thinking`. A None value forgets the model.
         """
+        # One form for both sides of the comparison: the field shows "default", the values hold None.
         shown = self.global_values()["start_thinking"]
-        if shown == self.shown_thinking:
+        if shown == (None if self.shown_thinking == "default" else self.shown_thinking):
             return {}
         return {self._thinking_model() or "": shown}
 
@@ -4960,8 +4987,8 @@ class HerdboardApp(App):
         """
         if agent != "pi":
             return
-        # The agent default has no model name of its own, so it is saved under pi's default model.
-        name = model or start_module.pi_default_model()
+        # The unnamed row runs `agent_model`'s model, so its level belongs to that model.
+        name = start_module.agent_model(self.store.config, model)
         if name is None:
             return
         try:
@@ -4969,10 +4996,14 @@ class HerdboardApp(App):
         except HerdboardError as error:
             self.call_from_thread(self.notify, f"The thinking level did not save: {error}", severity="warning")
             return
+        # The board may copy the table while a worker saves, so the change waits for the UI thread.
+        self.call_from_thread(self._remember_thinking_in_memory, name, thinking)
+
+    def _remember_thinking_in_memory(self, model: str, thinking: str | None) -> None:
         if thinking is None:
-            self.store.config.thinking.pop(name, None)
+            self.store.config.thinking.pop(model, None)
         else:
-            self.store.config.thinking[name] = thinking
+            self.store.config.thinking[model] = thinking
 
     def _card_action(self, run: Callable[[], dict], notice: Callable[[dict], str]) -> None:
         """Run a review, merge or finish in a thread worker, like a start: one at a time."""
@@ -5314,8 +5345,7 @@ class HerdboardApp(App):
         settings = {key: getattr(config, key) for key in ConfigScreen.GLOBAL_KEYS}
         self.push_screen(ConfigScreen(path, meta, path is not None and self.resolve_link is not None, settings,
                                       sorted(self.available_themes), pi_model_choices(config),
-                                      remembered=config.thinking,
-                                      default_model=start_module.pi_default_model()))
+                                      remembered=config.thinking))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
                       project: str, labels: list[str], removed_pins: set[str] = frozenset(),

@@ -249,6 +249,47 @@ class RequestTests(AgentReviewTestCase):
             self.reviewer.request(self.card.ref, reviewer="claude", thinking="high")
         self.assertEqual(raised.exception.code, "usage")
 
+    def test_a_pi_reviewer_without_a_level_takes_the_saved_one_of_its_model(self):
+        self.store.config.thinking = {"zai/glm-5.3": "xhigh", "start/one": "minimal"}
+        self.store.config.start_model = "start/one"
+        self.store.config.start_thinking = "low"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="pi", model="zai/glm-5.3")
+        args = self.reviewer_start()
+        args = args[args.index("--") + 1:]
+        self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
+
+    def test_a_pi_reviewer_without_a_model_takes_the_saved_level_of_start_model(self):
+        self.store.config.thinking = {"start/one": "xhigh"}
+        self.store.config.start_model = "start/one"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="pi")
+        args = self.reviewer_start()
+        args = args[args.index("--") + 1:]
+        self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
+
+    def test_a_pi_reviewer_takes_the_default_level_without_a_saved_one(self):
+        self.store.config.thinking = {"other/model": "xhigh"}
+        self.store.config.start_model = "start/one"
+        self.store.config.start_thinking = "low"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="pi")
+        args = self.reviewer_start()
+        args = args[args.index("--") + 1:]
+        self.assertEqual(args[args.index("--thinking") + 1], "low")
+
+    def test_a_saved_level_is_never_given_to_claude(self):
+        self.store.config.thinking = {"start/one": "xhigh"}
+        self.store.config.start_model = "start/one"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="claude")
+        args = self.reviewer_start()
+        self.assertNotIn("--thinking", args)
+
     def test_the_record_logs_and_worker_follow(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")

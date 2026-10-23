@@ -914,6 +914,41 @@ class ConfigScreenTests(BoardTestCase):
                 await settle(pilot)
         self.assertFalse(app.config_file.exists())
 
+    async def test_an_unchanged_default_thinking_level_writes_no_level(self):
+        # The field shows "default", which the values map to None: the save must see no change.
+        self.config.start_agent = "pi"
+        self.config.start_model = "zai/glm-5.3"
+        self.config.start_thinking = "high"
+        app = self.make_app()
+        app.config_file.write_text('start_agent = "pi"\nstart_model = "zai/glm-5.3"\nstart_thinking = "high"\n')
+        before = app.config_file.stat().st_mtime_ns
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                # This model has no saved level, so the field shows the agent default.
+                self.assertEqual(screen.query_one("#config-thinking").value, "default")
+                self.assertEqual(screen.thinking_levels(), {})
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        # No [thinking] row, no rewrite of start_thinking, and the untouched file is not replaced.
+        self.assertEqual(app.config_file.read_text(),
+                         'start_agent = "pi"\nstart_model = "zai/glm-5.3"\nstart_thinking = "high"\n')
+        self.assertEqual(app.config_file.stat().st_mtime_ns, before)
+
+    async def test_an_unchanged_agent_default_field_writes_nothing(self):
+        self.config.start_agent = "pi"
+        app = self.make_app()
+        app.config_file.write_text('start_agent = "pi"\n')
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                self.assertEqual(screen.query_one("#config-thinking").value, "default")
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        self.assertEqual(app.config_file.read_text(), 'start_agent = "pi"\n')
+
     async def test_the_board_merge_default_follows_the_global_merge_mode(self):
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:

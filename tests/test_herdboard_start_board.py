@@ -1,5 +1,6 @@
 """Start actions run through a thread worker, not the event loop."""
 import asyncio
+import json
 import subprocess
 import threading
 import time
@@ -181,11 +182,91 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
         self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="xhigh")
 
-    async def test_the_remembered_level_of_pis_own_default_model(self):
-        self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "max"}
+    async def test_the_default_row_shows_the_level_of_the_model_that_runs(self):
+        # start_model runs for the unnamed row, so its level is the one that the row shows.
+        self.store.config.start_model = "start/one"
+        self.store.config.thinking = {"start/one": "xhigh", "openai-codex/gpt-6.1-sol": "max"}
         app = self.app()
         with patch("herdboard.board.pi_model_choices",
                    return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, ModelScreen)
+                self.assertEqual(screen.query_one("#thinking").value, "xhigh")
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        # The row starts start_model, so it uses that model's level.
+        self.assertEqual(self.callback.call_args.kwargs["thinking"], "xhigh")
+        self.assertEqual(load_config(app.config_file).thinking, {"start/one": "xhigh"})
+
+    async def test_the_default_row_saves_the_level_of_the_model_that_runs(self):
+        self.store.config.start_model = "start/one"
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                app.screen.query_one("#thinking").value = "max"
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.assertEqual(load_config(app.config_file).thinking, {"start/one": "max"})
+        self.assertNotIn("openai-codex/gpt-6.1-sol", load_config(app.config_file).thinking)
+
+    async def test_the_cursor_stops_steering_the_level_once_the_user_picks_one(self):
+        self.store.config.thinking = {"zai/glm-5.3": "xhigh", "openai/gpt-5": "minimal"}
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3", "openai/gpt-5"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                thinking = app.screen.query_one("#thinking")
+                await pilot.press("down")
+                await pilot.pause()
+                self.assertEqual(thinking.value, "xhigh")
+                thinking.value = "max"
+                await pilot.pause()
+                # A later cursor move keeps the level that the user chose.
+                await pilot.press("down")
+                await pilot.pause()
+                self.assertEqual(thinking.value, "max")
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "pi", model="openai/gpt-5", thinking="max")
+
+    async def test_a_save_applies_on_the_ui_thread(self):
+        app = self.app()
+        seen = []
+        app.call_from_thread = lambda function, *args, **kwargs: seen.append((function, args, kwargs))
+        app.remember_thinking("pi", "zai/glm-5.3", "high")
+        # The file save runs here; the change in memory waits for the UI thread.
+        self.assertEqual(load_config(app.config_file).thinking, {"zai/glm-5.3": "high"})
+        self.assertEqual(app.store.config.thinking, {})
+        self.assertEqual(len(seen), 1)
+        function, args, _ = seen[0]
+        function(*args)
+        self.assertEqual(app.store.config.thinking, {"zai/glm-5.3": "high"})
+
+    async def test_the_remembered_level_of_pis_own_default_model(self):
+        # No start_model, so the unnamed row is pi's own default model, which pi names in its settings.
+        settings = self.root / "home" / ".pi" / "agent"
+        settings.mkdir(parents=True)
+        (settings / "settings.json").write_text(json.dumps({
+            "defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol",
+            "defaultThinkingLevel": "high", "enabledModels": ["zai/glm-5.3"]}))
+        self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "max"}
+        app = self.app()
+        with patch.dict(os.environ, {"HOME": str(self.root / "home")}):
             async with app.run_test() as pilot:
                 await pilot.press("S")
                 await pilot.pause()

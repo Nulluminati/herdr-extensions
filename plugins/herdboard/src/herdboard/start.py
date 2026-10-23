@@ -158,10 +158,19 @@ def pi_model_choices(config) -> tuple[str | None, list[str]]:
     return default, list(models)
 
 
-def thinking_level(config, model: str | None, thinking: str | None = None) -> str | None:
-    """The thinking level to give pi: the one asked for, else the last one for `model`, else the default.
+def agent_model(config, model: str | None) -> str | None:
+    """The pi model that an unnamed `model` means: `start_model`, else pi's own default.
 
-    `model` None is pi's own default model.
+    Every path that names no model resolves it here, so that the model that runs and the
+    `[thinking]` row that its level comes from are always the same model.
+    """
+    return model or config.start_model or pi_default_model()
+
+
+def thinking_level(config, model: str | None, thinking: str | None = None) -> str | None:
+    """The thinking level to give pi: the one asked for, else the last one for its model, else the default.
+
+    `model` None means the model that `agent_model` resolves.
     """
     if thinking:
         return thinking
@@ -169,11 +178,8 @@ def thinking_level(config, model: str | None, thinking: str | None = None) -> st
 
 
 def remembered_thinking(config, model: str | None) -> str | None:
-    """The thinking level that the user last chose for `model`, or None.
-
-    `model` None is pi's own default model.
-    """
-    return config.thinking.get(model or pi_default_model() or "")
+    """The thinking level that the user last chose for `model`, or None. None is `agent_model`'s model."""
+    return config.thinking.get(agent_model(config, model) or "")
 
 
 def agent_arguments(agent: str, message: str, model: str | None, thinking: str | None) -> list[str]:

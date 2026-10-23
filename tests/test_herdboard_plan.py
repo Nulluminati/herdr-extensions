@@ -396,8 +396,28 @@ class RequestTests(PlanTestCase):
         self.planner.plan(self.card.ref, agent="pi")
         args = self.planner_start()
         args = args[args.index("--") + 1:]
-        self.assertIn("--thinking", args)
+        # The level belongs to the model that runs: the planner passes no model, so pi uses start_model.
         self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
+        self.assertEqual(args[args.index("--model") + 1], "zai/glm-5.3")
+
+    def test_a_named_planner_model_takes_its_own_saved_level(self):
+        self.config.start_model = "zai/glm-5.3"
+        self.config.thinking = {"zai/glm-5.3": "xhigh", "openai/gpt-5": "minimal"}
+        self.planner.plan(self.card.ref, agent="pi", model="openai/gpt-5")
+        args = self.planner_start()
+        args = args[args.index("--") + 1:]
+        self.assertEqual(args[args.index("--model") + 1], "openai/gpt-5")
+        self.assertEqual(args[args.index("--thinking") + 1], "minimal")
+
+    def test_a_planner_without_a_saved_level_uses_the_default(self):
+        self.config.start_model = "openai/gpt-5"
+        self.config.start_thinking = "low"
+        self.config.thinking = {"zai/glm-5.3": "xhigh"}
+        self.planner.plan(self.card.ref, agent="pi")
+        args = self.planner_start()
+        args = args[args.index("--") + 1:]
+        self.assertEqual(args[args.index("--model") + 1], "openai/gpt-5")
+        self.assertEqual(args[args.index("--thinking") + 1], "low")
 
     def test_a_card_without_a_repository_needs_one(self):
         inbox = self.store.add(self.store.ensure_inbox(), "Plan the garden")

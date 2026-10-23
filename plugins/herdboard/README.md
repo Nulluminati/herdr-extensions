@@ -319,7 +319,7 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 `herdboard review <id>` has three modes:
 
 - `--human` (the default) opens the branch diff in Hunk, in a split next to the card's agent. Your Hunk comments go to that agent. A second `review` reuses the open Hunk pane. Hunk uses much memory, so herdboard closes the pane when the card leaves Review.
-- `--agent` has a second agent review the work. By default, Claude reviews pi's work and pi reviews Claude's work. `--reviewer`, `--model` and `--thinking` change this. Without `--thinking`, a pi reviewer uses the level saved for its model.
+- `--agent` has a second agent review the work. By default, Claude reviews pi's work and pi reviews Claude's work. `--reviewer`, `--model` and `--thinking` change this. Without `--thinking`, a pi reviewer uses the saved level of its model.
 - `--both` runs the agent review first, and opens Hunk when the findings are ready.
 
 When the card's agent no longer runs, `review` starts a new one of the same kind. Its first message has the card and the full log.
@@ -742,7 +742,7 @@ Press `c` to open configuration. It has two tabs. Switch tabs with a click, or f
 
 The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. "Agent default" removes `start_model`, so the agent uses its own default. A saved model that is not in the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking level applies to pi only, so it is off for Claude, but Claude keeps the saved level.
 
-The Thinking field follows the selected model. A named model shows its own level, from the `[thinking]` table. "Agent default" shows `start_thinking`. "Agent default" in the field clears the level of the selected model, so that model uses `start_thinking` again. See [thinking levels](#thinking-levels).
+The Thinking field follows the selected model. A named model shows its own level, from the `[thinking]` table. With "Agent default" as the model, the field shows `start_thinking`. "Agent default" in the field clears the level of the selected model, so that model uses `start_thinking` again. See [thinking levels](#thinking-levels).
 
 The board's merge option "Global default" shows the global mode. A board without `merge:` follows the global mode; a board with `merge:` keeps it.
 
@@ -762,11 +762,11 @@ A thinking level is a pi setting: off, minimal, low, medium, high, xhigh or max.
 "openai-codex/gpt-6.1-sol" = "max"
 ```
 
-When you choose a thinking level in the model dialog of `S`, `P` or `R`, herdboard saves it for the model of that dialog. The next dialog shows the saved level of the model under the cursor. So a careful level for one model does not change the level of another model.
+When you choose a thinking level in the model dialog of `S`, `P` or `R`, herdboard saves it for the model that the dialog starts. The dialog shows the saved level of the model under the cursor, until you change the field; after that, your choice stays. So a careful level for one model does not change the level of another model.
 
-A start, plan or pull request review without `--thinking` uses the saved level of its model. A model without a row in the table uses `start_thinking`, else pi's own `defaultThinkingLevel`. `--thinking` on the command line always wins.
+A start, plan, agent review or pull request review without `--thinking` uses the saved level of its model. A model without a row in the table uses `start_thinking`, else pi's own `defaultThinkingLevel`. `--thinking` on the command line always wins.
 
-pi's own default model has no name on the command line, so herdboard saves its level under the model name in pi's `settings.json`, from `defaultProvider` and `defaultModel`.
+When `start`, `plan` or `review` names no model, herdboard uses `start_model`, else pi's own default model. The dialog's "pi default" row is that same model. So the level always belongs to the model that runs. pi's own default has a name only in its `settings.json`, from `defaultProvider` and `defaultModel`; herdboard saves that model's level under that name.
 
 Remove a row by hand, or press `c` and choose "Agent default" for that model. herdboard keeps the table when it saves other settings.
 

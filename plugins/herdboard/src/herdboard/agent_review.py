@@ -179,6 +179,10 @@ class AgentReviewer(Reviewer):
         kind = reviewer or REVIEWERS[record.get("agent") or self.config.start_agent]
         if thinking and kind != "pi":
             raise ReviewError("--thinking works only with a pi reviewer", "usage")
+        if kind == "pi":
+            # One model for the launch and for its level, as start and plan do.
+            model = start_module.agent_model(self.config, model)
+            thinking = start_module.thinking_level(self.config, model, thinking)
         persist = self._persister(key, record)
         with _lock(".start-" + safe_key(key) + ".lock"):
             running = record.get("agent_review")
