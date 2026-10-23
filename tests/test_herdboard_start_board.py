@@ -750,3 +750,145 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsInstance(app.screen, AgentScreen)
             self.assertEqual(str(app.screen.title_text), "Choose the reviewer")
+
+
+class ParallelBoardTests(unittest.IsolatedAsyncioTestCase):
+    """An action on one card blocks only that card and its parent. Other cards stay free."""
+
+    async def asyncSetUp(self):
+        asyncio.get_running_loop().set_debug(False)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.store = Store(Config(todos_dir=root / "todos", projects_dir=root / "Projects"))
+        self.path = self.store.ensure_inbox()
+        self.a = self.store.add(self.path, "Card A")
+        self.b = self.store.add(self.path, "Card B")
+        self.child = self.store.add(self.path, "Child of A", parent=self.a.ref)
+        # Each start blocks until the test releases its card.
+        self.release = {ref: threading.Event() for ref in (self.a.ref, self.b.ref, self.child.ref)}
+        self.failures = {}
+        self.notices = []
+
+    def start(self, ref, agent, **options):
+        if not self.release[ref].wait(10):
+            raise AssertionError(f"{ref} was not released")
+        if ref in self.failures:
+            raise self.failures[ref]
+        return {"ref": ref, "workspace_id": f"w-{ref}", "pane_id": "p", "worktree_path": f"/tmp/{ref}",
+                "branch": ref, "agent_name": None, "steps_done": []}
+
+    def app(self, **kwargs):
+        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.start,
+                           **kwargs)
+        app.animation_level = "none"
+        app.notify = lambda message, **kw: self.notices.append(message)
+        return app
+
+    def select(self, app, ref):
+        card = next(card for column in app.columns for card in column.cards if card.ref == ref)
+        self.assertTrue(app.select_card(card))
+
+    async def until(self, pilot, check):
+        for _ in range(200):
+            await pilot.pause()
+            if check():
+                return
+            await asyncio.sleep(0.01)
+        self.fail("condition not met")
+
+    def column(self, ref):
+        return self.store.show(ref).column
+
+    def card_text(self, app, ref):
+        return next(widget.plain for widget in app.query(".card") if widget.card.ref == ref)
+
+    async def finish(self, pilot):
+        for event in self.release.values():
+            event.set()
+        await pilot.app.workers.wait_for_complete()
+        await pilot.pause()
+
+    async def test_a_start_does_not_block_a_move_of_another_card(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.a.ref, None)
+            self.select(app, self.b.ref)
+            app.action_move(1)
+            await self.until(pilot, lambda: self.column(self.b.ref) != "Backlog")
+            self.assertFalse([n for n in self.notices if n.startswith("Busy")])
+            await self.finish(pilot)
+
+    async def test_a_start_blocks_a_move_of_the_same_card(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.a.ref, None)
+            self.select(app, self.a.ref)
+            app.action_move(1)
+            self.assertIn(f"Busy: {self.a.ref} is starting", self.notices)
+            await self.finish(pilot)
+        self.assertEqual(self.column(self.a.ref), "Backlog")
+
+    async def test_a_start_of_a_sub_card_blocks_its_parent(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.child.ref, None)
+            self.select(app, self.a.ref)
+            app.action_move(1)
+            self.assertIn(f"Busy: {self.a.ref} is starting", self.notices)
+            await self.finish(pilot)
+        self.assertEqual(self.column(self.a.ref), "Backlog")
+
+    async def test_two_starts_of_different_cards_run_together(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.a.ref, None)
+            app._start_card(self.b.ref, None)
+            self.release[self.b.ref].set()
+            await self.until(pilot, lambda: any(f"w-{self.b.ref}" in n for n in self.notices))
+            self.release[self.a.ref].set()
+            await self.until(pilot, lambda: any(f"w-{self.a.ref}" in n for n in self.notices))
+            await self.finish(pilot)
+            self.assertFalse(app.starting)
+        self.assertFalse([n for n in self.notices if n.startswith("Busy")])
+
+    async def test_a_start_does_not_block_an_add(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.a.ref, None)
+            app._start_write(lambda: self.store.add(self.path, "Added meanwhile"))
+            await self.until(pilot, lambda: "Added meanwhile" in [c.title for c in self.store.list_cards([self.path])])
+            self.assertFalse([n for n in self.notices if n.startswith("Busy")])
+            await self.finish(pilot)
+
+    async def test_the_target_question_uses_the_request_of_the_failed_plan(self):
+        def plan(ref, **options):
+            raise StartError("Choose a repository.", "repo_required")
+
+        app = self.app(plan_card=plan)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.b.ref, None)
+            app._plan(self.a.ref, "claude", None, None)
+            await self.until(pilot, lambda: isinstance(app.screen, TargetScreen))
+            self.assertEqual(app.screen.ref, self.a.ref)
+            await pilot.press("escape")
+            await self.finish(pilot)
+
+    async def test_a_busy_card_shows_its_action(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._start_card(self.a.ref, None)
+            await self.until(pilot, lambda: "busy: starting" in self.card_text(app, self.a.ref))
+            self.assertNotIn("busy", self.card_text(app, self.b.ref))
+            await self.finish(pilot)
+            self.assertNotIn("busy", self.card_text(app, self.a.ref))

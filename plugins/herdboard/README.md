@@ -176,6 +176,7 @@ The markers after the state icon are the plan and review markers:
 | `⌕ ◐ claude` | An agent review runs: the reviewing icon, the reviewer's Herdr state and its agent |
 | `✔` | The agent review findings are ready, and the branch has no commits since that review |
 | `↑` | The branch has new commits since the agent review. A new agent review replaces it |
+| `⠋ starting` | The board runs an action on the card: a spinner and the action, such as `starting`, `planning`, `reviewing`, `merging` or `writing`. Another action on the card, or on its parent, waits with a Busy notice until it ends. Other cards stay free |
 
 The markers below the card are:
 

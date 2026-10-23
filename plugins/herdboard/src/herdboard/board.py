@@ -14,7 +14,7 @@ from pathlib import Path
 import threading
 import time
 import zlib
-from typing import Callable
+from typing import Callable, Iterable
 
 from rich.console import Group
 from rich.style import Style
@@ -62,6 +62,9 @@ LINEAR_SECONDS = 300.0
 WRITE_GROUP = "store-write"
 LINEAR_GROUP = "linear-fetch"
 START_GROUP = "card-start"
+# The frames of the spinner on a busy card, and the seconds between two frames.
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPINNER_SECONDS = 0.15
 PR_GROUP = "pull-requests"
 PR_SCREEN = "pull-requests"
 NOTES_SCREEN = "notes"
@@ -239,10 +242,26 @@ HELP_SECTIONS = [
         ("⌕", "an agent review runs, then the reviewer's state and agent"),
         ("✔", "the agent review findings are ready"),
         ("↑", "new commits since the agent review"),
+        ("⠋", "the board starts, plans, reviews, merges or changes the card; other cards stay free"),
         ("nerd", "with the Nerd Font icon style, the phase icons are Nerd Font glyphs; the agent states stay the same"),
     ]),
 ]
 HELP_KEYS = [entry for _title, entries in HELP_SECTIONS for entry in entries]
+
+
+@dataclass
+class Job:
+    """A board change that runs in a thread worker, with what its end needs."""
+
+    # The word for the spinner and the Busy notice, such as "starting".
+    kind: str
+    # The cards that the job blocks. Empty for a change that names no single card, such as an add.
+    refs: frozenset[str] = frozenset()
+    add_screen: AddScreen | None = None
+    # True for a Linear write: Linear is fetched again when it ends.
+    refetch: bool = False
+    # The start or plan arguments, for the question that asks where a card without a repository runs.
+    target_request: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -595,9 +614,10 @@ class CardFace:
 
 def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
               card_style: str = "full", done: bool = False, dark: bool = True,
-              agent_logos: bool = False) -> CardFace:
+              agent_logos: bool = False, busy: str | None = None, frame: int = 0) -> CardFace:
     """A card's rows: the state icon, the planning and review markers and the ID, the title, the description,
-    the type and tags, the sub-card count and due date, then the other status markers of the card."""
+    the type and tags, the sub-card count and due date, then the other status markers of the card.
+    `busy` names the board action that runs on the card, and `frame` is its spinner frame."""
     if card.source == "linear":
         title, tags, due = card.title, card.tags, card.due
     else:
@@ -641,6 +661,8 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
         words.append(item.plain if words_ is None else words_)
         (marks if mark else info).append(item)
 
+    if busy:
+        add(Text(f"{SPINNER[frame % len(SPINNER)]} {busy}", style="bold yellow"), f"busy: {busy}", mark=True)
     if card.source == "linear" and card.pr:
         add(Text(icon_label("pr", "PR", icon_style), style="bold"))
     if show_board:
@@ -681,9 +703,9 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
 
 
 def card_text(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-              card_style: str = "full", done: bool = False) -> Text:
+              card_style: str = "full", done: bool = False, busy: str | None = None) -> Text:
     """A card's rows as one text, as the board shows them."""
-    return card_face(card, show_board, tag_style, icon_style, card_style, done).text()
+    return card_face(card, show_board, tag_style, icon_style, card_style, done, busy=busy).text()
 
 
 def _two_sided(left, right: Text) -> Table:
@@ -700,18 +722,33 @@ class CardWidget(Static):
     ALLOW_SELECT = False
 
     def __init__(self, card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-                 card_style: str = "full", done: bool = False, dark: bool = True, agent_logos: bool = False):
+                 card_style: str = "full", done: bool = False, dark: bool = True, agent_logos: bool = False,
+                 busy: str | None = None, frame: int = 0):
         self.card = card
         self.agent_logos = agent_logos
-        face = card_face(card, show_board, tag_style, icon_style, card_style, done, dark, agent_logos)
+        self.face_options = (show_board, tag_style, icon_style, card_style, done, dark, agent_logos)
+        self.busy = busy
+        self.card_classes = "card" + (" compact" if card_style == "compact" else "") + (" done" if done else "")
+        super().__init__(self._content(frame), classes=self.card_classes)
+
+    def show_busy(self, busy: str | None, frame: int) -> None:
+        """Draw the card again with the board action that runs on it, at this spinner frame."""
+        self.busy = busy
+        self.update(self._content(frame))
+
+    def _content(self, frame: int) -> Group:
+        """The card's rows. Also sets the plain text and the key that a redraw compares."""
+        show_board, tag_style, icon_style, card_style, done, dark, agent_logos = self.face_options
+        face = card_face(self.card, show_board, tag_style, icon_style, card_style, done, dark, agent_logos,
+                         self.busy, frame)
         self.rich_text = face.text()
         # The state icon and the agent logo are not card text: `plain` has the title, then the corner.
         first = face.title.plain + (f"  {face.corner.plain}" if face.corner else "")
         rest = [line.plain for line in replace(face, status=face.words).lines()[1 if face.compact else 2:]]
         self.plain = "\n".join([first, *rest])
-        # What a redraw compares: the text with its styles and the classes.
-        classes = "card" + (" compact" if card_style == "compact" else "") + (" done" if done else "")
-        self.key = (self.rich_text.plain, tuple(self.rich_text.spans), classes)
+        # What a redraw compares: the text with its styles and the classes. The board draws new cards at the
+        # spinner frame of the busy cards it shows, so a turn of the spinner does not replace a card.
+        self.key = (self.rich_text.plain, tuple(self.rich_text.spans), self.card_classes)
         if face.compact:
             rows = [TitleLine(face.heading(), face.corner) if face.corner else face.heading()]
         else:
@@ -724,7 +761,7 @@ class CardWidget(Static):
             rows.append(_two_sided(face.count, face.due))
         if face.status:
             rows.append(face.status)
-        super().__init__(Group(*rows), classes=classes)
+        return Group(*rows)
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:
@@ -962,8 +999,9 @@ class DetailScreen(ModalBase):
         if index is None:
             return
         app = self.app
-        if app.writing or app.starting:
-            self.notify("Busy: a change is still being written", severity="warning")
+        busy = app._busy({self.card.ref})
+        if busy:
+            self.notify(busy, severity="warning")
             return
         try:
             card = await asyncio.to_thread(app.store.toggle_item, self.card.ref, index, self.card)
@@ -4004,10 +4042,10 @@ class HerdboardApp(App):
         self.pr_count: int | None = None
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
-        self.starting = False
-        # The last start or plan arguments, for the question that asks where a card without a
-        # repository runs. A dict, so a target chosen later adds one option.
-        self.target_request: dict = {}
+        # The board changes that run in thread workers. An action blocks only the cards of its job.
+        self.jobs: dict[Worker, Job] = {}
+        # The frame of the spinner on busy cards.
+        self.spin_frame = 0
         self.linear_results: dict[str, LinearResult] = {}
         self.linear_state = "loading" if self.linear_active else "off"
         # One Linear fetch runs at a time. A refresh asked meanwhile waits as one queued fetch.
@@ -4023,10 +4061,6 @@ class HerdboardApp(App):
         self.col = 0
         self.row = 0
         self.signature: tuple = ()
-        self.writing = False
-        self.add_screen: AddScreen | None = None
-        # True while a Linear write runs: Linear is fetched again when it ends.
-        self.refetch = False
         # The card that the mouse holds, and the index of its column, from mouse down to mouse up.
         self.drag: tuple[CardView, int] | None = None
         # True after a drop, so the click that ends the drag does not count.
@@ -4054,6 +4088,50 @@ class HerdboardApp(App):
         if self.linear_active:
             self.fetch_linear()
             self.set_interval(self.linear_interval, self.fetch_linear)
+        self.set_interval(SPINNER_SECONDS, self.spin)
+
+    # Busy cards
+
+    @property
+    def writing(self) -> bool:
+        """True while a store or Linear change runs."""
+        return any(worker.group == WRITE_GROUP for worker in self.jobs)
+
+    @property
+    def starting(self) -> bool:
+        """True while a start, plan, review, merge, finish or go to a workspace runs."""
+        return any(worker.group == START_GROUP for worker in self.jobs)
+
+    def busy_refs(self) -> dict[str, str]:
+        """Each card that a running job blocks, with the job's word, such as "starting"."""
+        return {ref: job.kind for job in self.jobs.values() for ref in job.refs}
+
+    def _busy(self, refs) -> str | None:
+        """The Busy notice when a job blocks one of `refs`, else None."""
+        busy = self.busy_refs()
+        for ref in refs:
+            if ref in busy:
+                return f"Busy: {ref} is {busy[ref]}"
+        return None
+
+    def _gate_refs(self, ref: str) -> frozenset[str]:
+        """The cards that an action on `ref` blocks: the card and its parent, which a start can move."""
+        for column in self.loaded:
+            for card in column.cards:
+                if card.ref == ref and card.parent:
+                    return frozenset({ref, card.parent})
+        return frozenset({ref})
+
+    def spin(self) -> None:
+        """Turn the spinner of each busy card on the board."""
+        if not self.jobs:
+            return
+        self.spin_frame += 1
+        busy = self.busy_refs()
+        for widget in self.base.query(CardWidget):
+            kind = busy.get(widget.card.ref)
+            if kind or widget.busy:
+                widget.show_busy(kind, self.spin_frame)
 
     # Loading
 
@@ -4255,8 +4333,10 @@ class HerdboardApp(App):
     def _card_widgets(self, column: ColumnData, show_board: bool) -> list[CardWidget]:
         config = self.store.config
         dark = self.current_theme.dark
+        busy = self.busy_refs()
         return [CardWidget(card, show_board, config.tag_style, config.icon_style, config.card_style,
-                           column.completed, dark, self.agent_logos) for card in column.cards]
+                           column.completed, dark, self.agent_logos, busy.get(card.ref), self.spin_frame)
+                for card in column.cards]
 
     def _column_widget(self, index: int, column: ColumnData, show_board: bool) -> Vertical:
         classes = ("column " + column_class(index, column) + (" completed" if column.completed else "")
@@ -4466,10 +4546,14 @@ class HerdboardApp(App):
         add: AddScreen | None = None,
         refetch: bool = False,
         removed: bool = False,
+        refs: Iterable[str] = (),
     ) -> bool:
-        """Run a store or Linear change in a thread worker, one at a time. False when busy."""
-        if self.writing or self.starting:
-            self.notify("Busy: a change is still being written", severity="warning")
+        """Run a store or Linear change in a thread worker. False when a job blocks one of `refs`,
+        the cards that the change names. A change that names no card runs at once."""
+        refs = frozenset(refs)
+        busy = self._busy(refs)
+        if busy:
+            self.notify(busy, severity="warning")
             return False
 
         def guarded() -> tuple[CardView | None, HerdboardError | None]:
@@ -4482,10 +4566,8 @@ class HerdboardApp(App):
                 start_module.card_changed(card, removed=removed)
             return card, None
 
-        self.writing = True
-        self.add_screen = add
-        self.refetch = refetch
-        self.run_worker(guarded, thread=True, group=WRITE_GROUP, exclusive=True, exit_on_error=False)
+        worker = self.run_worker(guarded, thread=True, group=WRITE_GROUP, exit_on_error=False)
+        self.jobs[worker] = Job("writing", refs, add_screen=add, refetch=refetch)
         return True
 
     async def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -4494,14 +4576,16 @@ class HerdboardApp(App):
         if worker.group == START_GROUP:
             if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
                 return
-            self.starting = False
+            job = self.jobs.pop(worker, None)
+            if job is None:
+                return
             result, error = (None, None)
             if event.state == WorkerState.SUCCESS:
                 result, error = worker.result
             elif event.state == WorkerState.ERROR:
                 error = worker.error
             if error:
-                if not self._ask_target(error):
+                if not self._ask_target(error, job.target_request):
                     self.notify(str(error), severity="error")
             elif result:
                 self.notify(result.get("notice") or
@@ -4518,9 +4602,10 @@ class HerdboardApp(App):
             WorkerState.CANCELLED,
         ):
             return
-        self.writing = False
-        screen, self.add_screen = self.add_screen, None
-        refetch, self.refetch = self.refetch, False
+        job = self.jobs.pop(worker, None)
+        if job is None:
+            return
+        screen, refetch = job.add_screen, job.refetch
         card, error = None, None
         if event.state == WorkerState.SUCCESS:
             card, error = worker.result
@@ -4625,7 +4710,7 @@ class HerdboardApp(App):
             change(writer)
             return card
 
-        self._start_write(write, refetch=True)
+        self._start_write(write, refetch=True, refs={card.ref})
 
     def action_move(self, step: int) -> None:
         card = self.current_card()
@@ -4642,7 +4727,7 @@ class HerdboardApp(App):
         if card.source == "linear":
             self._linear_write(card, lambda writer: writer.move(card.ref, name, None, self.ask_state))
             return
-        self._start_write(lambda: self.store.move(card.ref, name))
+        self._start_write(lambda: self.store.move(card.ref, name), refs={card.ref})
 
     def action_shift(self, step: int) -> None:
         card = self.current_card()
@@ -4652,7 +4737,7 @@ class HerdboardApp(App):
             self.notify("Change the order of Linear issues in Linear.", severity="warning")
             return
         ref = card.ref
-        self._start_write(lambda: self.store.shift(ref, step))
+        self._start_write(lambda: self.store.shift(ref, step), refs={ref})
 
     def action_done(self) -> None:
         card = self.current_card()
@@ -4661,7 +4746,7 @@ class HerdboardApp(App):
         if card.source == "linear":
             self._linear_write(card, lambda writer: writer.done(card.ref, self.ask_state))
             return
-        self._start_write(lambda: self.store.done(card.ref))
+        self._start_write(lambda: self.store.done(card.ref), refs={card.ref})
 
     def action_edit(self) -> None:
         card = self.current_card()
@@ -4675,7 +4760,8 @@ class HerdboardApp(App):
     def submit_edit(self, screen: EditScreen, title: str, body: list[str]) -> None:
         """Save the dialog's text, if the card still matches what the dialog showed."""
         ref, before = screen.card.ref, screen.card
-        self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen)
+        self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen,
+                          refs={ref})
 
     def action_parent(self) -> None:
         card = self.current_card()
@@ -4690,7 +4776,8 @@ class HerdboardApp(App):
 
         def chosen(answer: tuple[str, str | None] | None) -> None:
             if answer is not None:
-                self._start_write(lambda: self.store.set_parent(ref, answer[1]))
+                self._start_write(lambda: self.store.set_parent(ref, answer[1]),
+                                  refs={ref, answer[1]} - {None})
 
         self.push_screen(ParentScreen(card, options), chosen)
 
@@ -4768,7 +4855,7 @@ class HerdboardApp(App):
                 self.call_from_thread(self.notify, warning.removeprefix("--"), severity="warning")
             return promotion.todo
 
-        self._start_write(change, refetch=True)
+        self._start_write(change, refetch=True, refs={ref})
 
     def action_move_board(self) -> None:
         card = self.current_card()
@@ -4792,7 +4879,7 @@ class HerdboardApp(App):
                     self.store.ensure_inbox()
                 return self.store.move_to_board(ref, path)
 
-            self._start_write(write)
+            self._start_write(write, refs={ref})
 
         self.push_screen(BoardChoiceScreen(card, options), move)
 
@@ -4817,7 +4904,8 @@ class HerdboardApp(App):
         ref = card.ref
         self.push_screen(
             DeleteScreen(card),
-            lambda delete: self._start_write(lambda: self.store.delete(ref), removed=True) if delete else None,
+            lambda delete: self._start_write(lambda: self.store.delete(ref), removed=True, refs={ref})
+            if delete else None,
         )
 
     def action_archive(self) -> None:
@@ -4843,7 +4931,7 @@ class HerdboardApp(App):
             return changed
 
         if not card.archived:
-            self._start_write(archive)
+            self._start_write(archive, refs={ref})
             return
         try:
             parent = self.store.archived_parent(ref)
@@ -4851,12 +4939,12 @@ class HerdboardApp(App):
             self.notify(str(error), severity="error")
             return
         if parent is None:
-            self._start_write(unarchive)
+            self._start_write(unarchive, refs={ref})
             return
         self.push_screen(
             ConfirmScreen(f"Unarchive {parent.ref}: {parent.title} too?",
                           f"The parent of {ref} is archived. Both move back to the done column."),
-            lambda answer: self._start_write(lambda: unarchive(parent)) if answer else None,
+            lambda answer: self._start_write(lambda: unarchive(parent), refs={ref, parent.ref}) if answer else None,
         )
 
     def action_archive_done(self) -> None:
@@ -4904,12 +4992,10 @@ class HerdboardApp(App):
                     thinking: str | None = None, repo: Path | None = None, no_repo: bool = False,
                     new_repo: Path | None = None) -> None:
         """Start a card in a thread. `repo` is a board that names the card's repository."""
-        if self.starting or self.writing:
-            self.notify("Busy: a card change is in progress", severity="warning")
-            return
-        self.target_request = {"kind": "start", "ref": ref, "agent": agent, "model": model,
-                               "thinking": thinking, "repo": repo, "no_repo": no_repo,
-                               "new_repo": new_repo}
+        # A dict, so a target chosen later adds one option.
+        request = {"kind": "start", "ref": ref, "agent": agent, "model": model,
+                   "thinking": thinking, "repo": repo, "no_repo": no_repo,
+                   "new_repo": new_repo}
 
         def guarded():
             try:
@@ -4932,16 +5018,24 @@ class HerdboardApp(App):
             except HerdboardError as error:
                 return None, error
 
-        self.starting = True
-        self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+        self._run_job(ref, "starting", guarded, request)
 
-    def _ask_target(self, error: HerdboardError) -> bool:
+    def _run_job(self, ref: str, kind: str, guarded: Callable[[], tuple], target_request: dict | None = None) -> None:
+        """Run a card action in a thread worker. It blocks the card and its parent until it ends."""
+        refs = self._gate_refs(ref)
+        busy = self._busy(refs)
+        if busy:
+            self.notify(busy, severity="warning")
+            return
+        worker = self.run_worker(guarded, thread=True, group=START_GROUP, exit_on_error=False)
+        self.jobs[worker] = Job(kind, refs, target_request=target_request or {})
+
+    def _ask_target(self, error: HerdboardError, request: dict) -> bool:
         """After a start or a plan failed for want of a repository, ask where the card runs.
 
         The action then runs again with the chosen repository, a new repository, or no repository.
         False when there is nothing to ask: another error, or a choice was made already.
         """
-        request = self.target_request
         if getattr(error, "code", None) != "repo_required" or not request:
             return False
         if request["repo"] is not None or request["no_repo"] or request["new_repo"] is not None:
@@ -5005,11 +5099,9 @@ class HerdboardApp(App):
         else:
             self.store.config.thinking[model] = thinking
 
-    def _card_action(self, run: Callable[[], dict], notice: Callable[[dict], str]) -> None:
-        """Run a review, merge or finish in a thread worker, like a start: one at a time."""
-        if self.starting or self.writing:
-            self.notify("Busy: a card change is in progress", severity="warning")
-            return
+    def _card_action(self, ref: str, kind: str, run: Callable[[], dict], notice: Callable[[dict], str],
+                     target_request: dict | None = None) -> None:
+        """Run a review, merge or finish in a thread worker, like a start: one at a time per card."""
 
         def guarded():
             try:
@@ -5018,8 +5110,7 @@ class HerdboardApp(App):
                 return None, error
             return {**result, "notice": notice(result)}, None
 
-        self.starting = True
-        self.run_worker(guarded, thread=True, group=START_GROUP, exclusive=True, exit_on_error=False)
+        self._run_job(ref, kind, guarded, target_request)
 
     def action_review(self) -> None:
         card = self.current_card()
@@ -5045,7 +5136,8 @@ class HerdboardApp(App):
         run = (lambda: self.review_card(ref)) if self.review_card else (
             lambda: Reviewer(self.store, self.directory, writer=self.linear_writer,
                              config_file=self.config_file).review(ref))
-        self._card_action(run, lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}")
+        self._card_action(ref, "reviewing", run,
+                          lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}")
 
     def _chosen_reviewer(self, ref: str, reviewer: str | None, then_hunk: bool) -> None:
         if reviewer is None:
@@ -5075,7 +5167,7 @@ class HerdboardApp(App):
             model_text = f" ({result['model']})" if result["model"] else ""
             return f"Agent review of {result['ref']} by {result['reviewer']}{model_text} started in {result['pane_id']}"
 
-        self._card_action(run, notice)
+        self._card_action(ref, "reviewing", run, notice)
 
     def action_plan(self) -> None:
         card = self.current_card()
@@ -5095,9 +5187,9 @@ class HerdboardApp(App):
     def _plan(self, ref: str, agent: str, model: str | None, thinking: str | None, repo: Path | None = None,
               no_repo: bool = False, new_repo: Path | None = None) -> None:
         options = {"agent": agent, "model": model, "thinking": thinking}
-        self.target_request = {"kind": "plan", "ref": ref, "agent": agent, "model": model,
-                               "thinking": thinking, "repo": repo, "no_repo": no_repo,
-                               "new_repo": new_repo}
+        request = {"kind": "plan", "ref": ref, "agent": agent, "model": model,
+                   "thinking": thinking, "repo": repo, "no_repo": no_repo,
+                   "new_repo": new_repo}
         if self.plan_card:
             for name, value in (("repo", repo), ("no_repo", no_repo), ("new_repo", new_repo)):
                 if value:
@@ -5116,7 +5208,7 @@ class HerdboardApp(App):
                      else "a tab in its worktree")
             return f"{result['agent']}{model_text} plans {result['ref']} in {where}"
 
-        self._card_action(run, notice)
+        self._card_action(ref, "planning", run, notice, request)
 
     def _agent_reviewer(self) -> AgentReviewer:
         return AgentReviewer(self.store, self.directory, writer=self.linear_writer, config_file=self.config_file)
@@ -5149,17 +5241,17 @@ class HerdboardApp(App):
 
         if card.repoless:
             # There is no branch to merge: the merge refuses, and the board shows why.
-            self._card_action(run_merge, notice)
+            self._card_action(ref, "merging", run_merge, notice)
             return
 
         def rewrite(answer: bool) -> None:
-            self._card_action(lambda: run_merge(rewrite=bool(answer)), notice)
+            self._card_action(ref, "merging", lambda: run_merge(rewrite=bool(answer)), notice)
 
         def confirmed(answer: bool) -> None:
             if not answer:
                 return
             if not pr_open:
-                self._card_action(run_merge, notice)
+                self._card_action(ref, "merging", run_merge, notice)
                 return
             self.push_screen(
                 ConfirmScreen("A pull request is open. Rewrite its description?",
@@ -5192,7 +5284,7 @@ class HerdboardApp(App):
                   if card.repoless else
                   "The worktree and the merged branch are removed, and the card moves to Done.")
         self.push_screen(ConfirmScreen(f"Finish {ref}: {card.title}?", detail),
-                         lambda answer: self._card_action(run, notice) if answer else None)
+                         lambda answer: self._card_action(ref, "finishing", run, notice) if answer else None)
 
     def action_go(self) -> None:
         card = self.current_card()
@@ -5200,7 +5292,8 @@ class HerdboardApp(App):
             return
         ref = card.ref
         run = (lambda: self.go_card(ref)) if self.go_card else (lambda: start_module.go_to_workspace(ref))
-        self._card_action(run, lambda result: f"Went to the workspace {result['workspace_id']} of {result['ref']}")
+        self._card_action(ref, "opening", run,
+                          lambda result: f"Went to the workspace {result['workspace_id']} of {result['ref']}")
 
     def action_start(self) -> None:
         card = self.current_card()

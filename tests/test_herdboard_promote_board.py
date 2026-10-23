@@ -412,7 +412,7 @@ class PromoteTests(PromoteBoardCase):
             await settle(pilot)
             await settle(pilot)
             self.assertEqual(len(self.creates()), 1)
-            self.assertIn(("Busy: a change is still being written", "warning"), self.notifications(app))
+            self.assertIn((f"Busy: {ref} is writing", "warning"), self.notifications(app))
 
     async def test_a_failure_is_a_notification_and_T_finishes_the_recorded_promotion(self):
         self.store.edit(self.target.ref, title=TITLE, body=["- [ ] Book the plumber"])
