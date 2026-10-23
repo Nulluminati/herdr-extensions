@@ -196,6 +196,8 @@ class RequestTests(AgentReviewTestCase):
         self.assertEqual(result["reviewer"], "claude")
         self.assertIn("Herdboard automatically delivers", (folder / "request.md").read_text())
         self.assertIn("No command execution", (folder / "request.md").read_text())
+        self.assertIn("Do not report that you cannot run tests", (folder / "request.md").read_text())
+        self.assertNotIn("state those limits", (folder / "request.md").read_text())
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -317,8 +319,9 @@ class WaitTests(AgentReviewTestCase):
         self.assertEqual(self.log()[-1], f"Agent review by claude done: 2 findings. {findings}")
         prompt = self.calls("agent", "prompt")[-1]
         self.assertEqual(prompt[2], "w9:p1")
-        for part in (str(findings), "Describe each finding", "what the problem is",
-                     "agree or disagree", "herdboard log", "Do not change any code", "Wait for the user"):
+        for part in (str(findings), "| # | Description | Severity | Agree/Disagree | Reasoning |",
+                     "one row for each finding", "what the problem is",
+                     "Do not give only the finding's name or number", "herdboard log", "Do not change any code", "Wait for the user"):
             self.assertIn(part, prompt[3])
         notification = self.calls("notification", "show")[-1]
         self.assertEqual(notification[2], f"Agent review of {self.card.ref} done")

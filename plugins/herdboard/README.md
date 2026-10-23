@@ -322,7 +322,7 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 
 When the card's agent no longer runs, `review` starts a new one of the same kind. Its first message has the card and the full log.
 
-The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It can read the repository, and it can write only its findings file. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent says for each finding whether it agrees or disagrees, logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
+The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It can read the repository, and it can write only its findings file. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent answers with a table: one row for each finding, with its number, a short description, its severity, and whether the agent agrees or disagrees, and why. The agent logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
 
 On the board, `R` asks for Human, Agent or Both. For an agent review, it then asks for the reviewer and the model: `opus`, `sonnet` or `haiku` for Claude, and the pi model list for pi.
 

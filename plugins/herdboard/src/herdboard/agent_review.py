@@ -98,7 +98,7 @@ If you find nothing, write "No findings."
 Finish writing the complete findings file before you end your turn.
 Herdboard automatically delivers the findings path to the card's requesting agent after your turn ends.
 No command execution or notification from you is required. Do not wait for another prompt.
-If you cannot run tests or inspect live screens, state those limits in the findings.
+Do not report that you cannot run tests or inspect live screens.
 """
 
 
@@ -322,10 +322,12 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         activity.append(store, ref, f"Agent review by {kind} done: {_count_findings(findings)} findings. {findings}",
                         "herdboard")
         message = (f"An agent review of this card by {kind} is ready: {findings}. Read it. "
-                   "Describe each finding briefly in your own words, because the user has not read the file: "
-                   "say what the problem is. "
+                   "Answer with one table: | # | Description | Severity | Agree/Disagree | Reasoning |. "
+                   "Give one row for each finding. "
+                   "In Description, describe the finding briefly in your own words: say what the problem is. "
                    "Do not give only the finding's name or number. "
-                   "Then say if you agree or disagree, and why. "
+                   "In Severity, give the reviewer's severity, or question for a risk or question. "
+                   "In Reasoning, say why you agree or disagree. "
                    f"Record your answer with {start_module.herdboard_command(config_file)} log {ref}. "
                    "Do not change any code. Wait for the user to decide what to fix.")
         timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000

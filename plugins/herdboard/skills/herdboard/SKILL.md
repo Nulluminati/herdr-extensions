@@ -144,7 +144,7 @@ A pull request reviewer only adds notes to the Hunk session. The user submits th
 4. Commit every change on the card's branch, with conventional commit messages.
 5. When the work is ready for the user to check, commit it, then run `herdboard --json move <id> Review`.
 6. When review feedback arrives, move the card to `In progress`. Fix, commit, and move it back to Review.
-7. When an agent review arrives, read the findings file. Describe each finding briefly in your own words, because the user has not read the file: say what the problem is. Do not give only the finding's name or number. Then say if you agree or disagree, and why. Record the answer with `herdboard --json log <id> "..."`. Do not change code. Wait for the user to decide what to fix.
+7. When an agent review arrives, read the findings file. Answer with one table: `| # | Description | Severity | Agree/Disagree | Reasoning |`, one row for each finding. In Description, describe the finding briefly in your own words: say what the problem is. Do not give only the finding's name or number. In Severity, give the reviewer's severity, or `question` for a risk or question. In Reasoning, say why you agree or disagree. Record the answer with `herdboard --json log <id> "..."`. Do not change code. Wait for the user to decide what to fix.
 8. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
 9. Do not run `done`. The user moves the card to Done.
 

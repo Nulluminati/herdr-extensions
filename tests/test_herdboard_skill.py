@@ -92,9 +92,8 @@ class SkillTests(unittest.TestCase):
         self.assertIn(["--json", "review", "tep3", "--both"], commands)
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("agent review", text)
-        self.assertIn("agree or disagree", text)
-        self.assertIn("Describe each finding", text)
-        self.assertNotIn("file and line", text)
+        self.assertIn("| # | Description | Severity | Agree/Disagree | Reasoning |", text)
+        self.assertIn("Do not give only the finding's name or number", text)
 
     def test_planning_and_attachments_are_documented(self):
         commands = skill_commands()
