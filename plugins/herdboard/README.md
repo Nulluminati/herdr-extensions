@@ -90,7 +90,7 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `T` | Promote the todo to a Linear issue: choose its team and project. See [promote](#promote) |
 | `p` | Set or remove the todo's parent |
 | `s` | Start work with the default agent. A card without a repository asks where it runs |
-| `S` | Choose claude or pi, the model and pi's thinking level, then start work |
+| `S` | Choose claude or pi, the model and pi's thinking level, then start work. Each model keeps the thinking level that you chose for it |
 | `P` | Plan the card with an agent: choose claude or pi and the model |
 | `g` | Go to the started card's Herdr workspace, when Herdr has it open |
 | `R` | Review a started card: in Hunk, by another agent, or both. A repoless card offers the agent review only |
@@ -255,6 +255,8 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 
 `--agent claude|pi`, `--model` and `--thinking` (pi only) choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
 
+Without `--thinking`, pi uses the thinking level that you last chose for that model, from the `[thinking]` table of the config file. A model without a saved level uses `start_thinking`. See [thinking levels](#thinking-levels).
+
 A failed `start` reports the steps that worked. Run `start` again to continue from the first step that failed.
 
 ### plan
@@ -317,7 +319,7 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 `herdboard review <id>` has three modes:
 
 - `--human` (the default) opens the branch diff in Hunk, in a split next to the card's agent. Your Hunk comments go to that agent. A second `review` reuses the open Hunk pane. Hunk uses much memory, so herdboard closes the pane when the card leaves Review.
-- `--agent` has a second agent review the work. By default, Claude reviews pi's work and pi reviews Claude's work. `--reviewer`, `--model` and `--thinking` change this.
+- `--agent` has a second agent review the work. By default, Claude reviews pi's work and pi reviews Claude's work. `--reviewer`, `--model` and `--thinking` change this. Without `--thinking`, a pi reviewer uses the level saved for its model.
 - `--both` runs the agent review first, and opens Hunk when the findings are ready.
 
 When the card's agent no longer runs, `review` starts a new one of the same kind. Its first message has the card and the full log.
@@ -391,7 +393,7 @@ The flow:
    In a window narrower than about 115 columns, a PR keeps three rows: the GitHub and agent reviews move under the title, and CI, the counts and the update time go to the right.
 
    The lines above the list show the repository, the total, the page and the search, then count what needs you on the page, by GitHub, CI and agent.
-2. Press `R` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level.
+2. Press `R` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level; the dialog starts at the level that you last chose for that model. See [thinking levels](#thinking-levels).
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
 5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
@@ -698,7 +700,7 @@ archive_titles = []        # added to the English "Archive"
 # vault_root = "~/Notes"   # resolves [[note]] links in `show` and `promote`
 start_agent = "claude"     # or "pi"
 # start_model = "openai-codex/gpt-6.1-sol"   # default: the agent's own default
-# start_thinking = "medium"                  # pi only: off, minimal, low, medium, high, xhigh, max
+# start_thinking = "medium"                  # pi only: the level of a model with no [thinking] row
 # pi_models = ["zai/glm-5.3"]                # the board's pi model list; default: pi's enabledModels
 # start_column = "In progress"               # default: linear.columns.started
 merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
@@ -707,6 +709,9 @@ tag_style = "outline"      # tag text on a tint of its color; "round" (Nerd Font
 card_style = "full"        # cards with a border and a detail line; "compact" without both
 icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
 types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
+
+[thinking]
+# "zai/glm-5.3" = "high"   # pi only: the level that herdboard last chose for this model
 
 [linear]
 # enabled = true           # default: on when a key source is configured
@@ -737,6 +742,8 @@ Press `c` to open configuration. It has two tabs. Switch tabs with a click, or f
 
 The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. "Agent default" removes `start_model`, so the agent uses its own default. A saved model that is not in the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking level applies to pi only, so it is off for Claude, but Claude keeps the saved level.
 
+The Thinking field follows the selected model. A named model shows its own level, from the `[thinking]` table. "Agent default" shows `start_thinking`. "Agent default" in the field clears the level of the selected model, so that model uses `start_thinking` again. See [thinking levels](#thinking-levels).
+
 The board's merge option "Global default" shows the global mode. A board without `merge:` follows the global mode; a board with `merge:` keeps it.
 
 Press `ctrl+s` in either tab to save the changes of both tabs. Press `escape` to cancel without saving. Herdboard saves global changes in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. They apply at once in this board: the theme, the cards and the next start, plan, review or merge. Other open herdboard processes read the saved values when they start again. A running agent does not change.
@@ -744,6 +751,24 @@ Press `ctrl+s` in either tab to save the changes of both tabs. Press `escape` to
 The board file and the config file save separately. If the board saves and the config file does not, the dialog says "Board settings saved; global settings not saved" and stays open. Fix the cause and press `ctrl+s` again.
 
 Saves keep a `.<config name>.lock` file beside the configuration file (`.config.toml.lock` by default). Leave it in place; it coordinates concurrent saves.
+
+### Thinking levels
+
+A thinking level is a pi setting: off, minimal, low, medium, high, xhigh or max. herdboard keeps one level for each model in the `[thinking]` table of the config file:
+
+```toml
+[thinking]
+"zai/glm-5.3" = "high"
+"openai-codex/gpt-6.1-sol" = "max"
+```
+
+When you choose a thinking level in the model dialog of `S`, `P` or `R`, herdboard saves it for the model of that dialog. The next dialog shows the saved level of the model under the cursor. So a careful level for one model does not change the level of another model.
+
+A start, plan or pull request review without `--thinking` uses the saved level of its model. A model without a row in the table uses `start_thinking`, else pi's own `defaultThinkingLevel`. `--thinking` on the command line always wins.
+
+pi's own default model has no name on the command line, so herdboard saves its level under the model name in pi's `settings.json`, from `defaultProvider` and `defaultModel`.
+
+Remove a row by hand, or press `c` and choose "Agent default" for that model. herdboard keeps the table when it saves other settings.
 
 ### Display icons
 

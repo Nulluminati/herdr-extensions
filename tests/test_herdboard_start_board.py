@@ -11,7 +11,8 @@ import unittest
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from herdboard.board import AgentScreen, ClaudeModelScreen, ModelScreen, HerdboardApp, ReviewKindScreen, TargetScreen
-from herdboard.config import Config
+from herdboard.config import Config, load_config
+from herdboard.model import HerdboardError
 from herdboard.identity import RepoIdentity
 from herdboard.store import Store
 from herdboard.start import StartError
@@ -27,6 +28,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         env.start()
         self.addCleanup(env.stop)
         self.store = Store(Config(todos_dir=root / "todos"))
+        self.root = root
+        self.config_file = root / "config.toml"
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Start test")
         self.merge = Mock(return_value={"ref": self.card.ref, "mode": "local", "base": "main", "commit": "abcdef12",
@@ -43,7 +46,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     def app(self):
         app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
                            review_card=self.review, merge_card=self.merge, finish_card=self.finish,
-                           agent_review_card=self.agent_review, plan_card=self.plan, go_card=self.go)
+                           agent_review_card=self.agent_review, plan_card=self.plan, go_card=self.go,
+                           config_file=self.config_file)
         app.animation_level = "none"
         return app
     async def test_default_and_agent_dialog(self):
@@ -75,11 +79,125 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertIsInstance(screen, ModelScreen)
                 self.assertEqual(screen.labels, ["pi default (openai-codex/gpt-6.1-sol, high)", "zai/glm-5.3", "openai-codex/gpt-6-sol"])
+                # The level belongs to the highlighted model, so it is chosen after the cursor moves.
+                await pilot.press("down")
+                await pilot.pause()
                 screen.query_one("#thinking").value = "medium"
-                await pilot.press("down", "enter")
+                await pilot.press("enter")
                 await app.workers.wait_for_complete()
                 await pilot.pause()
         self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="medium")
+
+    async def test_the_chosen_level_is_saved_for_its_model(self):
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3", "openai/gpt-5"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+                app.screen.query_one("#thinking").value = "xhigh"
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.assertEqual(load_config(app.config_file).thinking, {"zai/glm-5.3": "xhigh"})
+        self.assertEqual(self.store.config.thinking, {"zai/glm-5.3": "xhigh"})
+        # The next dialog offers the saved level for the same model.
+        app2 = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3", "openai/gpt-5"])):
+            async with app2.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+                self.assertEqual(app2.screen.query_one("#thinking").value, "xhigh")
+
+    async def test_a_thinking_level_that_does_not_save_does_not_stop_the_start(self):
+        app = self.app()
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        app.config_file = self.root / "missing-folder" / "config.toml"
+        with patch("herdboard.board.save_thinking_levels",
+                   side_effect=HerdboardError("read-only directory")), \
+                patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+                app.screen.query_one("#thinking").value = "max"
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="max")
+        self.assertIn(("The thinking level did not save: read-only directory", "warning"), notices)
+        self.assertEqual(self.store.config.thinking, {})
+
+    async def test_choosing_the_agent_default_forgets_the_level_of_that_model(self):
+        app = self.app()
+        app.config_file.write_text('[thinking]\n"zai/glm-5.3" = "high"\n')
+        self.store.config.thinking = {"zai/glm-5.3": "high"}
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+                self.assertEqual(app.screen.query_one("#thinking").value, "high")
+                app.screen.query_one("#thinking").value = "default"
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.assertEqual(load_config(app.config_file).thinking, {})
+        self.assertEqual(self.store.config.thinking, {})
+
+    async def test_the_thinking_level_follows_the_model_under_the_cursor(self):
+        self.store.config.thinking = {"zai/glm-5.3": "xhigh", "openai-codex/gpt-6-sol": "minimal"}
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices",
+                   return_value=(None, ["zai/glm-5.3", "openai-codex/gpt-6-sol"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                thinking = app.screen.query_one("#thinking")
+                # pi's own default model has no remembered level.
+                self.assertEqual(thinking.value, "default")
+                for key, level in (("down", "xhigh"), ("down", "minimal"), ("up", "xhigh")):
+                    await pilot.press(key)
+                    await pilot.pause()
+                    self.assertEqual(thinking.value, level, key)
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "pi", model="zai/glm-5.3", thinking="xhigh")
+
+    async def test_the_remembered_level_of_pis_own_default_model(self):
+        self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "max"}
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices",
+                   return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await pilot.press("S")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, ModelScreen)
+                self.assertEqual(screen.query_one("#thinking").value, "max")
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "pi", model=None, thinking="max")
 
     async def test_shift_r_then_human_opens_the_review(self):
         app = self.app()
@@ -128,8 +246,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("down", "enter")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, ModelScreen)
+                await pilot.press("down")
+                await pilot.pause()
                 app.screen.query_one("#thinking").value = "high"
-                await pilot.press("down", "enter")
+                await pilot.press("enter")
                 await app.workers.wait_for_complete()
                 await pilot.pause()
         self.agent_review.assert_called_once_with(self.card.ref, reviewer="pi", model="zai/glm-5.3",

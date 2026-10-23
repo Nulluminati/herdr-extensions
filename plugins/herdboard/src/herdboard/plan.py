@@ -208,7 +208,7 @@ class Planner:
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise PlanError("The model must be one name, such as opus or zai/glm-5.3", "usage")
         if kind == "pi":
-            thinking = thinking or self.config.start_thinking
+            thinking = start_module.thinking_level(self.config, model or self.config.start_model, thinking)
         card, issue = self._card(ref)
         ref = card.ref
         # The record key matches `start`, so a later start finds the same worktree.

@@ -855,13 +855,64 @@ class ConfigScreenTests(BoardTestCase):
                 screen.query_one("#config-agent").value = "pi"
                 await pilot.pause()
                 screen.query_one("#config-model").value = "zai/glm-5.3"
+                await pilot.pause()
                 screen.query_one("#config-thinking").value = "low"
                 await pilot.press("ctrl+s")
                 await settle(pilot)
+        # The level belongs to the model, so the default for other models stays as it was.
+        self.assertEqual(load_config(app.config_file).thinking, {"zai/glm-5.3": "low"})
+        self.assertIsNone(load_config(app.config_file).start_thinking)
         # Start, plan, review and merge read the store's config when they run.
         config = Starter(app.store, self.root).config
         self.assertEqual((config.start_agent, config.start_model, config.start_thinking),
-                         ("pi", "zai/glm-5.3", "low"))
+                         ("pi", "zai/glm-5.3", None))
+        self.assertEqual(config.thinking, {"zai/glm-5.3": "low"})
+
+    async def test_the_thinking_field_follows_the_selected_pi_model(self):
+        self.config.start_agent = "pi"
+        self.config.thinking = {"zai/glm-5.3": "high"}
+        app = self.make_app()
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3", "openai/gpt-5"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                thinking = screen.query_one("#config-thinking")
+                # The default model has no level of its own, so the field shows the default.
+                self.assertEqual(thinking.value, "default")
+                screen.query_one("#config-model").value = "zai/glm-5.3"
+                await pilot.pause()
+                self.assertEqual(thinking.value, "high")
+                screen.query_one("#config-model").value = "openai/gpt-5"
+                await pilot.pause()
+                self.assertEqual(thinking.value, "default")
+
+    async def test_saving_the_default_model_level_writes_start_thinking(self):
+        app = self.make_app()
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-agent").value = "pi"
+                await pilot.pause()
+                screen.query_one("#config-thinking").value = "medium"
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        config = load_config(app.config_file)
+        self.assertEqual((config.start_thinking, config.thinking), ("medium", {}))
+
+    async def test_an_unchanged_model_level_writes_nothing(self):
+        self.config.start_agent = "pi"
+        self.config.start_model = "zai/glm-5.3"
+        self.config.thinking = {"zai/glm-5.3": "high"}
+        app = self.make_app()
+        with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                self.assertEqual(screen.query_one("#config-thinking").value, "high")
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        self.assertFalse(app.config_file.exists())
 
     async def test_the_board_merge_default_follows_the_global_merge_mode(self):
         app = self.make_app()

@@ -43,7 +43,8 @@ from .model import HerdboardError, join_title, parse_tags, plain_tags, split_tit
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import agent_states
 from . import start as start_module
-from .config import THINKING_LEVELS, check_global_config, save_global_config
+from .config import (THINKING_LEVELS, check_global_config, check_thinking_levels, save_global_config,
+                     save_thinking_levels)
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
@@ -1913,27 +1914,50 @@ class ConfirmScreen(ModalBase):
 
 
 class ModelScreen(ModalBase):
-    """Choose pi's model and thinking level before a start. Enter on a model starts."""
+    """Choose pi's model and thinking level before a start. Enter on a model starts.
 
-    def __init__(self, default: str | None, models: list[str]):
+    The thinking level follows the highlighted model: it starts at the level that the user last chose
+    for that model in the `[thinking]` table of the config file, else at the agent default.
+    """
+
+    def __init__(self, default: str | None, models: list[str], remembered: dict[str, str] | None = None,
+                 default_model: str | None = None):
         super().__init__()
         self.models = [None, *models]
         self.labels = [f"pi default ({default})" if default else "pi default", *models]
+        # The last level that the user chose for each model; pi's own default model when none is named.
+        self.remembered = dict(remembered or {})
+        self.default_model = default_model
+
+    def remembered_level(self, index: int) -> str:
+        model = self.models[index] if index < len(self.models) else None
+        return self.remembered.get(model or self.default_model or "", "default")
 
     def compose(self) -> ComposeResult:
         levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
         with Vertical(classes="dialog"):
             yield Label("Choose pi's model")
             yield OptionList(*self.labels, id="models")
-            thinking = Select(levels, value="default", allow_blank=False, id="thinking")
+            thinking = Select(levels, value=self.remembered_level(0), allow_blank=False, id="thinking")
             thinking.border_title = "Thinking"
             yield thinking
             yield Label("enter: start · tab: thinking level · escape: cancel", classes="dim")
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        """Show the level of the model under the cursor, so a start keeps that model's choice."""
+        event.stop()
+        self.query_one("#thinking", Select).value = self.remembered_level(event.option_index)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         thinking = self.query_one("#thinking", Select).value
         self.dismiss((self.models[event.option_index], None if thinking == "default" else thinking))
+
+
+def pi_model_screen(config) -> ModelScreen:
+    """The pi model dialog for `config`: its model list, and the thinking level of each model."""
+    default, models = pi_model_choices(config)
+    return ModelScreen(default, models, config.thinking, start_module.pi_default_model())
 
 
 class ConfigScreen(ModalBase):
@@ -1951,7 +1975,8 @@ class ConfigScreen(ModalBase):
                    "tag_style", "card_style")
 
     def __init__(self, path: Path | None, meta: BoardMeta, can_link: bool, settings: dict[str, str | None],
-                 themes: list[str], pi_choices: tuple[str | None, list[str]]):
+                 themes: list[str], pi_choices: tuple[str | None, list[str]], remembered: dict[str, str] | None = None,
+                 default_model: str | None = None):
         super().__init__()
         self.path = path
         self.meta = meta
@@ -1961,6 +1986,13 @@ class ConfigScreen(ModalBase):
         self.themes = themes
         self.pi_choices = pi_choices
         self.agent = settings["start_agent"]
+        # The model that the Global tab shows, and the level that its Thinking field shows.
+        self.model = settings["start_model"]
+        # The thinking level that the user last chose for each model, and pi's own default model.
+        self.remembered = dict(remembered or {})
+        self.default_model = default_model
+        # The level that the Thinking field showed last, so an unchanged field writes nothing.
+        self.shown_thinking = self._effective_thinking()
         self.removed: set[str] = set()
         self.removed_pins: set[str] = set()
 
@@ -2009,6 +2041,17 @@ class ConfigScreen(ModalBase):
                 ("local: merge into the base branch", "local"),
                 ("pr: open a draft pull request", "pr")]
 
+    def _thinking_model(self) -> str | None:
+        """The model whose thinking level the field shows: the chosen model, or None for the agent default."""
+        return self.model if self.agent == "pi" else None
+
+    def _effective_thinking(self) -> str:
+        """The level for the Thinking field: the model's remembered level, else the agent default."""
+        model = self._thinking_model()
+        if model:
+            return self.remembered.get(model, "default")
+        return self.settings["start_thinking"] or "default"
+
     def compose(self) -> ComposeResult:
         settings = self.settings
         thinking = [("Agent default", "default"), *((level, level) for level in THINKING_LEVELS)]
@@ -2025,7 +2068,7 @@ class ConfigScreen(ModalBase):
                         yield self._titled(Select(self._model_options(self.agent),
                                                   value=settings["start_model"] or "default", allow_blank=False,
                                                   id="config-model"), "Model")
-                        yield self._titled(Select(thinking, value=settings["start_thinking"] or "default",
+                        yield self._titled(Select(thinking, value=self._effective_thinking(),
                                                   allow_blank=False, disabled=self.agent != "pi",
                                                   id="config-thinking"), "Thinking (pi only)")
                         yield self._titled(Select([("local: merge into the base branch", "local"),
@@ -2045,6 +2088,8 @@ class ConfigScreen(ModalBase):
                                                   value=settings["card_style"], allow_blank=False,
                                                   id="config-card-style"), "Cards")
                         yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
+                        yield Label("Thinking is kept for each model; Agent default clears the chosen model's level.",
+                                    classes="dim")
                 with TabPane("Current board", id="config-board"):
                     with VerticalScroll(classes="config-pane", can_focus=False):
                         yield from self._compose_board()
@@ -2085,6 +2130,13 @@ class ConfigScreen(ModalBase):
             self.agent = event.value
             self.query_one("#config-model", Select).set_options(self._model_options(self.agent))
             self.query_one("#config-thinking", Select).disabled = self.agent != "pi"
+        elif event.select.id == "config-model":
+            # The level belongs to the model, so the field shows the level of the chosen one.
+            self.model = event.value if event.value != "default" else None
+            thinking = self.query_one("#config-thinking", Select)
+            thinking.value = self._effective_thinking()
+            # The field followed the model, so the user did not choose this level.
+            self.shown_thinking = thinking.value
         elif event.select.id == "config-default-merge" and self.path:
             board = self.query_one("#config-merge", Select)
             value = board.value
@@ -2118,7 +2170,11 @@ class ConfigScreen(ModalBase):
         self.call_after_refresh(error.scroll_visible, animate=False)
 
     def global_values(self) -> dict[str, str | None]:
-        """The Global tab's values, with None for an agent default."""
+        """The Global tab's values, with None for an agent default.
+
+        The Thinking field belongs to the chosen model, so its value goes in `levels` rather than
+        `start_thinking`; only the agent default's level stays a global default.
+        """
         values = {}
         for key, widget in zip(self.GLOBAL_KEYS, ("theme", "agent", "model", "thinking", "default-merge",
                                                   "icon-style", "tag-style", "card-style")):
@@ -2126,16 +2182,33 @@ class ConfigScreen(ModalBase):
             values[key] = None if value == "default" else value
         return values
 
+    def thinking_levels(self) -> dict[str, str | None]:
+        """The per-model level to write, when the user changed the Thinking field.
+
+        The key is the chosen model, or `""` for the agent default, whose level is the global
+        `start_thinking`. A None value forgets the model.
+        """
+        shown = self.global_values()["start_thinking"]
+        if shown == self.shown_thinking:
+            return {}
+        return {self._thinking_model() or "": shown}
+
     def action_save(self) -> None:
         merge = self.query_one("#config-merge", Select).value if self.path else "default"
         changed = {key: value for key, value in self.global_values().items() if value != self.settings[key]}
+        # The Thinking field belongs to a model, so `thinking_levels` carries it instead.
+        changed.pop("start_thinking", None)
+        levels = self.thinking_levels()
+        if "" in levels:
+            # The field showed the agent default: its level is the global default, not a model row.
+            changed["start_thinking"] = levels.pop("") or None
         project, labels = "", []
         if self.can_link:
             project = self.query_one("#config-project", Input).value.strip()
             labels = [label.strip() for label in self.query_one("#config-labels", Input).value.split(",")]
         self.app.submit_config(self, None if merge == "default" else merge, set(self.removed),
                                project, [label for label in labels if label], set(self.removed_pins),
-                               settings=changed)
+                               settings=changed, levels=levels)
 
 
 # The tabs under the header: (tab, label). G goes to the next tab, and from the last to the first.
@@ -3212,7 +3285,7 @@ class PullRequestsScreen(Screen):
                 self.app.push_screen(ClaudeModelScreen(),
                                      lambda choice: choice and self._review(pr.number, kind, choice[0], None))
             elif kind == "pi":
-                self.app.push_screen(ModelScreen(*pi_model_choices(self.app.store.config)),
+                self.app.push_screen(pi_model_screen(self.app.store.config),
                                      lambda choice: choice and self._review(pr.number, kind, *choice))
 
         self.app.push_screen(AgentScreen(f"Choose the reviewer of PR #{pr.number}"), chosen)
@@ -3232,7 +3305,11 @@ class PullRequestsScreen(Screen):
                 lambda answer: answer and self._refresh(number))
             return True
 
-        self._run(lambda: self.service.review(number, kind, model, thinking), notice, failed=new_commits)
+        def run() -> dict:
+            self.app.remember_thinking(kind, model, thinking)
+            return self.service.review(number, kind, model, thinking)
+
+        self._run(run, notice, failed=new_commits)
 
     def action_go(self) -> None:
         pr = self.current()
@@ -4809,6 +4886,7 @@ class HerdboardApp(App):
 
         def guarded():
             try:
+                self.remember_thinking(agent, model, thinking)
                 if self.start_card:
                     options = {"model": model, "thinking": thinking} if model or thinking else {}
                     if repo is not None:
@@ -4873,6 +4951,29 @@ class HerdboardApp(App):
         self.push_screen(TargetScreen(ref, options, default, linear=linear), chosen)
         return True
 
+    def remember_thinking(self, agent: str, model: str | None, thinking: str | None) -> None:
+        """Keep the thinking level that the user chose for `model`, for the next start, plan or review.
+
+        Only pi has a thinking level, so another agent saves nothing. A None level forgets the model,
+        which then uses `start_thinking` again. A failed save does not stop the action that asked for
+        it. This runs in a worker thread, beside the start that it remembers the level for.
+        """
+        if agent != "pi":
+            return
+        # The agent default has no model name of its own, so it is saved under pi's default model.
+        name = model or start_module.pi_default_model()
+        if name is None:
+            return
+        try:
+            save_thinking_levels(self.config_file, name, thinking)
+        except HerdboardError as error:
+            self.call_from_thread(self.notify, f"The thinking level did not save: {error}", severity="warning")
+            return
+        if thinking is None:
+            self.store.config.thinking.pop(name, None)
+        else:
+            self.store.config.thinking[name] = thinking
+
     def _card_action(self, run: Callable[[], dict], notice: Callable[[dict], str]) -> None:
         """Run a review, merge or finish in a thread worker, like a start: one at a time."""
         if self.starting or self.writing:
@@ -4927,13 +5028,17 @@ class HerdboardApp(App):
             if choice is not None:
                 self._agent_review(ref, reviewer, *choice, then_hunk)
 
-        self.push_screen(ModelScreen(*pi_model_choices(self.store.config)), chosen)
+        self.push_screen(pi_model_screen(self.store.config), chosen)
 
     def _agent_review(self, ref: str, reviewer: str, model: str | None, thinking: str | None,
                       then_hunk: bool) -> None:
         options = {"reviewer": reviewer, "model": model, "thinking": thinking, "then_hunk": then_hunk}
-        run = (lambda: self.agent_review_card(ref, **options)) if self.agent_review_card else (
-            lambda: self._agent_reviewer().request(ref, **options))
+
+        def run() -> dict:
+            self.remember_thinking(reviewer, model, thinking)
+            if self.agent_review_card:
+                return self.agent_review_card(ref, **options)
+            return self._agent_reviewer().request(ref, **options)
 
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
@@ -4951,7 +5056,7 @@ class HerdboardApp(App):
             if agent == "claude":
                 self.push_screen(ClaudeModelScreen(), lambda choice: choice and self._plan(ref, agent, choice[0], None))
             elif agent == "pi":
-                self.push_screen(ModelScreen(*pi_model_choices(self.store.config)),
+                self.push_screen(pi_model_screen(self.store.config),
                                  lambda choice: choice and self._plan(ref, agent, *choice))
 
         self.push_screen(AgentScreen("Choose the planner"), chosen_agent)
@@ -4968,6 +5073,7 @@ class HerdboardApp(App):
                     options[name] = value
 
         def run() -> dict:
+            self.remember_thinking(agent, model, thinking)
             if self.plan_card:
                 return self.plan_card(ref, **options)
             board = repo or (self.repo_board if self.view == "repo" else None)
@@ -5087,7 +5193,7 @@ class HerdboardApp(App):
             if choice is not None:
                 self._start_card(ref, "pi", *choice)
 
-        self.push_screen(ModelScreen(*pi_model_choices(self.store.config)), chosen)
+        self.push_screen(pi_model_screen(self.store.config), chosen)
 
     def action_detail(self) -> None:
         card = self.current_card()
@@ -5207,22 +5313,32 @@ class HerdboardApp(App):
         config = self.store.config
         settings = {key: getattr(config, key) for key in ConfigScreen.GLOBAL_KEYS}
         self.push_screen(ConfigScreen(path, meta, path is not None and self.resolve_link is not None, settings,
-                                      sorted(self.available_themes), pi_model_choices(config)))
+                                      sorted(self.available_themes), pi_model_choices(config),
+                                      remembered=config.thinking,
+                                      default_model=start_module.pi_default_model()))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
                       project: str, labels: list[str], removed_pins: set[str] = frozenset(),
-                      settings: dict[str, str | None] | None = None) -> None:
+                      settings: dict[str, str | None] | None = None,
+                      levels: dict[str, str | None] | None = None) -> None:
         """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing.
 
-        `settings` holds the changed global settings. The board file and the config file are
-        separate, so a failed config save after a board save leaves the board change saved.
+        `settings` holds the changed global settings, and `levels` the changed thinking level of each
+        model. The board file and the config file are separate, so a failed config save after a board
+        save leaves the board change saved.
         """
         path, before, resolve = screen.path, screen.meta.merge, self.resolve_link
         settings = dict(settings or {})
+        levels = dict(levels or {})
 
         def apply_settings() -> None:
             for key, value in settings.items():
                 setattr(self.store.config, key, value)
+            for model, level in levels.items():
+                if level is None:
+                    self.store.config.thinking.pop(model, None)
+                else:
+                    self.store.config.thinking[model] = level
             screen.settings.update(settings)
             if "theme" in settings:
                 self.theme = settings["theme"]
@@ -5230,6 +5346,8 @@ class HerdboardApp(App):
         def write() -> None:
             # A global value that cannot save must not leave a board change behind.
             check_global_config(**settings)
+            for model, level in levels.items():
+                check_thinking_levels(model, level)
             link = resolve(project, labels) if project and resolve else None
 
             def change(links: list[ProjectLink]) -> list[ProjectLink]:
@@ -5245,9 +5363,12 @@ class HerdboardApp(App):
                 if merge != before:
                     # A global-save failure leaves the dialog open; retries compare against the saved merge mode.
                     self.call_from_thread(setattr, screen.meta, "merge", merge)
-            if settings:
+            if settings or levels:
                 try:
-                    save_global_config(self.config_file, **settings)
+                    if settings:
+                        save_global_config(self.config_file, **settings)
+                    for model, level in levels.items():
+                        save_thinking_levels(self.config_file, model, level)
                 except HerdboardError as error:
                     if board_changed:
                         raise HerdboardError(f"Board settings saved; global settings not saved: {error}") from error

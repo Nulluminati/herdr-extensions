@@ -281,10 +281,66 @@ class ConfigTest(unittest.TestCase):
             save_global_config(start_agent="pi")
         self.assertEqual(load_config(path).start_agent, "pi")
 
+    def test_concurrent_thinking_saves_keep_both_models(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from herdboard.config import save_thinking_levels
+        path = self.write(self.dir / "a.toml", 'icon_style = "nerd"\n')
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            one = pool.submit(save_thinking_levels, path, "a/b", "high")
+            two = pool.submit(save_thinking_levels, path, "c/d", "low")
+            one.result()
+            two.result()
+        self.assertEqual(load_config(path).thinking, {"a/b": "high", "c/d": "low"})
+
     def test_save_global_uses_the_default_path(self):
         from herdboard.config import save_global_config
         save_global_config(theme="nord")
         self.assertEqual(load_config(self.dir / "home/.config/herdboard/config.toml").theme, "nord")
+
+    def test_thinking_levels_per_model_load_from_the_thinking_table(self):
+        path = self.write(self.dir / "a.toml",
+                          '[thinking]\n"zai/glm-5.3" = "high"\n"opus" = "low"\n')
+        self.assertEqual(load_config(path).thinking, {"zai/glm-5.3": "high", "opus": "low"})
+
+    def test_thinking_levels_without_a_table_are_empty(self):
+        self.assertEqual(load_config(self.write(self.dir / "a.toml", 'theme = "nord"\n')).thinking, {})
+
+    def test_thinking_levels_reject_a_bad_level_or_a_flat_value(self):
+        for text in ('[thinking]\n"a/b" = "huge"\n', '[thinking]\n"a/b" = 3\n',
+                     '[thinking]\n"a/b" = ""\n', 'thinking = "high"\n'):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "a.toml", text)
+                with self.assertRaisesRegex(HerdboardError, "thinking"):
+                    load_config(path)
+
+    def test_save_thinking_levels_writes_and_removes_one_model(self):
+        from herdboard.config import save_thinking_levels
+        path = self.write(self.dir / "a.toml", '# Keep\nicon_style = "nerd"\n\n[linear]\n# Linear\nenabled = false\n')
+        save_thinking_levels(path, "zai/glm-5.3", "high")
+        save_thinking_levels(path, "opus", "low")
+        self.assertEqual(load_config(path).thinking, {"zai/glm-5.3": "high", "opus": "low"})
+        self.assertIn('# Keep\nicon_style = "nerd"\n', path.read_text())
+        self.assertIn('[linear]\n# Linear\nenabled = false\n', path.read_text())
+        save_thinking_levels(path, "opus", None)
+        self.assertEqual(load_config(path).thinking, {"zai/glm-5.3": "high"})
+        save_thinking_levels(path, "zai/glm-5.3", None)
+        # The last model leaves no empty table behind.
+        self.assertNotIn("thinking", path.read_text())
+
+    def test_save_thinking_levels_rejects_a_bad_model_or_level(self):
+        from herdboard.config import save_thinking_levels
+        path = self.write(self.dir / "a.toml", 'icon_style = "nerd"\n')
+        for model, level in (("two words", "high"), ("", "high"), ("a/b", "huge"), ("a/b", "")):
+            with self.subTest(model=model, level=level):
+                with self.assertRaises(HerdboardError):
+                    save_thinking_levels(path, model, level)
+                self.assertEqual(path.read_text(), 'icon_style = "nerd"\n')
+
+    def test_save_thinking_levels_does_not_create_a_file_for_a_removal(self):
+        from herdboard.config import save_thinking_levels
+        path = self.dir / "settings" / "config.toml"
+        save_thinking_levels(path, "a/b", None)
+        self.assertFalse(path.exists())
 
     def test_concurrent_global_saves_keep_both_changes(self):
         from concurrent.futures import ThreadPoolExecutor

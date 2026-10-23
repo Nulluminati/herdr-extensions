@@ -741,6 +741,37 @@ class StartTests(unittest.TestCase):
         self.starter.start(self.card.ref, agent="pi")
         self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "low"])
 
+    def test_the_last_thinking_level_of_a_model_is_used_again(self):
+        self.store.config.start_model = "zai/glm-5.3"
+        self.store.config.start_thinking = "low"
+        self.store.config.thinking = {"zai/glm-5.3": "high", "openai/gpt-5": "minimal"}
+        self.starter.start(self.card.ref, agent="pi")
+        self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "high"])
+
+    def test_a_model_without_a_remembered_level_uses_the_config_default(self):
+        self.store.config.start_model = "openai/gpt-5"
+        self.store.config.start_thinking = "low"
+        self.store.config.thinking = {"zai/glm-5.3": "high"}
+        self.starter.start(self.card.ref, agent="pi")
+        self.assertEqual(self.agent_args()[:4], ["--model", "openai/gpt-5", "--thinking", "low"])
+
+    def test_the_remembered_level_of_the_agents_own_default_model(self):
+        home = Path(self.root) / "home"
+        (home / ".pi/agent").mkdir(parents=True)
+        (home / ".pi/agent/settings.json").write_text(json.dumps({
+            "defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol", "defaultThinkingLevel": "medium",
+        }))
+        self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "xhigh"}
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            self.starter.start(self.card.ref, agent="pi")
+        self.assertEqual(self.agent_args()[0], "--thinking")
+        self.assertEqual(self.agent_args()[1], "xhigh")
+
+    def test_an_explicit_thinking_level_wins_over_the_remembered_one(self):
+        self.store.config.thinking = {"zai/glm-5.3": "high"}
+        self.starter.start(self.card.ref, agent="pi", model="zai/glm-5.3", thinking="max")
+        self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "max"])
+
     def test_no_model_keeps_the_agents_own_default(self):
         self.starter.start(self.card.ref, agent="pi")
         self.assertEqual(self.agent_args()[0], "--")

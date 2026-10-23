@@ -124,29 +124,56 @@ def herdboard_command(config_file: Path | None = None) -> str:
     return program
 
 
+def pi_settings() -> dict:
+    """pi's own settings, or an empty dict when there is no file or it is not valid."""
+    try:
+        settings = json.loads((Path.home() / ".pi" / "agent" / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return settings if isinstance(settings, dict) else {}
+
+
+def pi_default_model(settings: dict | None = None) -> str | None:
+    """pi's default model as `provider/model`, or None when pi names no default."""
+    settings = pi_settings() if settings is None else settings
+    if not isinstance(settings.get("defaultModel"), str):
+        return None
+    provider = settings.get("defaultProvider")
+    return f"{provider}/{settings['defaultModel']}" if isinstance(provider, str) else settings["defaultModel"]
+
+
 def pi_model_choices(config) -> tuple[str | None, list[str]]:
     """pi's default model as `provider/model, thinking`, and the models to offer.
 
     The models come from `pi_models` in the config, else from pi's `enabledModels`.
     """
-    try:
-        settings = json.loads((Path.home() / ".pi" / "agent" / "settings.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        settings = {}
-    if not isinstance(settings, dict):
-        settings = {}
-    default = None
-    if isinstance(settings.get("defaultModel"), str):
-        default = settings["defaultModel"]
-        if isinstance(settings.get("defaultProvider"), str):
-            default = f"{settings['defaultProvider']}/{default}"
-        if isinstance(settings.get("defaultThinkingLevel"), str):
-            default += f", {settings['defaultThinkingLevel']}"
+    settings = pi_settings()
+    default = pi_default_model(settings)
+    if default and isinstance(settings.get("defaultThinkingLevel"), str):
+        default += f", {settings['defaultThinkingLevel']}"
     models = config.pi_models
     if models is None:
         found = settings.get("enabledModels")
         models = [m for m in found if isinstance(m, str) and m] if isinstance(found, list) else []
     return default, list(models)
+
+
+def thinking_level(config, model: str | None, thinking: str | None = None) -> str | None:
+    """The thinking level to give pi: the one asked for, else the last one for `model`, else the default.
+
+    `model` None is pi's own default model.
+    """
+    if thinking:
+        return thinking
+    return remembered_thinking(config, model) or config.start_thinking
+
+
+def remembered_thinking(config, model: str | None) -> str | None:
+    """The thinking level that the user last chose for `model`, or None.
+
+    `model` None is pi's own default model.
+    """
+    return config.thinking.get(model or pi_default_model() or "")
 
 
 def agent_arguments(agent: str, message: str, model: str | None, thinking: str | None) -> list[str]:
@@ -1129,7 +1156,7 @@ class Starter:
             raise StartError("The model must be one name, such as zai/glm-5.3", "usage")
         model = model or self.config.start_model
         if agent == "pi":
-            thinking = thinking or self.config.start_thinking
+            thinking = thinking_level(self.config, model, thinking)
         state_path = state_dir() / "starts.json"
         issue = None
         if LINEAR_REF.match(ref):

@@ -122,6 +122,8 @@ herdboard --json add --linear "Fix the login timeout" --team ENG
 
 `start` without `--agent` starts the default agent (Claude, unless the user's config says otherwise). `--no-agent` still creates the worktree and moves the card. Without `--base`, the card starts from the branch of the main checkout.
 
+`--thinking` chooses pi's thinking level for one run. Without it, pi uses the level that the user last chose for that model (the `[thinking]` table of the config file), else `start_thinking`, else its own default. Do not set a level unless the user asks for it: the saved level is their choice.
+
 A card on the inbox can run without a repository. `start` and `plan` then fail with `repo_required` unless the user picks one:
 
 - A repository board: `--repo BOARD`. The card stays on its board; `--repo` only names the repository.

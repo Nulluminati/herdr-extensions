@@ -115,6 +115,8 @@ class Config:
     # The model and thinking level `start` gives an agent; None keeps the agent's own default.
     start_model: str | None = None
     start_thinking: str | None = None
+    # The thinking level that the user last chose for each model, by model name.
+    thinking: dict[str, str] = field(default_factory=dict)
     # Models the board offers for pi; None reads pi's own `enabledModels`.
     pi_models: list[str] | None = None
     start_column: str | None = None
@@ -168,6 +170,52 @@ def save_display_config(path: Path | None = None, *, icon_style: str | None = No
     save_global_config(path, **changes)
 
 
+THINKING_TABLE = "thinking"
+
+
+def check_thinking_levels(model: str | None, level: str | None) -> None:
+    """Raise when `model` or `level` cannot go in the thinking table. None level removes the model."""
+    if not isinstance(model, str) or not model or any(ch.isspace() for ch in model):
+        raise HerdboardError("The model must be one name, such as zai/glm-5.3")
+    if level is not None and level not in THINKING_LEVELS:
+        raise HerdboardError(f"A thinking level must be one of {', '.join(THINKING_LEVELS)}")
+
+
+def save_thinking_levels(path: Path | None = None, model: str = "", level: str | None = None) -> None:
+    """Remember `model`'s thinking level for the next start, plan or review. None forgets the model.
+
+    The level lives in the `[thinking]` table of the config file, so a person can read and change it.
+    """
+    check_thinking_levels(model, level)
+    path = config_path(path)
+    if level is None and not path.exists():
+        return
+
+    def change(document) -> bool:
+        from tomlkit import table as new_table
+
+        found = document.get(THINKING_TABLE)
+        if level is None:
+            if found is None or model not in found:
+                return False
+            del found[model]
+            if not found:
+                # An emptied table would keep an empty `[thinking]` header.
+                del document[THINKING_TABLE]
+            return True
+        if not isinstance(found, dict):
+            if found is not None:
+                raise HerdboardError(f"{path}: thinking must be a table of model names and thinking levels")
+            found = new_table()
+            document[THINKING_TABLE] = found
+        if found.get(model) == level:
+            return False
+        found[model] = level
+        return True
+
+    _rewrite_config(path, change)
+
+
 class _Unchanged:
     def __repr__(self) -> str:
         return "UNCHANGED"
@@ -218,6 +266,23 @@ def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent
     if all(value is None for value in changes.values()) and not path.exists():
         return
 
+    def change(document) -> bool:
+        for key, value in changes.items():
+            if value is not None:
+                document[key] = value
+            elif key in document:
+                del document[key]
+        return True
+
+    _rewrite_config(path, change)
+
+
+def _rewrite_config(path: Path, change) -> None:
+    """Read the config file, let `change` edit the TOML document, and replace the file in one step.
+
+    `change` returns False when the document stays as it is. Comments, permissions and a symlink
+    survive. Core config reads need only the standard library; the board installs its TOML writer.
+    """
     # Core config reads need only the standard library; the board installs its TOML writer.
     import tomlkit
     from tomlkit.exceptions import ParseError
@@ -233,11 +298,8 @@ def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent
             except FileNotFoundError:
                 text, mode = "", 0o600
             document = tomlkit.parse(text)
-            for key, value in changes.items():
-                if value is not None:
-                    document[key] = value
-                elif key in document:
-                    del document[key]
+            if not change(document):
+                return
             temp = None
             try:
                 with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
@@ -326,6 +388,20 @@ def _load_linear(path: Path, data: dict) -> LinearConfig:
     return linear
 
 
+def _load_thinking(path: Path, data: dict) -> dict[str, str]:
+    """The `[thinking]` table: the thinking level that the user last chose for each model."""
+    table = data.get(THINKING_TABLE, {})
+    if not isinstance(table, dict):
+        raise HerdboardError(f"{path}: thinking must be a table of model names and thinking levels")
+    for model, level in table.items():
+        if not isinstance(model, str) or not model:
+            raise HerdboardError(f"{path}: thinking must be a table of model names and thinking levels")
+        if level not in THINKING_LEVELS:
+            raise HerdboardError(f"{path}: the thinking level of {model} must be one of "
+                                 f"{', '.join(THINKING_LEVELS)}")
+    return dict(table)
+
+
 def load_config(path: Path | None = None) -> Config:
     path = config_path(path)
     config = Config()
@@ -382,6 +458,7 @@ def load_config(path: Path | None = None) -> Config:
             raise HerdboardError(f"{path}: start_thinking must be one of {', '.join(THINKING_LEVELS)}")
         config.start_thinking = start_thinking
     config.pi_models = _string_list(path, data, "pi_models")
+    config.thinking = _load_thinking(path, data)
     config.start_column = _string(path, data, "start_column") or config.linear.columns["started"]
     config.theme = _string(path, data, "theme") or config.theme
     merge = _string(path, data, "merge")

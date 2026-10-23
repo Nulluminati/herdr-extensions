@@ -389,6 +389,16 @@ class RequestTests(PlanTestCase):
             self.planner.plan(self.card.ref, thinking="high")
         self.assertEqual(raised.exception.code, "usage")
 
+    def test_the_last_thinking_level_of_the_planner_model_is_used_again(self):
+        self.config.start_model = "zai/glm-5.3"
+        self.config.start_thinking = "low"
+        self.config.thinking = {"zai/glm-5.3": "xhigh"}
+        self.planner.plan(self.card.ref, agent="pi")
+        args = self.planner_start()
+        args = args[args.index("--") + 1:]
+        self.assertIn("--thinking", args)
+        self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
+
     def test_a_card_without_a_repository_needs_one(self):
         inbox = self.store.add(self.store.ensure_inbox(), "Plan the garden")
         with self.assertRaises(start.StartError) as raised:

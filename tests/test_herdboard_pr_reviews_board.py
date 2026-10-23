@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/
 from herdboard.board import (AGENT_LOGOS, PR_FIELDS, AgentScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
                              ModelScreen, NotesScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago,
                              pr_fields, pr_row_content)
-from herdboard.config import Config  # noqa: E402
+from herdboard.config import Config, load_config  # noqa: E402
 from herdboard.pr_reviews import Page, PrReviewError, PullRequest  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
@@ -291,10 +291,29 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("down", "enter")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, ModelScreen)
+                await pilot.press("down")
+                await pilot.pause()
                 app.screen.query_one("#thinking").value = "high"
-                await pilot.press("down", "enter")
+                await pilot.press("enter")
                 await self.settle(app, pilot)
         self.service.review.assert_called_once_with(8, "pi", "zai/glm-5.3", "high")
+
+    async def test_R_with_pi_saves_the_chosen_level_for_that_model(self):
+        app = self.app(config_file=Path(self.temp.name) / "config.toml")
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test() as pilot:
+                await self.open(app, pilot)
+                await pilot.press("j", "R")
+                await pilot.pause()
+                await pilot.press("down", "enter")
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+                app.screen.query_one("#thinking").value = "max"
+                await pilot.press("enter")
+                await self.settle(app, pilot)
+        self.assertEqual(load_config(app.config_file).thinking, {"zai/glm-5.3": "max"})
+        self.assertEqual(self.store.config.thinking, {"zai/glm-5.3": "max"})
 
     async def test_f_asks_then_finishes(self):
         app = self.app()

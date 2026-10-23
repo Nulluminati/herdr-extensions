@@ -29,6 +29,7 @@ from .merge import Merger
 from .promote import Promoter
 from .review import Reviewer
 from .store import CardView, Store
+from . import start as start_module
 from .start import Starter, _main_checkout, card_agent_panes, register_checkout
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
 
@@ -743,8 +744,6 @@ class LinearArchiveError(HerdboardError):
 
 
 def _cmd_archive(ctx: _Context) -> dict:
-    from . import start as start_module
-
     args, store = ctx.args, ctx.store
     if args.done == (args.ref is not None):
         raise UsageError("Give a card to archive, or --done")
@@ -961,7 +960,7 @@ def _cmd_pr_review(ctx: _Context) -> dict:
     args, config = ctx.args, ctx.config
     kind = args.agent or config.start_agent
     model = args.model or (config.start_model if kind == config.start_agent else None)
-    thinking = args.thinking or (config.start_thinking if kind == "pi" else None)
+    thinking = args.thinking or (start_module.thinking_level(config, model) if kind == "pi" else None)
     checkout, repo = _pr_target(ctx)
     return pr_reviews.request(checkout, repo, args.number, kind, model, thinking)
 

@@ -644,6 +644,26 @@ class PullRequestReviewTests(CliTestCase):
         self.assertEqual(Path(checkout).resolve(), self.repo.resolve())
         self.assertEqual((repo, number, kind, model, thinking), ("acme/api", 7, "pi", "zai/glm-5.3", "high"))
 
+    def test_pr_review_takes_the_remembered_level_of_its_model(self):
+        self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "pi"\nstart_model = "zai/glm-5.3"\n'
+                               'start_thinking = "low"\n[thinking]\n"zai/glm-5.3" = "xhigh"\n')
+        request = self.patch("request", return_value={
+            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
+            "hunk_session": "s1", "agent": "pi", "agent_name": "pr-api-7", "model": "zai/glm-5.3",
+            "thinking": "xhigh", "prompted": False})
+        self.run_json("pr-review", "7", directory=self.repo)
+        self.assertEqual(request.call_args.args[3:], ("pi", "zai/glm-5.3", "xhigh"))
+
+    def test_pr_review_takes_the_command_line_level_over_the_remembered_one(self):
+        self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "pi"\nstart_model = "zai/glm-5.3"\n'
+                               '[thinking]\n"zai/glm-5.3" = "xhigh"\n')
+        request = self.patch("request", return_value={
+            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
+            "hunk_session": "s1", "agent": "pi", "agent_name": "pr-api-7", "model": "zai/glm-5.3",
+            "thinking": "max", "prompted": False})
+        self.run_json("pr-review", "7", "--thinking", "max", directory=self.repo)
+        self.assertEqual(request.call_args.args[3:], ("pi", "zai/glm-5.3", "max"))
+
     def test_pr_review_defaults_to_the_start_agent(self):
         self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "claude"\nstart_model = "opus"\n')
         request = self.patch("request", return_value={
