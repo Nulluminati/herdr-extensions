@@ -51,6 +51,7 @@ class PeerReviewTests(unittest.TestCase):
         self.write_findings = True
         self.start_error = None
         self.reviewer_states = ["working", "idle"]
+        self.reviewer_kind = "claude"
         self.review = None
 
     def fake_command(self, argv, timeout=120):
@@ -61,7 +62,7 @@ class PeerReviewTests(unittest.TestCase):
                 raise peer_review.ReviewError('{"error":{"code":"agent_not_found"}}')
             if state == "idle" and self.write_findings:
                 (self.review / "findings.md").write_text("No findings.\n")
-            agent = {"agent": "claude", "agent_status": state, "pane_id": "w1:p9"}
+            agent = {"agent": self.reviewer_kind, "agent_status": state, "pane_id": "w1:p9"}
             return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"agent": agent}}), "")
         if argv[:3] == ["herdr", "agent", "get"]:
             agent = self.agents.get(argv[3])
@@ -160,6 +161,22 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(start[start.index("--") + 1:], ["--tools", "read,grep,find,ls,write", "--", prompt])
         self.assertIn(str(review / "request.md"), prompt)
         self.assertIn(str(review / "findings.md"), prompt)
+
+    def test_codex_lost_name_requires_a_matching_live_pane(self):
+        self.write_findings = False
+        self.agents["w1:p1"]["agent"] = "pi"
+        (self.repository / "app.py").write_text("print('two')\n")
+        self.start_error = '{"error":{"code":"agent_name_not_found"}}'
+        self.reviewer_kind = "codex"
+        status, _ = self.run_request()
+        self.assertEqual(status, 0, self.errors.getvalue())
+        self.assertEqual(len(self.workers), 1)
+        self.reviewer_kind = "claude"
+        with patch.object(peer_review.time, "strftime", return_value="wrong-kind"):
+            status, _ = self.run_request()
+        self.assertEqual(status, 1)
+        self.assertIn("agent_name_not_found", self.errors.getvalue())
+        self.assertEqual(len(self.workers), 1)
 
     def test_pi_request_starts_a_sandboxed_codex_reviewer(self):
         self.agents["w1:p1"]["agent"] = "pi"

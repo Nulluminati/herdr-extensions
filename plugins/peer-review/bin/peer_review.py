@@ -39,7 +39,26 @@ def command(argv: list[str], timeout: int = 120):
 
 
 def herdr(*arguments: str, timeout: int = 120):
-    return command([os.environ.get("HERDR_BIN_PATH", "herdr"), *arguments], timeout=timeout)
+    try:
+        return command([os.environ.get("HERDR_BIN_PATH", "herdr"), *arguments], timeout=timeout)
+    except ReviewError as error:
+        if arguments[:2] != ("agent", "start") or '"agent_name_not_found"' not in str(error):
+            raise
+        kind = arguments[arguments.index("--kind") + 1] if "--kind" in arguments else None
+        pane = arguments[arguments.index("--pane") + 1] if "--pane" in arguments else None
+        if kind != "codex" or not pane:
+            raise
+        # Herdr can clear Codex's launch name while the same agent still runs.
+        try:
+            found = herdr("agent", "get", pane)
+            data = json.loads(found.stdout)
+        except (ReviewError, ValueError, TypeError):
+            raise error
+        result = data.get("result") if isinstance(data, dict) else None
+        agent = result.get("agent") if isinstance(result, dict) else None
+        if isinstance(agent, dict) and agent.get("agent") == kind:
+            return found
+        raise
 
 
 def reviewer_for(agent: str) -> str:

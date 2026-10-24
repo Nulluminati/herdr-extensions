@@ -526,7 +526,7 @@ def _agent_name(repo: str, number: int) -> str:
 
 
 def _agent_status(record: dict) -> str | None:
-    """The reviewer's Herdr status, None when it no longer runs. Herdr can drop a pi agent's name, so its pane counts too."""
+    """The reviewer's Herdr status, None when it no longer runs. Herdr can drop a pi or Codex agent's name, so its pane counts too."""
     for target in (record.get("agent_name"), record.get("pane_id")):
         if not target:
             continue

@@ -714,6 +714,21 @@ class StartTests(unittest.TestCase):
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
         return call[call.index("--pane") + 3:]
 
+    def test_codex_start_recovers_a_lost_name_only_when_its_pane_matches(self):
+        arguments = ("agent", "start", "review", "--kind", "codex", "--pane", "w9:p2", "--", "task")
+        failure = subprocess.CompletedProcess([], 1, '{"error":{"code":"agent_name_not_found"}}', "")
+        for kind in ("codex", "claude", None):
+            agent = {"agent": kind, "pane_id": "w9:p2", "agent_status": "working"} if kind else None
+            reply = subprocess.CompletedProcess([], 0, json.dumps({"result": {"agent": agent}}), "")
+            with self.subTest(kind=kind), patch.object(start, "command", side_effect=[failure, reply]) as command:
+                if kind == "codex":
+                    self.assertEqual(start.herdr(*arguments), {"agent": agent})
+                else:
+                    with self.assertRaises(start.StartError) as raised:
+                        start.herdr(*arguments)
+                    self.assertEqual(raised.exception.code, "agent_name_not_found")
+                self.assertEqual(command.call_args_list[-1].args[0][-3:], ["agent", "get", "w9:p2"])
+
     def test_codex_arguments_put_the_prompt_last(self):
         self.assertEqual(start.agent_arguments("codex", "task", None, None), ["task"])
         self.assertEqual(start.agent_arguments("codex", "task", "gpt-6.1", None),

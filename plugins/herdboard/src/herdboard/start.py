@@ -72,6 +72,14 @@ def herdr(*args, tolerated=()):
         if not isinstance(details, dict):
             raise StartError(f"Unexpected Herdr error: {output}", "herdr_error")
         code = details.get("code", "herdr_error")
+        if code == "agent_name_not_found" and args[:2] == ("agent", "start"):
+            kind = args[args.index("--kind") + 1] if "--kind" in args else None
+            pane = args[args.index("--pane") + 1] if "--pane" in args else None
+            if kind == "codex" and pane:
+                # Herdr can clear Codex's launch name while the same agent still runs.
+                found = herdr("agent", "get", pane, tolerated=("agent_not_found", "pane_not_found"))
+                if ((found or {}).get("agent") or {}).get("agent") == kind:
+                    return found
         if code in tolerated:
             return None
         if code in ("server_unavailable", "server_not_running"):
