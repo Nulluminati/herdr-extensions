@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Ask the other agent (Claude or pi) to review changes in a Herdr pane.
+"""Ask a second agent (Claude, pi or Codex) to review changes in a Herdr pane.
 
 The changes are the uncommitted ones. When there are none, they are the commits
 on the branch since its upstream, so committed agent work can be reviewed too.
@@ -17,7 +17,7 @@ import sys
 import time
 
 
-REVIEWERS = {"claude": "pi", "pi": "claude"}
+REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large diff can take a long time; the worker runs in the background.
 REVIEW_TIMEOUT_MS = 30 * 60 * 1000
 POLL_SECONDS = 5
@@ -44,7 +44,7 @@ def herdr(*arguments: str, timeout: int = 120):
 
 def reviewer_for(agent: str) -> str:
     if agent not in REVIEWERS:
-        raise ReviewError(f"Peer review supports Claude and pi, not {agent}")
+        raise ReviewError(f"Peer review supports Claude, pi and Codex, not {agent}")
     return REVIEWERS[agent]
 
 
@@ -73,6 +73,10 @@ def reviewer_arguments(reviewer: str, review: Path) -> list[str]:
     # The reviewer reads the repository and writes only its findings; it never edits code.
     if reviewer == "pi":
         return ["--tools", "read,grep,find,ls,write", "--", prompt]
+    if reviewer == "codex":
+        path = json.dumps(str(review), ensure_ascii=False)
+        return ["-a", "never", "-c", 'default_permissions="hb-review"',
+                "-c", f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}', prompt]
     # The prompt goes first because --allowedTools takes every value after it.
     return [
         prompt,

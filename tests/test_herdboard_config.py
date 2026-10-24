@@ -29,6 +29,27 @@ class ConfigTest(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_codex_settings_and_agent_thinking_levels(self):
+        from herdboard.config import AGENTS, thinking_levels, save_global_config
+        self.assertEqual(AGENTS, ("claude", "pi", "codex"))
+        self.assertEqual(thinking_levels("claude"), ())
+        self.assertIn("off", thinking_levels("pi"))
+        self.assertNotIn("off", thinking_levels("codex"))
+        self.assertIn("ultra", thinking_levels("codex"))
+        path = self.write(self.dir / "a.toml", 'start_agent = "codex"\nstart_thinking = "ultra"\ncodex_models = ["gpt-6.1"]\n')
+        config = load_config(path)
+        self.assertEqual((config.start_agent, config.start_thinking, config.codex_models),
+                         ("codex", "ultra", ["gpt-6.1"]))
+        save_global_config(path, start_agent="codex", start_thinking="ultra")
+        self.assertEqual(load_config(path).start_agent, "codex")
+
+    def test_codex_models_must_be_a_list_of_names(self):
+        for value in ('"gpt-6.1"', '3', '["gpt-6.1", 2]', '[""]'):
+            with self.subTest(value=value):
+                path = self.write(self.dir / "a.toml", f'codex_models = {value}\n')
+                with self.assertRaisesRegex(HerdboardError, "codex_models"):
+                    load_config(path)
+
     def test_defaults_without_file(self):
         config = load_config()
         self.assertEqual(config.todos_dir, self.dir / "home" / "todos")
@@ -241,7 +262,7 @@ class ConfigTest(unittest.TestCase):
         from herdboard.config import save_global_config
         original = 'icon_style = "plain"\n'
         path = self.write(self.dir / "a.toml", original)
-        for values in ({"start_agent": "codex"}, {"start_agent": None}, {"start_model": "two words"},
+        for values in ({"start_agent": "unsupported"}, {"start_agent": None}, {"start_model": "two words"},
                        {"start_model": ""}, {"start_model": 3}, {"start_thinking": "huge"},
                        {"merge": "squash"}, {"merge": None}, {"theme": ""}, {"theme": None},
                        {"theme": 3}, {"icon_style": "nerd", "card_style": "small"}):

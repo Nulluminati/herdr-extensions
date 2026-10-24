@@ -28,8 +28,12 @@ DEFAULT_LINEAR_COLUMNS = {
 
 
 DEFAULT_DONE_DAYS = 14
+AGENTS = ("claude", "pi", "codex")
 # pi's thinking levels (`pi --thinking`).
-THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+PI_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+CODEX_THINKING_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
+THINKING_LEVELS = tuple(dict.fromkeys((*PI_THINKING_LEVELS, *CODEX_THINKING_LEVELS)))
+
 MERGE_MODES = ("local", "pr")
 # The names that a card's `#type/<name>` tag takes in `add --type`, `edit --type` and the board.
 DEFAULT_TYPES = ["bug", "feature", "chore", "docs", "refactor"]
@@ -38,6 +42,11 @@ CARD_STYLES = ("full", "compact")
 
 
 KEY_COMMAND_TIMEOUT = 30
+
+
+def thinking_levels(agent: str) -> tuple[str, ...]:
+    """The thinking levels accepted by an agent's command line."""
+    return {"pi": PI_THINKING_LEVELS, "codex": CODEX_THINKING_LEVELS}.get(agent, ())
 
 
 def _run_key_command(argv: list[str]) -> str:
@@ -119,6 +128,8 @@ class Config:
     thinking: dict[str, str] = field(default_factory=dict)
     # Models the board offers for pi; None reads pi's own `enabledModels`.
     pi_models: list[str] | None = None
+    # Models the board offers for Codex; None reads Codex's visible cached models.
+    codex_models: list[str] | None = None
     start_column: str | None = None
     # How `merge` merges a card branch when neither the command nor the board says: "local" or "pr".
     merge: str = "local"
@@ -231,7 +242,7 @@ def _check_global(key: str, value) -> None:
     """Raise when `value` is not a valid value of the global setting `key`."""
     if value is None and key in _OPTIONAL_SETTINGS:
         return
-    choices = {"start_agent": ("claude", "pi"), "start_thinking": THINKING_LEVELS, "merge": MERGE_MODES,
+    choices = {"start_agent": AGENTS, "start_thinking": THINKING_LEVELS, "merge": MERGE_MODES,
                "icon_style": ("plain", "nerd"), "tag_style": TAG_STYLES, "card_style": CARD_STYLES}.get(key)
     if choices is not None:
         if value not in choices:
@@ -444,8 +455,8 @@ def load_config(path: Path | None = None) -> Config:
     config.linear = _load_linear(path, data)
     start_agent = _string(path, data, "start_agent")
     if start_agent is not None:
-        if start_agent not in ("claude", "pi"):
-            raise HerdboardError(f"{path}: start_agent must be claude or pi")
+        if start_agent not in AGENTS:
+            raise HerdboardError(f"{path}: start_agent must be claude, pi or codex")
         config.start_agent = start_agent
     start_model = _string(path, data, "start_model")
     if start_model is not None:
@@ -459,6 +470,7 @@ def load_config(path: Path | None = None) -> Config:
         config.start_thinking = start_thinking
     config.pi_models = _string_list(path, data, "pi_models")
     config.thinking = _load_thinking(path, data)
+    config.codex_models = _string_list(path, data, "codex_models")
     config.start_column = _string(path, data, "start_column") or config.linear.columns["started"]
     config.theme = _string(path, data, "theme") or config.theme
     merge = _string(path, data, "merge")

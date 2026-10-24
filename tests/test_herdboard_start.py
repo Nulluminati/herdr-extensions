@@ -714,6 +714,54 @@ class StartTests(unittest.TestCase):
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
         return call[call.index("--pane") + 3:]
 
+    def test_codex_arguments_put_the_prompt_last(self):
+        self.assertEqual(start.agent_arguments("codex", "task", None, None), ["task"])
+        self.assertEqual(start.agent_arguments("codex", "task", "gpt-6.1", None),
+                         ["--model", "gpt-6.1", "task"])
+        self.assertEqual(start.agent_arguments("codex", "task", None, "high"),
+                         ["-c", 'model_reasoning_effort="high"', "task"])
+        self.assertEqual(start.agent_arguments("codex", "task", "gpt-6.1", "ultra"),
+                         ["--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+
+    def test_codex_start_accepts_its_own_thinking_levels(self):
+        self.starter.start(self.card.ref, agent="codex", thinking="ultra")
+        self.assertEqual(self.agent_args()[:2], ["-c", 'model_reasoning_effort="ultra"'])
+
+    def test_explicit_thinking_must_match_the_agent(self):
+        for agent, level in (("codex", "off"), ("pi", "ultra")):
+            with self.subTest(agent=agent), self.assertRaises(start.StartError) as caught:
+                self.starter.start(self.card.ref, agent=agent, thinking=level)
+            self.assertEqual(caught.exception.code, "usage")
+
+    def test_invalid_config_thinking_uses_the_agent_default(self):
+        self.config.start_thinking = "off"
+        self.starter.start(self.card.ref, agent="codex")
+        self.assertEqual(len(self.agent_args()), 1)
+
+    def test_codex_model_choices(self):
+        home = self.root / "codex-home"
+        folder = home / ".codex"
+        folder.mkdir(parents=True)
+        fixtures = Path(__file__).parent / "fixtures/herdboard/codex"
+        for name in ("config.toml", "models_cache.json"):
+            (folder / name).write_bytes((fixtures / name).read_bytes())
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            self.assertEqual(start.codex_model_choices(self.config),
+                             ("gpt-6.1, high", ["gpt-6.1", "gpt-6.1-mini"]))
+            self.config.codex_models = ["custom-model"]
+            self.assertEqual(start.codex_model_choices(self.config), ("gpt-6.1, high", ["custom-model"]))
+
+    def test_codex_model_choices_missing_or_invalid_files(self):
+        home = self.root / "codex-home"
+        folder = home / ".codex"
+        folder.mkdir(parents=True)
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            self.assertEqual(start.codex_model_choices(self.config), (None, []))
+            for text in ("invalid [", "[]", '{"models": [null, {}, {"slug": 1, "visibility": "list"}]}'):
+                (folder / "models_cache.json").write_text(text)
+                (folder / "config.toml").write_text("invalid [")
+                self.assertEqual(start.codex_model_choices(self.config), (None, []))
+
     def test_pi_gets_the_model_and_thinking_level(self):
         self.starter.start(self.card.ref, agent="pi", model="openai-codex/gpt-6.1-sol", thinking="medium")
         args = self.agent_args()

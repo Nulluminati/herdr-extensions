@@ -122,6 +122,22 @@ class WorkerTests(CliTestCase):
 
 
 class RequestTests(AgentReviewTestCase):
+    def test_codex_review_profile_quotes_the_folder(self):
+        import tomllib
+        folder = Path('/reviews/a"b\\c')
+        args = agent_review.reviewer_arguments("codex", "task", folder, "gpt-6.1", "ultra")
+        self.assertEqual(args[:4], ["-a", "never", "-c", 'default_permissions="hb-review"'])
+        profile = tomllib.loads(args[5])["permissions"]["hb-review"]["filesystem"]
+        self.assertEqual(profile, {":root": "read", str(folder): "write"})
+        self.assertEqual(args[6:], ["--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertEqual(agent_review.REVIEWERS, {"claude": "pi", "pi": "codex", "codex": "claude"})
+
+    def test_codex_reviewer_rejects_pi_only_thinking(self):
+        self.started()
+        with self.assertRaises(review.ReviewError) as raised:
+            self.reviewer.request(self.card.ref, reviewer="codex", thinking="off")
+        self.assertEqual(raised.exception.code, "usage")
+
     def test_a_card_that_was_never_started_cannot_be_reviewed(self):
         with self.assertRaises(review.ReviewError) as raised:
             self.reviewer.request(self.card.ref)
@@ -177,7 +193,7 @@ class RequestTests(AgentReviewTestCase):
         self.assertNotIn("plan that the user agreed on", text)
         self.assertNotIn("attachments", text)
 
-    def test_the_other_kind_reviews_in_a_split_next_to_the_card_agent(self):
+    def test_codex_reviews_pi_in_a_split_next_to_the_card_agent(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         result = self.request()
@@ -186,14 +202,13 @@ class RequestTests(AgentReviewTestCase):
                            "--no-focus"]])
         start_call = self.reviewer_start()
         self.assertEqual(start_call[2], f"hb-{self.card.ref}-review")
-        self.assertEqual(start_call[start_call.index("--kind") + 1], "claude")
+        self.assertEqual(start_call[start_call.index("--kind") + 1], "codex")
         self.assertEqual(start_call[start_call.index("--pane") + 1], result["pane_id"])
         folder = Path(result["folder"])
         args = start_call[start_call.index("--") + 1:]
-        self.assertIn(str(folder / "request.md"), args[0])
-        self.assertEqual(args[1:], ["--permission-mode", "dontAsk", "--allowedTools", "Read", "Grep", "Glob",
-                                    f"Edit(/{folder}/**)", "Bash(terminal-browser:*)"])
-        self.assertEqual(result["reviewer"], "claude")
+        self.assertIn(str(folder / "request.md"), args[-1])
+        self.assertEqual(args[:-1], agent_review.codex_review_options(folder))
+        self.assertEqual(result["reviewer"], "codex")
         request = (folder / "request.md").read_text()
         self.assertIn("Herdboard automatically delivers", request)
         self.assertIn("You do not need to run a command or send a notification", request)
@@ -205,6 +220,7 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn("Do not run `terminal-browser shutdown`", request)
         self.assertIn("stays listed", request)
         self.assertIn("do not start a server", request)
+
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -364,7 +380,7 @@ class WaitTests(AgentReviewTestCase):
         self.assertEqual(self.wait(), 0)
         findings = Path(result["folder"]) / "findings.md"
         self.assertEqual(self.calls("pane", "close"), [["pane", "close", result["pane_id"]]])
-        self.assertEqual(self.log()[-1], f"Agent review by claude done: 2 findings. {findings}")
+        self.assertEqual(self.log()[-1], f"Agent review by codex done: 2 findings. {findings}")
         prompt = self.calls("agent", "prompt")[-1]
         self.assertEqual(prompt[2], "w9:p1")
         for part in (str(findings), "| # | Description | Severity | Agree/Disagree | Reasoning |",
@@ -482,7 +498,7 @@ class WaitTests(AgentReviewTestCase):
         self.request(then_hunk=True)
         self.assertEqual(self.wait(), 1)
         self.assertIn("stopped before it wrote", self.errors.getvalue())
-        self.assertTrue(any(entry.startswith("Agent review failed: The claude reviewer stopped before it wrote")
+        self.assertTrue(any(entry.startswith("Agent review failed: The codex reviewer stopped before it wrote")
                             for entry in self.log()))
         self.assertEqual(self.calls("agent", "prompt"), [])
         self.assertEqual(self.calls("notification", "show")[-1][2], f"Agent review of {self.card.ref} failed")

@@ -16,12 +16,12 @@ import tempfile
 import time
 
 from . import activity, attachments, start as start_module
-from .config import THINKING_LEVELS
+from .config import AGENTS, THINKING_LEVELS, thinking_levels
 from .model import HerdboardError
 from .review import Reviewer, ReviewError
 from .start import NEW_REPO, REPOLESS, _lock, _read, _write, find_record, herdr, safe_key, state_dir
 
-REVIEWERS = {"claude": "pi", "pi": "claude"}
+REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large change can take long; the worker gives up after this.
 REVIEW_TIMEOUT_SECONDS = 30 * 60
 POLL_SECONDS = 5
@@ -45,6 +45,13 @@ def _git(worktree: Path, *args: str) -> str:
     return result.stdout
 
 
+def codex_review_options(folder: Path) -> list[str]:
+    """Read the whole disk and write only the review folder, without network access."""
+    path = json.dumps(str(folder), ensure_ascii=False)
+    return ["-a", "never", "-c", 'default_permissions="hb-review"',
+            "-c", f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}']
+
+
 def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
                        thinking: str | None, browser: bool = False) -> list[str]:
     """The reviewer's arguments after Herdr's `--`: it reads the repository and writes only its findings.
@@ -56,6 +63,8 @@ def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         tools = "read,grep,find,ls,write" + (",bash" if browser else "")
         return ["--tools", tools, *options, "--", prompt]
+    if kind == "codex":
+        return [*codex_review_options(folder), *start_module.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     extra = ["Bash(terminal-browser:*)"] if browser else []
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
@@ -163,8 +172,8 @@ class AgentReviewer(Reviewer):
         super().__init__(store, directory, writer=writer, config_file=config_file)
 
     def request(self, ref, reviewer=None, model=None, thinking=None, then_hunk=False):
-        if reviewer is not None and reviewer not in REVIEWERS:
-            raise ReviewError("The reviewer must be claude or pi", "usage")
+        if reviewer is not None and reviewer not in AGENTS:
+            raise ReviewError("The reviewer must be claude, pi or codex", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise ReviewError("The model must be one name, such as sonnet or zai/glm-5.3", "usage")
         if thinking is not None and thinking not in THINKING_LEVELS:
@@ -177,8 +186,11 @@ class AgentReviewer(Reviewer):
             raise ReviewError(f"{ref} has no repository, so Hunk cannot open. "
                               f"Use `herdboard review {ref} --agent`.", "no_repository")
         kind = reviewer or REVIEWERS[record.get("agent") or self.config.start_agent]
-        if thinking and kind != "pi":
-            raise ReviewError("--thinking works only with a pi reviewer", "usage")
+        levels = thinking_levels(kind)
+        if thinking is not None and not levels:
+            raise ReviewError("--thinking works only with pi or codex", "usage")
+        if thinking is not None and thinking not in levels:
+            raise ReviewError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if kind == "pi":
             # One model for the launch and for its level, as start and plan do.
             model = start_module.agent_model(self.config, model)

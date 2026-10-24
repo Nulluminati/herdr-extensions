@@ -109,6 +109,21 @@ class ReviewTestCase(unittest.TestCase):
 
 
 class ReviewTests(ReviewTestCase):
+    def test_a_gone_codex_agent_keeps_valid_config_thinking(self):
+        self.starter.start(self.card.ref, agent="codex")
+        self.config.start_thinking = "ultra"
+        self.fake.agent = False
+        self.reviewer.review(self.card.ref)
+        args = self.calls("agent", "start")[-1]
+        self.assertIn('model_reasoning_effort="ultra"', args)
+
+    def test_a_gone_pi_agent_drops_codex_config_thinking(self):
+        self.starter.start(self.card.ref, agent="pi")
+        self.config.start_thinking = "ultra"
+        self.fake.agent = False
+        self.reviewer.review(self.card.ref)
+        self.assertNotIn("--thinking", self.calls("agent", "start")[-1])
+
     def test_a_card_that_was_never_started_cannot_be_reviewed(self):
         with self.assertRaises(review.ReviewError) as raised:
             self.reviewer.review(self.card.ref)

@@ -2,7 +2,7 @@
 
 A kanban board inside Herdr for your own todos and your Linear issues. Todos are Markdown files in the Obsidian Kanban format, so Obsidian can open them. Linear issues show on the same board, in the same columns, with the same commands.
 
-A card can also start work: herdboard opens a Git worktree for it and hands the card to Claude Code or pi. When the agent is done, herdboard opens the work for review, merges it locally or as a draft GitHub pull request, and cleans up.
+A card can also start work: herdboard opens a Git worktree for it and hands the card to Claude Code, pi or Codex. When the agent is done, herdboard opens the work for review, merges it locally or as a draft GitHub pull request, and cleans up.
 
 ## Install
 
@@ -10,7 +10,7 @@ Requirements:
 
 - Herdr 0.9 or later
 - `uv` and Python 3.11 or later
-- Claude Code or pi, to start work on a card
+- Claude Code, pi or Codex, to start work on a card
 - The hunkdiff Herdr plugin (`jhochenbaum.hunkdiff`), for review in Hunk
 - The GitHub CLI (`gh`), signed in, for pull requests
 - Hunk 0.23 or later with the `hunk-gh-review` extension, for pull request reviews
@@ -90,8 +90,8 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `T` | Promote the todo to a Linear issue: choose its team and project. See [promote](#promote) |
 | `p` | Set or remove the todo's parent |
 | `s` | Start work with the default agent. A card without a repository asks where it runs |
-| `S` | Choose claude or pi, the model and pi's thinking level, then start work. Each model keeps the thinking level that you chose for it |
-| `P` | Plan the card with an agent: choose claude or pi and the model |
+| `S` | Choose claude, pi or codex, the model and the thinking level, then start work. Each pi model keeps the thinking level that you chose for it |
+| `P` | Plan the card: choose claude, pi or codex and the model |
 | `g` | Go to the started card's Herdr workspace, when Herdr has it open |
 | `R` | Review a started card: in Hunk, by another agent, or both. A repoless card offers the agent review only |
 | `m` | Merge the card, after you confirm. A repoless card has nothing to merge |
@@ -228,7 +228,7 @@ To find "reviewed", herdboard saves the branch HEAD when an agent review starts,
 ### Plan before the work
 
 1. Select the card and press `P`, or run `herdboard plan t3m9`.
-2. Choose the planner (claude or pi) and its model. herdboard creates the card's worktree and branch when the card has none. A `plan <id>` tab opens in the worktree's workspace, in the background: you stay on the board.
+2. Choose the planner (claude, pi or codex) and its model. herdboard creates the card's worktree and branch when the card has none. A `plan <id>` tab opens in the worktree's workspace, in the background: you stay on the board.
 3. The planner reads the card and the code. It may change code and run commands in the worktree to test ideas; it reverts its own changes and does not commit. It can show you a page, an HTML file or a server that already runs with `terminal-browser`, in a split next to its pane. It asks you about the unknowns, then writes the plan.
 4. Answer its questions in the tab. Close the tab when the plan is complete.
 5. Start the work with `s`. The agent starts in the same worktree and gets the plan in its brief.
@@ -265,7 +265,7 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 6. Move the card to In progress (`start_column`). A Linear issue moves to its started state.
 7. Start the agent in the worktree as `hb-<id>`. Its first message has the card and these rules: record progress with `herdboard log`, do not change the card text, commit with conventional commits, and do not push, merge or remove the worktree.
 
-`--agent claude|pi`, `--model` and `--thinking` (pi only) choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
+`--agent claude|pi|codex`, `--model` and `--thinking` (pi or Codex) choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
 
 Without `--thinking`, pi uses the thinking level that you last chose for that model, from the `[thinking]` table of the config file. A model without a saved level uses `start_thinking`. See [thinking levels](#thinking-levels).
 
@@ -283,7 +283,9 @@ When planning ends with a changed plan and the card's work agent still runs, the
 
 `plan` on a card that has a plan gives the planner the current plan to revise. A second `plan` for a card whose planner still runs fails with `plan_running`.
 
-`--agent claude|pi`, `--model`, `--thinking` (pi only) and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
+Codex planners use `workspace-write` with the attachments folder as an extra writable directory. Writes there and in the worktree need no approval. Other approval requests go to Codex's automatic reviewer (`approvals_reviewer = "auto_review"`), which uses extra model calls. You stay in the tab for requests it denies.
+
+`--agent claude|pi|codex`, `--model`, `--thinking` (pi or Codex) and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
 
 A planned card that will not be worked on is dropped with `herdboard finish <id>`: a branch with no commits counts as merged. Add `--force` when the branch has commits.
 
@@ -322,7 +324,7 @@ Each card has a log in `<todos_dir>/.herdboard/log/<id>.md`. Obsidian does not s
 - 2026-10-12 14:20 · herdboard · Rebase conflict in src/auth.py. Sent to the agent.
 ```
 
-herdboard sets the author. In a card's agent pane, the author is the agent kind (`claude` or `pi`). Entries that herdboard writes have the author `herdboard`. All other entries have the author `user`. The log works for Linear cards too, without a connection, and herdboard posts nothing to Linear.
+herdboard sets the author. In a card's agent pane, the author is the agent kind (`claude`, `pi` or `codex`). Entries that herdboard writes have the author `herdboard`. All other entries have the author `user`. The log works for Linear cards too, without a connection, and herdboard posts nothing to Linear.
 
 Agents record progress in the log, not in the card. `edit` fails with `agent_edit_denied` in a card's agent pane. This guards against mistakes. It is not a security boundary.
 
@@ -331,14 +333,16 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 `herdboard review <id>` has three modes:
 
 - `--human` (the default) opens the branch diff in Hunk, in a split next to the card's agent. Your Hunk comments go to that agent. A second `review` reuses the open Hunk pane. Hunk uses much memory, so herdboard closes the pane when the card leaves Review.
-- `--agent` has a second agent review the work. By default, Claude reviews pi's work and pi reviews Claude's work. `--reviewer`, `--model` and `--thinking` change this. Without `--thinking`, a pi reviewer uses the saved level of its model.
+- `--agent` has a second agent review the work. By default, pi reviews Claude's work, Codex reviews pi's work, and Claude reviews Codex's work. `--reviewer`, `--model` and `--thinking` change this. Without `--thinking`, a pi reviewer uses the saved level of its model.
 - `--both` runs the agent review first, and opens Hunk when the findings are ready.
 
 When the card's agent no longer runs, `review` starts a new one of the same kind. Its first message has the card and the full log.
 
 The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It can read the repository, and it can write only its findings file. It may use `terminal-browser` to open and check pages, HTML files and servers that already run; it runs no other command. The pi reviewer also gets `bash`, and only its prompt limits it to `terminal-browser`. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent answers with a table: one row for each finding, with its number, a short description, its severity, and whether the agent agrees or disagrees, and why. The agent logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
 
-On the board, `R` asks for Human, Agent or Both. For an agent review, it then asks for the reviewer and the model: `opus`, `sonnet` or `haiku` for Claude, and the pi model list for pi.
+On the board, `R` asks for Human, Agent or Both. For an agent review, it then asks for the reviewer and the model: `opus`, `sonnet` or `haiku` for Claude, the pi model list for pi, or the Codex model list for Codex.
+
+Codex card reviewers and fallback pull request writers use approvals `never`. Their permission profile reads the whole disk, writes only the review or description folder, and blocks network access. Unlike Claude and pi card reviewers, Codex has a shell. The sandbox limits its writes. These profiles apply to one run; herdboard does not change `~/.codex`.
 
 ### merge
 
@@ -405,7 +409,7 @@ The flow:
    In a window narrower than about 115 columns, a PR keeps three rows: the GitHub and agent reviews move under the title, and CI, the counts and the update time go to the right.
 
    The lines above the list show the repository, the total, the page and the search, then count what needs you on the page, by GitHub, CI and agent.
-2. Press `R` on a PR. Choose Claude or pi, then the model. For pi, also choose the thinking level; the dialog starts at the level that you last chose for that model. See [thinking levels](#thinking-levels).
+2. Press `R` on a PR. Choose Claude, pi or Codex, then the model. For pi or Codex, also choose the thinking level. The pi dialog starts at the level that you last chose for that model. See [thinking levels](#thinking-levels).
 3. herdboard fetches `pull/<N>/head` from the base repository's remote into the local branch `pr/<N>`. This also works for a PR from a fork. It opens a Herdr worktree workspace `PR #<N> <title>` under the repository, in the background.
 4. The workspace has the agent on the left and `hunk gh pr 'owner/repo#N'` on the right. The Hunk pane gets `GH_TOKEN`, `GH_PR_NUMBER` and `GH_PR_REPO` in its environment. The token does not show in the command.
 5. The agent reads the PR with `gh pr view`, `gh pr diff` and `gh pr checks`, and adds its notes with `hunk session comment add`. It ends with a short summary in its chat.
@@ -447,6 +451,7 @@ What the reviewer can do:
 
 - Claude runs with `--permission-mode dontAsk`. It can use `Read`, `Grep` and `Glob`, and Bash only for `hunk session`, `hunk skill path`, `gh pr view`, `gh pr diff`, `gh pr checks` and `terminal-browser`.
 - pi cannot limit its bash tool to some commands. It gets `read`, `grep`, `find`, `ls` and `bash`, and only its prompt tells it not to edit files, run code, change Git or write to GitHub, and to use `terminal-browser` only to open and check pages. Choose pi only for PRs whose code you trust that far.
+- Codex runs with approvals set to `never`. Its permission profile reads the whole disk, blocks file writes, and allows open network access. This includes GitHub and the local Hunk service. It can run any read-only command. The prompt forbids code execution and submission to GitHub.
 - No reviewer runs the tests or the code of the PR.
 
 Limits:
@@ -635,18 +640,18 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's first line, its indented lines, its parent or its type. `--body ""` removes the indented lines |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
-| `herdboard plan <id> [--agent claude\|pi] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
+| `herdboard plan <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
-| `herdboard start <id> [--agent claude\|pi] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first |
-| `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi] [--model] [--thinking]` | Review a started card's work |
+| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first |
+| `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi\|codex] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
 | `herdboard pr-sync <id> [--fetch]` | Push the card branch, then replace the open pull request's title and description with `pr.md`. `--fetch` writes the GitHub text to a new `pr.md` instead, and changes nothing |
 | `herdboard finish <id> [--force]` | Remove a merged card's worktree and branch, and move it to Done |
 | `herdboard board --prs` | Open the board on its pull request list |
 | `herdboard prs [--search TEXT] [--page N]` | List the open GitHub pull requests of the repository, 50 to a page, with review markers. `--search` takes GitHub search words and qualifiers |
-| `herdboard pr-review <N> [--agent claude\|pi] [--model] [--thinking]` | Have an agent review PR `N` in its own workspace, with notes in Hunk. The defaults are `start_agent` and `start_model` |
+| `herdboard pr-review <N> [--agent claude\|pi\|codex] [--model] [--thinking]` | Have an agent review PR `N` in its own workspace, with notes in Hunk. The defaults are `start_agent` and `start_model` |
 | `herdboard pr-review-refresh <N>` | Fetch the PR's new commits, and open Hunk again with the old notes |
 | `herdboard pr-review-go <N>` | Go to the PR's review workspace |
 | `herdboard pr-review-finish <N> [--force]` | Close the review: the workspace, the worktree and `pr/<N>`. `--force` also drops your unsent notes and worktree changes |
@@ -710,10 +715,11 @@ columns = ["Backlog", "Todo", "In progress", "Review", "Done"]   # for new board
 complete_markers = []      # added to the English "Complete"
 archive_titles = []        # added to the English "Archive"
 # vault_root = "~/Notes"   # resolves [[note]] links in `show` and `promote`
-start_agent = "claude"     # or "pi"
+start_agent = "claude"     # or "pi" or "codex"
 # start_model = "openai-codex/gpt-6.1-sol"   # default: the agent's own default
-# start_thinking = "medium"                  # pi only: the level of a model with no [thinking] row
+# start_thinking = "medium"                  # pi or Codex; pi uses it when the model has no [thinking] row
 # pi_models = ["zai/glm-5.3"]                # the board's pi model list; default: pi's enabledModels
+# codex_models = ["gpt-5.2-codex"]           # default: visible models in ~/.codex/models_cache.json
 # start_column = "In progress"               # default: linear.columns.started
 merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
@@ -752,7 +758,11 @@ Press `c` to open configuration. It has two tabs. Switch tabs with a click, or f
 - **Global (all boards)** sets values in the config file: theme, agent, model, thinking level, merge mode, icons, tags and cards. It works outside a repository too.
 - **Current board** shows the board name. It sets the board's merge mode, linked Linear projects and pinned issues in the board's frontmatter. Without a repository board, it tells you how to create one.
 
-The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. "Agent default" removes `start_model`, so the agent uses its own default. A saved model that is not in the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking level applies to pi only, so it is off for Claude, but Claude keeps the saved level.
+The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. Codex offers `codex_models`, else models with `visibility = "list"` in `~/.codex/models_cache.json`. Its default label reads `model` and `model_reasoning_effort` from `~/.codex/config.toml`.
+
+"Agent default" removes `start_model`, so the agent uses its own default. A saved model outside the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking control follows the agent's levels. Claude keeps the saved level but disables the control.
+
+pi accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. Codex accepts `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; model support varies. An explicit invalid level returns a `usage` error. herdboard drops a configured level that the chosen agent does not accept.
 
 The Thinking field follows the selected model. A named model shows its own level, from the `[thinking]` table. With "Agent default" as the model, the field shows `start_thinking`. "Agent default" in the field clears the level of the selected model, so that model uses `start_thinking` again. See [thinking levels](#thinking-levels).
 
@@ -881,14 +891,14 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 
 ## Known limits
 
-- Claude shows its folder trust prompt in a worktree where no Claude ran before. A new agent, reviewer, writer or planner waits until you answer it in its pane.
+- Claude and Codex can show a folder trust prompt in an unfamiliar worktree. Answer it in the agent, reviewer, writer or planner pane. herdboard does not pre-trust folders.
 - In Claude's default permission mode, the card's agent asks once before it writes the pull request description in the state folder.
 - herdboard does not sync between machines.
 - It is not confirmed that Obsidian opens a `[[#^t5aa]]` parent link from a card.
 
 ## Agent skill
 
-`skills/herdboard/SKILL.md` teaches Claude and pi to use the CLI with `--json`. It lists the error codes.
+`skills/herdboard/SKILL.md` teaches Claude, pi and Codex to use the CLI with `--json`. It lists the error codes.
 
 ## Tests
 

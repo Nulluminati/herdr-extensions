@@ -30,7 +30,7 @@ POLL_SECONDS = 5
 # How long Hunk gets to show its session for a new pane.
 HUNK_WAIT_SECONDS = 15
 TITLE_LENGTH = 40
-AUTHORS = {"claude": "Claude", "pi": "pi"}
+AUTHORS = {"claude": "Claude", "pi": "pi", "codex": "Codex"}
 PR_FIELDS = "number,title,url,author,isDraft,headRefOid,headRefName,baseRefName,reviewRequests"
 PAGE_SIZE = 50
 # One page of a GitHub search for open PRs, with the user's login. The description is read only when
@@ -466,6 +466,11 @@ def reviewer_arguments(kind: str, prompt: str, model: str | None, thinking: str 
         # pi cannot limit bash to some commands: the prompt holds the limits.
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return ["--tools", "read,grep,find,ls,bash", *options, "--", prompt]
+    if kind == "codex":
+        return ["-a", "never", "-c", 'default_permissions="hb-pr-review"',
+                "-c", 'permissions.hb-pr-review.filesystem={":root"="read"}',
+                "-c", 'permissions.hb-pr-review.network={enabled=true}',
+                *start.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
             "--allowedTools", "Read", "Grep", "Glob", "Bash(hunk session:*)", "Bash(hunk skill path:*)",
@@ -586,16 +591,17 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
 
 
 def _validate(kind: str, model: str | None, thinking: str | None) -> None:
-    from .config import THINKING_LEVELS
+    from .config import AGENTS, thinking_levels
 
-    if kind not in AUTHORS:
-        raise PrReviewError("The agent must be claude or pi", "usage")
+    if kind not in AGENTS:
+        raise PrReviewError("The agent must be claude, pi or codex", "usage")
     if model is not None and (not model or any(ch.isspace() for ch in model)):
         raise PrReviewError("The model must be one name, such as sonnet or zai/glm-5.3", "usage")
-    if thinking is not None and kind != "pi":
-        raise PrReviewError("--thinking works only with pi", "usage")
-    if thinking is not None and thinking not in THINKING_LEVELS:
-        raise PrReviewError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
+    levels = thinking_levels(kind)
+    if thinking is not None and not levels:
+        raise PrReviewError("--thinking works only with pi or codex", "usage")
+    if thinking is not None and thinking not in levels:
+        raise PrReviewError(f"Thinking must be one of {', '.join(levels)}", "usage")
 
 
 def request(checkout, repo: str, number: int, kind: str, model: str | None = None,

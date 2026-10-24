@@ -162,6 +162,26 @@ class PlanTestCase(unittest.TestCase):
 
 
 class RequestTests(PlanTestCase):
+    def test_codex_planner_arguments_and_record(self):
+        args = plan.planner_arguments("codex", "task", "/repo", Path("/plans"), "gpt-6.1", "ultra")
+        self.assertEqual(args, ["-s", "workspace-write", "--add-dir", "/plans", "-a", "on-request",
+                                "-c", 'approvals_reviewer="auto_review"', "--model", "gpt-6.1",
+                                "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.planner.plan(self.card.ref, agent="codex", thinking="ultra")
+        card = self.store.show(self.card.ref)
+        plan.mark_planning([card])
+        self.assertEqual(card.planning, "codex")
+
+    def test_codex_rejects_pi_only_thinking(self):
+        with self.assertRaises(plan.PlanError) as raised:
+            self.planner.plan(self.card.ref, agent="codex", thinking="off")
+        self.assertEqual(raised.exception.code, "usage")
+
+    def test_config_thinking_is_filtered_for_the_planner(self):
+        self.config.start_thinking = "off"
+        self.planner.plan(self.card.ref, agent="codex")
+        self.assertFalse(any("model_reasoning_effort" in arg for arg in self.planner_start()))
+
     def test_the_planner_creates_the_worktree_and_plans_in_a_tab_in_it(self):
         result = self.planner.plan(self.card.ref)
         creates = self.fake.find("worktree", "create")

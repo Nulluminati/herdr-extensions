@@ -18,6 +18,7 @@ import time
 from . import activity, merge, start as start_module
 from .agent_review import _notify, _reviewer_status, reviewer_arguments, start_worker
 from .brief import _unindent
+from .config import thinking_levels
 from .model import HerdboardError, commit_type, split_title
 from .start import Starter, _lock, _read, _write, agent_live, find_record, herdr, safe_key, state_dir
 
@@ -165,7 +166,7 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
     else:
         pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),
                      "--no-focus")["pane"]["pane_id"]
-        thinking = config.start_thinking if kind == "pi" else None
+        thinking = config.start_thinking if config.start_thinking in thinking_levels(kind) else None
         # A startup prompt waits for the user, and a busy writer never looks ready: the worker watches it.
         herdr("agent", "start", f"hb-{ref.lower()}-pr", "--kind", kind, "--pane", pane, "--",
               *reviewer_arguments(kind, prompt_text(folder, ref), folder, config.start_model, thinking),

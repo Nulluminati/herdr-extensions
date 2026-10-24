@@ -19,7 +19,7 @@ import time
 from . import activity, attachments, start as start_module
 from .agent_review import _reviewer_status, start_worker
 from .brief import _one_line, _title, _unindent
-from .config import THINKING_LEVELS
+from .config import AGENTS, thinking_levels
 from .linear_cards import LINEAR_REF, issue_card
 from .model import HerdboardError, NotFoundError
 from .start import (Starter, StartError, _git, _lock, _read, _write, agent_live, export_config,
@@ -69,6 +69,10 @@ def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model
     if kind == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return ["--tools", "read,grep,find,ls,write,edit,bash", *options, "--", prompt]
+    if kind == "codex":
+        return ["-s", "workspace-write", "--add-dir", str(folder), "-a", "on-request",
+                "-c", 'approvals_reviewer="auto_review"',
+                *start_module.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     return [prompt, *(["--model", model] if model else []),
             "--allowedTools", "Read", "Grep", "Glob",
@@ -199,18 +203,21 @@ class Planner:
     def plan(self, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None,
              no_repo=False, new_repo=None):
         kind = agent or self.config.start_agent
-        if kind not in ("claude", "pi"):
-            raise PlanError("The planner must be claude or pi", "usage")
-        if thinking and kind != "pi":
-            raise PlanError("--thinking works only with pi", "usage")
-        if thinking and thinking not in THINKING_LEVELS:
-            raise PlanError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
+        if kind not in AGENTS:
+            raise PlanError("The planner must be claude, pi or codex", "usage")
+        levels = thinking_levels(kind)
+        if thinking is not None and not levels:
+            raise PlanError("--thinking works only with pi or codex", "usage")
+        if thinking is not None and thinking not in levels:
+            raise PlanError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise PlanError("The model must be one name, such as opus or zai/glm-5.3", "usage")
         if kind == "pi":
             # One model for the launch and for its level, so pi cannot run a model with another's level.
             model = start_module.agent_model(self.config, model)
             thinking = start_module.thinking_level(self.config, model, thinking)
+        elif thinking is None and self.config.start_thinking in levels:
+            thinking = self.config.start_thinking
         card, issue = self._card(ref)
         ref = card.ref
         # The record key matches `start`, so a later start finds the same worktree.
@@ -322,7 +329,7 @@ def mark_planning(cards) -> None:
     for card in cards:
         card.planning = None
         record = records.get(card.ref)
-        if not isinstance(record, dict) or record.get("kind") not in ("claude", "pi"):
+        if not isinstance(record, dict) or record.get("kind") not in AGENTS:
             continue
         try:
             exists = _planner_pane(record) is not None

@@ -72,6 +72,17 @@ class PrWriteTestCase(PullRequestTestCase):
 
 
 class RequestTests(PrWriteTestCase):
+    def test_codex_writer_keeps_valid_config_thinking(self):
+        records = self.records()
+        records[self.card.ref]["agent"] = "codex"
+        start._write(start.state_dir() / "starts.json", records)
+        self.config.start_thinking = "ultra"
+        self.fake.agent = False
+        self.request()
+        call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
+        self.assertIn('model_reasoning_effort="ultra"', call)
+        self.assertIn('default_permissions="hb-review"', call)
+
     def test_the_card_agent_is_asked_by_the_worker(self):
         result = self.request()
         self.assertEqual(result["writer"], "the card's agent")

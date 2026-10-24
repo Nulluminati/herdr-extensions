@@ -1,11 +1,11 @@
 ---
 name: peer-review
-description: "Ask the other coding agent to review your changes through Herdr: uncommitted changes, else your branch commits since its upstream. Claude's changes go to pi and pi's changes go to Claude. Use only when the user asks for a peer review, a second opinion from the other agent, or a review by pi or Claude. Requires HERDR_ENV=1."
+description: "Ask the other coding agent to review your changes through Herdr: uncommitted changes, else your branch commits since its upstream. Claude's changes go to pi, pi's changes go to Codex, and Codex's changes go to Claude. Use only when the user asks for a peer review, a second opinion from another agent, or a review by pi, Claude or Codex. Requires HERDR_ENV=1."
 ---
 
 # Peer review
 
-A peer review opens the other agent in a split pane next to you. That agent reviews the uncommitted changes in your repository (or, when there are none, your branch commits since its upstream) and writes its findings to a file. You do not wait for it.
+A peer review opens a second agent in a split pane next to you. That agent reviews the uncommitted changes in your repository (or, when there are none, your branch commits since its upstream) and writes its findings to a file. You do not wait for it.
 
 ## Request a review
 

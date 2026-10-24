@@ -43,8 +43,8 @@ from .model import HerdboardError, is_triage, join_title, parse_tags, plain_tags
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import agent_states
 from . import start as start_module
-from .config import (THINKING_LEVELS, check_global_config, check_thinking_levels, save_global_config,
-                     save_thinking_levels)
+from .config import (AGENTS, THINKING_LEVELS, check_global_config, check_thinking_levels, save_global_config,
+                     save_thinking_levels, thinking_levels)
 from . import merge as merge_module
 from .merge import Merger
 from .agent_review import AgentReviewer
@@ -53,7 +53,7 @@ from .linear_states import StateCancelledError
 from .promote import Promoter
 from .promote_convert import promoted_identifier
 from .review import Reviewer
-from .start import Starter, mark_removed, pi_model_choices
+from .start import Starter, codex_model_choices, mark_removed, pi_model_choices
 from .views import LinearResult
 
 VIEWS = ["repo", "inbox", "all", "mine"]
@@ -172,7 +172,7 @@ HELP_SECTIONS = [
     ]),
     ("Agents and branches", [
         ("s", "start work with the default agent"),
-        ("S", "choose claude or pi (and pi's model and thinking level), then start work"),
+        ("S", "choose claude, pi or codex (and the model and thinking level), then start work"),
         ("P", "plan the card with an agent in a tab in its worktree, or in its card folder without a repository"),
         ("g", "go to the started card's Herdr workspace"),
         ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
@@ -306,7 +306,7 @@ def chip_tint(color: str, dark: bool = True) -> str:
 
 # Private Use Area codepoints of the "Herdr Agent Icons Max" font, as the agent-icons plugin uses them.
 AGENT_FONT = "Herdr Agent Icons Max"
-AGENT_LOGOS = {"claude": "\ue1a0", "pi": "\ue1a9"}
+AGENT_LOGOS = {"claude": "\ue1a0", "pi": "\ue1a9", "codex": "\ue1a1"}
 
 
 @functools.cache
@@ -1435,12 +1435,12 @@ class AgentScreen(ModalBase):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(self.title_text)
-            yield OptionList("claude", "pi")
+            yield OptionList(*AGENTS)
             yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
-        self.dismiss(("claude", "pi")[event.option_index])
+        self.dismiss(AGENTS[event.option_index])
 
 
 class ReviewKindScreen(ModalBase):
@@ -1966,17 +1966,18 @@ class ConfirmScreen(ModalBase):
 
 
 class ModelScreen(ModalBase):
-    """Choose pi's model and thinking level before a start. Enter on a model starts.
+    """Choose an agent's model and thinking level before a start. Enter on a model starts.
 
     The thinking level follows the highlighted model: it starts at the level that the user last chose
     for that model in the `[thinking]` table of the config file, else at the agent default.
     """
 
     def __init__(self, default: str | None, models: list[str], remembered: dict[str, str] | None = None,
-                 default_model: str | None = None):
+                 default_model: str | None = None, agent: str = "pi"):
         super().__init__()
+        self.agent = agent
         self.models = [None, *models]
-        self.labels = [f"pi default ({default})" if default else "pi default", *models]
+        self.labels = [f"{agent} default ({default})" if default else f"{agent} default", *models]
         # The last level that the user chose for each model.
         self.remembered = dict(remembered or {})
         # The model that the unnamed row runs: `agent_model` of the config that opened the dialog.
@@ -1994,10 +1995,11 @@ class ModelScreen(ModalBase):
     def remembered_level(self, index: int) -> str:
         return self.remembered.get(self.model_at(index) or "", "default")
 
+
     def compose(self) -> ComposeResult:
-        levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
+        levels = [("default", "default"), *((level, level) for level in thinking_levels(self.agent))]
         with Vertical(classes="dialog"):
-            yield Label("Choose pi's model")
+            yield Label(f"Choose {self.agent}'s model")
             yield OptionList(*self.labels, id="models")
             thinking = Select(levels, value=self.remembered_level(0), allow_blank=False, id="thinking")
             thinking.border_title = "Thinking"
@@ -2055,6 +2057,7 @@ class ConfigScreen(ModalBase):
 
     def __init__(self, path: Path | None, meta: BoardMeta, can_link: bool, settings: dict[str, str | None],
                  themes: list[str], pi_choices: tuple[str | None, list[str]],
+                 codex_choices: tuple[str | None, list[str]] | None = None,
                  remembered: dict[str, str] | None = None):
         super().__init__()
         self.path = path
@@ -2064,6 +2067,7 @@ class ConfigScreen(ModalBase):
         self.settings = dict(settings)
         self.themes = themes
         self.pi_choices = pi_choices
+        self.codex_choices = codex_choices if codex_choices is not None else (None, [])
         self.agent = settings["start_agent"]
         # The model that the Global tab shows, and the level that its Thinking field shows.
         self.model = settings["start_model"]
@@ -2100,8 +2104,8 @@ class ConfigScreen(ModalBase):
 
         The saved model stays an option for the saved agent, so a save of other settings keeps it.
         """
-        if agent == "pi":
-            default, models = self.pi_choices
+        if thinking_levels(agent):
+            default, models = self.codex_choices if agent == "codex" else self.pi_choices
             first = f"Agent default ({default})" if default else "Agent default"
         else:
             first, models = "Agent default", [model for model in ClaudeModelScreen.MODELS if model]
@@ -2132,7 +2136,9 @@ class ConfigScreen(ModalBase):
 
     def compose(self) -> ComposeResult:
         settings = self.settings
-        thinking = [("Agent default", "default"), *((level, level) for level in THINKING_LEVELS)]
+        levels = thinking_levels(self.agent) or THINKING_LEVELS
+        thinking = [("Agent default", "default"), *((level, level) for level in levels)]
+        level = settings["start_thinking"] if settings["start_thinking"] in levels else "default"
         with Vertical(classes="dialog card-form config"):
             yield RichStatic(Text("Herdboard config", style="bold"), id="config-heading")
             with TabbedContent(initial="config-global", id="config-tabs"):
@@ -2140,15 +2146,15 @@ class ConfigScreen(ModalBase):
                     with VerticalScroll(classes="config-pane", can_focus=False):
                         yield self._titled(Select([(name, name) for name in self.themes], value=settings["theme"],
                                                   allow_blank=False, id="config-theme"), "Theme")
-                        yield self._titled(Select([("claude", "claude"), ("pi", "pi")],
+                        yield self._titled(Select([(agent, agent) for agent in AGENTS],
                                                   value=settings["start_agent"], allow_blank=False,
                                                   id="config-agent"), "Agent")
                         yield self._titled(Select(self._model_options(self.agent),
                                                   value=settings["start_model"] or "default", allow_blank=False,
                                                   id="config-model"), "Model")
                         yield self._titled(Select(thinking, value=self._effective_thinking(),
-                                                  allow_blank=False, disabled=self.agent != "pi",
-                                                  id="config-thinking"), "Thinking (pi only)")
+                                                  allow_blank=False, disabled=not thinking_levels(self.agent),
+                                                  id="config-thinking"), "Thinking (pi, codex)")
                         yield self._titled(Select([("local: merge into the base branch", "local"),
                                                    ("pr: open a draft pull request", "pr")],
                                                   value=settings["merge"], allow_blank=False,
@@ -2204,10 +2210,15 @@ class ConfigScreen(ModalBase):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "config-agent" and event.value != self.agent:
-            # A new agent starts from its own default model. The thinking level stays for pi.
+            # An agent starts from its own default model and keeps only a valid thinking level.
             self.agent = event.value
             self.query_one("#config-model", Select).set_options(self._model_options(self.agent))
-            self.query_one("#config-thinking", Select).disabled = self.agent != "pi"
+            thinking = self.query_one("#config-thinking", Select)
+            value = thinking.value
+            levels = thinking_levels(self.agent) or THINKING_LEVELS
+            thinking.set_options([("Agent default", "default"), *((level, level) for level in levels)])
+            thinking.value = value if value in levels else "default"
+            thinking.disabled = not thinking_levels(self.agent)
         elif event.select.id == "config-model":
             # The level belongs to the model, so the field shows the level of the chosen one.
             self.model = event.value if event.value != "default" else None
@@ -3363,8 +3374,10 @@ class PullRequestsScreen(Screen):
             if kind == "claude":
                 self.app.push_screen(ClaudeModelScreen(),
                                      lambda choice: choice and self._review(pr.number, kind, choice[0], None))
-            elif kind == "pi":
-                self.app.push_screen(pi_model_screen(self.app.store.config),
+            elif thinking_levels(kind):
+                screen = (ModelScreen(*codex_model_choices(self.app.store.config), agent=kind)
+                          if kind == "codex" else pi_model_screen(self.app.store.config))
+                self.app.push_screen(screen,
                                      lambda choice: choice and self._review(pr.number, kind, *choice))
 
         self.app.push_screen(AgentScreen(f"Choose the reviewer of PR #{pr.number}"), chosen)
@@ -3411,7 +3424,7 @@ class PullRequestsScreen(Screen):
 
         def offer(result: dict) -> None:
             kind = result.get("agent")
-            if kind not in ("claude", "pi"):
+            if kind not in AGENTS:
                 return
             model = f" ({result['model']})" if result.get("model") else ""
             self.app.push_screen(
@@ -5177,7 +5190,9 @@ class HerdboardApp(App):
             if choice is not None:
                 self._agent_review(ref, reviewer, *choice, then_hunk)
 
-        self.push_screen(pi_model_screen(self.store.config), chosen)
+        screen = (ModelScreen(*codex_model_choices(self.store.config), agent=reviewer)
+                  if reviewer == "codex" else pi_model_screen(self.store.config))
+        self.push_screen(screen, chosen)
 
     def _agent_review(self, ref: str, reviewer: str, model: str | None, thinking: str | None,
                       then_hunk: bool) -> None:
@@ -5204,8 +5219,10 @@ class HerdboardApp(App):
         def chosen_agent(agent: str | None) -> None:
             if agent == "claude":
                 self.push_screen(ClaudeModelScreen(), lambda choice: choice and self._plan(ref, agent, choice[0], None))
-            elif agent == "pi":
-                self.push_screen(pi_model_screen(self.store.config),
+            elif thinking_levels(agent):
+                screen = (ModelScreen(*codex_model_choices(self.store.config), agent=agent)
+                          if agent == "codex" else pi_model_screen(self.store.config))
+                self.push_screen(screen,
                                  lambda choice: choice and self._plan(ref, agent, *choice))
 
         self.push_screen(AgentScreen("Choose the planner"), chosen_agent)
@@ -5335,15 +5352,17 @@ class HerdboardApp(App):
     def _chosen_agent(self, ref: str, agent: str | None) -> None:
         if agent is None:
             return
-        if agent != "pi":
+        if not thinking_levels(agent):
             self._start_card(ref, agent)
             return
 
         def chosen(choice: tuple[str | None, str | None] | None) -> None:
             if choice is not None:
-                self._start_card(ref, "pi", *choice)
+                self._start_card(ref, agent, *choice)
 
-        self.push_screen(pi_model_screen(self.store.config), chosen)
+        screen = (ModelScreen(*codex_model_choices(self.store.config), agent=agent)
+                  if agent == "codex" else pi_model_screen(self.store.config))
+        self.push_screen(screen, chosen)
 
     def action_detail(self) -> None:
         card = self.current_card()
@@ -5463,7 +5482,7 @@ class HerdboardApp(App):
         config = self.store.config
         settings = {key: getattr(config, key) for key in ConfigScreen.GLOBAL_KEYS}
         self.push_screen(ConfigScreen(path, meta, path is not None and self.resolve_link is not None, settings,
-                                      sorted(self.available_themes), pi_model_choices(config),
+                                      sorted(self.available_themes), pi_model_choices(config), codex_model_choices(config),
                                       remembered=config.thinking))
 
     def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],

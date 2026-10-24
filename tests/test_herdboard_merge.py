@@ -227,6 +227,16 @@ class OldRecordTests(MergeTestCase):
 
 
 class ConflictTests(MergeTestCase):
+    def test_a_restarted_codex_gets_its_config_thinking_level(self):
+        self.config.start_thinking = "ultra"
+        record = {"agent": "codex", "pane_id": "w9:p1"}
+        with patch.object(merge, "agent_live", return_value=False), \
+                patch.object(self.merger, "_move", return_value=self.card), \
+                patch.object(merge, "Starter") as starter:
+            self.merger._send_conflict(self.card, self.card.ref, self.card.ref, record, "main", ["a.py"])
+        args = starter.return_value.launch_agent.call_args.args
+        self.assertEqual((args[2], args[4]), ("codex", "ultra"))
+
     def setUp(self):
         super().setUp()
         self.commit(self.repo, "shared.txt", "one\n", "feat: shared")

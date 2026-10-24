@@ -759,6 +759,32 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
         self.assertFalse(app.config_file.exists())
 
+    async def test_codex_settings_offer_its_models_and_thinking(self):
+        from herdboard.config import CODEX_THINKING_LEVELS, PI_THINKING_LEVELS
+        app = self.make_app()
+        with mock.patch("herdboard.board.codex_model_choices", return_value=("gpt-6.1, high", ["gpt-6.1"])):
+            async with app.run_test(size=(80, 24)) as pilot:
+                await settle(pilot)
+                screen = await self.open_config(pilot)
+                screen.query_one("#config-agent").value = "codex"
+                await pilot.pause()
+                thinking = screen.query_one("#config-thinking")
+                self.assertFalse(thinking.disabled)
+                self.assertEqual(self.options(thinking), ["default", *CODEX_THINKING_LEVELS])
+                self.assertEqual(self.options(screen.query_one("#config-model")), ["default", "gpt-6.1"])
+                thinking.value = "ultra"
+                screen.query_one("#config-agent").value = "pi"
+                await pilot.pause()
+                self.assertEqual(self.options(thinking), ["default", *PI_THINKING_LEVELS])
+                self.assertEqual(thinking.value, "default")
+                screen.query_one("#config-agent").value = "codex"
+                await pilot.pause()
+                thinking.value = "ultra"
+                await pilot.press("ctrl+s")
+                await settle(pilot)
+        saved = load_config(app.config_file)
+        self.assertEqual((saved.start_agent, saved.start_thinking), ("codex", "ultra"))
+
     async def test_pi_models_come_from_the_start_model_choices(self):
         self.config.start_agent = "pi"
         self.config.start_model = "zai/glm-5.3"

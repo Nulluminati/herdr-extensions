@@ -11,6 +11,7 @@ from pathlib import Path
 import time
 
 from . import activity
+from .config import thinking_levels
 from .linear_cards import LINEAR_REF
 from .model import HerdboardError
 from .start import (NEW_REPO, REPOLESS, Starter, StartError, _lock, _read, _write, agent_live,
@@ -120,7 +121,7 @@ class Reviewer:
         if agent_live(record):
             return False
         kind = record.get("agent") or self.config.start_agent
-        thinking = self.config.start_thinking if kind == "pi" else None
+        thinking = self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None
         starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, self.config.start_model,
                              thinking, safe_key(key), persist, linear=card is None, note=REVIEW_NOTE,
                              log=activity.read(self.config, ref))

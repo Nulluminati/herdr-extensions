@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Herdr plugins for Claude Code and pi. One repository, one directory per plugin.
+Herdr plugins for Claude Code, pi and Codex. One repository, one directory per plugin.
 
 ## Layout
 
@@ -33,7 +33,7 @@ uv run python -m unittest discover -s tests
 
 ## Gotchas
 
-- Do not type prompts into a new agent pane. Text can land in a startup prompt, such as Claude's folder trust check. Pass the first message on the agent's command line.
+- Do not type prompts into a new agent pane. Text can land in a startup prompt, such as Claude's or Codex's folder trust check. Pass the first message on the agent's command line.
 - `herdr agent start` can report `agent_not_ready` or `timeout` for an agent that works: one blocked at a startup prompt, or one busy with its first message.
 - Claude's `--allowedTools` takes every value after it. Put a positional prompt before it.
 - The user's machine is linked to this checkout with `herdr plugin link`, so edits are live.

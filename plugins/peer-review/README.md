@@ -1,6 +1,6 @@
 # Peer review
 
-Have the other coding agent review your agent's work, inside Herdr. Claude's work goes to pi, and pi's work goes to Claude.
+Have a second coding agent review your agent's work inside Herdr. Claude's work goes to pi, pi's work goes to Codex, and Codex's work goes to Claude.
 
 The reviewer opens in a split next to your agent. It writes its findings to a file. Your agent then gets a prompt to read them, says for each finding whether it agrees or disagrees, and waits for you. Neither agent changes code. One request is one review round.
 
@@ -13,7 +13,7 @@ When there is nothing to review, or the branch has no upstream, the request fail
 
 ## Install
 
-Requirements: Herdr 0.9 or later, Python 3.11 or later, Claude Code and pi. The agent skill also needs `jq`.
+Requirements: Herdr 0.9 or later and Python 3.11 or later. Install the agents for your pairing: Claude Code, pi or Codex. The agent skill also needs `jq`.
 
 ```bash
 herdr plugin install Nulluminati/herdr-extensions/plugins/peer-review
@@ -40,7 +40,7 @@ description = "peer review: ask the other agent to review the focused agent's ch
 
 Do one of these:
 
-- Press the bound key in a Claude or pi pane.
+- Press the bound key in a Claude, pi or Codex pane.
 - Ask the agent for a review, for example "get a peer review from pi". The skill runs the request.
 
 The request returns at once. A background worker waits for the findings and then prompts your agent.
@@ -58,11 +58,12 @@ Each review has a folder, `~/.local/state/peer-review/<timestamp>/`:
 
 - pi runs with only the `read`, `grep`, `find`, `ls` and `write` tools. It cannot run commands or edit files. Its `write` tool is not limited to the review folder.
 - Claude runs in `dontAsk` mode. It can read and search, and it can edit only files in the review folder.
+- Codex runs with approvals set to `never`. Its permission profile reads the whole disk, writes only the review folder, and blocks network access. It has a shell, but the sandbox limits writes. The plugin supplies this profile for one run; it does not change your Codex config.
 
 ## Known limits
 
-- In a folder where no Claude ran before, Claude shows its folder trust prompt first. Answer it in the reviewer pane, and the review starts.
-- The focused pane must run Claude or pi, inside a Git repository.
+- Claude and Codex can show a folder trust prompt in an unfamiliar folder. Answer it in the reviewer pane to start the review.
+- The focused pane must run Claude, pi or Codex inside a Git repository.
 - `herdr plugin log list` shows the details of a failed request.
 
 ## Tests

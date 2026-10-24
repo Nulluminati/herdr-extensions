@@ -281,6 +281,21 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.service.review.assert_called_once_with(7, "claude", "sonnet", None)
         self.assertIn(("PR #7: claude (sonnet) reviews in workspace w9", None), self.notices)
 
+    async def test_R_with_codex_takes_its_model_and_thinking(self):
+        app = self.app()
+        with patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])):
+            async with app.run_test() as pilot:
+                await self.open(app, pilot)
+                await pilot.press("R")
+                await pilot.pause()
+                await pilot.press("down", "down", "enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ModelScreen)
+                app.screen.query_one("#thinking").value = "ultra"
+                await pilot.press("down", "enter")
+                await self.settle(app, pilot)
+        self.service.review.assert_called_once_with(7, "codex", "gpt-6.1", "ultra")
+
     async def test_R_with_pi_takes_its_model_and_thinking(self):
         app = self.app()
         with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
@@ -375,6 +390,18 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("y")
             await self.settle(app, pilot)
         self.service.review.assert_called_once_with(8, "pi", "zai/glm-5.3", "high")
+
+    async def test_refresh_offers_the_same_codex_reviewer(self):
+        self.service.refresh.return_value.update(agent="codex", model="gpt-6.1-sol", thinking="ultra")
+        app = self.app()
+        async with app.run_test() as pilot:
+            await self.open(app, pilot)
+            await pilot.press("j", "u")
+            await self.settle(app, pilot)
+            self.assertIsInstance(app.screen, ConfirmScreen)
+            await pilot.press("y")
+            await self.settle(app, pilot)
+        self.service.review.assert_called_once_with(8, "codex", "gpt-6.1-sol", "ultra")
 
     async def test_g_goes_to_the_workspace_and_errors_are_notices(self):
         self.service.go.side_effect = PrReviewError("Herdr has no open workspace", "workspace_closed")

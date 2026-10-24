@@ -16,11 +16,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 
 from . import attachments
 from .activity import LOG_REF
 from .brief import agent_message, brief_text, card_token
-from .config import THINKING_LEVELS, default_config_path
+from .config import AGENTS, default_config_path, thinking_levels
 from .identity import RepoIdentity, _canonical_identity, _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_pins import add_pin
@@ -182,11 +183,40 @@ def remembered_thinking(config, model: str | None) -> str | None:
     return config.thinking.get(agent_model(config, model) or "")
 
 
+def codex_model_choices(config) -> tuple[str | None, list[str]]:
+    """Codex's default model and effort, and its visible cached or configured models."""
+    folder = Path.home() / ".codex"
+    try:
+        settings = tomllib.loads((folder / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        settings = {}
+    default = settings.get("model")
+    if not isinstance(default, str) or not default:
+        default = None
+    elif isinstance(settings.get("model_reasoning_effort"), str):
+        default += f", {settings['model_reasoning_effort']}"
+    models = config.codex_models
+    if models is None:
+        try:
+            cache = json.loads((folder / "models_cache.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cache = {}
+        found = cache.get("models") if isinstance(cache, dict) else None
+        models = [entry["slug"] for entry in found
+                  if isinstance(entry, dict) and entry.get("visibility") == "list"
+                  and isinstance(entry.get("slug"), str) and entry["slug"]] if isinstance(found, list) else []
+    return default, list(models)
+
+
 def agent_arguments(agent: str, message: str, model: str | None, thinking: str | None) -> list[str]:
     """The agent's command-line arguments after Herdr's `--`."""
     if agent == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return [*options, "--", message]
+    if agent == "codex":
+        options = (["--model", model] if model else []) + (
+            ["-c", f'model_reasoning_effort="{thinking}"'] if thinking else [])
+        return [*options, message]
     # Claude takes its prompt first: options after it cannot swallow the prompt.
     return [message, *(["--model", model] if model else [])]
 
@@ -1152,17 +1182,20 @@ class Starter:
     def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None,
               base=None, no_repo=False, new_repo=None):
         agent = agent or self.config.start_agent
-        if agent not in ("claude", "pi"):
-            raise StartError("Agent must be claude or pi", "usage")
-        if thinking and agent != "pi":
-            raise StartError("--thinking works only with pi", "usage")
-        if thinking and thinking not in THINKING_LEVELS:
-            raise StartError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
+        if agent not in AGENTS:
+            raise StartError("Agent must be claude, pi or codex", "usage")
+        levels = thinking_levels(agent)
+        if thinking is not None and not levels:
+            raise StartError("--thinking works only with pi or codex", "usage")
+        if thinking is not None and thinking not in levels:
+            raise StartError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise StartError("The model must be one name, such as zai/glm-5.3", "usage")
         model = model or self.config.start_model
         if agent == "pi":
             thinking = thinking_level(self.config, model, thinking)
+        elif thinking is None and self.config.start_thinking in levels:
+            thinking = self.config.start_thinking
         state_path = state_dir() / "starts.json"
         issue = None
         if LINEAR_REF.match(ref):

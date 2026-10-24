@@ -14,7 +14,7 @@ from typing import Callable
 from . import activity, agent_review, attachments, plan, pr_reviews, pr_write
 from .agent_review import AgentReviewer
 from .plan import Planner
-from .config import THINKING_LEVELS, config_path, load_config
+from .config import AGENTS, THINKING_LEVELS, config_path, load_config, thinking_levels
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_links import LabelLink, ProjectLink, with_link
@@ -166,10 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("start", "start work on a card in Herdr")
     sub.add_argument("ref")
-    sub.add_argument("--agent", choices=["claude", "pi"])
+    sub.add_argument("--agent", choices=AGENTS)
     sub.add_argument("--no-agent", action="store_true")
     sub.add_argument("--model", help="the agent's model, such as openai-codex/gpt-6.1-sol or opus")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's or Codex's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--no-repo", action="store_true",
                      help="run the card in its own folder, without a repository; write the result as attachments")
@@ -180,9 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("plan", "plan a card with an agent in a tab in the card's worktree; the plan becomes the card's plan.md attachment")
     sub.add_argument("ref")
-    sub.add_argument("--agent", choices=["claude", "pi"])
+    sub.add_argument("--agent", choices=AGENTS)
     sub.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's or Codex's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--no-repo", action="store_true",
                      help="plan the card in its own folder, without a repository")
@@ -204,10 +204,10 @@ def build_parser() -> argparse.ArgumentParser:
                       help="have another agent review the work; the card's agent gets the findings")
     kind.add_argument("--both", dest="kind", action="store_const", const="both",
                       help="an agent review first, then Hunk")
-    sub.add_argument("--reviewer", choices=["claude", "pi"],
-                     help="the reviewing agent; default: the other kind than the card's agent")
+    sub.add_argument("--reviewer", choices=AGENTS,
+                     help="the reviewing agent; default rotation: claude to pi, pi to codex, codex to claude")
     sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi reviewer's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi or Codex reviewer's thinking level")
 
     sub = command("review-wait", "wait for an agent review and deliver it (run by review --agent)")
     sub.add_argument("ref")
@@ -245,9 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("pr-review", "have an agent review a pull request in its own workspace, with notes in Hunk")
     sub.add_argument("number", type=int)
-    sub.add_argument("--agent", choices=["claude", "pi"], help="the reviewer; default: start_agent")
+    sub.add_argument("--agent", choices=AGENTS, help="the reviewer; default: start_agent")
     sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi reviewer's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi or Codex reviewer's thinking level")
 
     sub = command("pr-review-wait", "wait for a pull request reviewer and notify (run by pr-review)")
     sub.add_argument("key", help="owner/repo#N")
@@ -960,7 +960,9 @@ def _cmd_pr_review(ctx: _Context) -> dict:
     args, config = ctx.args, ctx.config
     kind = args.agent or config.start_agent
     model = args.model or (config.start_model if kind == config.start_agent else None)
-    thinking = args.thinking or (start_module.thinking_level(config, model) if kind == "pi" else None)
+    thinking = args.thinking if args.thinking is not None else (
+        start_module.thinking_level(config, model) if kind == "pi" else
+        config.start_thinking if config.start_thinking in thinking_levels(kind) else None)
     checkout, repo = _pr_target(ctx)
     return pr_reviews.request(checkout, repo, args.number, kind, model, thinking)
 

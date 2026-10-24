@@ -69,6 +69,44 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.callback.assert_called_with(self.card.ref, "pi")
 
+    async def test_codex_start_plan_and_review_use_codex_models(self):
+        from herdboard.config import CODEX_THINKING_LEVELS
+        from textual.widgets import OptionList, Select
+        from herdboard.board import AGENT_LOGOS
+        self.assertEqual(AGENT_LOGOS.get("codex"), "\ue1a1")
+        for action in ("start", "plan", "review"):
+            with self.subTest(action=action), patch("herdboard.board.codex_model_choices",
+                    return_value=("gpt-6.1, high", ["gpt-6.1"])):
+                app = self.app()
+                async with app.run_test() as pilot:
+                    if action == "start":
+                        await pilot.press("S")
+                    elif action == "plan":
+                        app.action_plan()
+                    else:
+                        app._chosen_reviewer(self.card.ref, "codex", False)
+                    await pilot.pause()
+                    if action != "review":
+                        choices = app.screen.query_one(OptionList)
+                        self.assertEqual(choices.option_count, 3)
+                        await pilot.press("down", "down", "enter")
+                        await pilot.pause()
+                    self.assertIsInstance(app.screen, ModelScreen)
+                    self.assertEqual(app.screen.labels, ["codex default (gpt-6.1, high)", "gpt-6.1"])
+                    thinking = app.screen.query_one("#thinking", Select)
+                    self.assertEqual([value for _, value in thinking._options], ["default", *CODEX_THINKING_LEVELS])
+                    thinking.value = "ultra"
+                    await pilot.press("down", "enter")
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
+                if action == "start":
+                    self.callback.assert_called_with(self.card.ref, "codex", model="gpt-6.1", thinking="ultra")
+                elif action == "plan":
+                    self.plan.assert_called_with(self.card.ref, agent="codex", model="gpt-6.1", thinking="ultra")
+                else:
+                    self.agent_review.assert_called_with(self.card.ref, reviewer="codex", model="gpt-6.1",
+                                                         thinking="ultra", then_hunk=False)
+
     async def test_choose_a_pi_model_and_thinking_level(self):
         app = self.app()
         with patch("herdboard.board.pi_model_choices", return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3", "openai-codex/gpt-6-sol"])):

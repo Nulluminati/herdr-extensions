@@ -42,7 +42,7 @@ class StartCliTests(unittest.TestCase):
             load_config(self.config)
 
     def test_config_errors(self):
-        for text in ('start_agent = "codex"', 'start_agent = 2', 'start_column = ""', 'start_column = []'):
+        for text in ('start_agent = "unsupported"', 'start_agent = 2', 'start_column = ""', 'start_column = []'):
             with self.subTest(text=text):
                 self.config.write_text(text)
                 with self.assertRaises(HerdboardError):
@@ -60,6 +60,31 @@ class StartCliTests(unittest.TestCase):
                 self.config.write_text(text)
                 with self.assertRaises(HerdboardError):
                     load_config(self.config)
+
+    def test_cli_accepts_codex_for_all_agent_roles(self):
+        parser = cli.build_parser()
+        for command in (["start", "t123", "--agent", "codex"],
+                        ["plan", "t123", "--agent", "codex"],
+                        ["review", "t123", "--agent", "--reviewer", "codex"],
+                        ["pr-review", "123", "--agent", "codex"]):
+            with self.subTest(command=command):
+                args = parser.parse_args([*command, "--thinking", "ultra"])
+                self.assertEqual(args.thinking, "ultra")
+
+    def test_pr_review_filters_config_thinking_for_the_agent(self):
+        from types import SimpleNamespace
+        from herdboard.config import Config
+        config = Config()
+        for kind, level, expected in (("codex", "ultra", "ultra"), ("codex", "off", None),
+                                      ("pi", "ultra", None), ("claude", "high", None)):
+            with self.subTest(kind=kind, level=level):
+                config.start_thinking = level
+                args = SimpleNamespace(agent=kind, model=None, thinking=None, number=42)
+                ctx = SimpleNamespace(args=args, config=config)
+                with patch.object(cli, "_pr_target", return_value=(self.root, "owner/repo")), \
+                        patch.object(cli.pr_reviews, "request") as request:
+                    cli._cmd_pr_review(ctx)
+                self.assertEqual(request.call_args.args[-1], expected)
 
     def test_cli_passes_model_and_thinking(self):
         out = io.StringIO()

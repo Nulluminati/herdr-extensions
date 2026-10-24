@@ -111,13 +111,23 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(len(reviews), 1)
         return reviews[0]
 
-    def test_claude_and_pi_review_each_other(self):
+    def test_agent_reviewer_rotation(self):
         self.assertEqual(peer_review.reviewer_for("claude"), "pi")
-        self.assertEqual(peer_review.reviewer_for("pi"), "claude")
+        self.assertEqual(peer_review.reviewer_for("pi"), "codex")
+        self.assertEqual(peer_review.reviewer_for("codex"), "claude")
+
+    def test_codex_review_profile_quotes_the_folder(self):
+        import tomllib
+        folder = Path('/reviews/a"b\\c')
+        args = peer_review.reviewer_arguments("codex", folder)
+        self.assertEqual(args[:4], ["-a", "never", "-c", 'default_permissions="hb-review"'])
+        self.assertEqual(tomllib.loads(args[5])["permissions"]["hb-review"]["filesystem"],
+                         {":root": "read", str(folder): "write"})
+        self.assertIn(str(folder / "request.md"), args[-1])
 
     def test_other_agents_are_rejected(self):
-        with self.assertRaisesRegex(peer_review.ReviewError, "codex"):
-            peer_review.reviewer_for("codex")
+        with self.assertRaisesRegex(peer_review.ReviewError, "unsupported"):
+            peer_review.reviewer_for("unsupported")
 
     def test_request_writes_diff_and_untracked_files(self):
         (self.repository / "app.py").write_text("print('two')\n")
@@ -151,8 +161,18 @@ class PeerReviewTests(unittest.TestCase):
         self.assertIn(str(review / "request.md"), prompt)
         self.assertIn(str(review / "findings.md"), prompt)
 
-    def test_claude_reviewer_may_only_write_inside_the_review(self):
+    def test_pi_request_starts_a_sandboxed_codex_reviewer(self):
         self.agents["w1:p1"]["agent"] = "pi"
+        (self.repository / "app.py").write_text("print('two')\n")
+        status, _ = self.run_request()
+        self.assertEqual(status, 0)
+        review = self.only_review()
+        call = next(argv for argv in self.calls if argv[:3] == ["herdr", "agent", "start"])
+        self.assertEqual(call[call.index("--kind") + 1], "codex")
+        self.assertEqual(call[call.index("--") + 1:], peer_review.reviewer_arguments("codex", review))
+
+    def test_claude_reviewer_may_only_write_inside_the_review(self):
+        self.agents["w1:p1"]["agent"] = "codex"
         (self.repository / "app.py").write_text("print('two')\n")
 
         self.run_request()

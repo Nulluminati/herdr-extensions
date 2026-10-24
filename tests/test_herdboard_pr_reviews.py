@@ -349,6 +349,18 @@ class HunkTests(PrReviewTestCase):
 
 
 class ReviewerTests(PrReviewTestCase):
+    def test_codex_pr_reviewer_is_read_only_with_network(self):
+        args = pr_reviews.reviewer_arguments("codex", "task", "gpt-6.1", "ultra")
+        self.assertEqual(args, ["-a", "never", "-c", 'default_permissions="hb-pr-review"',
+                                "-c", 'permissions.hb-pr-review.filesystem={":root"="read"}',
+                                "-c", 'permissions.hb-pr-review.network={enabled=true}',
+                                "--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertEqual(pr_reviews.AUTHORS["codex"], "Codex")
+        pr_reviews._validate("codex", None, "ultra")
+        with self.assertRaises(pr_reviews.PrReviewError) as raised:
+            pr_reviews._validate("codex", None, "off")
+        self.assertEqual(raised.exception.code, "usage")
+
     def test_claude_gets_the_prompt_before_its_allowed_tools(self):
         arguments = pr_reviews.reviewer_arguments("claude", "Read it", "sonnet", None)
         self.assertEqual(arguments[0], "Read it")

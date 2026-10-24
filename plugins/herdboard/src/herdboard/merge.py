@@ -17,6 +17,7 @@ import subprocess
 import time
 
 from . import activity, pr_write
+from .config import thinking_levels
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
 from .model import HerdboardError
@@ -197,7 +198,7 @@ class Merger:
             kind = record.get("agent") or self.config.start_agent
             Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file).launch_agent(
                 card, record, kind, self.config.start_model,
-                self.config.start_thinking if kind == "pi" else None, safe_key(key),
+                self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None, safe_key(key),
                 lambda: self._persist(key, record), linear=card.source == "linear", note=text,
                 log=activity.read(self.config, ref))
         activity.append(self.store, ref, f"Rebase conflict in {names}. Sent to the agent.", "herdboard")
