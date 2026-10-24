@@ -4552,6 +4552,9 @@ class HerdboardApp(App):
         the cards that the change names. A change that names no card runs at once."""
         refs = frozenset(refs)
         busy = self._busy(refs)
+        # A dialog stays open until its save ends: a second save from it would write the change twice.
+        if add is not None and any(job.add_screen is add for job in self.jobs.values()):
+            busy = "Busy: the dialog is still saving"
         if busy:
             self.notify(busy, severity="warning")
             return False

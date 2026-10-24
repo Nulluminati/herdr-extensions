@@ -1108,6 +1108,20 @@ class BusyTests(BoardTestCase):
             await settle(pilot)
             self.assertEqual(self.refs(self.repo_path)["m"][1], "Todo")
 
+    async def test_a_second_save_of_the_add_dialog_while_it_saves_adds_once(self):
+        self.store.lock_timeout = 2.0
+        app = self.make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("a")
+            with HeldLock(self.store.lock_path):
+                await fill(pilot, "once", submit=False)
+                await pilot.press("enter")
+                await pilot.press("enter")
+                self.assertIn("Busy: the dialog is still saving", [n.message for n in app._notifications])
+            await settle(pilot)
+        self.assertEqual([c.title for c in self.store.list_cards([self.repo_path])], ["once"])
+
 
 class ErrorTests(BoardTestCase):
     def notifications(self, app):

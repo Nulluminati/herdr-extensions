@@ -576,6 +576,45 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.show(card.ref).column, "In progress")
         self.assertEqual(start._read(start.state_dir() / "starts.json")[card.ref]["repository"], repo_identity(repo).identity)
 
+    async def test_real_starts_of_two_cards_run_at_the_same_time(self):
+        from herdboard import start
+        from herdboard.identity import repo_identity
+        from test_herdboard_start import FakeHerdr
+        repo = self.path.parent / "repo"
+        repo.mkdir()
+        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"]):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        board = self.store.init_board(repo_identity(repo))
+        first = self.store.add(board, "First start")
+        second = self.store.add(board, "Second start")
+        start.register_checkout(repo)
+        fake = FakeHerdr(repo.parent)
+        # Each start waits at its worktree until the other start reaches its own: they must overlap.
+        both = threading.Barrier(2, timeout=10)
+        lock = threading.Lock()
+        def runner(argv, timeout=120):
+            if argv[1:3] == ["worktree", "create"]:
+                both.wait()
+            with lock:
+                return fake(argv, timeout)
+        app = HerdboardApp(self.store, "repo", lambda _: [board], directory=repo, repo_board=board, reload_interval=60)
+        app.animation_level = "none"
+        notices = []
+        app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
+        with patch.object(start, "command", runner):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app._start_card(first.ref, None)
+                app._start_card(second.ref, None)
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+        self.assertEqual([n for n in notices if n[1] in ("error", "warning")], [])
+        self.assertEqual(self.store.show(first.ref).column, "In progress")
+        self.assertEqual(self.store.show(second.ref).column, "In progress")
+        records = start._read(start.state_dir() / "starts.json")
+        self.assertIn(first.ref, records)
+        self.assertIn(second.ref, records)
+
     async def test_mark_removed_runs_off_event_loop(self):
         from herdboard import board
         threads = []
