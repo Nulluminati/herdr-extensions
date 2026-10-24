@@ -961,6 +961,62 @@ class ColumnOrderTests(BoardTestCase):
             self.assertEqual([c.name for c in app.columns], order)
 
 
+class TriageColumnTests(BoardTestCase):
+    def add_triage_column(self, *lines):
+        text = self.repo_path.read_text()
+        cards = "".join(f"{line}\n" for line in lines)
+        self.repo_path.write_text(text.replace("## Backlog\n", f"## Triage\n\n{cards}\n## Backlog\n", 1))
+
+    async def test_an_empty_triage_column_is_hidden(self):
+        self.add_triage_column()
+        app = self.make_app("repo")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertEqual([h.split()[0] for h in self.headers(app)],
+                             ["Backlog", "Todo", "In", "Review", "Done"])
+            self.assertNotIn("Triage", [c.name for c in app.columns])
+
+    async def test_a_triage_card_shows_the_column_first(self):
+        self.add_triage_column("- [ ] harness bug")
+        app = self.make_app("repo")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertEqual([h.split()[0] for h in self.headers(app)][0], "Triage")
+            self.assertEqual(app.columns[0].name, "Triage")
+
+    async def test_the_filter_does_not_hide_the_triage_column(self):
+        self.add_triage_column("- [ ] harness bug")
+        app = self.make_app("repo")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await app._apply_filter("zzz")
+            await pilot.pause()
+            self.assertEqual(app.columns[0].name, "Triage")
+            self.assertEqual(app.columns[0].cards, [])
+
+    async def test_triage_comes_first_in_the_all_view(self):
+        self.add_triage_column("- [ ] harness bug")
+        app = self.make_app("all")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            names = [c.name for c in app.columns]
+            self.assertEqual(names[0], "Triage")
+            self.assertLess(names.index("Triage"), names.index("Done"))
+
+    async def test_the_column_goes_when_its_last_card_leaves(self):
+        self.add_triage_column("- [ ] harness bug")
+        app = self.make_app("repo")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.columns[0].name, "Triage")
+            await pilot.press("L")
+            await settle(pilot)
+            self.assertEqual([c.name for c in app.columns][0], "Backlog")
+            self.assertEqual([c.title for c in app.columns[0].cards][-1], "harness bug")
+            self.assertLess(app.col, len(app.columns))
+            self.assertIsNotNone(app.current_card())
+
+
 class AddDialogTests(BoardTestCase):
     async def test_add_with_tags_date_and_details(self):
         app = self.make_app()

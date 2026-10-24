@@ -39,7 +39,7 @@ from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
 from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_writes import LinearWriter
-from .model import HerdboardError, join_title, parse_tags, plain_tags, split_title
+from .model import HerdboardError, is_triage, join_title, parse_tags, plain_tags, split_title
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import agent_states
 from . import start as start_module
@@ -4184,6 +4184,11 @@ class HerdboardApp(App):
             wanted = [name.casefold() for name in self.store.config.columns]
             ordered = [by_key[key] for key in wanted if key in by_key]
             ordered += [data for key, data in by_key.items() if key not in wanted]
+        # The triage column always comes first, wherever its file or the config puts it.
+        ordered.sort(key=lambda data: not is_triage(data.name))
+        # A triage column with no cards is hidden. The count is before the filter, so a
+        # filter neither hides nor shows it.
+        ordered = [data for data in ordered if not (is_triage(data.name) and not data.cards)]
         # The archive column is last, apart from a column with the same name.
         if self.show_archive:
             ordered.append(archive)

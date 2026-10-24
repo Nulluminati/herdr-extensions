@@ -92,6 +92,18 @@ class ImportTests(StoreTestCase):
         new_ids = ID.findall(path.read_text())  # includes the archive card
         self.assertEqual(len(set(new_ids)), 7)
 
+    def test_open_items_go_to_the_first_non_triage_column(self):
+        path = self.put("acme-api", repo_board(
+            col("Triage"),
+            col("Backlog", "- [ ] first ^taaa"),
+            col("Done", "**Complete**"),
+        ))
+        self.store.import_cards(items("- [ ] fresh\n- [x] finished\n"), identity=IDENTITY)
+        board = kanban_md.parse(path.read_text())
+        self.assertEqual([c.title for c in board.column("Triage").cards], [])
+        self.assertEqual([c.title for c in board.column("Backlog").cards], ["first", "fresh"])
+        self.assertEqual([c.title for c in board.column("Done").cards], ["finished"])
+
     def test_existing_cards_keep_their_bytes_when_all_have_ids(self):
         before = repo_board(
             col("Todo", "- [ ] one ^t111", "- [ ] two #tag 📅 2026-01-02 ^t222", "\tbody line"),

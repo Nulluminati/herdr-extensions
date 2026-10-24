@@ -71,6 +71,13 @@ class CommandTests(CliTestCase):
         self.assertTrue(card["path"].endswith("inbox.md"))
         self.assertNotIn("hint", data)
 
+    def test_add_to_triage_creates_the_column(self):
+        card = self.run_json("add", "harness bug", "--column", "Triage", directory=self.plain)["card"]
+        self.assertEqual((card["board"], card["column"]), ("inbox", "Triage"))
+        data = self.run_json("list", directory=self.plain)
+        self.assertEqual([c["title"] for c in data["boards"][0]["columns"]],
+                         ["Triage", "Backlog", "Todo", "In progress", "Review", "Done"])
+
     def test_add_with_body(self):
         card = self.run_json("add", "notes", "--body", "line one\nline two\n")["card"]
         self.assertEqual(card["body"], ["\tline one", "\tline two"])

@@ -139,6 +139,17 @@ The keys stay the main input. Each mouse action runs an action that a key also r
 
 In a view with several boards, columns with the same name merge. Each card keeps its own board, so a move writes to the correct file.
 
+### Triage
+
+Triage is the column where a new report lands before you sort it. Agents use it to file harness problems and project bugs.
+
+- Triage is the first column of the board. It does not show while it has no cards: herdboard hides it, then shows it again as soon as a card lands there.
+- A plain `add` skips Triage. The card goes to the first column that is not Triage, normally Backlog.
+- `herdboard add "Report" --column Triage`, `herdboard move <id> Triage`, and `H`/`L` into the Triage column file the card there. A board without the column gets it first, then the card. Any other unknown column name still fails with `not_found`.
+- A card moved to another board with `b` keeps its column name. A card that leaves Triage lands in the Triage column of the new board, which gets one when it has none.
+- New boards do not get a Triage column. It appears the first time a card needs it.
+- The Linear state type `triage` still maps to Backlog. A Linear issue cannot move to a column without a state.
+
 ### Card types
 
 A card can have one type, such as bug or feature. The type is an Obsidian nested tag on the first line: `#type/bug`. Obsidian shows it as a tag.

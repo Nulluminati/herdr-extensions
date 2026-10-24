@@ -13,6 +13,8 @@ import re
 
 
 CARD_START = re.compile(r"^- \[(?P<check>.)\] ")
+# The column that a new report lands in, before it is sorted: created on first use, on any board.
+TRIAGE_COLUMN = "Triage"
 BLOCK_ID = re.compile(r" \^(?P<id>[A-Za-z0-9-]+)$")
 DUE_DATE = re.compile(r"📅 (?P<date>\d{4}-\d{2}-\d{2})")
 TAG = re.compile(r"(?<!\S)#(?P<tag>[^\s#]+)")
@@ -197,6 +199,11 @@ class Board:
             if column.title.casefold() == title.casefold():
                 return column
         raise NotFoundError(f"No column named {title!r}")
+
+
+def is_triage(title: str) -> bool:
+    """True for the title of the triage column, in any case."""
+    return title.casefold() == TRIAGE_COLUMN.casefold()
 
 
 def frontmatter_scalars(lines: list[str]) -> dict[str, str]:

@@ -856,6 +856,69 @@ class WriteTest(StoreTestCase):
         self.assertTrue(self.store.done("tabc").checked)
 
 
+class TriageColumnTests(StoreTestCase):
+    def test_add_to_triage_inserts_the_column_first(self):
+        path = self.put("p", BASIC.replace("- [ ] one", "- [ ] one ^taaa").replace(
+            "- [ ] two #tag 📅 2026-01-02", "- [ ] two #tag 📅 2026-01-02 ^tbbb").replace(
+            "- [x] four", "- [x] four ^tccc"))
+        before = path.read_text()
+        view = self.store.add(path, "report the crash", column="Triage")
+        self.assertEqual((view.column, view.title), ("Triage", "report the crash"))
+        board = kanban_md.parse(path.read_text())
+        self.assertEqual([c.title for c in board.columns], ["Triage", "Todo", "Doing", "Done"])
+        self.assertEqual([c.title for c in board.column("Triage").cards], ["report the crash"])
+        # The other columns keep their bytes apart from the card that gained an ID.
+        after = path.read_text()
+        kept = [line for line in after.split("\n") if not line.startswith("- [ ] report the crash")]
+        expected = [line for line in before.split("\n")]
+        self.assertEqual([line for line in kept if line != "## Triage" and line.strip()],
+                         [line for line in expected if line.strip()])
+
+    def test_add_to_triage_uses_the_existing_column_in_any_case(self):
+        path = self.put("p", board_text(col("Triage"), col("Todo")))
+        view = self.store.add(path, "report", column="triage")
+        self.assertEqual(view.column, "Triage")
+        board = kanban_md.parse(path.read_text())
+        self.assertEqual([c.title for c in board.columns], ["Triage", "Todo"])
+
+    def test_add_without_a_column_skips_triage(self):
+        path = self.put("p", board_text(col("Triage"), col("Backlog"), col("Done", "**Complete**")))
+        view = self.store.add(path, "later")
+        self.assertEqual(view.column, "Backlog")
+
+    def test_move_to_triage_creates_the_column(self):
+        path = self.put("p", BASIC)
+        view = self.store.move("tabc", "Triage")
+        self.assertEqual(view.column, "Triage")
+        self.assertEqual([c.title for c in kanban_md.parse(path.read_text()).columns][0], "Triage")
+
+    def test_move_to_an_unknown_column_still_fails(self):
+        path = self.put("p", BASIC)
+        before = path.read_text()
+        with self.assertRaises(NotFoundError):
+            self.store.move("tabc", "Nonsense")
+        self.assertEqual(path.read_text(), before)
+
+    def test_move_to_another_board_from_triage_creates_triage_there(self):
+        self.put("p", board_text(col("Triage", "- [ ] sent ^tabc"), col("Todo")))
+        target = self.put("q", board_text(col("Backlog"), col("Done", "**Complete**")))
+        moved = self.store.move_to_board("tabc", target)
+        self.assertEqual((moved.board, moved.column), ("q", "Triage"))
+        self.assertEqual([c.title for c in kanban_md.parse(target.read_text()).columns],
+                         ["Triage", "Backlog", "Done"])
+
+    def test_move_to_another_board_from_backlog_skips_triage(self):
+        self.put("p", BASIC)
+        target = self.put("q", board_text(col("Triage"), col("Todo"), col("Doing")))
+        self.assertEqual(self.store.move_to_board("tabc", target).column, "Doing")
+
+    def test_move_to_another_board_and_column_creates_triage(self):
+        self.put("p", BASIC)
+        target = self.put("q", board_text(col("Todo")))
+        moved = self.store.move_to_board("tabc", target, "Triage")
+        self.assertEqual(moved.column, "Triage")
+
+
 class SnapshotTests(StoreTestCase):
     def test_snapshot_gives_columns_in_file_order_with_cards(self):
         path = self.put("proj", BASIC)

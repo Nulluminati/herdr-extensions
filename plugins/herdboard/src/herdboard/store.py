@@ -24,6 +24,7 @@ from .identity import RepoIdentity, find_board, new_board_path, same_repo
 from .model import (
     BLOCK_ID,
     PARENT_LINK,
+    TRIAGE_COLUMN,
     ArchivedError,
     Board,
     Card,
@@ -37,6 +38,7 @@ from .model import (
     NotFoundError,
     ParentError,
     card_type,
+    is_triage,
     parent_of,
     plain_tags,
     with_parent,
@@ -398,7 +400,7 @@ class Store:
         except HerdboardError as problem:
             done_title, error = None, str(problem)
         return ImportTarget(path, identity if board is None else None, True,
-                            parsed.columns[0].title, done_title, error)
+                            self._default_column(parsed, path).title, done_title, error)
 
     def import_cards(
         self, items: list[Item], path: Path | None = None, identity: RepoIdentity | None = None
@@ -426,8 +428,9 @@ class Store:
             if not board.columns:
                 raise HerdboardError(f"{path}: board has no columns")
             done = self._done_column(board, path) if any(i.checked for i in items) else None
+            open_column = self._default_column(board, path)
             for item in items:
-                column = done if item.checked else board.columns[0]
+                column = done if item.checked else open_column
                 kanban_md.insert_card(column, Card(item.card_lines()), "bottom")
             self._assign_ids(path, board)
             self._write(path, board)
@@ -691,6 +694,27 @@ class Store:
         """True when a `**<marker>**` line marks the column complete."""
         return column.has_marker(["Complete", *self.config.complete_markers])
 
+    def _default_column(self, board: Board, path: Path) -> Column:
+        """The column for a card that names none: the first one that is not the triage column."""
+        column = next((c for c in board.columns if not is_triage(c.title)), None)
+        if column is None:
+            raise HerdboardError(f"{path}: board has no columns")
+        return column
+
+    def _target_column(self, board: Board, title: str) -> Column:
+        """The column named `title`. The triage column is added first on a board that has none.
+
+        Only the triage column is made on demand; any other unknown name raises like `Board.column`.
+        """
+        try:
+            return board.column(title)
+        except NotFoundError:
+            if not is_triage(title):
+                raise
+        column = Column(f"## {TRIAGE_COLUMN}", ["", "", ""])
+        board.columns.insert(0, column)
+        return column
+
     def _done_column(self, board: Board, path: Path) -> Column:
         column = next((c for c in board.columns if self._is_completed(c)), None)
         if column is None:
@@ -721,7 +745,7 @@ class Store:
 
     def move(self, ref: str, column: str, position: str = "bottom") -> CardView:
         def change(board, path, source, card):
-            return self._move_card(source, card, board.column(column), position)
+            return self._move_card(source, card, self._target_column(board, column), position)
 
         return self._modify(ref, change)
 
@@ -770,9 +794,11 @@ class Store:
         """Move a todo, with its indented lines and its ID, to another board.
 
         Without `column`, the card keeps its column name when the target board has
-        it, else it goes to the target's first column. The target file is written
-        before the source file, so a failure between the two leaves the card on
-        both boards (`doctor` reports the duplicate ID) instead of on neither.
+        it, else it goes to the target's default column. A card that leaves the
+        triage column lands in the target's triage column, which that board gains
+        when it has none. The target file is written before the source file, so a
+        failure between the two leaves the card on both boards (`doctor` reports the
+        duplicate ID) instead of on neither.
         """
         located = self._resolve(ref)
         source = located.path
@@ -789,14 +815,14 @@ class Store:
             destination = self._read(target)
             self._require_writable(target, destination)
             if column is not None:
-                new_column = destination.column(column)
+                new_column = self._target_column(destination, column)
+            elif is_triage(old_column.title):
+                new_column = self._target_column(destination, TRIAGE_COLUMN)
             else:
                 new_column = next(
                     (c for c in destination.columns if c.title.casefold() == old_column.title.casefold()),
-                    destination.columns[0] if destination.columns else None,
-                )
-                if new_column is None:
-                    raise HerdboardError(f"{target}: board has no columns")
+                    None,
+                ) or self._default_column(destination, target)
             # One set of used IDs for both boards: neither file has the other's new IDs yet.
             taken = _all_ids(destination)
             self._assign_ids(source, board, taken)
@@ -1126,11 +1152,9 @@ class Store:
             board = self._read(path)
             self._require_writable(path, board)
             if column is None:
-                if not board.columns:
-                    raise HerdboardError(f"{path}: board has no columns")
-                target = board.columns[0]
+                target = self._default_column(board, path)
             else:
-                target = board.column(column)
+                target = self._target_column(board, column)
             self._assign_ids(path, board)
             if parent is not None:
                 self._check_parent(board, path, parent, None)
