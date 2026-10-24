@@ -1124,6 +1124,31 @@ class BusyTests(BoardTestCase):
             await settle(pilot)
         self.assertEqual([c.title for c in self.store.list_cards([self.repo_path])], ["once"])
 
+    async def test_a_save_that_ends_under_another_dialog_keeps_that_dialog(self):
+        self.store.lock_timeout = 2.0
+        app = self.make_app()
+        answers = []
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await pilot.press("a")
+            form = app.screen
+            with HeldLock(self.store.lock_path):
+                await fill(pilot, "under", submit=False)
+                await pilot.press("enter")
+                # Another job's question opens over the form while the form still saves.
+                question = ConfirmScreen("Another job asks", "Answer it")
+                app.push_screen(question, answers.append)
+                await pilot.pause()
+            await settle(pilot)
+            self.assertIs(app.screen, question)
+            self.assertIn(form, app.screen_stack)
+            question.dismiss(True)
+            await settle(pilot)
+            self.assertEqual(answers, [True])
+            self.assertNotIn(form, app.screen_stack)
+            self.assertIsNot(app.screen, question)
+        self.assertEqual([c.title for c in self.store.list_cards([self.repo_path])], ["under"])
+
 
 class ErrorTests(BoardTestCase):
     def notifications(self, app):

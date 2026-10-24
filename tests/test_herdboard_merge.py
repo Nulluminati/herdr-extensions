@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import sys
 import unittest
 from pathlib import Path
@@ -152,6 +153,44 @@ class MergeLocalTests(MergeTestCase):
             self.merger.merge(self.card.ref)
         self.assertEqual(raised.exception.code, "base_dirty")
         self.assertEqual(self.git(self.worktree, "rev-parse", "HEAD"), head)
+
+    def test_two_cards_of_one_repository_merge_at_the_same_time(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        other = self.store.add(self.board, "Fix logout")
+        other_worktree = Path(self.starter.start(other.ref, agent="pi")["worktree_path"])
+        self.commit(other_worktree, "b.txt", "b\n", "feat: b")
+        # After its rebase, each merge waits for the other merge's rebase. Without a lock around the
+        # rebase and the fast-forward, both branches rebase onto the old base and one fast-forward fails.
+        both = threading.Barrier(2, timeout=1)
+        original = merge._git
+
+        def git(directory, *args, **kwargs):
+            result = original(directory, *args, **kwargs)
+            if args[:1] == ("rebase",) and len(args) == 2:
+                try:
+                    both.wait()
+                except threading.BrokenBarrierError:
+                    pass
+            return result
+
+        errors = []
+
+        def run(ref):
+            try:
+                merge.Merger(self.store, self.repo).merge(ref)
+            except Exception as error:
+                errors.append(error)
+
+        with patch.object(merge, "_git", git):
+            threads = [threading.Thread(target=run, args=(ref,)) for ref in (self.card.ref, other.ref)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+        self.assertEqual(errors, [])
+        self.assertTrue((self.repo / "a.txt").exists())
+        self.assertTrue((self.repo / "b.txt").exists())
 
     def test_a_failed_fast_forward_changes_nothing_on_the_card(self):
         self.started()

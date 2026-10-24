@@ -27,6 +27,8 @@ from .start import (NEW_REPO, REPOLESS, Starter, StartError, _lock, _read, _writ
 
 # The board reads the state of an open pull request at most this often.
 PR_CHECK_SECONDS = 60
+# How long a local merge waits for another local merge into the same repository.
+MERGE_WAIT_SECONDS = 60
 
 
 class MergeError(HerdboardError):
@@ -263,25 +265,28 @@ class Merger:
         return {"pr_url": url, "pr_action": "writing", **written}
 
     def _merge_local(self, card, ref, key, record, worktree, checkout, branch, base):
-        target = checkout_of(checkout, base)
-        if target is not None and _dirty(target, untracked=False):
-            raise MergeError(f"{target} has uncommitted changes on {base}. Commit or stash them first.",
-                             "base_dirty")
-        old = _commit(checkout, base)
-        if _git(worktree, "rebase", base).returncode:
-            conflicted = _git(worktree, "diff", "--name-only", "--diff-filter=U").stdout.split()
-            _git(worktree, "rebase", "--abort")
-            self._send_conflict(card, ref, key, record, base, conflicted)
-            raise MergeError(f"Rebase of {branch} onto {base} conflicts in {', '.join(conflicted)}. "
-                             "The card's agent has the conflict.", "rebase_conflict", exit_code=2)
-        head = _commit(worktree, "HEAD")
-        if target is not None:
-            result = _git(target, "merge", "--ff-only", "--quiet", branch)
-        else:
-            # The old value makes Git refuse the update if the base moved after the rebase.
-            result = _git(checkout, "update-ref", f"refs/heads/{base}", head, old)
-        if result.returncode:
-            raise MergeError(f"Cannot fast-forward {base} to {branch}: {result.stderr.strip()}", "merge_failed")
+        # One local merge into a repository at a time: a second merge that rebased onto the same old base
+        # could not fast-forward.
+        with _lock(".merge-" + safe_key(str(Path(checkout).resolve())) + ".lock", wait=MERGE_WAIT_SECONDS):
+            target = checkout_of(checkout, base)
+            if target is not None and _dirty(target, untracked=False):
+                raise MergeError(f"{target} has uncommitted changes on {base}. Commit or stash them first.",
+                                 "base_dirty")
+            old = _commit(checkout, base)
+            if _git(worktree, "rebase", base).returncode:
+                conflicted = _git(worktree, "diff", "--name-only", "--diff-filter=U").stdout.split()
+                _git(worktree, "rebase", "--abort")
+                self._send_conflict(card, ref, key, record, base, conflicted)
+                raise MergeError(f"Rebase of {branch} onto {base} conflicts in {', '.join(conflicted)}. "
+                                 "The card's agent has the conflict.", "rebase_conflict", exit_code=2)
+            head = _commit(worktree, "HEAD")
+            if target is not None:
+                result = _git(target, "merge", "--ff-only", "--quiet", branch)
+            else:
+                # The old value makes Git refuse the update if the base moved after the rebase.
+                result = _git(checkout, "update-ref", f"refs/heads/{base}", head, old)
+            if result.returncode:
+                raise MergeError(f"Cannot fast-forward {base} to {branch}: {result.stderr.strip()}", "merge_failed")
         activity.append(self.store, ref, f"Merged into {base} at {head[:7]}.", "herdboard")
         return head
 

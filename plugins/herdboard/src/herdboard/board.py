@@ -809,6 +809,8 @@ class ColumnHeader(Static):
 
 class ModalBase(ModalScreen):
     BINDINGS = [Binding("escape", "dismiss_screen", "Close")]
+    # True when the dialog's save ended while another dialog was on top of it.
+    saved = False
 
     def on_mount(self) -> None:
         # The dialog's keys at the bottom, over the key bar of the screen below.
@@ -816,6 +818,18 @@ class ModalBase(ModalScreen):
 
     def action_dismiss_screen(self) -> None:
         self.dismiss(None)
+
+    def close_saved(self) -> None:
+        """Close the dialog after its save. `dismiss` closes the top screen, so a dialog under another
+        dialog, such as a question of another job, closes when it is on top again."""
+        if self.app.screen is self:
+            self.dismiss(None)
+        else:
+            self.saved = True
+
+    def on_screen_resume(self) -> None:
+        if self.saved:
+            self.dismiss(None)
 
 
 CHECK_ITEM = re.compile(r"^(?P<indent>\u00a0*)[-*+] \[(?P<mark>.)\] (?P<text>.*)$")
@@ -4619,7 +4633,7 @@ class HerdboardApp(App):
             if screen is not None and screen in self.screen_stack:
                 screen.show_error(str(error))
         elif screen is not None and screen in self.screen_stack:
-            screen.dismiss(None)
+            screen.close_saved()
         await self.reload(card.ref if card else None)
         if refetch:
             self.fetch_linear()
