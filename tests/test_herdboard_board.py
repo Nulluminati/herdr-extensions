@@ -1016,6 +1016,53 @@ class TriageColumnTests(BoardTestCase):
             self.assertLess(app.col, len(app.columns))
             self.assertIsNotNone(app.current_card())
 
+    async def test_an_empty_column_keeps_its_name_when_triage_appears(self):
+        self.store.add(self.repo_path, "kept", "Todo")
+        app = self.make_app("repo")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            # Select the empty In progress column, which has no card to remember.
+            await pilot.press("right", "right")
+            await pilot.pause()
+            self.assertEqual(app.columns[app.col].name, "In progress")
+            self.assertIsNone(app.current_card())
+            self.store.add(self.repo_path, "report", "Triage")
+            await app.check_files()
+            await settle(pilot)
+            self.assertEqual(app.columns[0].name, "Triage")
+            self.assertEqual(app.columns[app.col].name, "In progress")
+
+    async def test_an_empty_column_keeps_its_name_when_triage_goes(self):
+        self.add_triage_column("- [ ] harness bug")
+        self.store.add(self.repo_path, "kept", "Todo")
+        app = self.make_app("repo")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            # Select the empty In progress column, one right of Todo.
+            await pilot.press("right", "right", "right")
+            await pilot.pause()
+            self.assertEqual(app.columns[app.col].name, "In progress")
+            # An external write moves the only Triage card out, so the column goes.
+            self.store.move(self.store.list_cards([self.repo_path])[0].ref, "Backlog")
+            await app.check_files()
+            await settle(pilot)
+            self.assertNotIn("Triage", [c.name for c in app.columns])
+            self.assertEqual(app.columns[app.col].name, "In progress")
+
+    async def test_add_from_the_triage_column_of_the_all_view_files_triage(self):
+        self.add_triage_column("- [ ] harness bug")
+        app = self.make_app("all")
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.columns[app.col].name, "Triage")
+            await pilot.press("a")
+            await pilot.pause()
+            app.screen.query_one("#card-board").value = str(self.inbox_path)
+            await fill(pilot, "second report")
+            added = [c for c in self.store.list_cards([self.inbox_path]) if c.title == "second report"][0]
+            self.assertEqual(added.column, "Triage")
+            self.assertIn("## Triage", self.inbox_path.read_text())
+
 
 class AddDialogTests(BoardTestCase):
     async def test_add_with_tags_date_and_details(self):

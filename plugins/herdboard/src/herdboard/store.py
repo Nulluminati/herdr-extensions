@@ -698,6 +698,8 @@ class Store:
         """The column for a card that names none: the first one that is not the triage column."""
         column = next((c for c in board.columns if not is_triage(c.title)), None)
         if column is None:
+            if board.columns:
+                raise HerdboardError(f"{path}: board has no column apart from {TRIAGE_COLUMN}")
             raise HerdboardError(f"{path}: board has no columns")
         return column
 

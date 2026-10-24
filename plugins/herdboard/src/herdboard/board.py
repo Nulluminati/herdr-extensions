@@ -4214,18 +4214,21 @@ class HerdboardApp(App):
         """Select the card with `identity`.
 
         When it is gone, select the first card of `column`; without a column keep
-        the position within range.
+        the position within range. Without an identity, `column` keeps its place by
+        name, so a column that appears first or goes away does not move the selection.
         """
+        names = [data.name.casefold() for data in self.columns]
         if identity is not None:
             for col, data in enumerate(self.columns):
                 for row, card in enumerate(data.cards):
                     if self._identity(card) == identity:
                         self.col, self.row = col, row
                         return
-            names = [data.name.casefold() for data in self.columns]
             if column is not None and column.casefold() in names:
                 self.col, self.row = names.index(column.casefold()), 0
                 return
+        elif column is not None and column.casefold() in names:
+            self.col = names.index(column.casefold())
         self.col = min(self.col, max(len(self.columns) - 1, 0))
         count = len(self.columns[self.col].cards) if self.columns else 0
         self.row = min(self.row, max(count - 1, 0))
@@ -4244,7 +4247,8 @@ class HerdboardApp(App):
         if select is None:
             card = self.current_card()
             identity = self._identity(card) if card else None
-            column = self.columns[self.col].name if card else None
+            # Also without a card, so the column keeps its place when a column appears or goes.
+            column = self.columns[self.col].name if self.columns else None
         else:
             identity, column = ("id", select), None
         try:

@@ -867,12 +867,24 @@ class TriageColumnTests(StoreTestCase):
         board = kanban_md.parse(path.read_text())
         self.assertEqual([c.title for c in board.columns], ["Triage", "Todo", "Doing", "Done"])
         self.assertEqual([c.title for c in board.column("Triage").cards], ["report the crash"])
-        # The other columns keep their bytes apart from the card that gained an ID.
-        after = path.read_text()
-        kept = [line for line in after.split("\n") if not line.startswith("- [ ] report the crash")]
-        expected = [line for line in before.split("\n")]
-        self.assertEqual([line for line in kept if line != "## Triage" and line.strip()],
-                         [line for line in expected if line.strip()])
+        # The whole file: the new column as the plugin writes one, and every other byte as it was.
+        block = f"## Triage\n\n- [ ] report the crash ^{view.ref}\n\n\n"
+        self.assertEqual(path.read_text(), before.replace("## Todo\n", block + "## Todo\n", 1))
+
+    def test_a_new_triage_column_has_the_layout_of_a_new_board(self):
+        """Obsidian Kanban must open the made column: its first card goes where `insert_card` puts it.
+
+        Compared with the same card added to a column that `new_board` wrote.
+        """
+        path = self.put("p", BASIC.replace("- [ ] one", "- [ ] one ^taaa").replace(
+            "- [ ] two #tag 📅 2026-01-02", "- [ ] two #tag 📅 2026-01-02 ^tbbb").replace(
+            "- [x] four", "- [x] four ^tccc"))
+        view = self.store.add(path, "report the crash", column="Triage")
+        made = path.read_text().split("## Triage", 1)[1].split("## Todo", 1)[0]
+        board = kanban_md.parse(kanban_md.new_board(["Triage", "Backlog"], None))
+        kanban_md.insert_card(board.column("Triage"), kanban_md.Card([f"- [ ] report the crash ^{view.ref}"]))
+        written = kanban_md.serialize(board).split("## Triage", 1)[1].split("## Backlog", 1)[0]
+        self.assertEqual(made, written)
 
     def test_add_to_triage_uses_the_existing_column_in_any_case(self):
         path = self.put("p", board_text(col("Triage"), col("Todo")))
@@ -885,6 +897,14 @@ class TriageColumnTests(StoreTestCase):
         path = self.put("p", board_text(col("Triage"), col("Backlog"), col("Done", "**Complete**")))
         view = self.store.add(path, "later")
         self.assertEqual(view.column, "Backlog")
+
+    def test_a_board_with_only_triage_has_no_other_default_column(self):
+        path = self.put("p", board_text(col("Triage", "- [ ] sent ^tabc")))
+        before = path.read_text()
+        with self.assertRaises(HerdboardError) as caught:
+            self.store.add(path, "later")
+        self.assertIn("no column apart from Triage", str(caught.exception))
+        self.assertEqual(path.read_text(), before)
 
     def test_move_to_triage_creates_the_column(self):
         path = self.put("p", BASIC)
@@ -908,9 +928,9 @@ class TriageColumnTests(StoreTestCase):
                          ["Triage", "Backlog", "Done"])
 
     def test_move_to_another_board_from_backlog_skips_triage(self):
-        self.put("p", BASIC)
-        target = self.put("q", board_text(col("Triage"), col("Todo"), col("Doing")))
-        self.assertEqual(self.store.move_to_board("tabc", target).column, "Doing")
+        self.put("p", board_text(col("Backlog", "- [ ] sent ^tabc"), col("Todo")))
+        target = self.put("q", board_text(col("Triage"), col("Todo"), col("Done", "**Complete**")))
+        self.assertEqual(self.store.move_to_board("tabc", target).column, "Todo")
 
     def test_move_to_another_board_and_column_creates_triage(self):
         self.put("p", BASIC)
