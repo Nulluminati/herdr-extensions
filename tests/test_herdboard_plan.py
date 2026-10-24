@@ -411,6 +411,7 @@ class RequestTests(PlanTestCase):
         self.assertEqual(raised.exception.code, "usage")
 
     def test_the_last_thinking_level_of_the_planner_model_is_used_again(self):
+        self.config.start_agent = "pi"
         self.config.start_model = "zai/glm-5.3"
         self.config.start_thinking = "low"
         self.config.thinking = {"zai/glm-5.3": "xhigh"}
@@ -422,6 +423,7 @@ class RequestTests(PlanTestCase):
         self.assertEqual(args[args.index("--model") + 1], "zai/glm-5.3")
 
     def test_a_named_planner_model_takes_its_own_saved_level(self):
+        self.config.start_agent = "pi"
         self.config.start_model = "zai/glm-5.3"
         self.config.thinking = {"zai/glm-5.3": "xhigh", "openai/gpt-5": "minimal"}
         self.planner.plan(self.card.ref, agent="pi", model="openai/gpt-5")
@@ -431,6 +433,7 @@ class RequestTests(PlanTestCase):
         self.assertEqual(args[args.index("--thinking") + 1], "minimal")
 
     def test_a_planner_without_a_saved_level_uses_the_default(self):
+        self.config.start_agent = "pi"
         self.config.start_model = "openai/gpt-5"
         self.config.start_thinking = "low"
         self.config.thinking = {"zai/glm-5.3": "xhigh"}

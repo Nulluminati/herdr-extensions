@@ -168,12 +168,12 @@ def pi_model_choices(config) -> tuple[str | None, list[str]]:
 
 
 def agent_model(config, model: str | None) -> str | None:
-    """The pi model that an unnamed `model` means: `start_model`, else pi's own default.
+    """The pi model that an unnamed `model` means: pi's configured `start_model`, else pi's own default.
 
     Every path that names no model resolves it here, so that the model that runs and the
     `[thinking]` row that its level comes from are always the same model.
     """
-    return model or config.start_model or pi_default_model()
+    return model or (config.start_model if config.start_agent == "pi" else None) or pi_default_model()
 
 
 def thinking_level(config, model: str | None, thinking: str | None = None) -> str | None:
@@ -183,12 +183,14 @@ def thinking_level(config, model: str | None, thinking: str | None = None) -> st
     """
     if thinking:
         return thinking
-    return remembered_thinking(config, model) or config.start_thinking
+    level = remembered_thinking(config, model) or config.start_thinking
+    return level if level in thinking_levels("pi") else None
 
 
 def remembered_thinking(config, model: str | None) -> str | None:
     """The thinking level that the user last chose for `model`, or None. None is `agent_model`'s model."""
-    return config.thinking.get(agent_model(config, model) or "")
+    level = config.thinking.get(agent_model(config, model) or "")
+    return level if level in thinking_levels("pi") else None
 
 
 def codex_model_choices(config) -> tuple[str | None, list[str]]:

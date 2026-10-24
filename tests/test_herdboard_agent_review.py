@@ -132,6 +132,16 @@ class RequestTests(AgentReviewTestCase):
         self.assertEqual(args[6:], ["--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
         self.assertEqual(agent_review.REVIEWERS, {"claude": "pi", "pi": "codex", "codex": "claude"})
 
+    def test_codex_review_keeps_its_no_network_profile_without_browser_instructions(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="codex")
+        request = (self.folder / "request.md").read_text()
+        self.assertNotIn("terminal-browser", request)
+        args = self.reviewer_start()
+        self.assertIn('default_permissions="hb-review"', args)
+        self.assertFalse(any("network={enabled=true}" in arg for arg in args))
+
     def test_codex_reviewer_rejects_pi_only_thinking(self):
         self.started()
         with self.assertRaises(review.ReviewError) as raised:
@@ -214,13 +224,20 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn("You do not need to run a command or send a notification", request)
         self.assertIn("Do not report that you cannot run tests", request)
         self.assertNotIn("state those limits", request)
+        self.assertNotIn("terminal-browser", request)
+
+    def test_claude_reviewer_keeps_browser_support(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="claude")
+        self.assertIn("Bash(terminal-browser:*)", self.reviewer_start())
+        request = (self.folder / "request.md").read_text()
         self.assertIn("When the change has a page", request)
         self.assertIn("terminal-browser open --no-merge --split right", request)
         self.assertIn("terminal-browser action --browser <key> -- close", request)
         self.assertIn("Do not run `terminal-browser shutdown`", request)
         self.assertIn("stays listed", request)
         self.assertIn("do not start a server", request)
-
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -277,6 +294,7 @@ class RequestTests(AgentReviewTestCase):
         self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
 
     def test_a_pi_reviewer_without_a_model_takes_the_saved_level_of_start_model(self):
+        self.store.config.start_agent = "pi"
         self.store.config.thinking = {"start/one": "xhigh"}
         self.store.config.start_model = "start/one"
         self.started()
@@ -287,6 +305,7 @@ class RequestTests(AgentReviewTestCase):
         self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
 
     def test_a_pi_reviewer_takes_the_default_level_without_a_saved_one(self):
+        self.store.config.start_agent = "pi"
         self.store.config.thinking = {"other/model": "xhigh"}
         self.store.config.start_model = "start/one"
         self.store.config.start_thinking = "low"

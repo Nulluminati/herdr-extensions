@@ -1993,8 +1993,8 @@ class ModelScreen(ModalBase):
         return model or self.default_model
 
     def remembered_level(self, index: int) -> str:
-        return self.remembered.get(self.model_at(index) or "", "default")
-
+        level = self.remembered.get(self.model_at(index) or "", "default")
+        return level if level in thinking_levels(self.agent) else "default"
 
     def compose(self) -> ComposeResult:
         levels = [("default", "default"), *((level, level) for level in thinking_levels(self.agent))]
@@ -2130,15 +2130,14 @@ class ConfigScreen(ModalBase):
     def _effective_thinking(self) -> str:
         """The level for the Thinking field: the model's remembered level, else the agent default."""
         model = self._thinking_model()
-        if model:
-            return self.remembered.get(model, "default")
-        return self.settings["start_thinking"] or "default"
+        level = self.remembered.get(model, "default") if model else self.settings["start_thinking"]
+        levels = thinking_levels(self.agent) or THINKING_LEVELS
+        return level if level in levels else "default"
 
     def compose(self) -> ComposeResult:
         settings = self.settings
         levels = thinking_levels(self.agent) or THINKING_LEVELS
         thinking = [("Agent default", "default"), *((level, level) for level in levels)]
-        level = settings["start_thinking"] if settings["start_thinking"] in levels else "default"
         with Vertical(classes="dialog card-form config"):
             yield RichStatic(Text("Herdboard config", style="bold"), id="config-heading")
             with TabbedContent(initial="config-global", id="config-tabs"):
@@ -5114,7 +5113,7 @@ class HerdboardApp(App):
     def remember_thinking(self, agent: str, model: str | None, thinking: str | None) -> None:
         """Keep the thinking level that the user chose for `model`, for the next start, plan or review.
 
-        Only pi has a thinking level, so another agent saves nothing. A None level forgets the model,
+        Only pi stores per-model levels, so another agent saves nothing. A None level forgets the model,
         which then uses `start_thinking` again. A failed save does not stop the action that asked for
         it. This runs in a worker thread, beside the start that it remembers the level for.
         """

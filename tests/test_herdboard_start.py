@@ -799,6 +799,23 @@ class StartTests(unittest.TestCase):
             with self.subTest(**kwargs), self.assertRaises(start.StartError):
                 self.starter.start(self.card.ref, agent="pi", **kwargs)
 
+    def test_pi_model_memory_does_not_use_another_agents_model(self):
+        self.config.start_agent = "claude"
+        self.config.start_model = "opus"
+        self.config.thinking = {"opus": "max", "pi/default": "low"}
+        with patch.object(start, "pi_default_model", return_value="pi/default"):
+            self.assertEqual(start.agent_model(self.config, None), "pi/default")
+            self.assertEqual(start.thinking_level(self.config, None), "low")
+
+    def test_pi_model_memory_ignores_codex_only_levels(self):
+        self.config.start_agent = "pi"
+        self.config.start_model = "pi/default"
+        self.config.thinking = {"pi/default": "ultra"}
+        self.config.start_thinking = "high"
+        self.assertEqual(start.thinking_level(self.config, None), "high")
+        self.config.start_thinking = "ultra"
+        self.assertIsNone(start.thinking_level(self.config, None))
+
     def test_configured_models_are_scoped_to_their_agent(self):
         cases = (("codex", "claude", "opus", None, None),
                  ("pi", "claude", "opus", None, None),
@@ -826,6 +843,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "low"])
 
     def test_the_last_thinking_level_of_a_model_is_used_again(self):
+        self.store.config.start_agent = "pi"
         self.store.config.start_model = "zai/glm-5.3"
         self.store.config.start_thinking = "low"
         self.store.config.thinking = {"zai/glm-5.3": "high", "openai/gpt-5": "minimal"}
@@ -833,6 +851,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "high"])
 
     def test_a_model_without_a_remembered_level_uses_the_config_default(self):
+        self.store.config.start_agent = "pi"
         self.store.config.start_model = "openai/gpt-5"
         self.store.config.start_thinking = "low"
         self.store.config.thinking = {"zai/glm-5.3": "high"}

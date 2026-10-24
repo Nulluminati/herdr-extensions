@@ -69,6 +69,17 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.callback.assert_called_with(self.card.ref, "pi")
 
+    async def test_pi_model_dialog_ignores_codex_only_saved_levels(self):
+        self.store.config.thinking = {"pi/default": "ultra"}
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["pi/default"])), \
+                patch("herdboard.start.pi_default_model", return_value="pi/default"):
+            async with app.run_test() as pilot:
+                app._chosen_agent(self.card.ref, "pi")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ModelScreen)
+                self.assertEqual(app.screen.query_one("#thinking").value, "default")
+
     async def test_codex_start_plan_and_review_use_codex_models(self):
         from herdboard.config import CODEX_THINKING_LEVELS
         from textual.widgets import OptionList, Select
@@ -222,6 +233,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_default_row_shows_the_level_of_the_model_that_runs(self):
         # start_model runs for the unnamed row, so its level is the one that the row shows.
+        self.store.config.start_agent = "pi"
         self.store.config.start_model = "start/one"
         self.store.config.thinking = {"start/one": "xhigh", "openai-codex/gpt-6.1-sol": "max"}
         app = self.app()
@@ -243,6 +255,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(load_config(app.config_file).thinking, {"start/one": "xhigh"})
 
     async def test_the_default_row_saves_the_level_of_the_model_that_runs(self):
+        self.store.config.start_agent = "pi"
         self.store.config.start_model = "start/one"
         app = self.app()
         with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):

@@ -759,6 +759,24 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
         self.assertFalse(app.config_file.exists())
 
+    async def test_codex_saved_level_is_filtered_when_switching_to_pi(self):
+        self.config.start_agent = "codex"
+        self.config.start_thinking = "ultra"
+        self.config.pi_models = ["pi/default"]
+        self.config.thinking = {"pi/default": "ultra"}
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            thinking = screen.query_one("#config-thinking")
+            self.assertEqual(thinking.value, "ultra")
+            screen.query_one("#config-agent").value = "pi"
+            await pilot.pause()
+            self.assertEqual(thinking.value, "default")
+            screen.query_one("#config-model").value = "pi/default"
+            await pilot.pause()
+            self.assertEqual(thinking.value, "default")
+
     async def test_codex_settings_offer_its_models_and_thinking(self):
         from herdboard.config import CODEX_THINKING_LEVELS, PI_THINKING_LEVELS
         app = self.make_app()

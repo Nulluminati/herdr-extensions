@@ -25,6 +25,14 @@ REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large change can take long; the worker gives up after this.
 REVIEW_TIMEOUT_SECONDS = 30 * 60
 POLL_SECONDS = 5
+BROWSER_INSTRUCTIONS = """When the change has a page, an HTML file or a server that already runs, check it with
+`terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
+Before your turn ends, close it with `terminal-browser action --browser <key> -- close`; the key comes from
+the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
+success and leave the browser running, so say so in the findings when it stays listed.
+Do not run `terminal-browser shutdown`: it closes every browser on the machine.
+Run no other command, and do not start a server.
+"""
 
 
 def start_worker(arguments: list[str], log: Path) -> None:
@@ -71,7 +79,8 @@ def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
             "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)", *extra]
 
 
-def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = ()) -> str:
+def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = (),
+                 browser: bool = True) -> str:
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
     plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
     others = [entry for entry in files if entry is not plan]
@@ -100,14 +109,7 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
-When the change has a page, an HTML file or a server that already runs, check it with
-`terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
-Before your turn ends, close it with `terminal-browser action --browser <key> -- close`; the key comes from
-the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
-success and leave the browser running, so say so in the findings when it stays listed.
-Do not run `terminal-browser shutdown`: it closes every browser on the machine.
-Run no other command, and do not start a server.
-
+{BROWSER_INSTRUCTIONS if browser else ""}
 Write your findings to `{folder / 'findings.md'}` in this format:
 
     ## Confirmed problems
@@ -124,7 +126,7 @@ Do not report that you cannot run tests or inspect live screens.
 """
 
 
-def repoless_request_text(card, record, folder: Path, files: list[dict]) -> str:
+def repoless_request_text(card, record, folder: Path, files: list[dict], browser: bool = True) -> str:
     plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
     others = [entry for entry in files if entry is not plan]
     plan_line = (f"Check the attachments against the plan that the user agreed on: `{plan['path']}`\n"
@@ -143,14 +145,7 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 {listing}{plan_line}Look for correctness, gaps, unsupported claims and missing steps.
 Read the files in the working folder when you need context.
 Do not change any file.
-When the change has a page, an HTML file or a server that already runs, check it with
-`terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
-Before your turn ends, close it with `terminal-browser action --browser <key> -- close`; the key comes from
-the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
-success and leave the browser running, so say so in the findings when it stays listed.
-Do not run `terminal-browser shutdown`: it closes every browser on the machine.
-Run no other command, and do not start a server.
-
+{BROWSER_INSTRUCTIONS if browser else ""}
 Write your findings to `{folder / 'findings.md'}` in this format:
 
     ## Confirmed problems
@@ -234,11 +229,11 @@ class AgentReviewer(Reviewer):
                 folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-",
                                                dir=reviews))
                 if record.get("mode") == REPOLESS:
-                    request = repoless_request_text(card, record, folder, files)
+                    request = repoless_request_text(card, record, folder, files, browser=kind != "codex")
                 else:
                     (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
                     (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
-                    request = request_text(card, record, base, folder, untracked, files)
+                    request = request_text(card, record, base, folder, untracked, files, browser=kind != "codex")
                 (folder / "request.md").write_text(request, encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
@@ -249,7 +244,7 @@ class AgentReviewer(Reviewer):
             # A startup prompt (such as Claude's folder trust check) waits for the user,
             # and a reviewer busy with its first message never looks ready: the worker watches it.
             herdr("agent", "start", f"hb-{ref.lower()}-review", "--kind", kind, "--pane", pane, "--",
-                  *reviewer_arguments(kind, prompt, folder, model, thinking, browser=True),
+                  *reviewer_arguments(kind, prompt, folder, model, thinking, browser=kind != "codex"),
                   tolerated=("timeout", "agent_not_ready"))
             record["agent_review"] = {"folder": str(folder), "pane_id": pane, "kind": kind, "model": model,
                                       "then_hunk": then_hunk, "head": head}
