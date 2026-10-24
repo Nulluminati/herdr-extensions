@@ -19,11 +19,7 @@ from herdboard.identity import repo_identity  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
 from test_herdboard_cli import CliTestCase  # noqa: E402
-
-# A start that creates a repository makes the first commit, so the tests do not
-# depend on the Git identity of the machine that runs them.
-IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+from git_env import isolated  # noqa: E402
 
 
 class PlanHerdr:
@@ -438,7 +434,7 @@ class NoRepositoryPlanTests(PlanTestCase):
 
     def setUp(self):
         super().setUp()
-        self.enterContext(patch.dict(os.environ, IDENTITY))
+        self.enterContext(patch.dict(os.environ, isolated()))
         self.inbox_card = self.store.add(self.store.ensure_inbox(), "Research corvid memory #feature")
         self.plan_file = attachments.plan_path(self.config, self.inbox_card.ref)
 

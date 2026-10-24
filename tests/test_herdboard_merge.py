@@ -15,9 +15,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from herdboard import activity, merge, pr_write, start  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_review import PaneHerdr, ReviewTestCase  # noqa: E402
-
-IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+from git_env import isolated  # noqa: E402
 
 
 class GitHerdr(PaneHerdr):
@@ -55,7 +53,7 @@ class GitHerdr(PaneHerdr):
 class MergeTestCase(ReviewTestCase):
     def setUp(self):
         super().setUp()
-        self.enterContext(patch.dict(os.environ, IDENTITY))
+        self.enterContext(patch.dict(os.environ, isolated()))
         self.fake.__class__ = GitHerdr
         self.merger = merge.Merger(self.store, self.repo)
 

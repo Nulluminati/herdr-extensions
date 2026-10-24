@@ -14,11 +14,7 @@ from herdboard.identity import repo_identity
 from herdboard.store import Store
 from herdboard import start
 from test_herdboard_cli import CliTestCase
-
-# A start that creates a repository makes the first commit, so the tests do not
-# depend on the Git identity of the machine that runs them.
-IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+from git_env import isolated
 
 
 class FakeHerdr:
@@ -1074,7 +1070,7 @@ class NewRepositoryStartTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state"), **IDENTITY})
+        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state"), **isolated()})
         env.start()
         self.addCleanup(env.stop)
         self.config = Config(todos_dir=self.root / "todos", projects_dir=self.root / "Projects")
