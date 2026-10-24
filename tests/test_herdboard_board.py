@@ -1094,13 +1094,15 @@ class HeldLock:
 class BusyTests(BoardTestCase):
     async def test_held_lock_does_not_block_keys_and_refuses_second_write(self):
         self.store.add(self.repo_path, "m", "Backlog")
-        self.store.lock_timeout = 2.0
+        # A key that waited for the lock would take the whole lock timeout. The key limit stays well under it,
+        # with room for a slow key press on a busy machine.
+        self.store.lock_timeout = 10.0
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
             with HeldLock(self.store.lock_path):
                 await pilot.press("L")
-                await asyncio.wait_for(pilot.press("question_mark"), timeout=1.0)
+                await asyncio.wait_for(pilot.press("question_mark"), timeout=5.0)
                 self.assertIsInstance(app.screen, HelpScreen)
                 await pilot.press("escape")
                 await pilot.press("L")
