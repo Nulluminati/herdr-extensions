@@ -227,6 +227,20 @@ class OldRecordTests(MergeTestCase):
 
 
 class ConflictTests(MergeTestCase):
+    def test_conflict_restart_models_are_scoped_to_their_agent(self):
+        for kind, configured, model, expected in (("codex", "claude", "opus", None),
+                                                  ("pi", "claude", "opus", None),
+                                                  ("codex", "codex", "gpt-6.1-sol", "gpt-6.1-sol")):
+            with self.subTest(kind=kind, configured=configured):
+                self.config.start_agent = configured
+                self.config.start_model = model
+                record = {"agent": kind, "pane_id": "w9:p1"}
+                with patch.object(merge, "agent_live", return_value=False), \
+                        patch.object(self.merger, "_move", return_value=self.card), \
+                        patch.object(merge, "Starter") as starter:
+                    self.merger._send_conflict(self.card, self.card.ref, self.card.ref, record, "main", ["a.py"])
+                self.assertEqual(starter.return_value.launch_agent.call_args.args[3], expected)
+
     def test_a_restarted_codex_gets_its_config_thinking_level(self):
         self.config.start_thinking = "ultra"
         record = {"agent": "codex", "pane_id": "w9:p1"}

@@ -121,8 +121,9 @@ class Reviewer:
         if agent_live(record):
             return False
         kind = record.get("agent") or self.config.start_agent
+        model = self.config.start_model if kind == self.config.start_agent else None
         thinking = self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None
-        starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, self.config.start_model,
+        starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, model,
                              thinking, safe_key(key), persist, linear=card is None, note=REVIEW_NOTE,
                              log=activity.read(self.config, ref))
         activity.append(self.store, ref, "Agent restarted for review.", "herdboard")

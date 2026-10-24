@@ -72,6 +72,27 @@ class PrWriteTestCase(PullRequestTestCase):
 
 
 class RequestTests(PrWriteTestCase):
+    def test_codex_writer_does_not_inherit_a_claude_model(self):
+        records = self.records()
+        records[self.card.ref]["agent"] = "codex"
+        start._write(start.state_dir() / "starts.json", records)
+        self.config.start_model = "opus"
+        self.fake.agent = False
+        self.request()
+        call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
+        self.assertNotIn("--model", call)
+
+    def test_codex_writer_keeps_its_configured_model(self):
+        records = self.records()
+        records[self.card.ref]["agent"] = "codex"
+        start._write(start.state_dir() / "starts.json", records)
+        self.config.start_agent = "codex"
+        self.config.start_model = "gpt-6.1-sol"
+        self.fake.agent = False
+        self.request()
+        call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
+        self.assertEqual(call[call.index("--model") + 1], "gpt-6.1-sol")
+
     def test_codex_writer_keeps_valid_config_thinking(self):
         records = self.records()
         records[self.card.ref]["agent"] = "codex"

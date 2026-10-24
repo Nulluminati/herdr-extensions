@@ -166,10 +166,11 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
     else:
         pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),
                      "--no-focus")["pane"]["pane_id"]
+        model = config.start_model if kind == config.start_agent else None
         thinking = config.start_thinking if config.start_thinking in thinking_levels(kind) else None
         # A startup prompt waits for the user, and a busy writer never looks ready: the worker watches it.
         herdr("agent", "start", f"hb-{ref.lower()}-pr", "--kind", kind, "--pane", pane, "--",
-              *reviewer_arguments(kind, prompt_text(folder, ref), folder, config.start_model, thinking),
+              *reviewer_arguments(kind, prompt_text(folder, ref), folder, model, thinking),
               tolerated=("timeout", "agent_not_ready"))
         own, writer = True, f"a {kind} writer agent"
     data.update(folder=str(folder), pane_id=pane, kind=kind, own_pane=own, rewrite_url=rewrite_url,

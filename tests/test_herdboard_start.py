@@ -799,7 +799,27 @@ class StartTests(unittest.TestCase):
             with self.subTest(**kwargs), self.assertRaises(start.StartError):
                 self.starter.start(self.card.ref, agent="pi", **kwargs)
 
+    def test_configured_models_are_scoped_to_their_agent(self):
+        cases = (("codex", "claude", "opus", None, None),
+                 ("pi", "claude", "opus", None, None),
+                 ("claude", "pi", "zai/glm-5.3", None, None),
+                 ("codex", "codex", "gpt-6.1-sol", None, "gpt-6.1-sol"),
+                 ("codex", "claude", "opus", "gpt-6.1-sol", "gpt-6.1-sol"))
+        for agent, configured, default, explicit, expected in cases:
+            with self.subTest(agent=agent, configured=configured, explicit=explicit):
+                self.config.start_agent = configured
+                self.config.start_model = default
+                self.fake.agent = False
+                self.fake.calls.clear()
+                self.starter.start(self.card.ref, agent=agent, model=explicit)
+                args = self.agent_args()
+                if expected is None:
+                    self.assertNotIn("--model", args)
+                else:
+                    self.assertEqual(args[args.index("--model") + 1], expected)
+
     def test_config_defaults_for_the_model(self):
+        self.store.config.start_agent = "pi"
         self.store.config.start_model = "zai/glm-5.3"
         self.store.config.start_thinking = "low"
         self.starter.start(self.card.ref, agent="pi")

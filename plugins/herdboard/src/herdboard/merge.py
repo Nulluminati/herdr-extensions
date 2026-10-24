@@ -196,8 +196,9 @@ class Merger:
             herdr("agent", "prompt", record["pane_id"], text)
         else:
             kind = record.get("agent") or self.config.start_agent
+            model = self.config.start_model if kind == self.config.start_agent else None
             Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file).launch_agent(
-                card, record, kind, self.config.start_model,
+                card, record, kind, model,
                 self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None, safe_key(key),
                 lambda: self._persist(key, record), linear=card.source == "linear", note=text,
                 log=activity.read(self.config, ref))

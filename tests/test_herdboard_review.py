@@ -109,6 +109,22 @@ class ReviewTestCase(unittest.TestCase):
 
 
 class ReviewTests(ReviewTestCase):
+    def test_restarted_agent_models_are_scoped_to_their_agent(self):
+        self.starter.start(self.card.ref, agent="codex")
+        for configured, model, expected in (("claude", "opus", None),
+                                             ("codex", "gpt-6.1-sol", "gpt-6.1-sol")):
+            with self.subTest(configured=configured):
+                self.config.start_agent = configured
+                self.config.start_model = model
+                self.fake.agent = False
+                self.fake.calls.clear()
+                self.reviewer.review(self.card.ref)
+                args = self.calls("agent", "start")[-1]
+                if expected is None:
+                    self.assertNotIn("--model", args)
+                else:
+                    self.assertEqual(args[args.index("--model") + 1], expected)
+
     def test_a_gone_codex_agent_keeps_valid_config_thinking(self):
         self.starter.start(self.card.ref, agent="codex")
         self.config.start_thinking = "ultra"

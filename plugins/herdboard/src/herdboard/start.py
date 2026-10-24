@@ -1199,7 +1199,7 @@ class Starter:
             raise StartError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise StartError("The model must be one name, such as zai/glm-5.3", "usage")
-        model = model or self.config.start_model
+        model = model or (self.config.start_model if agent == self.config.start_agent else None)
         if agent == "pi":
             thinking = thinking_level(self.config, model, thinking)
         elif thinking is None and self.config.start_thinking in levels:
