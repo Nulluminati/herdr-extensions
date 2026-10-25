@@ -291,6 +291,7 @@ class Planner:
                 herdr("agent", "start", f"hb-{ref.lower()}-plan", "--kind", kind, "--pane", pane, "--",
                       *planner_arguments(kind, prompt, str(worktree), plan_file.parent, model, thinking),
                       tolerated=("timeout", "agent_not_ready"))
+                activity.record_pane_agent(pane, kind)
             except HerdboardError:
                 # Only the plan pane closes: the worktree and its workspace stay for the work.
                 herdr("pane", "close", pane, tolerated=("pane_not_found",))

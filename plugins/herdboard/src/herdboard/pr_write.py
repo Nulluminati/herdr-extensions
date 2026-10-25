@@ -172,6 +172,7 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
         herdr("agent", "start", f"hb-{ref.lower()}-pr", "--kind", kind, "--pane", pane, "--",
               *reviewer_arguments(kind, prompt_text(folder, ref), folder, model, thinking),
               tolerated=("timeout", "agent_not_ready"))
+        activity.record_pane_agent(pane, kind)
         own, writer = True, f"a {kind} writer agent"
     data.update(folder=str(folder), pane_id=pane, kind=kind, own_pane=own, rewrite_url=rewrite_url,
                 linear_url=card.url if card.source == "linear" else None, started=time.time())

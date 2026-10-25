@@ -252,6 +252,7 @@ class AgentReviewer(Reviewer):
             herdr("agent", "start", f"hb-{ref.lower()}-review", "--kind", kind, "--pane", pane, "--",
                   *reviewer_arguments(kind, prompt, folder, model, thinking, browser=kind != "codex"),
                   tolerated=("timeout", "agent_not_ready"))
+            activity.record_pane_agent(pane, kind)
             record["agent_review"] = {"folder": str(folder), "pane_id": pane, "kind": kind, "model": model,
                                       "then_hunk": then_hunk, "head": head}
             # A new review replaces the last one, also when it fails.

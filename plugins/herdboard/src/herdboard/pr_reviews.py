@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 
-from . import agent_review, start
+from . import activity, agent_review, start
 from .model import HerdboardError
 from .start import _lock, _read, _write, herdr, safe_key, state_dir
 
@@ -573,6 +573,7 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
         else:
             herdr("agent", "start", name, "--kind", kind, "--pane", record["pane_id"], "--",
                   *reviewer_arguments(kind, message, model, thinking), tolerated=("timeout", "agent_not_ready"))
+            activity.record_pane_agent(record["pane_id"], kind)
     except HerdboardError as error:
         # No worker starts, so without this the PR would show `reviewing` for good.
         record.update(status="failed", error=f"The reviewer did not start: {error}")

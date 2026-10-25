@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard import activity  # noqa: E402
+from herdboard.linear_source import state_dir  # noqa: E402
 from herdboard.config import load_config  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -87,6 +88,12 @@ class LogFileTests(unittest.TestCase):
 
 
 class AuthorTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = Path(self.tmp.name) / "state"
+        self.enterContext(mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(self.state)}))
+
     def test_outside_herdr_the_author_is_the_user(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(activity.author(), "user")
@@ -101,6 +108,45 @@ class AuthorTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
                 mock.patch.object(activity, "agent_kind", return_value=None):
             self.assertEqual(activity.author(), "user")
+
+    def test_a_pane_herdboard_cannot_reach_falls_back_to_the_started_agent(self):
+        # Codex's sandbox denies the Herdr socket, so `herdr agent get` fails from its tools.
+        activity.record_pane_agent("w1:p2", "codex")
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}), \
+                mock.patch.object(activity, "agent_kind", return_value=None):
+            self.assertEqual(activity.author(), "codex")
+
+    def test_a_pane_without_a_started_agent_stays_the_user(self):
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}), \
+                mock.patch.object(activity, "agent_kind", return_value=None):
+            self.assertEqual(activity.author(), "user")
+
+    def test_a_recorded_pane_that_herdr_reports_wins(self):
+        activity.record_pane_agent("w1:p2", "codex")
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}), \
+                mock.patch.object(activity, "agent_kind", return_value="pi"):
+            self.assertEqual(activity.author(), "pi")
+
+    def test_record_pane_agent_updates_a_pane_and_keeps_other_panes(self):
+        activity.record_pane_agent("w1:p2", "claude")
+        activity.record_pane_agent("w1:p3", "pi")
+        activity.record_pane_agent("w1:p2", "codex")
+        panes = json.loads((state_dir() / "panes.json").read_text(encoding="utf-8"))
+        self.assertEqual(panes, {"w1:p2": "codex", "w1:p3": "pi"})
+
+    def test_record_pane_agent_ignores_a_pane_or_kind_that_is_not_a_name(self):
+        for pane, kind in (("", "codex"), ("w1:p2", "Not A Kind")):
+            with self.subTest(pane=pane, kind=kind):
+                activity.record_pane_agent(pane, kind)
+                self.assertFalse((state_dir() / "panes.json").exists())
+
+    def test_record_pane_agent_keeps_only_the_newest_panes(self):
+        for number in range(300):
+            activity.record_pane_agent(f"w{number}:p1", "pi")
+        panes = json.loads((state_dir() / "panes.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(panes), 256)
+        self.assertNotIn("w0:p1", panes)
+        self.assertIn("w299:p1", panes)
 
     def test_agent_kind_reads_herdr(self):
         reply = {"id": "x", "result": {"type": "agent_info", "agent": {"agent": "claude", "pane_id": "w1:p2"}}}

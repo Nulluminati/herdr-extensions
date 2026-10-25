@@ -336,7 +336,7 @@ Each card has a log in `<todos_dir>/.herdboard/log/<id>.md`. Obsidian does not s
 - 2026-10-12 14:20 · herdboard · Rebase conflict in src/auth.py. Sent to the agent.
 ```
 
-herdboard sets the author. In a card's agent pane, the author is the agent kind (`claude`, `pi` or `codex`). Entries that herdboard writes have the author `herdboard`. All other entries have the author `user`. The log works for Linear cards too, without a connection, and herdboard posts nothing to Linear.
+herdboard sets the author. In a card's agent pane, the author is the agent kind (`claude`, `pi` or `codex`). Some agents run their tool commands in a sandbox that cannot reach Herdr; there, herdboard names the agent that it last started in that pane. Entries that herdboard writes have the author `herdboard`. All other entries have the author `user`. The log works for Linear cards too, without a connection, and herdboard posts nothing to Linear.
 
 Agents record progress in the log, not in the card. `edit` fails with `agent_edit_denied` in a card's agent pane. This guards against mistakes. It is not a security boundary.
 

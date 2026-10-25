@@ -19,6 +19,9 @@ from .model import HerdboardError, IoError
 # A todo ID (`t3m9`) or a Linear identifier (`ENG-123`): both are safe file names.
 LOG_REF = re.compile(r"^(t[0-9a-z]{3}|[A-Z][A-Z0-9]*-\d+)$")
 ENTRY = re.compile(r"^- (?P<time>\d{4}-\d\d-\d\d \d\d:\d\d) · (?P<author>[a-z]+) · (?P<message>.*)$")
+# Panes whose agent herdboard started, newest last. Herdr pane IDs are never reused.
+PANE_AGENTS_FILE = "panes.json"
+PANE_AGENT_LIMIT = 256
 
 
 class LogUsageError(HerdboardError):
@@ -85,6 +88,49 @@ def agent_kind(pane_id: str) -> str | None:
 
 
 def author() -> str:
-    """Who writes a log entry from this process: the agent of this Herdr pane, else the user."""
+    """Who writes a log entry from this process: the agent of this Herdr pane, else the user.
+
+    Some agents (Codex) run tool commands in a sandbox that cannot reach the Herdr socket,
+    so the pane lookup can fail even in an agent pane; the pane record from the last
+    `herdboard` start in that pane names the agent then.
+    """
     pane = os.environ.get("HERDR_PANE_ID")
-    return (agent_kind(pane) if pane else None) or "user"
+    if not pane:
+        return "user"
+    return agent_kind(pane) or pane_agent(pane) or "user"
+
+
+def record_pane_agent(pane: str, kind: str) -> None:
+    """Remember that the agent `kind` runs in `pane`, for the log author when Herdr is unreachable."""
+    # Imported here: linear_source imports the store, which imports this module.
+    from .linear_source import state_dir
+    if not pane or not re.fullmatch(r"[a-z]+", kind or ""):
+        return
+    path = state_dir() / PANE_AGENTS_FILE
+    panes: dict = {}
+    try:
+        found = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(found, dict):
+            panes = found
+    except (OSError, ValueError):
+        panes = {}
+    panes.pop(pane, None)
+    panes[pane] = kind
+    while len(panes) > PANE_AGENT_LIMIT:
+        panes.pop(next(iter(panes)))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(panes), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def pane_agent(pane: str) -> str | None:
+    """The agent kind that herdboard last started in `pane`, or None."""
+    from .linear_source import state_dir
+    try:
+        panes = json.loads((state_dir() / PANE_AGENTS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    kind = panes.get(pane) if isinstance(panes, dict) else None
+    return kind if isinstance(kind, str) and re.fullmatch(r"[a-z]+", kind) else None

@@ -19,7 +19,7 @@ import time
 import tomllib
 
 from . import attachments
-from .activity import LOG_REF
+from .activity import LOG_REF, record_pane_agent
 from .brief import agent_message, brief_text, card_token
 from .config import AGENTS, default_config_path, thinking_levels
 from .identity import RepoIdentity, _canonical_identity, _git, repo_identity
@@ -929,6 +929,7 @@ class Starter:
         export_config(record["pane_id"], self.config_file)
         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
               tolerated=("timeout", "agent_not_ready"))
+        record_pane_agent(record["pane_id"], agent)
 
     def _repoless_workspace(self, ref, folder, record, focus=True):
         """Open the card folder as a Herdr workspace, reusing the open one that the record names."""

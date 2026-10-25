@@ -487,6 +487,12 @@ class StartTests(unittest.TestCase):
         self.assertFalse(card.worktree_removed)
         self.assertTrue(card.worktree)
 
+    def test_start_records_the_pane_agent_for_the_log_author(self):
+        self.starter.start(self.card.ref)
+        panes = json.loads((start.state_dir() / "panes.json").read_text(encoding="utf-8"))
+        call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
+        self.assertEqual(panes[call[call.index("--pane") + 1]], call[call.index("--kind") + 1])
+
     def test_agent_message_is_safe_for_herdr_shell_encoding(self):
         self.starter.start(self.card.ref)
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
