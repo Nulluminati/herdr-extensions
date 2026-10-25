@@ -131,10 +131,32 @@ def changes(repository: Path, requester: str) -> tuple[str, list[str], str]:
                       f"in the repository at `{repository}`.")
 
 
-def write_request(review: Path, repository: Path, requester: str) -> None:
+def create_review() -> Path:
+    """Make a review folder that no other request in the same second holds."""
+    root = review_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ReviewError(f"{root}: cannot make the review root: {error}") from error
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    # Two requests can fall in the same second, so the folder name takes a counter.
+    for attempt in range(1, 100):
+        review = root / (stamp if attempt == 1 else f"{stamp}-{attempt}")
+        try:
+            review.mkdir()
+        except FileExistsError:
+            continue
+        except OSError as error:
+            raise ReviewError(f"{review}: cannot make the review folder: {error}") from error
+        return review
+    raise ReviewError(f"{root}: cannot make a review folder for {stamp}")
+
+
+def write_request(repository: Path, requester: str) -> Path:
+    """Write the request files into a new review folder and return that folder."""
     diff, untracked, summary = changes(repository, requester)
 
-    review.mkdir(parents=True)
+    review = create_review()
     (review / "diff.patch").write_text(diff)
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
     (review / "request.md").write_text(f"""# Peer review request
@@ -159,6 +181,7 @@ Write your findings to `{review / "findings.md"}` in this format:
 
 If you find nothing, write "No findings."
 """)
+    return review
 
 
 def request(pane_option: str | None) -> int:
@@ -170,8 +193,7 @@ def request(pane_option: str | None) -> int:
         ["git", "-C", agent["cwd"], "rev-parse", "--show-toplevel"]
     ).stdout.rstrip("\n"))
 
-    review = review_root() / time.strftime("%Y%m%d-%H%M%S")
-    write_request(review, repository, requester)
+    review = write_request(repository, requester)
 
     split = herdr("pane", "split", pane, "--direction", "right", "--cwd", str(repository), "--no-focus")
     reviewer_pane = json.loads(split.stdout)["result"]["pane"]["pane_id"]

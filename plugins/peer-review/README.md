@@ -45,7 +45,7 @@ Do one of these:
 
 The request returns at once. A background worker waits for the findings and then prompts your agent.
 
-Each review has a folder, `~/.local/state/peer-review/<timestamp>/`:
+Each review has a folder, `~/.local/state/peer-review/<timestamp>/`. A second request in the same second adds a counter, as in `<timestamp>-2`:
 
 | File | Content |
 |---|---|

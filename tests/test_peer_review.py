@@ -204,6 +204,20 @@ class PeerReviewTests(unittest.TestCase):
             "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{review}/**)",
         ])
 
+    def test_two_requests_in_one_second_get_two_review_folders(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+
+        with patch.object(peer_review.time, "strftime", return_value="20250101-010101"):
+            first, _ = self.run_request()
+            second, _ = self.run_request()
+
+        self.assertEqual((first, second), (0, 0))
+        reviews = sorted(review.name for review in (self.state / "peer-review").iterdir())
+        self.assertEqual(reviews, ["20250101-010101", "20250101-010101-2"])
+        starts = [argv[3] for argv in self.calls if argv[:3] == ["herdr", "agent", "start"]]
+        self.assertEqual(starts, ["review-20250101-010101", "review-20250101-010101-2"])
+        self.assertEqual(len(self.workers), 2)
+
     def test_request_hands_the_wait_to_a_background_worker(self):
         (self.repository / "app.py").write_text("print('two')\n")
 
