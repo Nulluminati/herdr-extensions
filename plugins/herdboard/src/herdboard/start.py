@@ -51,8 +51,8 @@ class StartError(HerdboardError):
         self.steps_done = []
 
 
-def command(argv: list[str], timeout: int = 120):
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+def command(argv: list[str], timeout: int = 120, stdin=None):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=stdin)
 
 
 def herdr(*args, tolerated=()):

@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import time
 
-from . import activity, pr_write
+from . import activity, mockup, pr_write
 from .config import thinking_levels
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
@@ -296,6 +296,8 @@ class Merger:
         card, ref, key, record = self._started(ref)
         with _lock(".start-" + safe_key(key) + ".lock"):
             result = self._finish(card, ref, key, record, force=force)
+        # Drafts that the user did not attach are no longer needed.
+        mockup.discard_drafts(ref)
         return {"ref": ref, **result}
 
     def _finish(self, card, ref, key, record, force):

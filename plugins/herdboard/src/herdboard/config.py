@@ -124,6 +124,9 @@ class Config:
     # The model and thinking level `start` gives an agent; None keeps the agent's own default.
     start_model: str | None = None
     start_thinking: str | None = None
+    # The Codex model that `mockup` generates images with. The user's Codex config model does not
+    # work for image generation on a ChatGPT account, so herdboard always names one.
+    mockup_model: str = "gpt-6.1-sol"
     # The thinking level that the user last chose for each model, by model name.
     thinking: dict[str, str] = field(default_factory=dict)
     # Models the board offers for pi; None reads pi's own `enabledModels`.
@@ -468,6 +471,11 @@ def load_config(path: Path | None = None) -> Config:
         if start_thinking not in THINKING_LEVELS:
             raise HerdboardError(f"{path}: start_thinking must be one of {', '.join(THINKING_LEVELS)}")
         config.start_thinking = start_thinking
+    mockup_model = _string(path, data, "mockup_model")
+    if mockup_model is not None:
+        if any(ch.isspace() for ch in mockup_model):
+            raise HerdboardError(f"{path}: mockup_model must be one model name, such as gpt-6.1-sol")
+        config.mockup_model = mockup_model
     config.pi_models = _string_list(path, data, "pi_models")
     config.thinking = _load_thinking(path, data)
     config.codex_models = _string_list(path, data, "codex_models")

@@ -12,7 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard import cli, kanban_md, plan, start  # noqa: E402
+from herdboard import cli, kanban_md, mockup, plan, start  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.model import ConflictError, HerdboardError, NotFoundError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -388,6 +388,14 @@ class ArchiveCliTest(unittest.TestCase):
         out, _ = self.run_cli("unarchive", "t111")
         self.assertEqual(out, "t111 → Done (p)\n")
         self.assertEqual(self.run_json("show", "t111")["card"]["checked"], True)
+
+    def test_archive_removes_the_mockup_drafts(self):
+        for ref in ("t111", "t222"):
+            mockup.drafts_dir(ref).mkdir(parents=True)
+        self.run_json("archive", "t111")
+        self.assertFalse(mockup.drafts_dir("t111").exists())
+        self.run_json("archive", "--done", "--board", "p")
+        self.assertFalse(mockup.drafts_dir("t222").exists())
 
     def test_archive_text_output(self):
         out, _ = self.run_cli("archive", "t111")

@@ -287,6 +287,18 @@ Codex planners use `workspace-write` with the attachments folder as an extra wri
 
 `--agent claude|pi|codex`, `--model`, `--thinking` (pi or Codex) and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
 
+### Mockups
+
+For work on a user interface, the planner offers a mockup image. It asks you before it makes one, because a mockup takes up to a few minutes and uses your ChatGPT subscription.
+
+`herdboard mockup <id> "<prompt>" ["<prompt>"]...` runs `codex exec` once for each prompt, at the same time, and makes one draft per prompt. Give one prompt per option, four at most. Each prompt describes the screen: layout, components, text and style. `--image FILE` (up to five) gives Codex an image to revise or follow, such as an earlier draft or a screenshot. `--quality auto|low|medium|high` sets the image quality; the default is `medium`. A failed option does not stop the others: the JSON result lists it in `failed`.
+
+The drafts go to `~/.local/state/herdboard/mockups/<id>/`, not to the attachments. The command logs the path of each draft. The planner attaches only the draft that you approve, with `herdboard attach <id> <draft> --name mockup-<slug>.png`. The work agent's brief tells it to open the `mockup-*.png` attachments before it builds the UI. `finish` and `archive` delete the drafts. Linear cards keep mockups in the local attachments only.
+
+In Herdr, the drafts open in one pane to the right of the caller's pane. The pane shows one draft at a time, labeled "Option 1 of 3" and so on. Left and right arrows (or `h` and `l`) switch drafts, and Enter or `q` closes the pane. The pane draws the image with the kitty graphics protocol, so Herdr needs `kitty_graphics = true` in its `[terminal]` settings, in a terminal that shows images, such as Ghostty or kitty. When the terminal does not answer the graphics query, or outside Herdr, the drafts open with `xdg-open` (`open` on macOS). `--no-show` only makes the drafts.
+
+`mockup` needs the `codex` CLI, logged in with a ChatGPT account. The `mockup_model` setting names the Codex model, because the model in your Codex config may not make images on a ChatGPT account. When Codex reports `model_not_found`, change `mockup_model`.
+
 A planned card that will not be worked on is dropped with `herdboard finish <id>`: a branch with no commits counts as merged. Add `--force` when the branch has commits.
 
 ### Cards without a repository
@@ -640,6 +652,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's first line, its indented lines, its parent or its type. `--body ""` removes the indented lines |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
+| `herdboard mockup <id> PROMPT... [--image FILE]... [--quality Q] [--no-show]` | Make UI mockup drafts with Codex, one per prompt (four at most), and show them in a pane |
 | `herdboard plan <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
@@ -718,6 +731,7 @@ archive_titles = []        # added to the English "Archive"
 start_agent = "claude"     # or "pi" or "codex"
 # start_model = "openai-codex/gpt-6.1-sol"   # default: the agent's own default
 # start_thinking = "medium"                  # pi or Codex; pi uses it when the model has no [thinking] row
+mockup_model = "gpt-6.1-sol"                 # the Codex model that `mockup` makes images with
 # pi_models = ["zai/glm-5.3"]                # the board's pi model list; default: pi's enabledModels
 # codex_models = ["gpt-5.2-codex"]           # default: visible models in ~/.codex/models_cache.json
 # start_column = "In progress"               # default: linear.columns.started

@@ -61,6 +61,9 @@ herdboard --json edit tep3 --type feature             # or --no-type
 herdboard --json log tep3 "Ready for review: 3 commits."   # append to the card's activity log
 herdboard --json attach tep3 docs/spec.md             # copy a large document into the card's attachments
 herdboard --json attach tep3 --remove spec.md         # remove an attachment
+herdboard --json mockup tep3 "Login screen: email and password fields, a blue Sign in button"   # a UI mockup draft
+herdboard --json mockup tep3 "Sidebar layout" "Top tabs layout"   # one draft per option, four at most
+herdboard --json attach tep3 /path/to/draft.png --name mockup-login.png   # attach the draft the user approved
 herdboard --json add "Add invoice table" --parent t5aa     # a sub-card, on the parent's board
 herdboard --json edit tep3 --parent t5aa              # make a todo a sub-card
 herdboard --json edit tep3 --no-parent                # make it a plain todo again
@@ -79,11 +82,14 @@ The activity log is the card's history. It works for todos and Linear issues, an
 
 Attachments hold documents too large for the card text. `show` lists them in `attachments`. The attachment `plan.md` is the card's plan: the agent that starts work on the card gets it in its brief.
 
+`mockup` asks Codex for a UI mockup image of each prompt and shows the drafts in a pane next to yours. A draft is not an attachment: it stays in herdboard's state folder until `finish` or `archive`. Attach only a draft that the user approves, with a name `mockup-<slug>.png`. The work agent's brief points to these files. `--image FILE` revises a draft or follows a screenshot. Give the call a timeout of 10 minutes.
+
 Ask the user first before these. They change shared Linear data, open workspaces, or rewrite many cards:
 
 - `add --linear` (creates a Linear issue), `promote` (turns a todo into a Linear issue), and `move` or `done` on a Linear issue.
 - `start` (creates a worktree and starts an agent).
 - `plan` (creates the card's worktree when needed, and starts a planner agent in a tab in it).
+- `mockup` (takes up to a few minutes and uses the user's ChatGPT subscription).
 - `review` (focuses the card's workspace and opens Hunk; it can start a new agent). `review --agent` and `--both` also start a reviewer agent.
 - `merge` and `finish` (change the base branch, remove the worktree and delete the branch). Never run them for the card you work on.
 - `pr-review` (opens a workspace and Hunk, and starts a reviewer agent), `pr-review-refresh` (moves `pr/<N>` and reopens Hunk) and `pr-review-finish` (removes the PR's worktree and branch).

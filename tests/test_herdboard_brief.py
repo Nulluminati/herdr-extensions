@@ -95,6 +95,16 @@ class BriefTests(unittest.TestCase):
                       "- `/todos/.herdboard/attachments/t83k/spec.pdf`\n", text)
         self.assertNotIn("attachments/t83k/plan.md", text)
 
+    def test_approved_mockups_are_named_only_when_attached(self):
+        mockup_line = "Files named `mockup-*.png` are UI mockups that the user approved. Open them before you build the UI."
+        spec = {"name": "spec.pdf", "path": "/a/spec.pdf", "size": 9}
+        login = {"name": "mockup-login.png", "path": "/a/mockup-login.png", "size": 9}
+        for files, expected in (([spec], False), ([spec, login], True)):
+            with self.subTest(files=[entry["name"] for entry in files]):
+                text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
+                                  command="herdboard", attachments=files)
+                self.assertEqual(mockup_line in text, expected)
+
     def test_a_card_without_a_plan_or_attachments_has_neither_section(self):
         text = self.brief(todo())
         self.assertNotIn("## Plan", text)

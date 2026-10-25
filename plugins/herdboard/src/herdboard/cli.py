@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity, agent_review, attachments, plan, pr_reviews, pr_write
+from . import activity, agent_review, attachments, mockup, plan, pr_reviews, pr_write
 from .agent_review import AgentReviewer
 from .plan import Planner
 from .config import AGENTS, THINKING_LEVELS, config_path, load_config, thinking_levels
@@ -144,6 +144,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("file", nargs="?", type=Path)
     sub.add_argument("--name", help="the attachment's name; default: the file's name")
     sub.add_argument("--remove", metavar="NAME", help="remove the attachment with this name")
+
+    sub = command("mockup", "generate UI mockup drafts with Codex and show them; attach the approved one")
+    sub.add_argument("ref")
+    sub.add_argument("prompt", nargs="+", help=f"one prompt per option, {mockup.MAX_OPTIONS} at most")
+    sub.add_argument("--image", action="append", type=Path, default=[], metavar="FILE",
+                     help="an image to revise or follow, for every option")
+    sub.add_argument("--quality", choices=mockup.QUALITIES, default="medium")
+    sub.add_argument("--no-show", action="store_true", help="only generate the drafts")
+
+    # No help text, so the help leaves out this command, which only the mockup pane runs.
+    sub = commands.add_parser("mockup-view")
+    _add_global_options(sub, suppress=True)
+    sub.add_argument("paths", nargs="+", type=Path)
 
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
@@ -624,6 +637,27 @@ def _cmd_attach(ctx: _Context) -> dict:
     return {"ref": ref, "attachment": added}
 
 
+def _cmd_mockup(ctx: _Context) -> dict:
+    args = ctx.args
+    if len(args.prompt) > mockup.MAX_OPTIONS:
+        raise UsageError(f"Give {mockup.MAX_OPTIONS} prompts at most, one per option")
+    ref = args.ref.upper() if LINEAR_REF.match(args.ref) else ctx.store.ensure_id(args.ref).ref
+    images = [image if image.is_absolute() else ctx.directory / image for image in args.image]
+    drafts, errors = mockup.generate_all(ctx.config, ref, args.prompt, images, args.quality)
+    made = [{"option": number, "prompt": prompt, "path": str(draft)}
+            for number, (prompt, draft) in enumerate(zip(args.prompt, drafts), 1) if draft is not None]
+    failed = [{"option": number, "prompt": prompt, "error": error}
+              for number, (prompt, error) in enumerate(zip(args.prompt, errors), 1) if error is not None]
+    shown = None if args.no_show else mockup.show([entry["path"] for entry in made], config_path(args.config))
+    for entry in made:
+        activity.append(ctx.store, ref, f"Mockup draft {entry['option']}: {entry['path']}", activity.author())
+    return {"ref": ref, "drafts": made, "failed": failed, "shown": shown}
+
+
+def _cmd_mockup_view(ctx: _Context) -> dict:
+    return {"exit_code": mockup.view(ctx.args.paths)}
+
+
 def _require_todo_options(args: argparse.Namespace) -> None:
     if args.state:
         raise UsageError("--state works only with Linear issues")
@@ -764,11 +798,13 @@ def _cmd_archive(ctx: _Context) -> dict:
         archived, skipped = store.archive_done(path, blocked=start_module.archive_blocker)
         for card in archived:
             activity.append(store, card.ref, "Archived.", activity.author())
+            mockup.discard_drafts(card.ref)
         return {"board": store.board_name(path), "archived": archived, "skipped": skipped}
     if LINEAR_REF.match(args.ref):
         raise LinearArchiveError("herdboard archives only todos. Linear hides completed issues after done_days.")
     card = store.archive(args.ref, blocked=start_module.archive_blocker)
     activity.append(store, card.ref, "Archived.", activity.author())
+    mockup.discard_drafts(card.ref)
     return {"card": card}
 
 
@@ -1281,6 +1317,8 @@ COMMANDS = {
     "edit": _cmd_edit,
     "log": _cmd_log,
     "attach": _cmd_attach,
+    "mockup": _cmd_mockup,
+    "mockup-view": _cmd_mockup_view,
     "promote": _cmd_promote,
     "start": _cmd_start,
     "plan": _cmd_plan,
@@ -1353,7 +1391,16 @@ def _render(command: str, result: dict, as_json: bool) -> None:
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait"):
+    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+        return
+    if command == "mockup":
+        if as_json:
+            _emit_json(result)
+            return
+        for entry in result["drafts"]:
+            print(f"{result['ref']}: option {entry['option']}: {entry['path']}")
+        for entry in result["failed"]:
+            print(f"herdboard: option {entry['option']} failed: {entry['error']}", file=sys.stderr)
         return
     if command == "pr-sync":
         if as_json:
@@ -1550,7 +1597,7 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](_Context(args))
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json)
-        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait"):
+        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
             return result["exit_code"]
     except HerdboardError as error:
         if as_json:

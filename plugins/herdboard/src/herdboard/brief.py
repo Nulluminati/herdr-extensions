@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from pathlib import Path
 import unicodedata
 
@@ -130,6 +131,9 @@ def brief_text(
     if others:
         lines += ["## Attachments", "", "Read them when you need them.", ""]
         lines += [f"- `{entry['path']}`" for entry in others] + [""]
+        if any(fnmatch(entry["name"], "mockup-*.png") for entry in others):
+            lines += ["Files named `mockup-*.png` are UI mockups that the user approved. "
+                      "Open them before you build the UI.", ""]
 
     if log:
         lines += ["## Activity log", ""]

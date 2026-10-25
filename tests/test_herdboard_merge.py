@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard import activity, merge, pr_write, start  # noqa: E402
+from herdboard import activity, merge, mockup, pr_write, start  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_review import PaneHerdr, ReviewTestCase  # noqa: E402
 from git_env import isolated  # noqa: E402
@@ -319,6 +319,12 @@ class FinishTests(MergeTestCase):
         review.Reviewer(self.store, self.repo).review(self.card.ref)
         self.merger.finish(self.card.ref, force=True)
         self.assertEqual(self.calls("plugin", "pane", "close"), [["plugin", "pane", "close", "w9:p2:hunk"]])
+
+    def test_finish_removes_the_mockup_drafts(self):
+        self.started()
+        mockup.drafts_dir(self.card.ref).mkdir(parents=True)
+        self.merger.finish(self.card.ref, force=True)
+        self.assertFalse(mockup.drafts_dir(self.card.ref).exists())
 
     def test_a_worktree_that_is_already_gone_still_finishes(self):
         self.started()
@@ -704,6 +710,11 @@ class NoRepositoryFinishTests(MergeTestCase):
         self.assertEqual(card.column, "Done")
         self.assertEqual(self.records(), {})
         self.assertIn("Finished.", self.log())
+
+    def test_finish_removes_the_mockup_drafts_of_a_repoless_card(self):
+        mockup.drafts_dir(self.card.ref).mkdir(parents=True)
+        self.merger.finish(self.card.ref)
+        self.assertFalse(mockup.drafts_dir(self.card.ref).exists())
 
     def test_finish_works_when_the_folder_is_gone(self):
         shutil.rmtree(self.folder)

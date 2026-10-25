@@ -137,7 +137,26 @@ def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, wor
             lines.append(f"- {entry['time']} · {entry['author']} · {first}")
             lines += [f"\t{line}" for line in rest]
         lines.append("")
+    ref = card.ref
     lines += [
+        "## Mockups",
+        "",
+        "- When the work changes a user interface, offer the user a mockup image. Ask before you generate one. "
+        "It takes up to a few minutes and uses the user's ChatGPT subscription.",
+        f'- Run `{command} --json mockup {ref} "<prompt>"`. Describe the screen in the prompt: layout, components, '
+        "text and style. Add `--image <file>` to revise a draft or to start from a screenshot.",
+        "- Claude: give the Bash call a timeout of 600000 milliseconds.",
+        "- When the user wants options, give one prompt per option, four at most: "
+        f'`{command} --json mockup {ref} "<prompt 1>" "<prompt 2>"`. Make each prompt a different direction. '
+        "Codex makes them at the same time.",
+        '- The command shows the drafts in one pane next to yours, labeled "Option 1 of 2" and so on. Look at the '
+        "drafts yourself too (read the PNG files). Ask the user which option they prefer, or if a draft is good. "
+        "The `option` numbers in the JSON result match the labels.",
+        "- To refine the chosen option, run the command again with `--image <that draft>`.",
+        f"- Only when the user approves a draft: `{command} attach {ref} <draft> --name mockup-<slug>.png`. "
+        "Do not attach drafts the user did not choose.",
+        "- Name the approved mockups in the plan, in the step they belong to.",
+        "",
         "## How to plan",
         "",
         "1. Read the card, its attachments and the code that the work touches.",

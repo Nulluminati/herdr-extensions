@@ -72,6 +72,20 @@ class ConfigTest(unittest.TestCase):
                 with self.assertRaises(HerdboardError):
                     load_config(path)
 
+    def test_mockup_model_defaults_to_a_codex_image_model(self):
+        self.assertEqual(load_config().mockup_model, "gpt-6.1-sol")
+
+    def test_mockup_model_from_file(self):
+        path = self.write(self.dir / "a.toml", 'mockup_model = "gpt-7"\n')
+        self.assertEqual(load_config(path).mockup_model, "gpt-7")
+
+    def test_mockup_model_must_be_one_name(self):
+        for text in ("mockup_model = 3", 'mockup_model = ""', 'mockup_model = "two words"'):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "a.toml", text + "\n")
+                with self.assertRaises(HerdboardError):
+                    load_config(path)
+
     def test_tag_style_defaults_to_outline(self):
         self.assertEqual(load_config().tag_style, "outline")
 

@@ -251,6 +251,19 @@ class RequestTests(PlanTestCase):
         self.assertNotIn("## Changes already in the worktree", text)
         self.assertNotIn("work agent works in this worktree", text)
 
+    def test_the_brief_offers_mockups_before_how_to_plan(self):
+        self.planner.plan(self.card.ref)
+        text = self.brief()
+        command = start.herdboard_command(None)
+        ref = self.card.ref
+        self.assertLess(text.index("## Mockups"), text.index("## How to plan"))
+        for part in ("Ask before you generate one", f'`{command} --json mockup {ref} "<prompt>"`',
+                     "timeout of 600000 milliseconds", f'`{command} --json mockup {ref} "<prompt 1>" "<prompt 2>"`',
+                     "four at most", "Option 1 of 2", "--image <that draft>",
+                     f"`{command} attach {ref} <draft> --name mockup-<slug>.png`",
+                     "Do not attach drafts the user did not choose"):
+            self.assertIn(part, text)
+
     def test_the_brief_warns_when_a_work_agent_runs_in_the_worktree(self):
         self.planner.plan(self.card.ref)
         start._write(start.state_dir() / "starts.json",
@@ -483,6 +496,7 @@ class NoRepositoryPlanTests(PlanTestCase):
         self.assertIn("Working folder", text)
         self.assertIn("no repository", text)
         self.assertNotIn("Revert your code changes", text)
+        self.assertIn("## Mockups", text)
         record = json.loads((start.state_dir() / "starts.json").read_text())[self.inbox_card.ref]
         self.assertEqual(record["mode"], "repoless")
         self.assertEqual(record["worktree_path"], str(self.folder()))
