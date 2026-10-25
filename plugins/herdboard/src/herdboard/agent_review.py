@@ -25,13 +25,17 @@ REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large change can take long; the worker gives up after this.
 REVIEW_TIMEOUT_SECONDS = 30 * 60
 POLL_SECONDS = 5
+REVIEW_COMMAND_RULES = """Do not run the project's code, tests or builds from the shell.
+Do not start a server.
+Run only read-only inspection commands. Browser commands require explicit permission below.
+"""
 BROWSER_INSTRUCTIONS = """When the change has a page, an HTML file or a server that already runs, check it with
 `terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
 Before your turn ends, close it with `terminal-browser action --browser <key> -- close`; the key comes from
 the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
 success and leave the browser running, so say so in the findings when it stays listed.
 Do not run `terminal-browser shutdown`: it closes every browser on the machine.
-Run no other command, and do not start a server.
+Run no other command.
 """
 
 
@@ -109,7 +113,7 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
-{BROWSER_INSTRUCTIONS if browser else ""}
+{REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}
 Write your findings to `{folder / 'findings.md'}` in this format:
 
     ## Confirmed problems
@@ -145,7 +149,7 @@ Card {record['ref']}: {card.title if card is not None else record['ref']}
 {listing}{plan_line}Look for correctness, gaps, unsupported claims and missing steps.
 Read the files in the working folder when you need context.
 Do not change any file.
-{BROWSER_INSTRUCTIONS if browser else ""}
+{REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}
 Write your findings to `{folder / 'findings.md'}` in this format:
 
     ## Confirmed problems
@@ -190,6 +194,8 @@ class AgentReviewer(Reviewer):
             # One model for the launch and for its level, as start and plan do.
             model = start_module.agent_model(self.config, model)
             thinking = start_module.thinking_level(self.config, model, thinking)
+        elif thinking is None and self.config.start_thinking in levels:
+            thinking = self.config.start_thinking
         persist = self._persister(key, record)
         with _lock(".start-" + safe_key(key) + ".lock"):
             running = record.get("agent_review")

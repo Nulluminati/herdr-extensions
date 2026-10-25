@@ -142,6 +142,47 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn('default_permissions="hb-review"', args)
         self.assertFalse(any("network={enabled=true}" in arg for arg in args))
 
+    def test_codex_reviewer_uses_valid_config_thinking(self):
+        self.config.start_thinking = "high"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="codex")
+        self.assertIn('model_reasoning_effort="high"', self.reviewer_start())
+
+    def test_codex_reviewer_keeps_explicit_thinking(self):
+        self.config.start_thinking = "high"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="codex", thinking="low")
+        args = self.reviewer_start()
+        self.assertIn('model_reasoning_effort="low"', args)
+        self.assertNotIn('model_reasoning_effort="high"', args)
+
+    def test_codex_reviewer_drops_invalid_config_thinking(self):
+        self.config.start_thinking = "off"
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="codex")
+        self.assertFalse(any("model_reasoning_effort=" in arg for arg in self.reviewer_start()))
+
+    def test_all_review_prompts_prohibit_project_shell_execution(self):
+        record = {"ref": self.card.ref, "worktree_path": str(self.repo), "branch": "test"}
+        for browser in (False, True):
+            texts = (
+                agent_review.request_text(self.card, record, "main", self.root, [], browser=browser),
+                agent_review.repoless_request_text(self.card, record, self.root, [], browser=browser),
+            )
+            for index, text in enumerate(texts):
+                with self.subTest(browser=browser, repoless=bool(index)):
+                    self.assertIn("Do not run the project's code, tests or builds from the shell.", text)
+                    self.assertIn("Do not start a server.", text)
+                    self.assertIn("Run only read-only inspection commands.", text)
+                    if browser:
+                        self.assertLess(text.index("Do not run the project's code"),
+                                        text.index("terminal-browser open"))
+                    else:
+                        self.assertNotIn("terminal-browser", text)
+
     def test_codex_reviewer_rejects_pi_only_thinking(self):
         self.started()
         with self.assertRaises(review.ReviewError) as raised:
@@ -237,7 +278,7 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn("terminal-browser action --browser <key> -- close", request)
         self.assertIn("Do not run `terminal-browser shutdown`", request)
         self.assertIn("stays listed", request)
-        self.assertIn("do not start a server", request)
+        self.assertIn("Do not start a server.", request)
 
     def test_the_review_starts_in_the_background(self):
         self.started()
@@ -687,7 +728,7 @@ class NoRepositoryAgentReviewTests(AgentReviewTestCase):
         self.assertIn("terminal-browser action --browser <key> -- close", request)
         self.assertIn("Do not run `terminal-browser shutdown`", request)
         self.assertIn("stays listed", request)
-        self.assertIn("do not start a server", request)
+        self.assertIn("Do not start a server.", request)
         self.assertFalse((self.folder / "branch.patch").exists())
         self.assertFalse((self.folder / "uncommitted.patch").exists())
 
