@@ -273,6 +273,20 @@ class RunTests(AutomationTestCase):
         self.assertIsNone(result["card"])
         self.assertTrue(result["result"].startswith("spawn_failed: "))
 
+    def test_a_failed_attachment_copy_keeps_the_card_linked_and_logged(self):
+        added = self.add()
+        source = self.root / "plan.md"
+        source.write_text("# Plan\n", encoding="utf-8")
+        attachments.add(self.store, added.id, source)
+        with patch.object(automations.attachments, "add", side_effect=HerdboardError("disk full")):
+            result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+        self.assertTrue(result["result"].startswith("spawn_failed: "))
+        self.assertIsNotNone(result["card"])
+        self.assertEqual(automations.read_state()[added.id]["last_card"], result["card"])
+        messages = [entry["message"] for entry in activity.read(self.config, result["card"])]
+        self.assertTrue(any(f"Spawned by automation {added.id}" in message for message in messages), messages)
+        self.assertTrue(any("disk full" in message for message in messages), messages)
+
     def test_a_merge_automation_puts_the_merge_section_in_the_brief(self):
         added = self.add(may_merge_prs=True)
         result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
@@ -338,6 +352,23 @@ class TickTests(AutomationTestCase):
         automations.set_enabled(self.store, added.id, True, now=local(2026, 10, 23, 10, 0))
         self.assertEqual(automations.tick(self.store, now=local(2026, 10, 23, 10, 5))["runs"], [])
         self.assertEqual(len(automations.tick(self.store, now=local(2026, 10, 24, 9, 1))["runs"]), 1)
+
+    def test_the_restart_time_is_written_under_the_definitions_lock(self):
+        added = self.add()
+        held = []
+
+        def restart(automation_id, now):
+            try:
+                with start._lock(automations.DEFINITIONS_LOCK, wait=0):
+                    held.append(False)
+            except HerdboardError:
+                held.append(True)
+
+        with patch.object(automations, "_restart", side_effect=restart):
+            automations.set_enabled(self.store, added.id, False)
+            automations.set_enabled(self.store, added.id, True)
+            automations.edit(self.store, added.id, schedule="every week on friday")
+        self.assertEqual(held, [True, True])
 
     def test_a_changed_schedule_starts_with_its_next_due_time(self):
         added = self.add(schedule="every week on friday")

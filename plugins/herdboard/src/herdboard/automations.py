@@ -52,6 +52,14 @@ class AutomationError(HerdboardError):
         self.code = code
 
 
+class SpawnError(AutomationError):
+    """A spawn that failed after it added its card."""
+
+    def __init__(self, message, card: CardView):
+        super().__init__(message, "spawn_failed")
+        self.card = card
+
+
 # Schedules
 
 
@@ -348,8 +356,9 @@ def add(store, *, title: str, schedule: str, board: str = "inbox", body: str = "
     return item
 
 
-def _change(store, automation_id: str, change) -> tuple[Automation, Automation]:
-    """Apply `change(item) -> item` to one automation. Returns (before, after)."""
+def _change(store, automation_id: str, change, saved=None) -> tuple[Automation, Automation]:
+    """Apply `change(item) -> item` to one automation. Returns (before, after). `saved(before, after)`
+    runs under the same lock, so a tick never sees the change without it."""
     with _lock(DEFINITIONS_LOCK, wait=2):
         current = load(store.config)
         for index, item in enumerate(current):
@@ -357,6 +366,8 @@ def _change(store, automation_id: str, change) -> tuple[Automation, Automation]:
                 changed = _check(store, change(item))
                 current[index] = changed
                 save(store.config, current)
+                if saved is not None:
+                    saved(item, changed)
                 return item, changed
     raise NotFoundError(f"No automation {automation_id}")
 
@@ -366,18 +377,20 @@ def edit(store, automation_id: str, now: datetime | None = None, **changes) -> A
     unknown = set(changes) - set(Automation.__dataclass_fields__) | ({"id", "created"} & set(changes))
     if unknown:
         raise AutomationError(f"Cannot change {', '.join(sorted(unknown))}")
-    before, after = _change(store, automation_id, lambda item: replace(item, **changes))
-    if after.schedule != before.schedule:
-        _restart(automation_id, now)
-    return after
+    def saved(before: Automation, after: Automation) -> None:
+        if after.schedule != before.schedule:
+            _restart(automation_id, now)
+
+    return _change(store, automation_id, lambda item: replace(item, **changes), saved)[1]
 
 
 def set_enabled(store, automation_id: str, enabled: bool, now: datetime | None = None) -> Automation:
     """Pause or resume. A resumed automation starts with its next due time: it does not catch up."""
-    before, after = _change(store, automation_id, lambda item: replace(item, enabled=enabled))
-    if enabled and not before.enabled:
-        _restart(automation_id, now)
-    return after
+    def saved(before: Automation, after: Automation) -> None:
+        if enabled and not before.enabled:
+            _restart(automation_id, now)
+
+    return _change(store, automation_id, lambda item: replace(item, enabled=enabled), saved)[1]
 
 
 def remove(store, automation_id: str) -> Automation:
@@ -437,9 +450,13 @@ def spawn(store, automation: Automation, due: datetime) -> CardView:
         text = with_type(text, config.type_named(automation.type))
     body = automation.body.splitlines() if automation.body.strip() else None
     card = store.add(path, text, body=body)
-    for entry in attachments.listing(config, automation.id):
-        attachments.add(store, card.ref, Path(entry["path"]))
     activity.append(store, card.ref, f"Spawned by automation {automation.id} for {_stamp(due)}.", "herdboard")
+    try:
+        for entry in attachments.listing(config, automation.id):
+            attachments.add(store, card.ref, Path(entry["path"]))
+    except HerdboardError as error:
+        activity.append(store, card.ref, f"Cannot copy the automation's attachments: {error}", "herdboard")
+        raise SpawnError(str(error), card) from error
     return card
 
 
@@ -451,9 +468,11 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0,
         card = spawn(store, automation, due)
     except HerdboardError as error:
         result = f"spawn_failed: {error}"
-        _update_state(automation.id, last_run=now, last_card=None, last_result=result)
+        # A card that was added stays on its board, linked to the automation.
+        ref = error.card.ref if isinstance(error, SpawnError) else None
+        _update_state(automation.id, last_run=now, last_card=ref, last_result=result)
         notify(f"herdboard: automation {automation.id} failed", f"{automation.title}: {error}")
-        return {"id": automation.id, "card": None, "result": result, "skipped": skipped}
+        return {"id": automation.id, "card": ref, "result": result, "skipped": skipped}
     if skipped:
         activity.append(store, card.ref, f"Missed runs: skipped {skipped} earlier due "
                         f"time{'' if skipped == 1 else 's'}.", "herdboard")

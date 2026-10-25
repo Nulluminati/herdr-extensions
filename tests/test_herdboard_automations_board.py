@@ -116,6 +116,13 @@ class TabTests(AutomationsBoardTestCase):
             await self.settle(app, pilot)
             self.assertEqual(self.tab(app), "board")
 
+    async def test_the_key_bar_shows_back(self):
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.open_tab(app, pilot)
+            keys = " ".join(app.screen.query_one(KeyBar).keys_text().plain.split())
+            self.assertIn("Back", keys)
+
 
 class ListTests(AutomationsBoardTestCase):
     async def test_rows_show_state_id_title_board_schedule_and_runs(self):
