@@ -20,6 +20,7 @@ from .config import AGENTS, THINKING_LEVELS, thinking_levels
 from .model import HerdboardError
 from .review import Reviewer, ReviewError
 from .start import NEW_REPO, REPOLESS, _lock, _read, _write, find_record, herdr, safe_key, state_dir
+from .start import notify as _notify
 
 REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large change can take long; the worker gives up after this.
@@ -299,13 +300,6 @@ def _wait_for_findings(findings: Path, pane: str, kind: str) -> None:
 
 def _count_findings(findings: Path) -> int:
     return sum(1 for line in findings.read_text(encoding="utf-8").splitlines() if line.startswith("- "))
-
-
-def _notify(title: str, body: str) -> None:
-    try:
-        herdr("notification", "show", title, "--body", body)
-    except HerdboardError as error:
-        print(f"herdboard: cannot show a notification: {error}", file=sys.stderr)
 
 
 def _forget(ref: str, folder: Path, reviewed: dict | None = None) -> dict | None:

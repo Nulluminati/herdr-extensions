@@ -50,11 +50,13 @@ def brief_text(
     attachments: list[dict] = (),
     repoless: bool = False,
     attachments_dir: str | None = None,
+    may_merge_prs: bool = False,
 ) -> str:
     """A Markdown brief: the task, where to work, and how to keep the card current.
 
     Without a repository (`repoless`), the card folder is the whole workspace and its output
-    goes in the card's attachments: herdboard deletes the folder at finish.
+    goes in the card's attachments: herdboard deletes the folder at finish. With `may_merge_prs`
+    (an automation that allows it), the agent may merge other pull requests that need no change.
     """
     linear = card.source == "linear"
     ref = card.ref
@@ -142,6 +144,17 @@ def brief_text(
             lines.append(f"- {entry['time']} · {entry['author']} · {first}")
             lines += [f"\t{line}" for line in rest]
         lines.append("")
+    if may_merge_prs:
+        lines += [
+            "## GitHub pull requests",
+            "",
+            "This task allows you to merge pull requests with `gh pr merge`. Merge a pull request only when "
+            "all its checks pass and it needs no code change. Leave every other pull request open: one that "
+            "needs a code change, an answer to a review comment, or a conflict fix.",
+            "",
+            f'Log each pull request that you merged or left, and why: `{command} --json log {ref} "..."`',
+            "",
+        ]
     lines += [
         "## Keep the card up to date",
         "",
@@ -180,7 +193,9 @@ def brief_text(
         f"- When the work is ready for the user to check, commit it, then run `{command} --json move {ref} Review`",
         f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
         "Fix, commit, and move the card back to Review.",
-        "- Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.",
+        ("- Do not push or merge your branch, rebase it onto another branch, or remove the worktree. "
+         "herdboard does that." if may_merge_prs else
+         "- Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that."),
         "- Do not move the card to Done. The user does that after the review.",
         "",
     ]

@@ -16,8 +16,8 @@ import subprocess
 from .config import Config
 from .model import HerdboardError, IoError
 
-# A todo ID (`t3m9`) or a Linear identifier (`ENG-123`): both are safe file names.
-LOG_REF = re.compile(r"^(t[0-9a-z]{3}|[A-Z][A-Z0-9]*-\d+)$")
+# A todo ID (`t3m9`), an automation ID (`a7k2`) or a Linear identifier (`ENG-123`): all are safe file names.
+LOG_REF = re.compile(r"^(t[0-9a-z]{3}|a[0-9a-z]{3}|[A-Z][A-Z0-9]*-\d+)$")
 ENTRY = re.compile(r"^- (?P<time>\d{4}-\d\d-\d\d \d\d:\d\d) · (?P<author>[a-z]+) · (?P<message>.*)$")
 # Panes whose agent herdboard started, newest last. Herdr pane IDs are never reused.
 PANE_AGENTS_FILE = "panes.json"

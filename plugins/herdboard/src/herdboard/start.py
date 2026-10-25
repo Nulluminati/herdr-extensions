@@ -115,6 +115,14 @@ def herdr(*args, tolerated=()):
     return found
 
 
+def notify(title: str, body: str) -> None:
+    """Show a Herdr notification. Best effort: a failure is only printed."""
+    try:
+        herdr("notification", "show", title, "--body", body)
+    except HerdboardError as error:
+        print(f"herdboard: cannot show a notification: {error}", file=sys.stderr)
+
+
 def herdboard_command(config_file: Path | None = None) -> str:
     """How an agent runs this herdboard: the installed command, else this Python with `-m`.
 
@@ -919,6 +927,7 @@ class Starter:
             attachments=attachments.listing(self.config, card.ref),
             repoless=record.get("mode") == REPOLESS,
             attachments_dir=str(attachments.folder(self.config, card.ref)),
+            may_merge_prs=bool(record.get("may_merge_prs")),
         ))
         message = agent_message(card, brief)
         record["agent_name"] = name
@@ -1191,7 +1200,12 @@ class Starter:
             raise
 
     def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None,
-              base=None, no_repo=False, new_repo=None):
+              base=None, no_repo=False, new_repo=None, may_merge_prs=False):
+        """Prepare the card, move it to the start column and start its agent.
+
+        `may_merge_prs` (set by an automation) lets the agent merge other pull requests; the start
+        record keeps it, so a later start of the card keeps it too.
+        """
         agent = agent or self.config.start_agent
         if agent not in AGENTS:
             raise StartError("Agent must be claude, pi or codex", "usage")
@@ -1237,6 +1251,8 @@ class Starter:
                 record = self._prepare(card, issue, key, repo, checkout, base, move_parent=True,
                                        check_column=True, identity=target)
             state_name = record.pop("_state_name", None)
+            if may_merge_prs:
+                record["may_merge_prs"] = True
             try:
                 def persist():
                     with _lock(wait=2):
