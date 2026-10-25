@@ -120,8 +120,9 @@ def _error_text(event: dict) -> str | None:
     return None
 
 
-def _saved_image(events: list[dict]) -> tuple[Path | None, str]:
-    """The PNG that Codex saved, and the text that explains a missing one."""
+def _saved_image(events: list[dict]) -> tuple[Path | None, bool, str]:
+    """The PNG that Codex saved, True when it is in Codex's own folder for this run, and the text that
+    explains a missing one."""
     thread = next((event.get("thread_id") for event in events
                    if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str)), None)
     messages = [event["item"]["text"] for event in events
@@ -132,14 +133,14 @@ def _saved_image(events: list[dict]) -> tuple[Path | None, str]:
         folder = _codex_home() / "generated_images" / thread
         found = sorted(folder.glob("*.png"), key=lambda path: path.stat().st_mtime) if folder.is_dir() else []
         if found:
-            return found[-1], ""
+            return found[-1], True, ""
     if messages:
         candidate = Path(messages[-1].strip()).expanduser()
         if candidate.suffix.lower() == ".png" and candidate.is_file():
-            return candidate, ""
+            return candidate, False, ""
     # Codex errors first, unchanged: `model_not_found` tells the user to change mockup_model.
     unique = list(dict.fromkeys(errors))
-    return None, "; ".join(unique) or (messages[-1].strip() if messages else "")
+    return None, False, "; ".join(unique) or (messages[-1].strip() if messages else "")
 
 
 def generate(config, ref: str, prompt: str, images=(), quality: str = "medium", stamp: str | None = None) -> Path:
@@ -166,7 +167,7 @@ def generate(config, ref: str, prompt: str, images=(), quality: str = "medium", 
         raise MockupError(f"Codex made no image in {CODEX_TIMEOUT_SECONDS // 60} minutes", "timeout") from error
     except OSError as error:
         raise MockupError(f"Cannot run codex: {error}", "codex_missing") from error
-    saved, reason = _saved_image(_events(result.stdout))
+    saved, generated, reason = _saved_image(_events(result.stdout))
     if saved is None:
         reason = reason or result.stderr.strip()[-500:] or f"exit code {result.returncode}"
         raise MockupError(f"Codex made no image: {reason}", "no_image")
@@ -179,8 +180,12 @@ def generate(config, ref: str, prompt: str, images=(), quality: str = "medium", 
             if not draft.exists():
                 break
             number += 1
+        # A file that Codex only names can be an input image or an attachment, so it stays where it is.
         try:
-            shutil.move(str(saved), draft)
+            if generated:
+                shutil.move(str(saved), draft)
+            else:
+                shutil.copy2(saved, draft)
         except OSError as error:
             raise MockupError(f"Cannot move {saved} to {draft}: {error}", "io") from error
     return draft
@@ -221,8 +226,11 @@ def open_file(path: Path) -> None:
         print(f"herdboard: cannot open {path} with {opener}: {error}", file=sys.stderr)
 
 
-def show(paths, config_file: Path | None = None) -> str:
-    """Show the drafts of one call in a pane to the right of the caller's, else in the default viewer."""
+def show(paths, config_file: Path | None = None, numbers=None, total=None) -> str:
+    """Show the drafts of one call in a pane to the right of the caller's, else in the default viewer.
+
+    `numbers` are the option numbers of the drafts and `total` the number of options asked for, so the
+    pane's labels match the option numbers in the result when an option failed."""
     paths = [Path(path) for path in paths]
     caller = os.environ.get("HERDR_PANE_ID")
     if caller:
@@ -231,7 +239,9 @@ def show(paths, config_file: Path | None = None) -> str:
         except (HerdboardError, KeyError, TypeError):
             pane = None
         if pane:
-            viewer = " ".join([start.herdboard_command(config_file), "mockup-view",
+            labels = [f"--option {number}" for number in numbers or []]
+            labels += [f"--total {total}"] if total is not None else []
+            viewer = " ".join([start.herdboard_command(config_file), "mockup-view", *labels,
                                *(shlex.quote(str(path)) for path in paths)])
             # Herdr prints nothing for `pane run` when it works, so only the exit code counts.
             try:
@@ -326,7 +336,7 @@ def _fit(data: bytes, terminal) -> tuple[int, int]:
             max(1, min(rows, round(size[1] * scale / cell_height))))
 
 
-def _draw(terminal, paths: list[Path], index: int) -> None:
+def _draw(terminal, paths: list[Path], index: int, numbers: list[int], total: int) -> None:
     path = paths[index]
     data = path.read_bytes()
     columns, rows = _fit(data, terminal)
@@ -338,45 +348,96 @@ def _draw(terminal, paths: list[Path], index: int) -> None:
         controls = f"a=T,f=100,c={columns},r={rows},q=2,m={more}" if number == 0 else f"m={more}"
         terminal.write(b"\033_G" + controls.encode() + b";" + chunk + b"\033\\")
     lines = []
-    if len(paths) > 1:
-        lines.append(f"Option {index + 1} of {len(paths)}")
+    if total > 1:
+        lines.append(f"Option {numbers[index]} of {total}")
     lines.append(path.name)
     lines.append("←/→ switch · Enter close" if len(paths) > 1 else "Enter close")
     terminal.write(f"\033[{rows + 2};1H".encode() + "\r\n".join(lines).encode())
 
 
-def _keys(terminal, paths: list[Path]) -> None:
-    index = 0
-    _draw(terminal, paths, index)
+CLOSE_KEYS = (b"\r", b"\n", b"q", b"\x03", b"\x04")
+NEXT_KEYS = (b"\033[C", b"\033OC", b"l")
+PREVIOUS_KEYS = (b"\033[D", b"\033OD", b"h")
+# How long the viewer waits for the rest of an escape sequence that one read cut.
+SEQUENCE_WAIT_SECONDS = 0.1
+
+
+def _split_keys(data: bytes) -> tuple[list[bytes], bytes]:
+    """The keys in `data`, and the start of an escape sequence that the next read completes."""
+    keys = []
+    while data:
+        if data[:1] != b"\033":
+            keys.append(data[:1])
+            data = data[1:]
+        elif len(data) < 2 or data[1:2] in b"[O" and len(data) < 3:
+            break
+        elif data[1:2] == b"O":
+            keys.append(data[:3])
+            data = data[3:]
+        elif data[1:2] == b"[":
+            sequence = re.match(rb"\033\[[0-9;]*[@-~]", data)
+            if sequence is None and re.fullmatch(rb"\033\[[0-9;]*", data):
+                break
+            end = sequence.end() if sequence else 2
+            keys.append(data[:end])
+            data = data[end:]
+        else:
+            keys.append(data[:1])
+            data = data[1:]
+    return keys, data
+
+
+def _read_keys(terminal):
+    """Yield single keys: a read can hold several keys, or cut an escape sequence. Ends at end of input."""
+    pending = b""
     while True:
-        key = terminal.read(None)
-        if key in (b"\r", b"\n", b"q", b"\x03", b"\x04", b""):
+        data = terminal.read(SEQUENCE_WAIT_SECONDS if pending else None)
+        if not data:
+            if not pending:
+                return
+            # The rest of the sequence did not come: it was the Escape key alone, or noise.
+            yield pending
+            pending = b""
+            continue
+        keys, pending = _split_keys(pending + data)
+        yield from keys
+
+
+def _keys(terminal, paths: list[Path], numbers: list[int], total: int) -> None:
+    index = 0
+    _draw(terminal, paths, index, numbers, total)
+    for key in _read_keys(terminal):
+        if key in CLOSE_KEYS:
             return
         if len(paths) < 2:
             continue
-        if key in (b"\033[C", b"\033OC", b"l"):
+        if key in NEXT_KEYS:
             index = (index + 1) % len(paths)
-        elif key in (b"\033[D", b"\033OD", b"h"):
+        elif key in PREVIOUS_KEYS:
             index = (index - 1) % len(paths)
         else:
             continue
-        _draw(terminal, paths, index)
+        _draw(terminal, paths, index, numbers, total)
 
 
-def view(paths, terminal=None) -> int:
-    """The viewer that the pane runs: one draft at a time, full size, until Enter."""
+def view(paths, terminal=None, numbers=None, total=None) -> int:
+    """The viewer that the pane runs: one draft at a time, full size, until Enter. `numbers` and `total`
+    label the drafts as `show` describes; by default they count the drafts."""
     paths = [Path(path) for path in paths]
+    numbers = list(numbers) if numbers else list(range(1, len(paths) + 1))
+    total = total or len(paths)
     with terminal if terminal is not None else Terminal() as screen:
         if _graphics(screen):
-            _keys(screen, paths)
+            _keys(screen, paths, numbers, total)
         else:
             for path in paths:
                 open_file(path)
             lines = ["This terminal shows no images. The drafts open in the default viewer:",
-                     *(f"{number}. {path}" for number, path in enumerate(paths, 1)), "", "Enter close"]
+                     *(f"{number}. {path}" for number, path in zip(numbers, paths)), "", "Enter close"]
             screen.write("\r\n".join(lines).encode())
-            while screen.read(None) not in (b"\r", b"\n", b"q", b"\x03", b"\x04", b""):
-                pass
+            for key in _read_keys(screen):
+                if key in CLOSE_KEYS:
+                    break
     pane = os.environ.get("HERDR_PANE_ID")
     if pane:
         try:

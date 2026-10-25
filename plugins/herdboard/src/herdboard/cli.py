@@ -157,6 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = commands.add_parser("mockup-view")
     _add_global_options(sub, suppress=True)
     sub.add_argument("paths", nargs="+", type=Path)
+    sub.add_argument("--option", type=int, action="append", dest="numbers", help="the option number of each draft")
+    sub.add_argument("--total", type=int, help="the number of options asked for")
 
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
@@ -648,14 +650,17 @@ def _cmd_mockup(ctx: _Context) -> dict:
             for number, (prompt, draft) in enumerate(zip(args.prompt, drafts), 1) if draft is not None]
     failed = [{"option": number, "prompt": prompt, "error": error}
               for number, (prompt, error) in enumerate(zip(args.prompt, errors), 1) if error is not None]
-    shown = None if args.no_show else mockup.show([entry["path"] for entry in made], config_path(args.config))
+    shown = None if args.no_show else mockup.show([entry["path"] for entry in made], config_path(args.config),
+                                                  numbers=[entry["option"] for entry in made],
+                                                  total=len(args.prompt))
     for entry in made:
         activity.append(ctx.store, ref, f"Mockup draft {entry['option']}: {entry['path']}", activity.author())
     return {"ref": ref, "drafts": made, "failed": failed, "shown": shown}
 
 
 def _cmd_mockup_view(ctx: _Context) -> dict:
-    return {"exit_code": mockup.view(ctx.args.paths)}
+    args = ctx.args
+    return {"exit_code": mockup.view(args.paths, numbers=args.numbers, total=args.total)}
 
 
 def _require_todo_options(args: argparse.Namespace) -> None:

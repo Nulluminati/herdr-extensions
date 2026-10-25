@@ -33,6 +33,7 @@ class FakeCodex:
         # "none" (no image) or "fail" (exit code 1 and an error event).
         self.behavior = {}
         self.count = 0
+        self.existing = None
 
     def __call__(self, argv, timeout=120, stdin=None):
         self.calls.append({"argv": argv, "timeout": timeout, "stdin": stdin})
@@ -51,6 +52,9 @@ class FakeCodex:
             saved.parent.mkdir(parents=True, exist_ok=True)
             saved.write_bytes(PNG)
             events.append({"type": "item.completed", "item": {"type": "agent_message", "text": str(saved)}})
+        elif behavior == "existing":
+            # Codex makes no image and names a file that was already there, such as an input image.
+            events.append({"type": "item.completed", "item": {"type": "agent_message", "text": str(self.existing)}})
         elif behavior == "none":
             events.append({"type": "item.completed", "item": {"type": "agent_message", "text": "I cannot draw that"}})
         else:
@@ -110,6 +114,17 @@ class GenerateTests(MockupTestCase):
         draft = mockup.generate(self.config, "tabc", "Login screen")
         self.assertEqual(draft.read_bytes(), PNG)
         self.assertEqual(draft.parent, mockup.drafts_dir("tabc"))
+
+    def test_a_file_named_in_the_agent_message_is_copied_and_kept(self):
+        original = self.root / "approved" / "mockup-login.png"
+        original.parent.mkdir()
+        original.write_bytes(PNG)
+        self.codex.existing = original
+        self.codex.behavior["Login"] = "existing"
+        draft = mockup.generate(self.config, "tabc", "Login screen", images=[original])
+        self.assertEqual(draft.read_bytes(), PNG)
+        mockup.discard_drafts("tabc")
+        self.assertEqual(original.read_bytes(), PNG)
 
     def test_no_png_raises_no_image_with_the_agent_message(self):
         self.codex.behavior["Login"] = "none"
@@ -226,6 +241,14 @@ class ShowTests(MockupTestCase):
         self.assertEqual(len(herdr.calls), 2)
         self.assertEqual(self.opened, [])
 
+    def test_the_viewer_gets_the_option_numbers_and_the_total(self):
+        herdr = FakeHerdr()
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), mock.patch.object(start, "command", herdr):
+            mockup.show(self.paths, numbers=[2, 3], total=3)
+        command = herdr.calls[1][3]
+        self.assertIn(" mockup-view --option 2 --option 3 --total 3 ", command)
+        self.assertTrue(command.endswith(" ".join(shlex.quote(str(path)) for path in self.paths)))
+
     def test_opens_each_draft_without_herdr(self):
         self.assertEqual(mockup.show(self.paths), "xdg-open")
         self.assertEqual(self.opened, self.paths)
@@ -330,6 +353,46 @@ class ViewTests(MockupTestCase):
                   for screen in terminal.screens()]
         self.assertEqual(labels, ["Option 1 of 3", "Option 2 of 3", "Option 1 of 3", "Option 3 of 3",
                                   "Option 1 of 3", "Option 3 of 3"])
+
+    def test_labels_use_the_option_numbers_after_a_failed_option(self):
+        terminal = FakeTerminal([OK_REPLY, b"\033[C", b"\r"])
+        mockup.view(self.paths[:2], terminal=terminal, numbers=[2, 3], total=3)
+        first, second = terminal.screens()
+        self.assertIn("Option 2 of 3", first)
+        self.assertIn("Option 3 of 3", second)
+
+    def test_one_draft_left_of_several_options_keeps_its_label(self):
+        terminal = FakeTerminal([OK_REPLY, b"\r"])
+        mockup.view(self.paths[:1], terminal=terminal, numbers=[2], total=2)
+        screen, = terminal.screens()
+        self.assertIn("Option 2 of 2", screen)
+        self.assertNotIn("←/→", screen)
+
+    def test_no_graphics_lists_the_option_numbers(self):
+        terminal = FakeTerminal([b"", b"\r"])
+        mockup.view(self.paths[:2], terminal=terminal, numbers=[2, 3], total=3)
+        self.assertIn(f"2. {self.paths[0]}", terminal.text())
+        self.assertIn(f"3. {self.paths[1]}", terminal.text())
+
+    def test_an_arrow_split_over_two_reads_still_switches(self):
+        terminal = FakeTerminal([OK_REPLY, b"\033[", b"C", b"\r"])
+        mockup.view(self.paths, terminal=terminal)
+        self.assertIn("Option 2 of 3", terminal.screens()[-1])
+
+    def test_several_keys_in_one_read_all_count(self):
+        terminal = FakeTerminal([OK_REPLY, b"\033[C\033[C", b"\r"])
+        mockup.view(self.paths, terminal=terminal)
+        self.assertIn("Option 3 of 3", terminal.screens()[-1])
+
+    def test_enter_after_an_arrow_in_one_read_closes(self):
+        terminal = FakeTerminal([OK_REPLY, b"\033[C\r", b"\033[C"])
+        mockup.view(self.paths, terminal=terminal)
+        self.assertEqual(terminal.inputs, [b"\033[C"])
+
+    def test_no_graphics_enter_in_a_longer_read_closes(self):
+        terminal = FakeTerminal([b"", b"x\r", b"y"])
+        mockup.view(self.paths, terminal=terminal)
+        self.assertEqual(terminal.inputs, [b"y"])
 
     def test_q_closes_too(self):
         terminal = FakeTerminal([OK_REPLY, b"q"])
@@ -437,7 +500,19 @@ class MockupCliTests(CliTestCase):
     def test_mockup_view_runs_the_viewer(self):
         with mock.patch.object(mockup, "view", return_value=0) as view:
             self.run_cli("mockup-view", "/tmp/a.png", "/tmp/b.png")
-        view.assert_called_once_with([Path("/tmp/a.png"), Path("/tmp/b.png")])
+        view.assert_called_once_with([Path("/tmp/a.png"), Path("/tmp/b.png")], numbers=None, total=None)
+
+    def test_mockup_view_passes_the_option_numbers(self):
+        with mock.patch.object(mockup, "view", return_value=0) as view:
+            self.run_cli("mockup-view", "--option", "2", "--option", "3", "--total", "3", "/tmp/a.png", "/tmp/b.png")
+        view.assert_called_once_with([Path("/tmp/a.png"), Path("/tmp/b.png")], numbers=[2, 3], total=3)
+
+    def test_a_failed_first_option_keeps_the_numbers_in_the_pane(self):
+        self.codex.behavior["Sidebar"] = "fail"
+        with mock.patch.object(mockup, "show", return_value="pane") as show:
+            data = self.run_json("mockup", self.ref, "Sidebar layout", "Top tabs layout", "Card grid")
+        self.assertEqual([draft["option"] for draft in data["drafts"]], [2, 3])
+        show.assert_called_once_with([draft["path"] for draft in data["drafts"]], mock.ANY, numbers=[2, 3], total=3)
 
 
 if __name__ == "__main__":
