@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 from typing import Callable
 
-from . import activity, agent_review, attachments, mockup, plan, pr_reviews, pr_write
+from . import activity, agent_review, attachments, automations, mockup, plan, pr_reviews, pr_write
 from .agent_review import AgentReviewer
 from .plan import Planner
 from .config import AGENTS, THINKING_LEVELS, config_path, load_config, thinking_levels
@@ -277,6 +277,64 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("number", type=int)
     sub.add_argument("--force", action="store_true",
                      help="also with notes of yours that are not submitted, or changes in the worktree")
+
+    sub = command("automation", "manage automations: a schedule that spawns a card and starts an agent on it")
+    actions = sub.add_subparsers(dest="action", required=True, parser_class=_Parser)
+
+    def action(name: str, help: str) -> argparse.ArgumentParser:
+        found = actions.add_parser(name, help=help)
+        _add_global_options(found, suppress=True)
+        return found
+
+    def automation_fields(found: argparse.ArgumentParser, adding: bool) -> None:
+        clear = "" if adding else "; an empty value clears it"
+        found.add_argument("--title", required=adding, help="the spawned card's title")
+        found.add_argument("--body", help="the spawned card's details, one per line")
+        found.add_argument("--body-file", type=Path, help="read the details from a file")
+        found.add_argument("--type", help=f"the card's type, such as chore (the `types` setting){clear}")
+        found.add_argument("--tag", action="append", default=None,
+                           help="a tag of the card; repeat for more" + ("" if adding else "; replaces the tags"))
+        found.add_argument("--board", help="the board of the spawned cards: inbox or a project name"
+                           + (" (default: inbox)" if adding else ""))
+        found.add_argument("--schedule", required=adding,
+                           help="such as `every weekday at 07:30`, `every week on monday`, `every month on the 1st`")
+        found.add_argument("--agent", help=f"claude or pi; default: start_agent{clear}")
+        found.add_argument("--model", help=f"the agent's model; default: start_model{clear}")
+        found.add_argument("--thinking", help=f"pi's thinking level; default: start_thinking{clear}")
+        merge = found.add_mutually_exclusive_group()
+        merge.add_argument("--may-merge-prs", dest="may_merge_prs", action="store_const", const=True,
+                           help="let the agent merge pull requests whose checks pass and that need no change")
+        merge.add_argument("--no-merge-prs", dest="may_merge_prs", action="store_const", const=False,
+                           help="the agent merges no pull request (the default)")
+
+    action("list", "list the automations with their next and last runs")
+    automation_fields(action("add", "add an automation"), adding=True)
+    found = action("edit", "change an automation")
+    found.add_argument("id")
+    automation_fields(found, adding=False)
+    found = action("remove", "remove an automation; its spawned cards stay")
+    found.add_argument("id")
+    found.add_argument("--yes", action="store_true", help="remove without asking")
+    for name, help in (("pause", "stop the scheduled runs of an automation"),
+                       ("resume", "run an automation again from its next due time"),
+                       ("run", "spawn and start one card now, outside the schedule")):
+        action(name, help).add_argument("id")
+    found = action("plan", "plan an automation with an agent; the plan goes into each spawned card's brief")
+    found.add_argument("id")
+    found.add_argument("--agent", choices=["claude", "pi"])
+    found.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
+    found.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
+    found = action("plan-wait", "log each save of an automation's plan until the planner ends (run by plan)")
+    found.add_argument("id")
+    found.add_argument("--pane", required=True, help="the planner's pane")
+    action("tick", "spawn and start each due run (run by the timer)")
+    found = action("attach", "add a file to an automation's attachments, or remove one")
+    found.add_argument("id")
+    found.add_argument("file", nargs="?", type=Path)
+    found.add_argument("--name", help="the attachment's name; default: the file's name")
+    found.add_argument("--remove", metavar="NAME", help="remove the attachment with this name")
+    found = action("timer", "install, remove or check the OS timer that runs the tick every 5 minutes")
+    found.add_argument("timer_action", choices=["install", "remove", "status"])
 
     sub = command("doctor", "check boards, configuration, Linear links and state")
     sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
@@ -1310,6 +1368,138 @@ def _cmd_board(ctx: _Context) -> dict:
     return {}
 
 
+def _automation_changes(ctx: _Context, adding: bool) -> dict:
+    """The automation fields that the options give. In an edit, an empty value clears a setting."""
+    args = ctx.args
+    if args.body is not None and args.body_file is not None:
+        raise UsageError("Use --body or --body-file, not both")
+    changes = {}
+    if args.title is not None:
+        changes["title"] = args.title
+    if args.body_file is not None:
+        path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
+        changes["body"] = _read_todo_file(path)
+    elif args.body is not None:
+        changes["body"] = args.body
+    for key in ("type", "agent", "model", "thinking"):
+        value = getattr(args, key)
+        if value is not None:
+            changes[key] = value or None
+    if args.tag is not None:
+        changes["tags"] = [tag.lstrip("#") for tag in args.tag if tag.strip()]
+    for key in ("board", "schedule", "may_merge_prs"):
+        if getattr(args, key) is not None:
+            changes[key] = getattr(args, key)
+    if not adding and not changes:
+        raise UsageError("Give at least one field to change")
+    return changes
+
+
+def _cmd_automation(ctx: _Context) -> dict:
+    args, store = ctx.args, ctx.store
+    name = args.action
+    if name == "list":
+        return {"automations": automations.listing(store)}
+    if name == "add":
+        return {"automation": automations.add(store, **_automation_changes(ctx, adding=True))}
+    if name == "edit":
+        return {"automation": automations.edit(store, args.id, **_automation_changes(ctx, adding=False))}
+    if name == "remove":
+        found = automations.get(ctx.config, args.id)
+        if not args.yes:
+            if args.json or not _interactive():
+                raise ConfirmationRequired(f"Removing {found.id} needs --yes without a terminal.")
+            if not _confirm(f"Remove automation {found.id}: {found.title}? Its spawned cards stay. [y/N] "):
+                return {"removed": None}
+        return {"removed": automations.remove(store, args.id)}
+    if name in ("pause", "resume"):
+        return {"automation": automations.set_enabled(store, args.id, name == "resume")}
+    if name == "run":
+        found = automations.get(ctx.config, args.id)
+        return automations.run(store, found, datetime.now().astimezone(), config_file=config_path(args.config))
+    if name == "plan":
+        from .automation_plan import AutomationPlanner
+
+        return AutomationPlanner(store, config_file=config_path(args.config)).plan(
+            args.id, agent=args.agent, model=args.model, thinking=args.thinking)
+    if name == "plan-wait":
+        from .automation_plan import wait
+
+        return {"exit_code": wait(store, args.id, args.pane)}
+    if name == "tick":
+        return automations.tick(store, config_file=config_path(args.config))
+    if name == "attach":
+        if (args.file is None) == (args.remove is None):
+            raise UsageError("Give a file to attach, or --remove NAME")
+        if args.remove is not None and args.name is not None:
+            raise UsageError("--name works only when you attach a file")
+        found = automations.get(ctx.config, args.id)
+        if args.remove is not None:
+            removed = attachments.remove(store, found.id, args.remove)
+            activity.append(store, found.id, f"Removed the attachment {removed['name']}.", activity.author())
+            return {"id": found.id, "removed": removed}
+        path = args.file if args.file.is_absolute() else ctx.directory / args.file
+        added = attachments.add(store, found.id, path, args.name)
+        activity.append(store, found.id, f"Attached {added['name']}.", activity.author())
+        return {"id": found.id, "attachment": added}
+    return automations.timer(args.timer_action, config_file=config_path(args.config))
+
+
+def _automation_line(item) -> str:
+    state = "on " if item.enabled else "off"
+    return f"{item.id}  {state}  {item.title}  ({item.schedule}; board {item.board})"
+
+
+def _short_time(text: str | None) -> str:
+    return text[:16].replace("T", " ") if text else "-"
+
+
+def _automation_text(action: str, result: dict) -> str:
+    if action == "list":
+        lines = []
+        for entry in result["automations"]:
+            state = "on " if entry["enabled"] else "off"
+            last = entry["last_card"] or "-"
+            if entry["last_result"]:
+                last += f" {entry['last_result']}"
+            lines.append(f"{entry['id']}  {state}  {entry['title']}  ({entry['schedule']}; board {entry['board']})  "
+                         f"next: {_short_time(entry['next_due'])}  last: {_short_time(entry['last_run'])} {last}")
+        return "\n".join(lines) if lines else "No automations. Add one with `herdboard automation add`."
+    if action == "remove":
+        removed = result["removed"]
+        return f"Removed {removed.id}: {removed.title}" if removed else "Nothing removed."
+    if action == "run":
+        if result["card"] is None:
+            return f"{result['id']}: {result['result']}"
+        return f"{result['id']}: spawned {result['card']}: {result['result']}"
+    if action == "tick":
+        if result["busy"]:
+            return "Another tick runs; nothing done."
+        lines = [f"{run['id']}: spawned {run['card'] or 'nothing'}: {run['result']}" for run in result["runs"]]
+        lines += [f"{error['id']}: {error['message']}" for error in result["errors"]]
+        return "\n".join(lines) if lines else "Nothing due."
+    if action == "attach":
+        if "removed" in result:
+            return f"{result['id']}: removed {result['removed']['name']}"
+        return f"{result['id']}: attached {result['attachment']['name']}"
+    if action == "timer":
+        return (f"{result['backend']}: {result['state']}"
+                + ("" if result["installed"] else " (not installed)") + "\n" + "\n".join(result["files"]))
+    if action == "plan":
+        model = f" ({result['model']})" if result["model"] else ""
+        return (f"{result['id']}: {result['agent']}{model} plans in pane {result['pane_id']}, "
+                f"in {result['worktree_path']}.\nThe plan: {result['plan']}")
+    return _automation_line(result["automation"])
+
+
+def _automation_json(result: dict) -> dict:
+    data = dict(result)
+    for key in ("automation", "removed"):
+        if key in data and data[key] is not None and not isinstance(data[key], dict):
+            data[key] = automations._fields(data[key])
+    return data
+
+
 COMMANDS = {
     "list": _cmd_list,
     "add": _cmd_add,
@@ -1346,6 +1536,7 @@ COMMANDS = {
     "pr-review-refresh": _cmd_pr_review_refresh,
     "pr-review-go": _cmd_pr_review_go,
     "pr-review-finish": _cmd_pr_review_finish,
+    "automation": _cmd_automation,
 }
 
 
@@ -1377,7 +1568,7 @@ def _linear_warnings(result: LinearResult) -> None:
         print(f"herdboard: warning: Linear data is stale (fetched {stamp})", file=sys.stderr)
 
 
-def _render(command: str, result: dict, as_json: bool) -> None:
+def _render(command: str, result: dict, as_json: bool, action: str | None = None) -> None:
     if command == "board":
         return
     if command == "start":
@@ -1406,6 +1597,12 @@ def _render(command: str, result: dict, as_json: bool) -> None:
             print(f"{result['ref']}: option {entry['option']}: {entry['path']}")
         for entry in result["failed"]:
             print(f"herdboard: option {entry['option']} failed: {entry['error']}", file=sys.stderr)
+        return
+    if command == "automation":
+        if as_json:
+            _emit_json(_automation_json(result))
+        elif "exit_code" not in result:
+            print(_automation_text(action, result))
         return
     if command == "pr-sync":
         if as_json:
@@ -1601,8 +1798,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if result["summary"]["error"] else 0
         result = COMMANDS[args.command](_Context(args))
         _update_sidebar(args.command, result)
-        _render(args.command, result, as_json)
+        _render(args.command, result, as_json, getattr(args, "action", None))
         if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+            return result["exit_code"]
+        if args.command == "automation" and "exit_code" in result:
             return result["exit_code"]
     except HerdboardError as error:
         if as_json:

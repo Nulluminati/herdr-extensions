@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import plistlib
 import tomllib
 import unittest
 from unittest.mock import patch
@@ -20,6 +21,7 @@ from herdboard.identity import repo_identity  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 from test_herdboard_brief import todo  # noqa: E402
+from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_start import FakeHerdr  # noqa: E402
 
 
@@ -369,6 +371,218 @@ class BriefMergeTests(unittest.TestCase):
         self.assertIn("gh pr merge", text)
         self.assertIn("checks pass", text)
         self.assertIn("Do not push or merge your branch", text)
+
+
+class CliTests(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.fake = FakeHerdr(Path(self.tmp.name))
+        self.enterContext(patch.object(start, "command", self.fake))
+
+    def test_add_list_edit_pause_resume_remove(self):
+        added = self.run_json("automation", "add", "--title", "Check alerts", "--body", "Look\nclosely",
+                              "--tag", "security", "--type", "chore", "--schedule", "every weekday at 07:30",
+                              "--may-merge-prs")["automation"]
+        self.assertEqual(added["board"], "inbox")
+        self.assertEqual(added["body"], "Look\nclosely")
+        self.assertIs(added["may_merge_prs"], True)
+        listed = self.run_json("automation", "list")["automations"]
+        self.assertEqual([a["id"] for a in listed], [added["id"]])
+        self.assertIsNotNone(listed[0]["next_due"])
+        self.assertIsNone(listed[0]["last_run"])
+        edited = self.run_json("automation", "edit", added["id"], "--title", "Check all alerts", "--type", "",
+                               "--no-merge-prs")["automation"]
+        self.assertEqual(edited["title"], "Check all alerts")
+        self.assertIsNone(edited["type"])
+        self.assertIs(edited["may_merge_prs"], False)
+        self.assertEqual(edited["tags"], ["security"])
+        self.assertIs(self.run_json("automation", "pause", added["id"])["automation"]["enabled"], False)
+        self.assertIs(self.run_json("automation", "resume", added["id"])["automation"]["enabled"], True)
+        self.run_json("automation", "remove", added["id"], expect=1)
+        removed = self.run_json("automation", "remove", added["id"], "--yes")["removed"]
+        self.assertEqual(removed["id"], added["id"])
+        self.assertEqual(self.run_json("automation", "list")["automations"], [])
+
+    def test_text_output(self):
+        self.run_cli("automation", "add", "--title", "Check alerts", "--schedule", "every day")
+        out, _ = self.run_cli("automation", "list")
+        self.assertIn("Check alerts", out)
+        self.assertIn("every day", out)
+
+    def test_error_codes_for_bad_schedule_and_unknown_board(self):
+        error = self.run_json("automation", "add", "--title", "x", "--schedule", "now and then", expect=1)["error"]
+        self.assertEqual(error["code"], "bad_schedule")
+        error = self.run_json("automation", "add", "--title", "x", "--schedule", "every day", "--board", "nope",
+                              expect=1)["error"]
+        self.assertEqual(error["code"], "unknown_board")
+        error = self.run_json("automation", "edit", "a000", "--title", "x", expect=1)["error"]
+        self.assertEqual(error["code"], "not_found")
+
+    def test_body_file(self):
+        body = Path(self.tmp.name) / "body.md"
+        body.write_text("From a file\n", encoding="utf-8")
+        added = self.run_json("automation", "add", "--title", "x", "--schedule", "every day",
+                              "--body-file", str(body))["automation"]
+        self.assertEqual(added["body"], "From a file\n")
+
+    def test_run_now_spawns_and_starts(self):
+        added = self.run_json("automation", "add", "--title", "Say hello", "--schedule", "every day")["automation"]
+        result = self.run_json("automation", "run", added["id"])
+        self.assertEqual(result["result"], "started")
+        card = self.run_json("show", result["card"])["card"]
+        self.assertEqual(card["column"], "In progress")
+        again = self.run_json("automation", "run", added["id"])
+        self.assertNotEqual(again["card"], result["card"])
+
+    def test_tick_runs_due_automations(self):
+        self.run_json("automation", "add", "--title", "Say hello", "--schedule", "every day")
+        result = self.run_json("automation", "tick")
+        self.assertIs(result["busy"], False)
+        self.assertEqual(result["runs"], [])
+
+    def test_attach_and_remove(self):
+        added = self.run_json("automation", "add", "--title", "x", "--schedule", "every day")["automation"]
+        source = Path(self.tmp.name) / "notes.txt"
+        source.write_text("hi", encoding="utf-8")
+        attached = self.run_json("automation", "attach", added["id"], str(source), "--name", "plan.md")
+        self.assertEqual(attached["attachment"]["name"], "plan.md")
+        listed = self.run_json("automation", "list")["automations"][0]
+        self.assertEqual([a["name"] for a in listed["attachments"]], ["plan.md"])
+        removed = self.run_json("automation", "attach", added["id"], "--remove", "plan.md")
+        self.assertEqual(removed["removed"]["name"], "plan.md")
+        error = self.run_json("automation", "attach", "a000", str(source), expect=1)["error"]
+        self.assertEqual(error["code"], "not_found")
+
+
+class FakeSystem:
+    """Records systemctl and launchctl calls; `is-active` answers with `state`."""
+
+    def __init__(self):
+        self.calls = []
+        self.state = "active"
+        self.loaded = True
+
+    def __call__(self, argv, timeout=120):
+        self.calls.append(argv)
+        if argv[:3] == ["systemctl", "--user", "is-active"]:
+            return subprocess.CompletedProcess(argv, 0 if self.state == "active" else 3, self.state + "\n", "")
+        if argv[:2] == ["launchctl", "print"]:
+            return subprocess.CompletedProcess(argv, 0 if self.loaded else 113, "", "")
+        if argv[:2] == ["launchctl", "bootout"]:
+            return subprocess.CompletedProcess(argv, 3, "", "Boot-out failed: 3: No such process")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+class TimerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        for name in ("herdr", "herdboard", "gh", "git"):
+            tool = self.bin / name
+            tool.write_text("#!/bin/sh\n")
+            tool.chmod(0o755)
+        env = patch.dict(os.environ, {"HOME": str(self.root / "home"), "XDG_CONFIG_HOME": str(self.root / "config"),
+                                      "XDG_STATE_HOME": str(self.root / "state"),
+                                      "PATH": f"{self.bin}:/usr/bin:/bin"})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("HERDR_BIN_PATH", None)
+        os.environ.pop("HERDBOARD_CONFIG", None)
+        self.system = FakeSystem()
+        runner = patch.object(start, "command", self.system)
+        runner.start()
+        self.addCleanup(runner.stop)
+        # The installed `herdboard`, outside this Python's environment.
+        found = patch.object(start, "herdboard_command", lambda config_file=None: "herdboard"
+                             + (f" --config {config_file}" if config_file else ""))
+        found.start()
+        self.addCleanup(found.stop)
+
+    def platform(self, name):
+        patcher = patch.object(automations.sys, "platform", name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_linux_install_writes_units_and_enables_the_timer(self):
+        self.platform("linux")
+        result = automations.timer("install")
+        units = self.root / "config" / "systemd" / "user"
+        service = (units / "herdboard-automations.service").read_text()
+        timer = (units / "herdboard-automations.timer").read_text()
+        self.assertIn("Type=oneshot", service)
+        self.assertIn(f'ExecStart="{self.bin / "herdboard"}" "automation" "tick"', service)
+        self.assertIn(f'"HERDR_BIN_PATH={self.bin / "herdr"}"', service)
+        self.assertIn(f"PATH={self.bin}:", service)
+        self.assertIn("OnCalendar=*:0/5", timer)
+        self.assertIn("Persistent=true", timer)
+        self.assertIn(["systemctl", "--user", "daemon-reload"], self.system.calls)
+        self.assertIn(["systemctl", "--user", "enable", "--now", "herdboard-automations.timer"], self.system.calls)
+        self.assertEqual(result["backend"], "systemd")
+        self.assertIs(result["active"], True)
+
+    def test_a_config_file_that_is_not_the_default_is_named(self):
+        self.platform("linux")
+        config = self.root / "other.toml"
+        automations.timer("install", config_file=config)
+        service = (self.root / "config" / "systemd" / "user" / "herdboard-automations.service").read_text()
+        self.assertIn(f'"--config" "{config}"', service)
+        self.assertIn(f'"HERDBOARD_CONFIG={config}"', service)
+
+    def test_linux_remove_and_status(self):
+        self.platform("linux")
+        automations.timer("install")
+        self.system.state = "inactive"
+        status = automations.timer("status")
+        self.assertIs(status["active"], False)
+        self.assertIs(status["installed"], True)
+        automations.timer("remove")
+        units = self.root / "config" / "systemd" / "user"
+        self.assertFalse((units / "herdboard-automations.service").exists())
+        self.assertFalse((units / "herdboard-automations.timer").exists())
+        self.assertIn(["systemctl", "--user", "disable", "--now", "herdboard-automations.timer"], self.system.calls)
+
+    def test_macos_install_writes_the_plist_and_bootstraps_it(self):
+        self.platform("darwin")
+        result = automations.timer("install")
+        path = self.root / "home" / "Library" / "LaunchAgents" / "com.nulluminati.herdboard-automations.plist"
+        data = plistlib.loads(path.read_bytes())
+        self.assertEqual(data["Label"], "com.nulluminati.herdboard-automations")
+        self.assertEqual(data["ProgramArguments"], [str(self.bin / "herdboard"), "automation", "tick"])
+        self.assertEqual(data["StartInterval"], 300)
+        self.assertIs(data["RunAtLoad"], True)
+        self.assertEqual(data["EnvironmentVariables"]["HERDR_BIN_PATH"], str(self.bin / "herdr"))
+        self.assertTrue(data["EnvironmentVariables"]["PATH"].startswith(str(self.bin)))
+        self.assertEqual(data["StandardOutPath"], str(self.root / "state" / "herdboard" / "automations.log"))
+        domain = f"gui/{os.getuid()}"
+        self.assertIn(["launchctl", "bootout", f"{domain}/com.nulluminati.herdboard-automations"], self.system.calls)
+        self.assertIn(["launchctl", "bootstrap", domain, str(path)], self.system.calls)
+        self.assertEqual(result["backend"], "launchd")
+        self.assertIs(result["active"], True)
+
+    def test_macos_remove_and_status(self):
+        self.platform("darwin")
+        automations.timer("install")
+        self.system.loaded = False
+        self.assertIs(automations.timer("status")["active"], False)
+        automations.timer("remove")
+        path = self.root / "home" / "Library" / "LaunchAgents" / "com.nulluminati.herdboard-automations.plist"
+        self.assertFalse(path.exists())
+
+    def test_missing_herdr_fails(self):
+        self.platform("linux")
+        (self.bin / "herdr").unlink()
+        with self.assertRaises(HerdboardError) as raised:
+            automations.timer("install")
+        self.assertEqual(raised.exception.code, "herdr_not_found")
+
+    def test_other_platforms_fail(self):
+        self.platform("win32")
+        with self.assertRaises(HerdboardError) as raised:
+            automations.timer("install")
+        self.assertEqual(raised.exception.code, "unsupported_platform")
 
 
 if __name__ == "__main__":

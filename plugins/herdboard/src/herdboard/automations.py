@@ -14,13 +14,18 @@ from datetime import date, datetime, time as clock, timedelta
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import secrets
+import shlex
+import shutil
+import subprocess
+import sys
 import tempfile
 import tomllib
 
-from . import activity, attachments
-from .config import THINKING_LEVELS, Config
+from . import activity, attachments, start as start_module
+from .config import THINKING_LEVELS, Config, default_config_path
 from .model import ConflictError, HerdboardError, IoError, NotFoundError, join_title, with_type
 from .start import Starter, _lock, _read, _write, notify, state_dir
 from .store import ID_ALPHABET, CardView
@@ -513,11 +518,153 @@ def listing(store, now: datetime | None = None) -> list[dict]:
             problem = None
         except HerdboardError as error:
             next_text, problem = None, str(error)
+        try:
+            files = attachments.listing(store.config, item.id)
+        except HerdboardError:
+            files = []
         found.append({**_fields(item), "next_due": next_text, "schedule_error": problem,
                       "last_run": entry.get("last_run"), "last_card": entry.get("last_card"),
-                      "last_result": entry.get("last_result")})
+                      "last_result": entry.get("last_result"), "attachments": files})
     return found
 
 
 def _fields(item: Automation) -> dict:
     return {key: getattr(item, key) for key in Automation.__dataclass_fields__}
+
+
+# The OS timer that runs `automation tick`
+
+
+SERVICE = "herdboard-automations"
+LAUNCH_LABEL = "com.nulluminati.herdboard-automations"
+TICK_SECONDS = 300
+# The tools that a started agent needs: background jobs get a minimal PATH.
+PATH_TOOLS = ("herdr", "gh", "git", "uv", "claude", "pi")
+SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
+
+
+def _tick_program(config_file: Path | None) -> list[str]:
+    """The tick command as absolute arguments."""
+    argv = shlex.split(start_module.herdboard_command(config_file))
+    if "/" not in argv[0]:
+        found = shutil.which(argv[0])
+        if found is None:
+            raise AutomationError(f"{argv[0]} is not on the PATH", "herdboard_not_found")
+        argv[0] = str(Path(found).absolute())
+    return [*argv, "automation", "tick"]
+
+
+def _environment(config_file: Path | None) -> dict[str, str]:
+    herdr = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr")
+    if not herdr:
+        raise AutomationError("Cannot find the herdr binary: put it on the PATH or set HERDR_BIN_PATH",
+                              "herdr_not_found")
+    folders = []
+    for tool in PATH_TOOLS:
+        found = herdr if tool == "herdr" else shutil.which(tool)
+        if found and str(Path(found).absolute().parent) not in folders:
+            folders.append(str(Path(found).absolute().parent))
+    folders += [folder for folder in SYSTEM_PATH if folder not in folders]
+    env = {"PATH": ":".join(folders), "HERDR_BIN_PATH": str(Path(herdr).absolute())}
+    if config_file is not None and Path(config_file) != default_config_path():
+        env["HERDBOARD_CONFIG"] = str(config_file)
+    return env
+
+
+def _system(argv: list[str], tolerate: bool = False):
+    try:
+        result = start_module.command(argv)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AutomationError(f"{argv[0]} failed: {error}", "timer_failed") from error
+    if result.returncode and not tolerate:
+        raise AutomationError(f"{' '.join(argv)} failed: {(result.stderr or result.stdout).strip()}",
+                              "timer_failed")
+    return result
+
+
+def _systemd_quote(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+    return f'"{escaped}"'
+
+
+def _systemd_units() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    return (Path(xdg).expanduser() if xdg else Path.home() / ".config") / "systemd" / "user"
+
+
+def _launch_agent() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_LABEL}.plist"
+
+
+def _write_file(path: Path, data: bytes) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except OSError as error:
+        raise IoError(f"{path}: cannot write: {error}") from error
+
+
+def _systemd(action: str, config_file: Path | None) -> dict:
+    units = _systemd_units()
+    service, timer_file = units / f"{SERVICE}.service", units / f"{SERVICE}.timer"
+    if action == "install":
+        program = _tick_program(config_file)
+        env = _environment(config_file)
+        lines = ["[Unit]", "Description=herdboard automations: spawn and start due cards", "",
+                 "[Service]", "Type=oneshot",
+                 "ExecStart=" + " ".join(_systemd_quote(arg) for arg in program),
+                 *(f"Environment={_systemd_quote(f'{key}={value}')}" for key, value in env.items()), ""]
+        _write_file(service, "\n".join(lines).encode("utf-8"))
+        _write_file(timer_file, "\n".join([
+            "[Unit]", "Description=Run herdboard automations every 5 minutes", "",
+            "[Timer]", "OnCalendar=*:0/5", "Persistent=true", "",
+            "[Install]", "WantedBy=timers.target", ""]).encode("utf-8"))
+        _system(["systemctl", "--user", "daemon-reload"])
+        _system(["systemctl", "--user", "enable", "--now", f"{SERVICE}.timer"])
+    elif action == "remove":
+        _system(["systemctl", "--user", "disable", "--now", f"{SERVICE}.timer"], tolerate=True)
+        for path in (service, timer_file):
+            path.unlink(missing_ok=True)
+        _system(["systemctl", "--user", "daemon-reload"], tolerate=True)
+    state = _system(["systemctl", "--user", "is-active", f"{SERVICE}.timer"], tolerate=True).stdout.strip()
+    return {"backend": "systemd", "active": state == "active", "state": state or "unknown",
+            "installed": service.exists() and timer_file.exists(), "files": [str(service), str(timer_file)]}
+
+
+def _launchd(action: str, config_file: Path | None) -> dict:
+    path = _launch_agent()
+    domain = f"gui/{os.getuid()}"
+    if action == "install":
+        log = str(state_dir() / "automations.log")
+        try:
+            state_dir().mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise IoError(f"{state_dir()}: cannot create: {error}") from error
+        _write_file(path, plistlib.dumps({
+            "Label": LAUNCH_LABEL, "ProgramArguments": _tick_program(config_file),
+            "EnvironmentVariables": _environment(config_file), "StartInterval": TICK_SECONDS,
+            "RunAtLoad": True, "StandardOutPath": log, "StandardErrorPath": log}))
+        # A loaded job keeps its old definition until it is booted out.
+        _system(["launchctl", "bootout", f"{domain}/{LAUNCH_LABEL}"], tolerate=True)
+        _system(["launchctl", "bootstrap", domain, str(path)])
+    elif action == "remove":
+        _system(["launchctl", "bootout", f"{domain}/{LAUNCH_LABEL}"], tolerate=True)
+        path.unlink(missing_ok=True)
+    loaded = _system(["launchctl", "print", f"{domain}/{LAUNCH_LABEL}"], tolerate=True).returncode == 0
+    return {"backend": "launchd", "active": loaded, "state": "loaded" if loaded else "not loaded",
+            "installed": path.exists(), "files": [str(path)]}
+
+
+def timer(action: str, config_file: Path | None = None) -> dict:
+    """Install, remove or report the OS timer that runs `automation tick` every 5 minutes.
+
+    A second install writes the files again, so it also refreshes the paths in them.
+    """
+    if action not in ("install", "remove", "status"):
+        raise AutomationError("The timer action must be install, remove or status")
+    if sys.platform.startswith("linux"):
+        return _systemd(action, config_file)
+    if sys.platform == "darwin":
+        return _launchd(action, config_file)
+    raise AutomationError(f"Automations need systemd (Linux) or launchd (macOS), not {sys.platform}",
+                          "unsupported_platform")
