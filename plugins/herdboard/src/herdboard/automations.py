@@ -25,7 +25,7 @@ import tempfile
 import tomllib
 
 from . import activity, attachments, start as start_module
-from .config import THINKING_LEVELS, Config, default_config_path
+from .config import THINKING_LEVELS, Config
 from .model import ConflictError, HerdboardError, IoError, NotFoundError, join_title, with_type
 from .start import Starter, _lock, _read, _write, notify, state_dir
 from .store import ID_ALPHABET, CardView
@@ -36,10 +36,14 @@ TICK_LOCK = ".automations-tick.lock"
 DEFINITIONS_LOCK = ".automations.lock"
 DEFAULT_TIME = (9, 0)
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-# The search for a due time stops after this many days; the longest period is `every N weeks`.
+# The longest periods, so a due time is always within the search.
+MAX_DAYS = 365
+MAX_WEEKS = 52
+# The search for a due time stops after this many days: longer than any allowed period.
 SEARCH_DAYS = 366 * 3
 FORMS = ("every day", "every weekday", "every week on monday[, thursday]", "every month on the 1st",
-         "every N days", "every N weeks", "each with an optional `at HH:MM` (default 09:00)")
+         f"every N days (N up to {MAX_DAYS})", f"every N weeks (N up to {MAX_WEEKS})",
+         "each with an optional `at HH:MM` (default 09:00)")
 
 
 class AutomationError(HerdboardError):
@@ -135,14 +139,14 @@ def parse_schedule(text: str, anchor: date | None = None) -> Schedule:
         return Schedule("weekday", hour, minute)
     if found := re.fullmatch(r"every (\d+) days?", words):
         interval = int(found[1])
-        if interval < 1:
+        if not 1 <= interval <= MAX_DAYS:
             raise _bad(text)
         return Schedule("day", hour, minute, interval=interval, anchor=anchor)
     if words == "every week":
         return Schedule("week", hour, minute, anchor=anchor)
     if found := re.fullmatch(r"every (\d+) weeks?", words):
         interval = int(found[1])
-        if interval < 1:
+        if not 1 <= interval <= MAX_WEEKS:
             raise _bad(text)
         return Schedule("week", hour, minute, interval=interval, anchor=anchor)
     if found := re.fullmatch(r"every week on (.+)", words):
@@ -460,12 +464,30 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0,
     except HerdboardError as error:
         result = f"start_failed: {error}"
         activity.append(store, card.ref, f"Auto start failed: {error}", "herdboard")
+        _undo_move(store, card)
         notify(f"herdboard: {automation.title} did not start ({card.ref})", str(error))
     else:
         result = "started"
         notify(f"herdboard: {automation.title} started ({card.ref})", f"Automation {automation.id}")
     _update_state(automation.id, last_run=now, last_card=card.ref, last_result=result)
     return {"id": automation.id, "card": card.ref, "result": result, "skipped": skipped}
+
+
+def _undo_move(store, card: CardView) -> None:
+    """Put a card whose start failed after the move back in its first column, and forget the move in its
+    start record, so a later start by hand moves it again. Best effort: the log already has the failure."""
+    try:
+        if store.show(card.ref).column != card.column:
+            store.move(card.ref, card.column)
+        path = state_dir() / "starts.json"
+        with _lock(wait=2):
+            records = _read(path)
+            record = records.get(card.ref)
+            if isinstance(record, dict) and "move" in record.get("steps_done", []):
+                record["steps_done"] = [step for step in record["steps_done"] if step != "move"]
+                _write(path, records)
+    except HerdboardError as error:
+        activity.append(store, card.ref, f"Cannot move the card back to {card.column}: {error}", "herdboard")
 
 
 def tick(store, now: datetime | None = None, *, config_file: Path | None = None) -> dict:
@@ -482,27 +504,36 @@ def tick(store, now: datetime | None = None, *, config_file: Path | None = None)
         for item in load(store.config):
             if not item.enabled:
                 continue
+            # One broken automation does not stop the others.
             try:
-                schedule = item.parsed_schedule()
+                found = _due_run(item, state, now)
             except HerdboardError as error:
                 errors.append({"id": item.id, "message": str(error)})
                 continue
-            due = schedule.latest_at_or_before(now)
-            if due is None:
-                continue
-            entry = state.get(item.id) if isinstance(state.get(item.id), dict) else {}
-            floor = _time(entry.get("last_due")) or _time(item.created)
-            if floor is None:
-                # Without a creation time, the automation starts with its next due time.
-                _update_state(item.id, last_due=due.isoformat(timespec="seconds"))
-                continue
-            if due <= floor:
-                continue
-            skipped = schedule.count_between(floor, due)
-            # Recorded before the run, so a run that fails or crashes is never repeated.
-            _update_state(item.id, last_due=due.isoformat(timespec="seconds"))
-            runs.append(run(store, item, due, skipped=skipped, config_file=config_file))
+            if found is not None:
+                due, skipped = found
+                runs.append(run(store, item, due, skipped=skipped, config_file=config_file))
     return {"busy": False, "runs": runs, "errors": errors}
+
+
+def _due_run(item: Automation, state: dict, now: datetime) -> tuple[datetime, int] | None:
+    """The due time to run now and the number of due times it skips, or None. A due time is recorded
+    before the run, so a run that fails or crashes is never repeated."""
+    schedule = item.parsed_schedule()
+    due = schedule.latest_at_or_before(now)
+    if due is None:
+        return None
+    entry = state.get(item.id) if isinstance(state.get(item.id), dict) else {}
+    floor = _time(entry.get("last_due")) or _time(item.created)
+    if floor is None:
+        # Without a creation time, the automation starts with its next due time.
+        _update_state(item.id, last_due=due.isoformat(timespec="seconds"))
+        return None
+    if due <= floor:
+        return None
+    skipped = schedule.count_between(floor, due)
+    _update_state(item.id, last_due=due.isoformat(timespec="seconds"))
+    return due, skipped
 
 
 def listing(store, now: datetime | None = None) -> list[dict]:
@@ -545,7 +576,10 @@ SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 def _tick_program(config_file: Path | None) -> list[str]:
     """The tick command as absolute arguments."""
-    argv = shlex.split(start_module.herdboard_command(config_file))
+    # The config file is always named: the job's default can differ from this shell's.
+    argv = shlex.split(start_module.herdboard_command())
+    if config_file is not None:
+        argv += ["--config", str(config_file)]
     if "/" not in argv[0]:
         found = shutil.which(argv[0])
         if found is None:
@@ -566,8 +600,12 @@ def _environment(config_file: Path | None) -> dict[str, str]:
             folders.append(str(Path(found).absolute().parent))
     folders += [folder for folder in SYSTEM_PATH if folder not in folders]
     env = {"PATH": ":".join(folders), "HERDR_BIN_PATH": str(Path(herdr).absolute())}
-    if config_file is not None and Path(config_file) != default_config_path():
+    if config_file is not None:
         env["HERDBOARD_CONFIG"] = str(config_file)
+    # A job does not get the shell's folders: without them it reads other config and state folders.
+    for name in ("XDG_CONFIG_HOME", "XDG_STATE_HOME"):
+        if os.environ.get(name):
+            env[name] = str(Path(os.environ[name]).expanduser().absolute())
     return env
 
 

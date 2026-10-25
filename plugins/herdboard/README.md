@@ -533,8 +533,10 @@ Schedules are in local time. Each form takes an optional `at HH:MM`; the default
 | `every weekday` | Monday to Friday |
 | `every week on monday, thursday` | Those days. Names can be short (`mon`), and `and` also separates them |
 | `every month on the 1st` | That day of each month. A month without the day (the 31st in April) uses its last day |
-| `every N days`, `every N weeks` | Every N days or weeks, counted from the day the automation was added |
+| `every N days`, `every N weeks` | Every N days (up to 365) or weeks (up to 52), counted from the day the automation was added |
 | `every week` | Each week, on the weekday the automation was added |
+
+A due time in the hour that daylight saving time skips runs one hour later. A due time in the hour that repeats runs once, the first time.
 
 ### The tick and the timer
 
@@ -545,7 +547,7 @@ Schedules are in local time. Each form takes an optional `at HH:MM`; the default
 - Linux: a systemd user timer, `~/.config/systemd/user/herdboard-automations.timer`, and its service. `journalctl --user -u herdboard-automations` shows the output.
 - macOS: a launchd agent, `~/Library/LaunchAgents/com.nulluminati.herdboard-automations.plist`. The output goes to `~/.local/state/herdboard/automations.log`. macOS shows a "Background item added" notice once.
 
-The timer files hold absolute paths: the `herdboard` command, the `herdr` binary, the config file when it is not the default, and a `PATH` with the folders of `herdr`, `gh`, `git`, `uv`, `claude` and `pi`. Run `timer install` again after one of them moves; it writes the files again. `timer status` shows whether the timer runs, and `timer remove` removes it. `herdboard doctor` warns when automations are on and the timer does not run.
+The timer files hold absolute paths: the `herdboard` command, the `herdr` binary, the config file, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when they are set, and a `PATH` with the folders of `herdr`, `gh`, `git`, `uv`, `claude` and `pi`. Run `timer install` again after one of them moves; it writes the files again. `timer status` shows whether the timer runs, and `timer remove` removes it. `herdboard doctor` warns when automations are on and the timer does not run.
 
 ### What a run does
 
@@ -555,7 +557,7 @@ The timer files hold absolute paths: the `herdboard` command, the `herdr` binary
 - The agent starts exactly as a manual `start` does: same permission mode, no extra allowed tools. When it waits at a prompt, the card shows a red `×`. herdboard shows a Herdr notification for each run.
 - A run starts even when the card of the last run is not done.
 - After sleep or power-off, the next tick spawns one card for the latest missed due time, and logs how many it skipped.
-- When the start fails, the card stays in its first column, its log says `Auto start failed: <reason>`, and herdboard shows a notification. No later tick retries it. Start the card by hand.
+- When the start fails, the card stays in (or goes back to) its first column, its log says `Auto start failed: <reason>`, and herdboard shows a notification. No later tick retries it. Start the card by hand.
 - A resumed automation, or one with a changed schedule, waits for its next due time. It does not catch up.
 
 ### Merge permission

@@ -111,6 +111,14 @@ class ScheduleTests(LocalTime):
             self.assertEqual(raised.exception.code, "bad_schedule")
             self.assertIn("every weekday", str(raised.exception))
 
+    def test_intervals_longer_than_a_year_are_refused(self):
+        for text in ("every 2000 days", "every 366 days", "every 53 weeks"):
+            with self.subTest(text=text), self.assertRaises(HerdboardError) as raised:
+                parse_schedule(text)
+            self.assertEqual(raised.exception.code, "bad_schedule")
+        parse_schedule("every 365 days")
+        parse_schedule("every 52 weeks")
+
 
 class AutomationTestCase(LocalTime):
     def setUp(self):
@@ -245,6 +253,18 @@ class RunTests(AutomationTestCase):
         self.assertTrue(self.notifications())
         self.assertTrue(automations.read_state()[added.id]["last_result"].startswith("start_failed: "))
 
+    def test_a_failed_agent_launch_moves_the_card_back(self):
+        added = self.add()
+        self.fake.fail = "agent start"
+        result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+        self.assertTrue(result["result"].startswith("start_failed: "))
+        self.assertEqual(self.store.show(result["card"]).column, self.config.columns[0])
+        # A later start by hand moves the card again.
+        record = json.loads((start.state_dir() / "starts.json").read_text())[result["card"]]
+        self.assertNotIn("move", record["steps_done"])
+        start.Starter(self.store, self.root).start(result["card"], no_repo=True)
+        self.assertEqual(self.store.show(result["card"]).column, self.config.start_column)
+
     def test_a_spawn_failure_is_recorded(self):
         added = self.add()
         # A board that is gone after the automation was saved.
@@ -344,6 +364,40 @@ class TickTests(AutomationTestCase):
         automations.tick(self.store, now=local(2026, 10, 22, 9, 1))
         automations.tick(self.store, now=local(2026, 10, 23, 9, 1))
         self.assertEqual(len(self.cards()), 2)
+
+    def test_a_broken_automation_does_not_stop_the_others(self):
+        path = automations.definitions_path(self.config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[[automation]]\nid = "a001"\ntitle = "Broken"\nschedule = "every 2000 days"\n'
+                        'created = "2026-10-20T08:00:00+02:00"\n'
+                        '[[automation]]\nid = "a002"\ntitle = "Good"\nschedule = "every day"\n'
+                        'created = "2026-10-20T08:00:00+02:00"\n', encoding="utf-8")
+        result = automations.tick(self.store, now=local(2026, 10, 23, 9, 1))
+        self.assertEqual([run["id"] for run in result["runs"]], ["a002"])
+        self.assertEqual([error["id"] for error in result["errors"]], ["a001"])
+
+    def ticks_over(self, start_utc, hours):
+        """Tick every 10 minutes for `hours` hours from a UTC time, as the timer does."""
+        moment = start_utc
+        while moment < start_utc + timedelta(hours=hours):
+            automations.tick(self.store, now=moment.astimezone())
+            moment += timedelta(minutes=10)
+
+    def test_a_due_time_in_the_skipped_spring_hour_runs_once_an_hour_later(self):
+        from datetime import timezone
+        self.add(schedule="every day at 02:30", created=local(2026, 3, 28, 12, 0))
+        # Berlin skips 02:00 to 03:00 on 2026-03-29.
+        self.ticks_over(datetime(2026, 3, 28, 22, 0, tzinfo=timezone.utc), 6)
+        cards = self.cards()
+        self.assertEqual(len(cards), 1)
+        self.assertIn("2026-03-29 03:30", activity.read(self.config, cards[0].ref)[0]["message"])
+
+    def test_a_due_time_in_the_repeated_autumn_hour_runs_once(self):
+        from datetime import timezone
+        self.add(schedule="every day at 02:30", created=local(2026, 10, 24, 12, 0))
+        # Berlin repeats 02:00 to 03:00 on 2026-10-25.
+        self.ticks_over(datetime(2026, 10, 24, 22, 0, tzinfo=timezone.utc), 6)
+        self.assertEqual(len(self.cards()), 1)
 
     def test_listing_has_the_next_due_and_the_last_run(self):
         added = self.add(created=local(2026, 10, 23, 8, 0))
@@ -530,6 +584,27 @@ class TimerTests(unittest.TestCase):
         service = (self.root / "config" / "systemd" / "user" / "herdboard-automations.service").read_text()
         self.assertIn(f'"--config" "{config}"', service)
         self.assertIn(f'"HERDBOARD_CONFIG={config}"', service)
+
+    def test_the_default_config_file_and_custom_xdg_folders_reach_the_job(self):
+        self.platform("linux")
+        # The CLI always passes the resolved config file, also when it is the default one.
+        config = self.root / "config" / "herdboard" / "config.toml"
+        automations.timer("install", config_file=config)
+        service = (self.root / "config" / "systemd" / "user" / "herdboard-automations.service").read_text()
+        self.assertIn(f'"--config" "{config}"', service)
+        self.assertIn(f'"HERDBOARD_CONFIG={config}"', service)
+        self.assertIn(f'"XDG_CONFIG_HOME={self.root / "config"}"', service)
+        self.assertIn(f'"XDG_STATE_HOME={self.root / "state"}"', service)
+
+    def test_unset_xdg_folders_stay_unset(self):
+        self.platform("darwin")
+        os.environ.pop("XDG_CONFIG_HOME")
+        os.environ.pop("XDG_STATE_HOME")
+        automations.timer("install")
+        path = self.root / "home" / "Library" / "LaunchAgents" / "com.nulluminati.herdboard-automations.plist"
+        env = plistlib.loads(path.read_bytes())["EnvironmentVariables"]
+        self.assertNotIn("XDG_CONFIG_HOME", env)
+        self.assertNotIn("XDG_STATE_HOME", env)
 
     def test_linux_remove_and_status(self):
         self.platform("linux")

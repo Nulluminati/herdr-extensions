@@ -178,7 +178,7 @@ herdboard --json automation run a7k2          # spawn and start one card now
 herdboard --json automation timer status      # is the timer that runs the tick active?
 ```
 
-Schedules: `every day`, `every weekday`, `every week on monday[, thursday]`, `every month on the 1st`, `every N days`, `every N weeks`, each with an optional `at HH:MM` (default 09:00), in local time.
+Schedules: `every day`, `every weekday`, `every week on monday[, thursday]`, `every month on the 1st`, `every N days` (N up to 365), `every N weeks` (N up to 52), each with an optional `at HH:MM` (default 09:00), in local time.
 
 When your brief has a "GitHub pull requests" section, the automation lets you run `gh pr merge` on pull requests whose checks pass and that need no code change. Log each one that you merged or left. You still never push or merge your own card branch.
 
