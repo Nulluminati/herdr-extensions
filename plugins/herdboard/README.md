@@ -55,7 +55,7 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 
 ## The board
 
-The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are three tabs: **Board**, **Pull requests** and **Notes**. Each tab is as wide as the widest tab, and its icon and label sit in the middle of its box. `G` goes to the next tab, and from Notes back to the board. The right end of the tab row shows a yellow `G next tab`, outside the tabs, so the tabs never change size when the tab that `G` goes to changes. A click on a tab opens it. The Pull requests tab shows the open PR count after the list reads GitHub. A search does not change the count. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it. A dialog, such as the card detail, shows its own keys there. A key that has nothing to act on is dimmed: for example Merge on a card without a worktree, Check on a card without a checklist, or Go on a PR without a local review. A dimmed key still runs and says why it did nothing.
+The top row shows `herdboard`, the board names and the Linear state at the left, and the view and the herdboard version at the right. Under it are four tabs: **Board**, **Pull requests**, **Notes** and **Automations**. Each tab is as wide as the widest tab, and its icon and label sit in the middle of its box. `G` goes to the next tab, and from Automations back to the board. The right end of the tab row shows a yellow `G next tab`, outside the tabs, so the tabs never change size when the tab that `G` goes to changes. A click on a tab opens it. The Pull requests tab shows the open PR count after the list reads GitHub. A search does not change the count. The bottom row shows the keys of the current tab as keycaps. It wraps between two keys when they do not fit. A click on a key presses it. A dialog, such as the card detail, shows its own keys there. A key that has nothing to act on is dimmed: for example Merge on a card without a worktree, Check on a card without a checklist, or Go on a PR without a local review. A dimmed key still runs and says why it did nothing.
 
 Each column takes a color in turn: blue, magenta, yellow, cyan and green. The column's scrollbar has its color too. The done column is always green with a `✓`, and the start column has a `●`. The current column has a heavy border and an underlined header. The selected card has a heavy border in the text color.
 
@@ -103,7 +103,7 @@ Set `card_style = "compact"` for cards without a border and without the detail l
 | `u` | Remove the pin of a pinned Linear issue (repo view) |
 | `c` | Configure the global settings of all boards, and this board's merge mode, linked Linear projects and pinned issues. ctrl+s saves both tabs |
 | `r` | Reload, and fetch Linear again |
-| `G` | Go to the next tab: the list of the repository's open GitHub pull requests (see [Pull request reviews](#pull-request-reviews)) |
+| `G` | Go to the next tab: the list of the repository's open GitHub pull requests (see [Pull request reviews](#pull-request-reviews)), then the [notes](#notes) and the [automations](#automations) |
 | `?` | Help |
 | `q` | Quit |
 
@@ -502,13 +502,91 @@ The tab shows the note as Markdown. Press `e` to edit it as text. herdboard save
 | `r` | Read the file again |
 | `escape` | In the editor: save and show the note. Else: back to the board |
 | `ctrl+s` | In the editor: save now |
-| `G` | Back to the board tab |
+| `G` | Go to the Automations tab |
 
 When you edit a note file in another application, such as Obsidian, the tab shows the change within 2 seconds. In the editor, the tab does not read the file. When the file changed on disk during your edit, a save asks: `o` writes your edit over the file, `r` reads the file and drops your edit, and `escape` keeps editing.
 
 When a save fails, for example because the disk is full, the error shows above the note and your edit stays. The tab stays open until the save works. `q` then asks before it quits without the edit.
 
 Agents do not read or write the notes.
+
+## Automations
+
+An automation is a task and a schedule. At each due time, herdboard adds a new card to the automation's board and starts an agent on it, as `start` does. Each run is its own card, with its own ID, log, worktree and branch. The agent moves the card to Review. You review, merge and finish it as any other card.
+
+An example: every weekday, look at the repository's open security alerts and merge the Dependabot pull requests that need no change.
+
+```bash
+herdboard automation add --title "Merge safe Dependabot PRs" --board acme-api \
+  --schedule "every weekday at 07:30" --type chore --tag security --may-merge-prs \
+  --body "Read the open security alerts with gh. Merge each Dependabot PR whose checks pass."
+herdboard automation timer install
+```
+
+### Schedules
+
+Schedules are in local time. Each form takes an optional `at HH:MM`; the default time is 09:00.
+
+| Schedule | Due |
+|---|---|
+| `every day` | Each day |
+| `every weekday` | Monday to Friday |
+| `every week on monday, thursday` | Those days. Names can be short (`mon`), and `and` also separates them |
+| `every month on the 1st` | That day of each month. A month without the day (the 31st in April) uses its last day |
+| `every N days`, `every N weeks` | Every N days or weeks, counted from the day the automation was added |
+| `every week` | Each week, on the weekday the automation was added |
+
+### The tick and the timer
+
+`herdboard automation tick` does the work. For each automation that is on, it finds the last due time. When that time is new, it spawns one card and starts its agent. A tick never runs an automation twice for one due time, and a second tick that starts while one runs does nothing.
+
+`herdboard automation timer install` sets up the OS scheduler to run the tick every 5 minutes, also when no board is open:
+
+- Linux: a systemd user timer, `~/.config/systemd/user/herdboard-automations.timer`, and its service. `journalctl --user -u herdboard-automations` shows the output.
+- macOS: a launchd agent, `~/Library/LaunchAgents/com.nulluminati.herdboard-automations.plist`. The output goes to `~/.local/state/herdboard/automations.log`. macOS shows a "Background item added" notice once.
+
+The timer files hold absolute paths: the `herdboard` command, the `herdr` binary, the config file when it is not the default, and a `PATH` with the folders of `herdr`, `gh`, `git`, `uv`, `claude` and `pi`. Run `timer install` again after one of them moves; it writes the files again. `timer status` shows whether the timer runs, and `timer remove` removes it. `herdboard doctor` warns when automations are on and the timer does not run.
+
+### What a run does
+
+- The card gets the automation's title, details, type and tags, and a copy of every attachment of the automation. A `plan.md` attachment becomes the plan in the agent's brief.
+- The card's log says which automation spawned it, and for which due time.
+- An automation on the `inbox` board starts its cards without a repository, as `start --no-repo` does.
+- The agent starts exactly as a manual `start` does: same permission mode, no extra allowed tools. When it waits at a prompt, the card shows a red `×`. herdboard shows a Herdr notification for each run.
+- A run starts even when the card of the last run is not done.
+- After sleep or power-off, the next tick spawns one card for the latest missed due time, and logs how many it skipped.
+- When the start fails, the card stays in its first column, its log says `Auto start failed: <reason>`, and herdboard shows a notification. No later tick retries it. Start the card by hand.
+- A resumed automation, or one with a changed schedule, waits for its next due time. It does not catch up.
+
+### Merge permission
+
+By default the agent follows the usual rules: it does not push or merge. With `--may-merge-prs`, its brief also lets it run `gh pr merge` on pull requests whose checks pass and that need no code change. It logs each pull request it merged or left, and why. It still never pushes or merges its own card branch.
+
+### Plan an automation
+
+`herdboard automation plan <id>`, or `P` in the Automations tab, starts a planner, as `plan` does for a card. For a repository board, it runs in a temporary worktree on the branch `auto/<id>-plan`, from the main checkout's branch. For an inbox automation, it runs in `.herdboard/work/<id>/`. The planner writes `plan.md` to the automation's attachments, so each run gets the plan. When the planner ends, herdboard removes the temporary worktree and branch if they are clean, and logs that it kept them if not. A second `plan` revises the plan.
+
+### The Automations tab
+
+The tab lists each automation: on or paused, ID, title, board, schedule, next run, and last run with its card and result.
+
+| Key | Action |
+|---|---|
+| `enter` | Details: the fields, attachments and last result. `o` opens an attachment |
+| `a` / `e` | Add or edit an automation. The form checks the schedule |
+| `P` | Plan the automation with an agent |
+| `space` | Pause or resume |
+| `n` | Run now: spawn and start one card, after you confirm |
+| `x` | Remove the automation, after you confirm. Its cards stay |
+| `r` | Read the automations again. The tab also reads them every 30 seconds |
+| `escape`, `G` | Back to the board |
+
+Limits:
+
+- Automations are herdboard data in `.herdboard/automations.toml`. Obsidian does not show them. The spawned cards are normal board cards.
+- Spawned cards are todos. An automation cannot target a Linear issue or spawn a sub-card.
+- herdboard does not review, merge or finish a spawned card, and does not limit how many runs of one automation are open.
+- A repository board needs a known checkout (`checkouts.json`). A run without one fails with `checkout_unknown`; run any herdboard command in the repository once.
 
 ## Linear
 
@@ -674,9 +752,19 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard search <term>` | List the open Linear issues of your teams that match, or one issue by identifier |
 | `herdboard init` | Create the board for the current repository |
 | `herdboard migrate <TODO.md> [--board] [--yes]` | Convert a free-form `TODO.md` into cards |
-| `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear and the state files |
+| `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
+| `herdboard automation list` | List the automations, with the next due time and the last run |
+| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox` |
+| `herdboard automation edit <aid> [the add options] [--no-merge-prs]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
+| `herdboard automation remove <aid> [--yes]` | Remove an automation. Its cards stay |
+| `herdboard automation pause\|resume <aid>` | Stop or restart the scheduled runs |
+| `herdboard automation run <aid>` | Spawn and start one card now |
+| `herdboard automation plan <aid> [--agent] [--model] [--thinking]` | Plan the automation with an agent |
+| `herdboard automation attach <aid> FILE [--name]` / `attach <aid> --remove NAME` | Add or remove an automation attachment |
+| `herdboard automation tick` | Spawn and start the due runs (the timer runs it) |
+| `herdboard automation timer install\|remove\|status` | Set up, remove or check the timer that runs the tick |
 
-- `<id>` is a todo ID (`t7k2`), a temporary reference (`homelab:12`) or a Linear identifier (`ENG-123`).
+- `<id>` is a todo ID (`t7k2`), a temporary reference (`homelab:12`) or a Linear identifier (`ENG-123`). `<aid>` is an automation ID (`a7k2`).
 - Every command takes `--json`, `--config FILE` and `-C DIR` (run as if in `DIR`).
 - With `--json`, output goes to standard output as JSON. An error has the form `{"error": {"code": "…", "message": "…"}}`. The skill lists the error codes.
 - Exit codes: 0 success, 1 user error, 2 conflict (the card changed, the lock is held, a rebase conflict), 3 Linear error.
@@ -829,7 +917,10 @@ These settings affect display only. Stored Markdown, filters and command-line ou
   .herdboard/log/              # activity logs
   .herdboard/attachments/      # card attachments, such as plan.md
   .herdboard/work/<id>/        # the folder of a card without a repository; deleted at `finish`
+  .herdboard/automations.toml  # the automations
 ```
+
+An automation's attachments are in `.herdboard/attachments/<aid>/`, and its log in `.herdboard/log/<aid>.md`.
 
 A board file uses the format of the Obsidian Kanban plugin:
 
@@ -896,7 +987,9 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 |---|---|
 | `starts.json` | The worktree, branch, base, agent pane and pull request of each started card, and the HEAD commit of its last agent review |
 | `checkouts.json` | The known main checkouts of each repository |
-| `plans.json`, `plans/<id>.log` | The running planner of each card, and the plan worker's output |
+| `plans.json`, `plans/<id>.log` | The running planner of each card and automation, and the plan worker's output |
+| `automations.json` | The last handled due time, last run, last card and last result of each automation |
+| `automations.log` | The tick's output on macOS |
 | `reviews/<id>-<time>-<random>/` | Agent review requests and findings |
 | `prs/<id>-<time>-<random>/` | Pull request requests and the written description |
 | `pr_reviews.json` | The workspace, Hunk session, agent and review state of each pull request review, keyed `owner/repo#N` |

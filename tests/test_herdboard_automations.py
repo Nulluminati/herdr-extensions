@@ -694,5 +694,59 @@ class PlanAutomationTests(LocalTime):
         self.assertTrue(self.fake.find("workspace", "close"))
 
 
+class DoctorTests(unittest.TestCase):
+    def setUp(self):
+        from herdboard import doctor
+
+        self.doctor = doctor
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.todos = self.root / "todos"
+        self.config_file = self.root / "config.toml"
+        self.config_file.write_text(f'todos_dir = "{self.todos}"\n[linear]\nenabled = false\n')
+        env = patch.dict(os.environ, {"HOME": str(self.root), "XDG_STATE_HOME": str(self.root / "state"),
+                                      "XDG_CONFIG_HOME": str(self.root / "config"), "LINEAR_API_KEY": ""})
+        env.start()
+        self.addCleanup(env.stop)
+        self.system = FakeSystem()
+        self.enterContext(patch.object(start, "command", self.system))
+        self.enterContext(patch.object(automations.sys, "platform", "linux"))
+        self.store = Store(Config(todos_dir=self.todos))
+        self.store.ensure_inbox()
+
+    def codes(self):
+        return [f["code"] for f in self.doctor.diagnose(self.config_file, offline=True)["findings"]
+                if f["code"].startswith("automation")]
+
+    def write(self, text):
+        path = automations.definitions_path(self.store.config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_no_automations_no_findings(self):
+        self.assertEqual(self.codes(), [])
+        self.assertFalse(any(c[:1] == ["systemctl"] for c in self.system.calls))
+
+    def test_a_good_automation_with_an_active_timer_has_no_findings(self):
+        automations.add(self.store, title="x", schedule="every day")
+        self.assertEqual(self.codes(), [])
+
+    def test_an_inactive_timer_is_a_warning(self):
+        automations.add(self.store, title="x", schedule="every day")
+        self.system.state = "inactive"
+        self.assertEqual(self.codes(), ["automation_timer_inactive"])
+
+    def test_invalid_toml_is_an_error(self):
+        self.write("[[automation]\n")
+        self.assertEqual(self.codes(), ["automations_invalid"])
+
+    def test_bad_schedule_missing_board_and_duplicate_ids(self):
+        self.write('[[automation]]\nid = "a001"\ntitle = "x"\nschedule = "sometimes"\nboard = "inbox"\n'
+                   '[[automation]]\nid = "a001"\ntitle = "y"\nschedule = "every day"\nboard = "gone"\n')
+        self.assertEqual(sorted(self.codes()), ["automation_board_missing", "automation_duplicate_id",
+                                                "automation_schedule_invalid"])
+
+
 if __name__ == "__main__":
     unittest.main()

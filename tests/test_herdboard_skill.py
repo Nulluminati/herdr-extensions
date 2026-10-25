@@ -125,6 +125,8 @@ class SkillTests(unittest.TestCase):
         known.add(UnknownTypeError.code)
         known |= {"remote_unknown", "branch_exists", "agent_running", "workspace_closed", "worktree_missing",
                   "unsent_notes", "gh_failed", "git_failed", "hunk_failed", "new_commits"}
+        known |= {"bad_schedule", "unknown_board", "unsupported_platform", "herdr_not_found", "herdboard_not_found",
+                  "timer_failed"}
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

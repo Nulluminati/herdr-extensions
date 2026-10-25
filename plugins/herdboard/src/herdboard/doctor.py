@@ -401,6 +401,49 @@ def check_promotions(path, store):
     return findings
 
 
+def check_automations(store):
+    """The automations file parses, each schedule parses, each board exists, the IDs are unique, and the
+    timer that runs them is active."""
+    from . import automations
+
+    path = automations.definitions_path(store.config)
+    try:
+        items = automations.load(store.config)
+    except HerdboardError as error:
+        return [finding("error", "automations_invalid", str(error), path)]
+    findings = []
+    seen = set()
+    for item in items:
+        if item.id in seen or not automations.AUTOMATION_ID.match(item.id):
+            findings.append(finding("error", "automation_duplicate_id",
+                                    f"Automation ID {item.id!r} is used twice or is not `a` and 3 letters or digits.",
+                                    path, fix="Give each automation its own ID, such as a7k2."))
+        seen.add(item.id)
+        try:
+            automations.parse_schedule(item.schedule)
+        except HerdboardError as error:
+            findings.append(finding("error", "automation_schedule_invalid", f"{item.id}: {error}", path))
+        if item.board != "inbox":
+            try:
+                store.resolve_board(item.board)
+            except HerdboardError:
+                findings.append(finding("error", "automation_board_missing",
+                                        f"{item.id}: no board named {item.board!r}; its runs fail.", path,
+                                        fix=f"herdboard automation edit {item.id} --board BOARD"))
+    if any(item.enabled for item in items):
+        try:
+            status = automations.timer("status")
+        except HerdboardError as error:
+            findings.append(finding("warning", "automation_timer_inactive",
+                                    f"Automations do not run on their own: {error}"))
+        else:
+            if not status["active"]:
+                findings.append(finding("warning", "automation_timer_inactive",
+                                        f"Automations do not run on their own: the {status['backend']} timer is "
+                                        f"{status['state']}.", fix="herdboard automation timer install"))
+    return findings
+
+
 def check_herdr():
     binary = os.environ.get("HERDR_BIN_PATH") or "herdr"
     if shutil.which(binary) is None:
@@ -459,6 +502,7 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
         findings.extend(check_parents(boards))
         findings.extend(check_duplicate_repos(boards))
         findings.extend(check_linear(config, boards, offline))
+        findings.extend(check_automations(store))
     state = linear_source.state_dir()
     findings.extend(check_starts(state / "starts.json"))
     if config is not None:

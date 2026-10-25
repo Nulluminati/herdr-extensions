@@ -96,6 +96,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `archive --done` (archives every card in the board's done column).
 - `link`, `pin`, `init`, `migrate --yes`, `doctor --fix-ids`.
+- Every `automation` command except `automation list`. Automations spawn cards and start agents on a schedule; change one only when the user asks.
 
 ```bash
 herdboard --json start tep3 --agent pi        # worktree, workspace, card to In progress, pi with the card
@@ -163,6 +164,23 @@ A repoless card has no repository and no branch. Work in its card folder, write 
 You may run `pr-sync <id>` for your own card. It pushes your branch and sends `pr.md` to the open pull request. When the user asks to change the PR title or description, edit the `pr.md` you wrote when you know its path. Otherwise, run `pr-sync <id> --fetch`, which names a new `pr.md`. Edit that file, then run `pr-sync <id>`.
 
 The Herdr sidebar shows the card next to your agent row, and it follows the card's column.
+
+## Automations
+
+An automation (ID `a7k2`) is a task and a schedule. At each due time, herdboard adds a new card to the automation's board and starts an agent on it. A card that an automation spawned is a normal card: its log starts with `Spawned by automation a7k2`. Work on it as on any other card.
+
+```bash
+herdboard --json automation list              # each automation, its next due time and its last run
+herdboard --json automation add --title "Merge safe Dependabot PRs" --board acme-api --schedule "every weekday at 07:30" --may-merge-prs
+herdboard --json automation edit a7k2 --schedule "every week on monday"
+herdboard --json automation pause a7k2
+herdboard --json automation run a7k2          # spawn and start one card now
+herdboard --json automation timer status      # is the timer that runs the tick active?
+```
+
+Schedules: `every day`, `every weekday`, `every week on monday[, thursday]`, `every month on the 1st`, `every N days`, `every N weeks`, each with an optional `at HH:MM` (default 09:00), in local time.
+
+When your brief has a "GitHub pull requests" section, the automation lets you run `gh pr merge` on pull requests whose checks pass and that need no code change. Log each one that you merged or left. You still never push or merge your own card branch.
 
 ## When you plan a card
 
@@ -234,4 +252,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `path_exists` | The new repository path exists and is not an empty folder. Ask the user for another path. |
 | `new_repo_failed` | herdboard could not create the repository or its first commit. Tell the user the message; a missing git `user.name` or `user.email` is the usual cause. |
 | `worktree_create_failed` | Herdr could not create the worktree. Tell the user the message and `steps_done`. `invalid reference: HEAD` means the repository has no commit yet. Do not retry, and do not make a commit, unless the user asks. |
+| `bad_schedule` | The schedule text is not one of the forms in "Automations". The message lists them. Fix the text, or ask the user. |
+| `unknown_board` | The automation's board does not exist. Run `list` for the board names, or ask the user. |
+| `unsupported_platform`, `herdr_not_found`, `herdboard_not_found`, `timer_failed` | `automation timer` works on Linux (systemd) and macOS (launchd), and needs `herdr` and `herdboard` on the PATH. Tell the user the message. |
 | `herdr_unavailable`, `herdr_error` | `start` needs a running Herdr, or a Herdr command failed. Tell the user the message. Running `start` again continues from the step that failed. |

@@ -30,10 +30,11 @@ from textual.errors import NoWidget
 from textual.message import Message
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, TabbedContent, TabPane, TextArea
+from textual.widgets import (Checkbox, DataTable, Input, Label, Markdown, OptionList, Select, Static,
+                             TabbedContent, TabPane, TextArea)
 from textual.worker import Worker, WorkerState
 
-from . import activity, attachments, notes, pr_reviews
+from . import activity, attachments, automations, notes, pr_reviews
 from .linear import LinearAuthError
 from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
@@ -68,6 +69,10 @@ SPINNER_SECONDS = 0.15
 PR_GROUP = "pull-requests"
 PR_SCREEN = "pull-requests"
 NOTES_SCREEN = "notes"
+AUTOMATIONS_SCREEN = "automations"
+AUTOMATION_GROUP = "automations"
+# How often the Automations tab reads the run state again, for runs that the timer started.
+AUTOMATION_SECONDS = 30.0
 # How often the pull request list reads GitHub again, the same as the PR state check of the board.
 PR_SECONDS = 60.0
 # Each pull request state: its Nerd Font icon, its plain icon, and its style. The prefix names where
@@ -151,7 +156,7 @@ HELP_SECTIONS = [
         ("u", "remove the pin of a pinned Linear issue"),
         ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
         ("r", "reload, and fetch Linear again"),
-        ("G", "go to the next tab: Board, Pull requests, Notes; a click on a tab opens it"),
+        ("G", "go to the next tab: Board, Pull requests, Notes, Automations; a click on a tab opens it"),
     ]),
     ("Cards", [
         ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
@@ -210,7 +215,20 @@ HELP_SECTIONS = [
         ("r", "read the note file again"),
         ("escape", "in the editor, save and show the note; else go back to the board"),
         ("ctrl+s", "in the editor, save now"),
-        ("G", "go back to the board"),
+        ("G", "go to the Automations tab"),
+    ]),
+    ("Automations", [
+        ("up, k", "previous automation"),
+        ("down, j", "next automation"),
+        ("enter", "its details, attachments and last run; o opens an attachment"),
+        ("a", "add an automation: title, board, schedule, type, tags, agent, merge permission, details"),
+        ("e", "edit the automation"),
+        ("P", "plan the automation with an agent; the plan goes into each spawned card's brief"),
+        ("space", "pause or resume; a resumed automation waits for its next due time"),
+        ("n", "run now: spawn a card and start its agent, after you confirm"),
+        ("x", "remove the automation, after you confirm; its cards stay"),
+        ("r", "read the automations again"),
+        ("escape, G", "go back to the board"),
     ]),
     ("Pull request detail", [
         ("R", "review the pull request with an agent"),
@@ -2301,10 +2319,11 @@ class ConfigScreen(ModalBase):
 
 
 # The tabs under the header: (tab, label). G goes to the next tab, and from the last to the first.
-TABS = [("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes")]
+TABS = [("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes"), ("automations", "Automations")]
 TAB_KEY = "G"
 # Each tab's icon: its Nerd Font icon and its plain icon.
-TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂"), "notes": ("\uf249", "✎")}
+TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂"), "notes": ("\uf249", "✎"),
+             "automations": ("\uf017", "↻")}
 # The actions that the tabs show, so the key list leaves them out.
 TAB_ACTIONS = {"pull_requests", "next_tab"}
 
@@ -2353,8 +2372,8 @@ TAB_HINT_MIN_GAP = 3
 
 
 class TabBar(Vertical):
-    """The row under the header: the Board, Pull requests and Notes tabs, each with its icon, and the
-    open pull request count once the list has read it. A click on another tab switches to it.
+    """The row under the header: the Board, Pull requests, Notes and Automations tabs, each with its
+    icon, and the open pull request count once the list has read it. A click on another tab switches to it.
 
     The switch key's hint stands on the bar outside the tabs: at the right end of the tab row, or in
     a row above the tabs when the pane is too narrow for both."""
@@ -3503,7 +3522,7 @@ class NotesScreen(Screen):
     BINDINGS = [
         Binding("escape", "back", "Back"),
         Binding("escape", "done", "Done"),
-        Binding("G", "next_tab", "Board", show=False),
+        Binding("G", "next_tab", "Automations", show=False),
         Binding("e", "edit", "Edit"),
         Binding("enter", "edit", "Edit", show=False),
         Binding("t", "toggle", "Global note"),
@@ -3721,7 +3740,7 @@ class NotesScreen(Screen):
         self.app.show_tab("board")
 
     def action_next_tab(self) -> None:
-        self.app.show_tab("board")
+        self.app.show_tab("automations")
 
     def action_toggle(self) -> None:
         target = notes.GLOBAL if self.board != notes.GLOBAL else self.home
@@ -3738,6 +3757,433 @@ class NotesScreen(Screen):
 
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen())
+
+
+class AutomationFormScreen(ModalBase):
+    """The fields of an automation. ctrl+s or enter in a one-line field saves; `save` raises
+    HerdboardError for bad input, which the form shows."""
+
+    BINDINGS = [Binding("ctrl+s", "save", "Save")]
+    AUTO_FOCUS = "#automation-title"
+
+    def __init__(self, heading: str, boards: list[str], types: list[str], save: Callable[[dict], None],
+                 item: automations.Automation | None = None):
+        super().__init__()
+        self.heading = heading
+        self.item = item
+        # The automation's own board and type stay choices, so an edit keeps them.
+        self.boards = boards + ([item.board] if item and item.board not in boards else [])
+        self.types = list(types) + ([item.type] if item and item.type and item.type not in types else [])
+        self.save = save
+
+    def compose(self) -> ComposeResult:
+        item = self.item
+        titled = CardFormScreen._titled
+        error = Static("", id="automation-error", classes="error")
+        error.plain = ""
+        agents = [("default", "default"), ("claude", "claude"), ("pi", "pi")]
+        levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
+        with Vertical(classes="dialog card-form"):
+            yield Static(Text(self.heading), id="automation-heading")
+            yield titled(Input(value=item.title if item else "", placeholder="What each run does",
+                               id="automation-title", select_on_focus=False), "Title")
+            with Horizontal(classes="form-row"):
+                yield titled(Select([(board, board) for board in self.boards], allow_blank=False,
+                                    value=item.board if item else "inbox", id="automation-board"), "Board")
+                yield titled(Input(value=item.schedule if item else "", placeholder="every weekday at 07:30",
+                                   id="automation-schedule", select_on_focus=False), "Schedule")
+            with Horizontal(classes="form-row"):
+                yield titled(Select([(kind, kind) for kind in self.types], prompt="none",
+                                    value=item.type if item and item.type else Select.NULL,
+                                    id="automation-type"), "Type")
+                yield titled(Input(value=" ".join(item.tags) if item else "", placeholder="security, deps",
+                                   id="automation-tags", select_on_focus=False), "Tags")
+            with Horizontal(classes="form-row"):
+                yield titled(Select(agents, allow_blank=False, value=(item.agent if item and item.agent else "default"),
+                                    id="automation-agent"), "Agent")
+                yield titled(Input(value=(item.model or "") if item else "", placeholder="default",
+                                   id="automation-model", select_on_focus=False), "Model")
+                yield titled(Select(levels, allow_blank=False,
+                                    value=item.thinking if item and item.thinking else "default",
+                                    id="automation-thinking"), "Thinking (pi)")
+            yield Checkbox("Agent may merge PRs that pass checks and need no change",
+                           value=bool(item and item.may_merge_prs), id="automation-merge")
+            yield titled(TextArea(item.body if item else "", id="automation-body",
+                                  placeholder="What the agent does on each run"), "Details")
+            yield error
+            yield Label("ctrl+s: save · tab: next field · escape: cancel · schedules: every day, every weekday, "
+                        "every week on monday, every month on the 1st, every N days, with at HH:MM", classes="dim")
+
+    def values(self) -> dict:
+        def choice(name: str) -> str | None:
+            select = self.query_one(f"#automation-{name}", Select)
+            return None if select.is_blank() or select.value == "default" else str(select.value)
+
+        return {
+            "title": self.query_one("#automation-title", Input).value,
+            "board": str(self.query_one("#automation-board", Select).value),
+            "schedule": self.query_one("#automation-schedule", Input).value.strip(),
+            "type": choice("type"),
+            "tags": plain_tags(parse_tags(self.query_one("#automation-tags", Input).value)),
+            "agent": choice("agent"),
+            "model": self.query_one("#automation-model", Input).value.strip() or None,
+            "thinking": choice("thinking"),
+            "may_merge_prs": self.query_one("#automation-merge", Checkbox).value,
+            "body": self.query_one("#automation-body", TextArea).text.rstrip("\n"),
+        }
+
+    def error_text(self) -> str:
+        return self.query_one("#automation-error", Static).plain
+
+    def show_error(self, message: str) -> None:
+        error = self.query_one("#automation-error", Static)
+        error.plain = message
+        error.update(Text(message))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.action_save()
+
+    def action_save(self) -> None:
+        try:
+            self.save(self.values())
+        except HerdboardError as error:
+            self.show_error(str(error))
+            return
+        self.dismiss(True)
+
+
+class AutomationDetailScreen(ModalBase):
+    """An automation in full: its fields, its attachments and its last run."""
+
+    BINDINGS = [
+        Binding("e", "edit", "Edit"),
+        Binding("o", "open_attachment", "Open attachment"),
+    ]
+
+    def __init__(self, entry: dict, icon_style: str = "plain"):
+        super().__init__()
+        self.entry = entry
+        self.files = entry["attachments"]
+        self.icon_style = icon_style
+
+    def compose(self) -> ComposeResult:
+        entry = self.entry
+        facts = [("ID", entry["id"]), ("State", "on" if entry["enabled"] else "paused"),
+                 ("Board", entry["board"]), ("Schedule", entry["schedule"]),
+                 ("Next run", _short_time(entry["next_due"])), ("Type", entry["type"] or "none"),
+                 ("Tags", ", ".join(entry["tags"]) or "none"),
+                 ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
+                 ("Merges PRs", "yes" if entry["may_merge_prs"] else "no"),
+                 ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
+                 ("Last result", entry["last_result"] or "-")]
+        if entry["schedule_error"]:
+            facts.append(("Schedule error", entry["schedule_error"]))
+        meta = Text()
+        for number, (name, value) in enumerate(facts):
+            if number:
+                meta.append("\n")
+            meta.append(f"{name}: ", style="bold")
+            meta.append(value)
+        with VerticalScroll(classes="dialog detail", can_focus=False):
+            yield RichStatic(Text(entry["title"], style="bold"), id="detail-title")
+            yield RichStatic(meta, id="detail-meta")
+            if entry["body"].strip():
+                block = RichStatic(detail_lines(entry["body"].split("\n")), id="detail-body", classes="detail-block")
+                block.border_title = "Details"
+                yield block
+            if self.files:
+                block = RichStatic(attachment_lines(self.files), id="detail-files", classes="detail-block")
+                block.border_title = icon_label("attachment", "Attachments", self.icon_style)
+                block.ALLOW_SELECT = False
+                yield block
+            yield Label(("o: open attachment · " if self.files else "") + "e: edit · escape: close", classes="dim")
+
+    def action_edit(self) -> None:
+        self.dismiss("edit")
+
+    # The card detail's attachment viewer works on any screen with `files`.
+    action_open_attachment = DetailScreen.action_open_attachment
+    open_attachment = DetailScreen.open_attachment
+
+
+def _short_time(text: str | None) -> str:
+    """An ISO time as `YYYY-MM-DD HH:MM`, or `-`."""
+    return text[:16].replace("T", " ") if text else "-"
+
+
+class AutomationsScreen(Screen):
+    """The automations: each spawns a card on its board at its due times and starts an agent on it."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+        Binding("G", "next_tab", "Board", show=False),
+        Binding("enter", "detail", "Details"),
+        Binding("a", "add", "Add"),
+        Binding("e", "edit", "Edit"),
+        Binding("P", "plan", "Plan"),
+        Binding("space", "toggle", "Pause/resume"),
+        Binding("n", "run", "Run now"),
+        Binding("x", "remove", "Remove"),
+        Binding("r", "load", "Reload"),
+        Binding("down,j", "cursor(1)", "Next", show=False),
+        Binding("up,k", "cursor(-1)", "Previous", show=False),
+        Binding("question_mark", "help", "Help"),
+    ]
+
+    COLUMNS = ("", "ID", "Title", "Board", "Schedule", "Next run", "Last run")
+
+    def __init__(self):
+        super().__init__()
+        self.entries: list[dict] = []
+        # One run or plan starts at a time.
+        self.busy = False
+
+    def compose(self) -> ComposeResult:
+        yield HeaderBar("Automations", self.app.view)
+        yield TabBar("automations")
+        yield Static("", id="automation-status")
+        table = DataTable(id="automation-list", cursor_type="row", zebra_stripes=False)
+        table.add_columns(*self.COLUMNS)
+        yield table
+        with Vertical(classes="bottom-dock"):
+            yield KeyBar()
+
+    def on_mount(self) -> None:
+        self.action_load()
+        # A tick of the timer changes the next and last runs while the tab is open.
+        self.timer = self.set_interval(AUTOMATION_SECONDS, self.action_load)
+        self.query_one("#automation-list", DataTable).focus()
+
+    def on_screen_suspend(self) -> None:
+        self.timer.pause()
+
+    def on_screen_resume(self) -> None:
+        self.timer.resume()
+        self.action_load()
+
+    @property
+    def store(self) -> Store:
+        return self.app.store
+
+    def rows(self) -> list[tuple[str, ...]]:
+        """Each row's cells as plain text, for tests."""
+        table = self.query_one("#automation-list", DataTable)
+        return [tuple(str(cell.plain if isinstance(cell, Text) else cell) for cell in table.get_row_at(index))
+                for index in range(table.row_count)]
+
+    def status_text(self) -> str:
+        return self.query_one("#automation-status", Static).plain
+
+    def current(self) -> dict | None:
+        index = self.query_one("#automation-list", DataTable).cursor_row
+        return self.entries[index] if self.entries and 0 <= index < len(self.entries) else None
+
+    def key_applies(self, action: str) -> bool:
+        """False for a key that has nothing to act on: the key bar dims it."""
+        if action in ("detail", "edit", "plan", "toggle", "run", "remove"):
+            return self.current() is not None
+        return True
+
+    def _row(self, entry: dict) -> list[Text]:
+        state = Text("on", style="green") if entry["enabled"] else Text("paused", style="yellow")
+        last = " ".join(filter(None, (_short_time(entry["last_run"]) if entry["last_run"] else None,
+                                       entry["last_card"], entry["last_result"]))) or "-"
+        failed = (entry["last_result"] or "").startswith(("start_failed", "spawn_failed"))
+        next_run = entry["schedule_error"] or _short_time(entry["next_due"])
+        return [state, Text(entry["id"]), Text(entry["title"]), Text(entry["board"]), Text(entry["schedule"]),
+                Text(next_run, style="red" if entry["schedule_error"] else ""),
+                Text(last, style="red" if failed else "")]
+
+    def action_load(self) -> None:
+        try:
+            entries = automations.listing(self.store)
+        except HerdboardError as error:
+            self._status(f"Cannot read the automations: {error}")
+            return
+        selected = self.current()
+        self.entries = entries
+        table = self.query_one("#automation-list", DataTable)
+        table.clear()
+        for entry in entries:
+            table.add_row(*self._row(entry), key=entry["id"])
+        ids = [entry["id"] for entry in entries]
+        if selected and selected["id"] in ids:
+            table.move_cursor(row=ids.index(selected["id"]))
+        if not entries:
+            self._status("No automations. a adds one: a card that a schedule spawns and starts.")
+        else:
+            paused = sum(not entry["enabled"] for entry in entries)
+            self._status(f"{len(entries)} automation{'' if len(entries) == 1 else 's'}"
+                         + (f", {paused} paused" if paused else "")
+                         + f" · {automations.definitions_path(self.store.config)}")
+        self.refresh_bindings()
+
+    def _status(self, text: str) -> None:
+        status = self.query_one("#automation-status", Static)
+        status.plain = text
+        status.update(Text(text))
+
+    def action_cursor(self, step: int) -> None:
+        table = self.query_one("#automation-list", DataTable)
+        if self.entries:
+            table.move_cursor(row=max(0, min(len(self.entries) - 1, table.cursor_row + step)))
+
+    def action_back(self) -> None:
+        self.app.show_tab("board")
+
+    def action_next_tab(self) -> None:
+        self.app.show_tab("board")
+
+    def action_help(self) -> None:
+        self.app.push_screen(HelpScreen())
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()
+        self.action_detail()
+
+    def action_detail(self) -> None:
+        entry = self.current()
+        if entry is None:
+            return
+        self.app.push_screen(AutomationDetailScreen(entry, self.store.config.icon_style),
+                             lambda answer: answer == "edit" and self.action_edit())
+
+    def _boards(self) -> list[str]:
+        names = ["inbox"]
+        for path in self.store.board_paths():
+            name = self.store.board_name(path)
+            if name not in names:
+                names.append(name)
+        return names
+
+    def action_add(self) -> None:
+        def save(values: dict) -> None:
+            automations.add(self.store, **values)
+
+        self.app.push_screen(AutomationFormScreen("Add an automation", self._boards(), self.store.config.types,
+                                                  save), lambda saved: saved and self.action_load())
+
+    def action_edit(self) -> None:
+        entry = self.current()
+        if entry is None:
+            return
+        item = automations.get(self.store.config, entry["id"])
+
+        def save(values: dict) -> None:
+            automations.edit(self.store, item.id, **values)
+
+        self.app.push_screen(AutomationFormScreen(f"Edit {item.id}", self._boards(), self.store.config.types, save,
+                                                  item=item), lambda saved: saved and self.action_load())
+
+    def action_toggle(self) -> None:
+        entry = self.current()
+        if entry is None:
+            return
+        try:
+            changed = automations.set_enabled(self.store, entry["id"], not entry["enabled"])
+        except HerdboardError as error:
+            self.app.notify(str(error), severity="error")
+            return
+        self.app.notify(f"{changed.id} {'resumed' if changed.enabled else 'paused'}")
+        self.action_load()
+
+    def action_remove(self) -> None:
+        entry = self.current()
+        if entry is None:
+            return
+
+        def answered(answer: bool | None) -> None:
+            if not answer:
+                return
+            try:
+                automations.remove(self.store, entry["id"])
+            except HerdboardError as error:
+                self.app.notify(str(error), severity="error")
+                return
+            self.app.notify(f"Removed {entry['id']}")
+            self.action_load()
+
+        self.app.push_screen(ConfirmScreen(f"Remove automation {entry['id']}: {entry['title']}?",
+                                           "Its spawned cards stay on their boards."), answered)
+
+    def _call(self, function, *args, **options) -> None:
+        """Run a function on the event loop from a worker thread. Nothing runs once the board quits."""
+        try:
+            self.app.call_from_thread(function, *args, **options)
+        except RuntimeError:
+            pass
+
+    def _work(self, work: Callable[[], dict], notice: Callable[[dict], str]) -> None:
+        """Run a run or a plan in a thread, then show the notice and read the list again."""
+        if self.busy:
+            self.app.notify("Busy: an automation run or plan is starting", severity="warning")
+            return
+        self.busy = True
+
+        def done(result: dict | None, error: HerdboardError | None) -> None:
+            self.busy = False
+            if error is not None:
+                self.app.notify(str(error), severity="error")
+            else:
+                self.app.notify(notice(result))
+            self.action_load()
+
+        def guarded() -> None:
+            try:
+                result, error = work(), None
+            except HerdboardError as error_:
+                result, error = None, error_
+            self._call(done, result, error)
+
+        self.run_worker(guarded, thread=True, group=AUTOMATION_GROUP, exit_on_error=False)
+
+    def action_run(self) -> None:
+        entry = self.current()
+        if entry is None:
+            return
+        agent = entry["agent"] or self.store.config.start_agent
+
+        def answered(answer: bool | None) -> None:
+            if not answer:
+                return
+            item = automations.get(self.store.config, entry["id"])
+
+            def notice(result: dict) -> str:
+                if result["card"] is None:
+                    return f"{item.id}: {result['result']}"
+                return f"{item.id}: spawned {result['card']}: {result['result']}"
+
+            self._work(lambda: automations.run(self.store, item, datetime.now().astimezone(),
+                                               config_file=self.app.config_file), notice)
+
+        self.app.push_screen(ConfirmScreen(f"Run {entry['id']} now: {entry['title']}?",
+                                           f"Spawns a card on {entry['board']} and starts {agent} on it."), answered)
+
+    def action_plan(self) -> None:
+        entry = self.current()
+        if entry is None:
+            return
+        automation_id = entry["id"]
+
+        def plan(agent: str, model: str | None, thinking: str | None) -> None:
+            from .automation_plan import AutomationPlanner
+
+            def notice(result: dict) -> str:
+                model_text = f" ({result['model']})" if result["model"] else ""
+                return f"{result['agent']}{model_text} plans {automation_id} in workspace {result['workspace_id']}"
+
+            self._work(lambda: AutomationPlanner(self.store, config_file=self.app.config_file).plan(
+                automation_id, agent=agent, model=model, thinking=thinking), notice)
+
+        def chosen_agent(agent: str | None) -> None:
+            if agent == "claude":
+                self.app.push_screen(ClaudeModelScreen(), lambda choice: choice and plan(agent, choice[0], None))
+            elif agent == "pi":
+                self.app.push_screen(ModelScreen(*pi_model_choices(self.store.config)),
+                                     lambda choice: choice and plan(agent, *choice))
+
+        self.app.push_screen(AgentScreen("Choose the planner"), chosen_agent)
 
 
 # The column colors in turn, as (color, ANSI color), and the completed column's green.
@@ -3882,6 +4328,14 @@ class HerdboardApp(App):
     #card-type:focus-within { border: round $primary; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
+    #automation-board, #automation-type, #automation-agent, #automation-thinking {
+        width: 1fr; border: round $surface-lighten-2; height: auto;
+    }
+    #automation-board > SelectCurrent, #automation-type > SelectCurrent, #automation-agent > SelectCurrent,
+    #automation-thinking > SelectCurrent { border: none; }
+    #automation-board:focus-within, #automation-type:focus-within, #automation-agent:focus-within,
+    #automation-thinking:focus-within { border: round $primary; }
+    #automation-schedule, #automation-tags, #automation-model { width: 2fr; }
     .config Select { border: round $surface-lighten-2; height: auto; }
     .config Select > SelectCurrent { border: none; }
     .config Select:focus-within { border: round $primary; }
@@ -3912,6 +4366,9 @@ class HerdboardApp(App):
     #pr-repo { height: 1; padding: 0 1; color: $accent; }
     #pr-status { height: 1; padding: 0 1; color: $text-muted; }
     #pr-list { height: 1fr; scrollbar-size-vertical: 1; }
+    #automation-status { height: 1; padding: 0 1; color: $text-muted; }
+    #automation-list { height: 1fr; scrollbar-size-vertical: 1; }
+    #automation-merge { border: none; padding: 0 1; }
     .pr-row { height: auto; padding: 0 1; }
     """ + pr_row_css() + """
     .pr-row.selected { background: $accent 20%; }
@@ -4449,7 +4906,8 @@ class HerdboardApp(App):
         # Modal screens handle their own keys: the board's own key actions stop
         # behind a dialog. Textual's actions, such as tab to the next field, stay.
         # The pull request list is a full screen with its own keys, so the board's stop there too.
-        if isinstance(self.screen, (ModalScreen, PullRequestsScreen, NotesScreen)) and action in BOARD_ACTIONS:
+        if isinstance(self.screen, (ModalScreen, PullRequestsScreen, NotesScreen, AutomationsScreen)) \
+                and action in BOARD_ACTIONS:
             return False
         return True
 
@@ -5630,6 +6088,8 @@ class HerdboardApp(App):
             return "prs"
         if isinstance(self.screen, NotesScreen):
             return "notes"
+        if isinstance(self.screen, AutomationsScreen):
+            return "automations"
         return "board"
 
     def show_tab(self, tab: str) -> None:
@@ -5647,6 +6107,10 @@ class HerdboardApp(App):
             name = PR_SCREEN
             if not self.is_screen_installed(PR_SCREEN):
                 self.install_screen(PullRequestsScreen(self.pr_service), name=PR_SCREEN)
+        elif tab == "automations":
+            name = AUTOMATIONS_SCREEN
+            if not self.is_screen_installed(AUTOMATIONS_SCREEN):
+                self.install_screen(AutomationsScreen(), name=AUTOMATIONS_SCREEN)
         else:
             name = NOTES_SCREEN
             if not self.is_screen_installed(NOTES_SCREEN):
