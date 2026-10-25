@@ -375,6 +375,9 @@ class ReviewerTests(PrReviewTestCase):
     def test_pi_gets_bash_and_its_thinking_level(self):
         arguments = pr_reviews.reviewer_arguments("pi", "Read it", "zai/glm-5.3", "high")
         self.assertEqual(arguments[:2], ["--tools", "read,grep,find,ls,bash"])
+        allow = arguments[arguments.index("--bash-allow") + 1]
+        self.assertEqual(allow, "Bash(hunk session:*),Bash(hunk skill path:*),Bash(gh pr view:*),"
+                                "Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(terminal-browser:*)")
         self.assertEqual(arguments[-2:], ["--", "Read it"])
         self.assertIn("high", arguments)
 

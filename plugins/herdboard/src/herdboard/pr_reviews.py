@@ -460,12 +460,15 @@ def _comments(session_id: str, kind: str) -> list[dict]:
 
 # The reviewer agent
 
+REVIEWER_BASH = ("Bash(hunk session:*)", "Bash(hunk skill path:*)", "Bash(gh pr view:*)", "Bash(gh pr diff:*)",
+                 "Bash(gh pr checks:*)", "Bash(terminal-browser:*)")
+
+
 def reviewer_arguments(kind: str, prompt: str, model: str | None, thinking: str | None) -> list[str]:
     """The reviewer's arguments after Herdr's `--`: it reads, runs `hunk session` and reads PR data."""
     if kind == "pi":
-        # pi cannot limit bash to some commands: the prompt holds the limits.
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
-        return ["--tools", "read,grep,find,ls,bash", *options, "--", prompt]
+        return ["--tools", "read,grep,find,ls,bash", "--bash-allow", ",".join(REVIEWER_BASH), *options, "--", prompt]
     if kind == "codex":
         return ["-a", "never", "-c", 'default_permissions="hb-pr-review"',
                 "-c", 'permissions.hb-pr-review.filesystem={":root"="read"}',
@@ -473,8 +476,7 @@ def reviewer_arguments(kind: str, prompt: str, model: str | None, thinking: str 
                 *start.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
-            "--allowedTools", "Read", "Grep", "Glob", "Bash(hunk session:*)", "Bash(hunk skill path:*)",
-            "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)", "Bash(terminal-browser:*)"]
+            "--allowedTools", "Read", "Grep", "Glob", *REVIEWER_BASH]
 
 
 def prompt_text(record: dict, pr: PullRequest, kind: str | None = None) -> str:
