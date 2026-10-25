@@ -585,5 +585,114 @@ class TimerTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "unsupported_platform")
 
 
+class PlanAutomationTests(LocalTime):
+    def setUp(self):
+        super().setUp()
+        from herdboard import automation_plan, plan
+        from test_herdboard_plan import PlanHerdr
+
+        self.automation_plan = automation_plan
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.enterContext(patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}))
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        for args in (["init", "-q", "-b", "main"], ["-c", "user.name=Test", "-c", "user.email=test@example.com",
+                                                     "commit", "--allow-empty", "-qm", "init"]):
+            subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
+        self.config = Config(todos_dir=self.root / "todos")
+        self.store = Store(self.config)
+        self.store.ensure_inbox()
+        self.board = self.store.init_board(repo_identity(self.repo))
+        start.register_checkout(self.repo)
+        self.fake = PlanHerdr(self.root)
+        self.enterContext(patch.object(start, "command", self.fake))
+        self.workers = []
+        self.enterContext(patch.object(automation_plan, "start_worker",
+                                       lambda arguments, log: self.workers.append((arguments, log))))
+        self.enterContext(patch.object(plan, "POLL_SECONDS", 0))
+        self.planner = automation_plan.AutomationPlanner(self.store)
+
+    def add(self, board):
+        return automations.add(self.store, title="Merge safe Dependabot PRs", schedule="every weekday at 07:30",
+                               board=board, body="Check the open security alerts.")
+
+    def brief(self):
+        call = self.fake.find("agent", "start")[0]
+        message = call[call.index("--") + 1]
+        return Path(message.split("Read the brief at ")[1].split(" first")[0]).read_text()
+
+    def log(self, automation_id):
+        return [entry["message"] for entry in activity.read(self.config, automation_id)]
+
+    def test_a_repository_automation_plans_in_a_temporary_worktree(self):
+        added = self.add(self.board.stem)
+        result = self.planner.plan(added.id)
+        create = self.fake.find("worktree", "create")[0]
+        self.assertEqual(create[create.index("--branch") + 1], f"auto/{added.id}-plan")
+        self.assertEqual(create[create.index("--base") + 1], "main")
+        self.assertEqual(create[create.index("--label") + 1], f"plan {added.id}")
+        self.assertEqual(result["plan"], str(attachments.plan_path(self.config, added.id)))
+        records = json.loads((start.state_dir() / "plans.json").read_text())
+        self.assertEqual(records[added.id]["pane_id"], result["pane_id"])
+        self.assertEqual(self.workers[0][0][-4:], ["plan-wait", added.id, "--pane", result["pane_id"]])
+        brief = self.brief()
+        for part in (added.id, "every weekday at 07:30", self.board.stem, "Check the open security alerts.",
+                     "unattended", str(attachments.plan_path(self.config, added.id))):
+            self.assertIn(part, brief)
+        self.assertIn("Planning started", self.log(added.id)[0])
+
+    def test_an_inbox_automation_plans_in_its_folder(self):
+        added = self.add("inbox")
+        result = self.planner.plan(added.id)
+        create = self.fake.find("workspace", "create")[0]
+        folder = self.config.todos_dir / ".herdboard" / "work" / added.id
+        self.assertEqual(create[create.index("--cwd") + 1], str(folder))
+        self.assertEqual(create[create.index("--label") + 1], f"plan {added.id}")
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(result["worktree_path"], str(folder))
+        self.assertFalse(self.fake.find("worktree", "create"))
+
+    def test_a_running_planner_blocks_a_second_one(self):
+        added = self.add("inbox")
+        self.planner.plan(added.id)
+        with self.assertRaises(HerdboardError) as raised:
+            self.planner.plan(added.id)
+        self.assertEqual(raised.exception.code, "plan_running")
+
+    def test_the_worker_removes_a_clean_worktree_and_its_branch(self):
+        added = self.add(self.board.stem)
+        result = self.planner.plan(added.id)
+        worktree = Path(result["worktree_path"])
+        self.assertTrue(worktree.exists())
+        plan_file = attachments.plan_path(self.config, added.id)
+        plan_file.parent.mkdir(parents=True, exist_ok=True)
+        self.fake.on_poll = lambda: plan_file.write_text("# Plan\n")
+        self.assertEqual(self.automation_plan.wait(self.store, added.id, result["pane_id"]), 0)
+        self.assertFalse(worktree.exists())
+        branches = subprocess.run(["git", "-C", str(self.repo), "branch", "--list", f"auto/{added.id}-plan"],
+                                  capture_output=True, text=True).stdout
+        self.assertEqual(branches.strip(), "")
+        log = self.log(added.id)
+        self.assertTrue(any(m.startswith("Plan saved") for m in log))
+        self.assertIn("Removed the planning worktree", log[-1])
+
+    def test_the_worker_keeps_a_worktree_with_changes(self):
+        added = self.add(self.board.stem)
+        result = self.planner.plan(added.id)
+        worktree = Path(result["worktree_path"])
+        (worktree / "scratch.txt").write_text("left over")
+        self.automation_plan.wait(self.store, added.id, result["pane_id"])
+        self.assertTrue(worktree.exists())
+        self.assertIn("Kept the planning worktree", self.log(added.id)[-1])
+
+    def test_the_worker_closes_an_inbox_workspace(self):
+        added = self.add("inbox")
+        result = self.planner.plan(added.id)
+        self.automation_plan.wait(self.store, added.id, result["pane_id"])
+        self.assertTrue(self.fake.find("workspace", "close"))
+
+
 if __name__ == "__main__":
     unittest.main()
