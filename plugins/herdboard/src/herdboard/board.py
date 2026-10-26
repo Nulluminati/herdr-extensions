@@ -2369,6 +2369,9 @@ class HeaderBar(Horizontal):
 # The least room that the tabs and the switch key's hint keep between them, before the hint takes its
 # own row above the tabs.
 TAB_HINT_MIN_GAP = 3
+# The cells that a tab box takes around its label before the style sheet applies: its `padding: 0 1` and
+# its round border. A bar that has no box yet sizes its boxes from this number.
+TAB_CHROME = 4
 
 
 class TabBar(Vertical):
@@ -2468,9 +2471,19 @@ class TabBar(Vertical):
         return text
 
     def _tab_width(self) -> int:
-        """The widest tab text, so every tab box has the same width, and a short label has room to sit
-        in the middle of its tab."""
-        return max(self._tab_text(tab, label).cell_len for tab, label in TABS)
+        """The outer width that every tab box takes: the widest tab text plus the cells that the box
+        keeps for its padding and border. Every box is as wide as the widest label, so no label is cut
+        and a short label has room to sit in the middle of its tab."""
+        return max(self._tab_text(tab, label).cell_len for tab, label in TABS) + self._tab_chrome()
+
+    def _tab_chrome(self) -> int:
+        """The cells that a tab box takes for its padding and border. A mounted box is the source, so
+        the labels stay whole after a change of the box style."""
+        boxes = self.query(".tab")
+        if not boxes:
+            return TAB_CHROME
+        gutter = boxes.first().styles.gutter
+        return gutter.left + gutter.right
 
     def _hint(self) -> Text:
         """The switch key and what it does, on the bar outside the tabs."""

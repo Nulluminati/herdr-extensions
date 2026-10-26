@@ -274,6 +274,23 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(label.region.x - box.region.x - box.styles.padding.left,
                                  box.region.right - label.region.right - box.styles.padding.right, box.id)
 
+    async def test_no_tab_hides_its_label(self):
+        # Every tab is as wide as the widest label plus its own padding and border, so no label is cut.
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            for active in ("prs", "notes", "automations", "board"):
+                bar = self.bar(app)
+                self.assertEqual(bar.active, active)
+                for box in bar.query(".tab"):
+                    label = box.query_one(".tab-label")
+                    line = "".join(segment.text for segment in label.render_line(0))
+                    self.assertEqual(line.strip(), box.plain, (active, box.id, line, box.plain))
+                    self.assertEqual(label.content_size.width, box.content_size.width, (active, box.id))
+                await pilot.press("G")
+                await self.settle(app, pilot)
+
     async def test_the_g_indicator_stands_on_the_bar_outside_the_tabs(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
