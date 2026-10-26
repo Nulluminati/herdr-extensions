@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
 from herdboard import notes  # noqa: E402
-from herdboard.board import (ConfirmScreen, HerdboardApp, KeyBar, NoteChangedScreen, NotesScreen,  # noqa: E402
+from herdboard.board import (AutomationsScreen, ConfirmScreen, HerdboardApp, KeyBar, NoteChangedScreen, NotesScreen,  # noqa: E402
                              PullRequestsScreen, TabBar)
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page  # noqa: E402
@@ -60,20 +60,25 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(app.screen, NotesScreen)
         return app.screen
 
-    async def test_capital_g_cycles_the_three_tabs(self):
+    async def test_capital_g_cycles_the_four_tabs(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
             labels = app.screen.query_one(TabBar).tab_labels()
-            self.assertEqual(labels, ["▦ Board", "⑂ Pull requests", "✎ Notes"])
+            self.assertEqual(labels, ["▦ Board", "⑂ Pull requests", "✎ Notes", "↻ Automations"])
             await pilot.press("G")
             await self.settle(app, pilot)
             self.assertIsInstance(app.screen, PullRequestsScreen)
-            self.assertEqual(app.screen.query_one(TabBar).tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes"])
+            self.assertEqual(app.screen.query_one(TabBar).tab_labels(),
+                             ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"])
             await pilot.press("G")
             await self.settle(app, pilot)
             self.assertIsInstance(app.screen, NotesScreen)
-            self.assertEqual(app.screen.query_one(TabBar).tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes"])
+            self.assertEqual(app.screen.query_one(TabBar).tab_labels(),
+                             ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"])
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            self.assertIsInstance(app.screen, AutomationsScreen)
             await pilot.press("G")
             await self.settle(app, pilot)
             self.assertIs(app.screen, app.screen_stack[0])
@@ -167,7 +172,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(160, 30)) as pilot:
             screen = await self.open_notes(app, pilot)
             self.assertEqual(screen.board, "inbox")
-            await pilot.press("G")
+            await pilot.press("escape")
             await self.settle(app, pilot)
             await pilot.press("j")
             await pilot.click("#tab-notes")
