@@ -35,4 +35,6 @@ Run the tests from the repository root:
 uv run python -m unittest discover -s tests
 ```
 
+Dependabot keeps the GitHub Actions pins and the two uv lock files current. It checks weekly and groups the minor and patch updates per ecosystem. See [.github/dependabot.yml](.github/dependabot.yml). `tests/test_dependabot.py` holds the settings that matter.
+
 [AGENTS.md](AGENTS.md) describes the layout and the rules for plugin code.
