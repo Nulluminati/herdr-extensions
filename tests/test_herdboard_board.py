@@ -1391,7 +1391,7 @@ class InitAssistTests(BoardTestCase):
             messages = [n.message for n in app._notifications]
             self.assertIn("Linear is off, so there are no Linear cards to hide.", messages)
 
-    def test_board_command_offers_init_in_a_repository_without_a_board(self):
+    def test_board_command_creates_a_missing_repository_board(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             # The CLI records checkouts in the state folder; keep that inside the test.
@@ -1407,9 +1407,10 @@ class InitAssistTests(BoardTestCase):
                 HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)
             ), mock.patch.object(HerdboardApp, "run"):
                 cli.main(["--config", str(config), "-C", str(repo), "board"])
-            board = seen["init_board"]()
+            board = seen["repo_board"]
             self.assertTrue(board.exists())
             self.assertIn("repo:", board.read_text())
+            self.assertIsNone(seen["init_board"])
 
     def test_board_command_has_no_init_outside_git(self):
         with tempfile.TemporaryDirectory() as tmp:

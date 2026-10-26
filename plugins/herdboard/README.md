@@ -47,11 +47,15 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 ## Quick start
 
 1. Open a terminal in a repository, inside Herdr.
-2. Run `herdboard init` to create the board for the repository.
+2. Run `herdboard list`. The command creates the repository board and asks for its settings.
 3. Run `herdboard add "Fix login timeout"`. The command prints the card ID, for example `t3m9`.
 4. Press the board key. Select the card and press `s`. herdboard creates the worktree and branch `t3m9-fix-login-timeout`, and starts the agent with the card as its brief.
 5. When the agent moves the card to Review, press `R` to review the work.
 6. Press `m` to merge, then confirm with `y`.
+
+Repository commands create a missing board automatically. On a terminal, setup asks for the merge method. `local` merges into the base branch. `pr` opens a draft pull request. Press Enter to use the global merge setting. You can also enter an optional Linear project name or identifier and comma-separated labels. Project lookup must succeed before herdboard creates the board. Press Control+C to cancel setup.
+
+Commands with `--json` or without an interactive terminal create the board with global defaults and no Linear links. They do not ask questions. Open the board and press `c` to change these settings later. Existing boards keep their settings. Outside a Git repository, commands continue to use the inbox. `herdboard init` remains available for explicit creation. Migration creates its target board after confirmation; previews write no files. `doctor` only checks files unless you request repairs.
 
 ## The board
 

@@ -600,6 +600,7 @@ def _cmd_add(ctx: _Context) -> dict:
     if args.body_file is not None:
         path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
         body = _read_todo_file(path)
+    _ensure_repo_board(ctx)
     if args.linear:
         return _cmd_add_linear(ctx, body)
     lines = body.splitlines() if body is not None else None
@@ -1116,6 +1117,35 @@ def _cmd_init(ctx: _Context) -> dict:
     if ctx.identity is None:
         raise HerdboardError("Not in a Git repository.")
     return {"board": ctx.store.init_board(ctx.identity)}
+
+
+def _ensure_repo_board(ctx: _Context) -> None:
+    """Create a missing repository board; terminal users choose its settings first."""
+    if ctx.identity is None or ctx.repo_board() is not None:
+        return
+    merge, links = None, []
+    if not ctx.args.json and _interactive():
+        def ask(prompt: str) -> str:
+            print(prompt, end="", file=sys.stderr, flush=True)
+            return input().strip()
+
+        print(f"Set up herdboard for {ctx.identity.identity}.", file=sys.stderr)
+        print("local: merge into the base branch; pr: open a draft pull request.", file=sys.stderr)
+        try:
+            while True:
+                choice = ask(f"Merge method [local/pr] (default: {ctx.config.merge}): ").lower()
+                if choice in ("", "local", "pr"):
+                    merge = choice or None
+                    break
+                print("Choose local or pr, or press Enter for the default.", file=sys.stderr)
+            project = ask("Linear project name or ID (optional; Enter to skip): ")
+            if project:
+                labels = ask("Linear labels (comma-separated; optional): ")
+                links = [_project_link(ctx, project, [label.strip() for label in labels.split(",")
+                                                      if label.strip()])]
+        except (EOFError, KeyboardInterrupt) as error:
+            raise HerdboardError("Board setup cancelled. Run the command again to retry.") from error
+    ctx.store.init_board(ctx.identity, merge=merge, links=links, exist_ok=True)
 
 
 def _read_todo_file(path: Path) -> str:
@@ -1796,7 +1826,11 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(render(result))
             return 1 if result["summary"]["error"] else 0
-        result = COMMANDS[args.command](_Context(args))
+        ctx = _Context(args)
+        # Add validates its input first. Migration previews write nothing.
+        if args.command not in ("init", "migrate", "add"):
+            _ensure_repo_board(ctx)
+        result = COMMANDS[args.command](ctx)
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json, getattr(args, "action", None))
         if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):

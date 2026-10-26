@@ -140,6 +140,7 @@ class DoneCommandTests(WriteCliCase):
 class AmbiguousStateTests(WriteCliCase):
     def setUp(self):
         super().setUp()
+        self.board()
         linear_data.add_state(self.fixtures, "ENG", "Coding", "started")
 
     def test_without_a_terminal_the_error_lists_the_candidates(self):

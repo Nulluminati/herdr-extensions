@@ -439,11 +439,10 @@ class ArchiveCliTest(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             code = cli.main(["--config", str(self.config), "-C", str(repo), "--json", "archive", "--done"])
-        self.assertEqual(code, 1)
-        error = json.loads(out.getvalue())["error"]
-        self.assertEqual(error["code"], "usage")
-        self.assertIn("herdboard init", error["message"])
-        self.assertIn("--board inbox", error["message"])
+        self.assertEqual(code, 0)
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["archived"], [])
+        self.assertTrue((self.todos / "projects/acme-api.md").exists())
         self.assertFalse((self.todos / "inbox.md").exists())
 
     def test_archive_done_needs_a_done_column(self):

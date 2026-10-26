@@ -397,9 +397,9 @@ class LinkTests(LinearCliCase):
     def links(self):
         return self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").links
 
-    def test_requires_repository_and_board(self):
-        error = self.link("Platform", expect=1)["error"]
-        self.assertIn("herdboard init", error["message"])
+    def test_creates_board_but_requires_repository(self):
+        self.link("Platform")
+        self.assertEqual(self.links()[0].name, "Platform")
         out = self.run_json("link", "Platform", directory=self.plain, expect=1)["error"]
         self.assertIn("Not in a Git repository", out["message"])
 
@@ -513,8 +513,9 @@ class PinTests(LinearCliCase):
         self.run_json("pin", "ENG-1", "--repo", "api", directory=self.repo.parent)
         self.assertEqual([p.identifier for p in self.pins()], ["ENG-1"])
 
-    def test_needs_a_repository_board(self):
-        self.assertIn("herdboard init", self.run_json("pin", "ENG-1", directory=self.repo, expect=1)["error"]["message"])
+    def test_creates_board_but_needs_a_repository(self):
+        self.run_json("pin", "ENG-1", directory=self.repo)
+        self.assertEqual([p.identifier for p in self.pins()], ["ENG-1"])
         self.assertIn("Not in a Git repository",
                       self.run_json("pin", "ENG-1", directory=self.plain, expect=1)["error"]["message"])
 

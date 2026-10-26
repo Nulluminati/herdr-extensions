@@ -389,13 +389,13 @@ class RepositoryTests(CliTestCase):
         _, err = self.run_cli("init", directory=self.plain, expect=1)
         self.assertTrue(err.startswith("herdboard: "))
 
-    def test_add_without_board_hints(self):
+    def test_add_without_board_creates_repo_board(self):
         out, _ = self.run_cli("add", "x", directory=self.repo)
-        self.assertIn("herdboard init", out)
-        self.assertIn("(inbox)", out)
+        self.assertNotIn("herdboard init", out)
+        self.assertIn("(acme-api)", out)
         data = self.run_json("add", "y", directory=self.repo)
-        self.assertIn("herdboard init", data["hint"])
-        self.assertEqual(data["card"]["board"], "inbox")
+        self.assertNotIn("hint", data)
+        self.assertEqual(data["card"]["board"], "acme-api")
 
     def test_init_then_add_goes_to_repo_board(self):
         self.init_repo_board()
@@ -417,10 +417,10 @@ class RepositoryTests(CliTestCase):
         titles = [c["title"] for c in self.run_json("list", directory=self.repo)["cards"]]
         self.assertEqual(titles, ["repo card"])
 
-    def test_default_view_in_repo_without_board_is_inbox(self):
-        self.run_cli("add", "inbox card", directory=self.repo)
+    def test_default_view_in_repo_without_board_is_repo(self):
+        self.run_cli("add", "repo card", directory=self.repo)
         titles = [c["title"] for c in self.run_json("list", directory=self.repo)["cards"]]
-        self.assertEqual(titles, ["inbox card"])
+        self.assertEqual(titles, ["repo card"])
 
     def test_default_view_outside_git_is_inbox(self):
         self.init_repo_board()
@@ -429,9 +429,9 @@ class RepositoryTests(CliTestCase):
         titles = [c["title"] for c in self.run_json("list", directory=self.plain)["cards"]]
         self.assertEqual(titles, ["inbox card"])
 
-    def test_view_repo_without_board_errors(self):
-        _, err = self.run_cli("list", "--view", "repo", directory=self.repo, expect=1)
-        self.assertIn("herdboard init", err)
+    def test_view_repo_without_board_creates_it(self):
+        data = self.run_json("list", "--view", "repo", directory=self.repo)
+        self.assertEqual(data["boards"][0]["name"], "acme-api")
 
     def test_view_all_shows_board_headings(self):
         self.init_repo_board()
