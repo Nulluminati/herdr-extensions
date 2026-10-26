@@ -423,6 +423,40 @@ class TickTests(AutomationTestCase):
         self.assertEqual([run["id"] for run in result["runs"]], ["a002"])
         self.assertEqual([error["id"] for error in result["errors"]], ["a001"])
 
+    def tick_with(self, during_first_run):
+        """Tick at 09:01 with two due automations; `during_first_run(second)` runs while the first one starts."""
+        first = self.add(title="First", created=local(2026, 10, 22, 8, 0))
+        second = self.add(title="Second", created=local(2026, 10, 22, 8, 0))
+        real_run = automations.run
+        started = []
+
+        def run(store, item, due, **options):
+            started.append(item)
+            if item.id == first.id:
+                during_first_run(second)
+            return real_run(store, item, due, **options)
+
+        with patch.object(automations, "run", side_effect=run):
+            automations.tick(self.store, now=local(2026, 10, 23, 9, 1))
+        return [item for item in started if item.id == second.id]
+
+    def test_a_pause_during_another_run_stops_the_run(self):
+        self.assertEqual(self.tick_with(lambda second: automations.set_enabled(self.store, second.id, False)), [])
+
+    def test_a_removal_during_another_run_stops_the_run(self):
+        self.assertEqual(self.tick_with(lambda second: automations.remove(self.store, second.id)), [])
+
+    def test_an_edit_during_another_run_reaches_the_run(self):
+        runs = self.tick_with(lambda second: automations.edit(self.store, second.id, may_merge_prs=True))
+        self.assertEqual([item.may_merge_prs for item in runs], [True])
+
+    def test_a_resume_during_another_run_waits_for_the_next_due_time(self):
+        def pause_and_resume(second):
+            automations.set_enabled(self.store, second.id, False)
+            automations.set_enabled(self.store, second.id, True, now=local(2026, 10, 23, 9, 1))
+
+        self.assertEqual(self.tick_with(pause_and_resume), [])
+
     def ticks_over(self, start_utc, hours):
         """Tick every 10 minutes for `hours` hours from a UTC time, as the timer does."""
         moment = start_utc
@@ -848,6 +882,27 @@ class PlanAutomationTests(LocalTime):
         result = self.planner.plan(added.id)
         self.automation_plan.wait(self.store, added.id, result["pane_id"])
         self.assertTrue(self.fake.find("workspace", "close"))
+
+    def test_the_worker_keeps_a_worktree_that_a_later_planner_opened(self):
+        added = self.add(self.board.stem)
+        result = self.planner.plan(added.id)
+        worktree = Path(result["worktree_path"])
+        real_wait = self.automation_plan.plan_module.wait
+        later = []
+
+        def wait(store, ref, pane):
+            code = real_wait(store, ref, pane)
+            # A second planner starts after the first one ended, before the worker cleans up.
+            later.append(self.planner.plan(added.id))
+            return code
+
+        with patch.object(self.automation_plan.plan_module, "wait", side_effect=wait):
+            self.automation_plan.wait(self.store, added.id, result["pane_id"])
+        self.assertEqual(later[0]["worktree_path"], str(worktree))
+        self.assertNotEqual(later[0]["pane_id"], result["pane_id"])
+        self.assertTrue(worktree.exists())
+        self.assertFalse(self.fake.find("worktree", "remove"))
+        self.assertIn("A later planner uses", self.log(added.id)[-1])
 
 
 class DoctorTests(unittest.TestCase):

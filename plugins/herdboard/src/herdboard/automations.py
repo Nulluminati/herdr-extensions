@@ -520,15 +520,18 @@ def tick(store, now: datetime | None = None, *, config_file: Path | None = None)
             stack.enter_context(_lock(TICK_LOCK))
         except ConflictError:
             return {"busy": True, "runs": [], "errors": []}
-        state = read_state()
-        for item in load(store.config):
-            if not item.enabled:
-                continue
+        for listed in load(store.config):
             # One broken automation does not stop the others.
             try:
-                found = _due_run(item, state, now)
+                # The automation and its state are read again under the definitions lock, so a pause,
+                # removal, edit or resume during an earlier run of this tick counts.
+                with _lock(DEFINITIONS_LOCK, wait=2):
+                    item = next((found for found in load(store.config) if found.id == listed.id), None)
+                    if item is None or not item.enabled:
+                        continue
+                    found = _due_run(item, read_state(), now)
             except HerdboardError as error:
-                errors.append({"id": item.id, "message": str(error)})
+                errors.append({"id": listed.id, "message": str(error)})
                 continue
             if found is not None:
                 due, skipped = found

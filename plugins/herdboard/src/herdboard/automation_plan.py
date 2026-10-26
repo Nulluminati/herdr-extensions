@@ -255,13 +255,21 @@ def wait(store, ref: str, pane: str) -> int:
     if not isinstance(record, dict) or record.get("pane_id") != pane:
         return plan_module.wait(store, ref, pane)
     code = plan_module.wait(store, ref, pane)
-    with _lock(wait=2):
-        still = _read(_plans_path()).get(ref)
-    if isinstance(still, dict) and still.get("pane_id") == pane:
-        # The planner still runs after the worker's time limit: its worktree stays.
-        return code
     try:
-        _clean_up(store, ref, record)
+        # The plan lock keeps a later planner from starting in the worktree while it is cleaned up.
+        with _lock(f".plan-{ref}.lock", wait=30):
+            with _lock(wait=2):
+                still = _read(_plans_path()).get(ref)
+            if isinstance(still, dict) and still.get("pane_id") == pane:
+                # The planner still runs after the worker's time limit: its worktree stays.
+                return code
+            if isinstance(still, dict):
+                # A later planner started after this one ended, in the same worktree or folder.
+                if record.get("repoless") and record.get("workspace_id") not in (None, still.get("workspace_id")):
+                    herdr("workspace", "close", record["workspace_id"], tolerated=("workspace_not_found",))
+                activity.append(store, ref, f"A later planner uses {record['worktree_path']}; it stays.", "herdboard")
+                return code
+            _clean_up(store, ref, record)
     except (HerdboardError, OSError) as error:
         print(f"herdboard: cannot clean up the planning workspace: {error}", file=sys.stderr)
         activity.append(store, ref, f"Cannot clean up the planning workspace: {error}", "herdboard")
