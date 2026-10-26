@@ -33,8 +33,6 @@ from . import start as start_module
 from .start import Starter, _main_checkout, card_agent_panes, register_checkout
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
 
-INIT_HINT = "Run `herdboard init` to create a board for this repository."
-
 
 class UsageError(HerdboardError):
     code = "usage"
@@ -606,7 +604,6 @@ def _cmd_add(ctx: _Context) -> dict:
     lines = body.splitlines() if body is not None else None
     if args.type is not None:
         args.text = with_type(args.text, ctx.config.type_named(args.type))
-    hint = None
     if args.parent is not None:
         if LINEAR_REF.match(args.parent):
             raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")
@@ -622,11 +619,11 @@ def _cmd_add(ctx: _Context) -> dict:
     else:
         path = ctx.repo_board()
         if path is None:
-            path = store.ensure_inbox()
             if ctx.identity is not None:
-                hint = INIT_HINT
+                raise HerdboardError(INIT_MESSAGE)
+            path = store.ensure_inbox()
     card = store.add(path, args.text, args.column, args.position, body=lines)
-    return {"card": card, "hint": hint}
+    return {"card": card, "hint": None}
 
 
 def _find_linear_card(ctx: _Context, ref: str) -> tuple[CardView, LinearResult]:
@@ -856,7 +853,7 @@ def _cmd_archive(ctx: _Context) -> dict:
             path = ctx.repo_board()
             if path is None and ctx.identity is not None:
                 # A bulk archive of the inbox needs a clear request.
-                raise UsageError(f"No board for this repository. {INIT_HINT} "
+                raise UsageError(f"{INIT_MESSAGE} "
                                  "Use --board inbox to archive the inbox's done column.")
             path = path or store.ensure_inbox()
         archived, skipped = store.archive_done(path, blocked=start_module.archive_blocker)
@@ -1120,11 +1117,12 @@ def _cmd_init(ctx: _Context) -> dict:
 
 
 def _ensure_repo_board(ctx: _Context) -> None:
-    """Create a missing repository board; terminal users choose its settings first."""
+    """Create a missing board; board, list and add offer setup on a terminal."""
     if ctx.identity is None or ctx.repo_board() is not None:
         return
     merge, links = None, []
-    if not ctx.args.json and _interactive():
+    interactive = ctx.args.command in ("board", "list", "add") and not ctx.args.json and _interactive()
+    if interactive:
         def ask(prompt: str) -> str:
             print(prompt, end="", file=sys.stderr, flush=True)
             return input().strip()
@@ -1138,14 +1136,28 @@ def _ensure_repo_board(ctx: _Context) -> None:
                     merge = choice or None
                     break
                 print("Choose local or pr, or press Enter for the default.", file=sys.stderr)
-            project = ask("Linear project name or ID (optional; Enter to skip): ")
-            if project:
-                labels = ask("Linear labels (comma-separated; optional): ")
-                links = [_project_link(ctx, project, [label.strip() for label in labels.split(",")
-                                                      if label.strip()])]
+            if not getattr(ctx.args, "offline", False) and ctx.views.source.active:
+                while True:
+                    project = ask("Linear project name or identifier (optional; Enter to skip): ")
+                    if not project:
+                        break
+                    labels = ask("Labels for this project (comma-separated; optional): ")
+                    try:
+                        links = [_project_link(ctx, project, [label.strip() for label in labels.split(",")
+                                                              if label.strip()])]
+                    except HerdboardError as error:
+                        print(f"{error}. Retry the project, or press Enter to skip linking.", file=sys.stderr)
+                        continue
+                    break
         except (EOFError, KeyboardInterrupt) as error:
             raise HerdboardError("Board setup cancelled. Run the command again to retry.") from error
-    ctx.store.init_board(ctx.identity, merge=merge, links=links, exist_ok=True)
+
+    def keep_existing(path: Path) -> None:
+        print(f"Repository board already exists: {path}. Existing settings kept; setup answers were not applied.",
+              file=sys.stderr)
+
+    ctx.store.init_board(ctx.identity, merge=merge, links=links, exist_ok=True,
+                         on_existing=keep_existing if interactive else None)
 
 
 def _read_todo_file(path: Path) -> str:
@@ -1361,7 +1373,7 @@ def _project_link(ctx: _Context, name: str, labels: list[str]) -> ProjectLink:
 
 
 def _init_for_board(ctx: _Context) -> Callable[[], Path] | None:
-    """What the board's `i` key runs: create this repository's board, when it has none."""
+    """Recovery for the board's `i` key if its repository board disappears after automatic setup."""
     if ctx.identity is None or ctx.repo_board() is not None:
         return None
     identity = ctx.identity

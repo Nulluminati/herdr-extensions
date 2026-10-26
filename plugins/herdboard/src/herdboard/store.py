@@ -279,14 +279,20 @@ class Store:
         return self.inbox_path
 
     def init_board(self, identity: RepoIdentity, merge: str | None = None,
-                   links: list[ProjectLink] = (), *, exist_ok: bool = False) -> Path:
-        """Create a configured board in one write. With `exist_ok`, keep an existing board unchanged."""
+                   links: list[ProjectLink] = (), *, exist_ok: bool = False,
+                   on_existing: Callable[[Path], None] | None = None) -> Path:
+        """Create a configured board in one write. With `exist_ok`, keep an existing board unchanged.
+
+        `on_existing` reports that the existing board kept its settings instead of the supplied ones.
+        """
         if merge is not None and merge not in MERGE_MODES:
             raise HerdboardError("merge must be local or pr")
         with self._lock():
             existing = find_board(self.projects_dir, identity)
             if existing is not None:
                 if exist_ok:
+                    if on_existing is not None:
+                        on_existing(existing)
                     return existing
                 raise HerdboardError(f"{identity.identity} already has a board: {existing}")
             path = new_board_path(self.projects_dir, identity)

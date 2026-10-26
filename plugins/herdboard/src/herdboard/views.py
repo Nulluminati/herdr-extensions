@@ -16,7 +16,7 @@ from .model import HerdboardError
 from .store import CardView, Store
 
 VIEW_NAMES = ["repo", "inbox", "all", "mine", "project"]
-INIT_MESSAGE = "No board for this repository. Run `herdboard init` to create one."
+INIT_MESSAGE = "Repository board is unavailable. Run the command again to retry automatic setup."
 
 
 @dataclass

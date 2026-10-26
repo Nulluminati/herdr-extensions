@@ -53,9 +53,11 @@ The action opens the board as a Herdr tab in the focused pane's directory, so th
 5. When the agent moves the card to Review, press `R` to review the work.
 6. Press `m` to merge, then confirm with `y`.
 
-Repository commands create a missing board automatically. On a terminal, setup asks for the merge method. `local` merges into the base branch. `pr` opens a draft pull request. Press Enter to use the global merge setting. You can also enter an optional Linear project name or identifier and comma-separated labels. Project lookup must succeed before herdboard creates the board. Press Control+C to cancel setup.
+Repository commands create a missing board automatically. On a terminal, `board`, `list`, and `add` ask for the merge method. `local` merges into the base branch. `pr` opens a draft pull request. Press Enter to use the global merge setting.
 
-Commands with `--json` or without an interactive terminal create the board with global defaults and no Linear links. They do not ask questions. Open the board and press `c` to change these settings later. Existing boards keep their settings. Outside a Git repository, commands continue to use the inbox. `herdboard init` remains available for explicit creation. Migration creates its target board after confirmation; previews write no files. `doctor` only checks files unless you request repairs.
+When Linear is enabled and the command runs online, setup offers an optional Linear project name or identifier. After you select a project, you can enter comma-separated labels to filter its issues. An invalid project or label repeats the project question and keeps your merge choice. Press Enter at the project question to skip linking. Press Control+C to cancel setup before herdboard creates the board.
+
+Other commands, commands with `--json`, and commands without an interactive terminal create the board with global defaults and no Linear links. They do not ask questions. Open the board and press `c` to change these settings later. Existing boards keep their settings. If another process creates the board during setup, herdboard reports that your setup answers did not apply. Outside a Git repository, commands continue to use the inbox. `herdboard init` remains available for explicit creation. Migration creates its target board after confirmation; previews write no files. `doctor` only checks files unless you request repairs.
 
 ## The board
 
