@@ -16,11 +16,11 @@ import time
 from . import activity, attachments, automations, plan as plan_module
 from .agent_review import start_worker
 from .brief import _one_line
-from .config import THINKING_LEVELS
+from .config import AGENTS, thinking_levels
 from .model import HerdboardError
 from .plan import PLAN_FORMAT, PlanError, _mtime, _plans_path, _planner_pane, planner_arguments
-from .start import (Starter, StartError, _git, _lock, _read, _write, export_config, herdboard_command, herdr,
-                    work_folder, write_brief)
+from .start import (Starter, StartError, _git, _lock, _read, _write, agent_model, export_config,
+                    herdboard_command, herdr, thinking_level, work_folder, write_brief)
 
 
 def plan_branch(automation_id: str) -> str:
@@ -140,16 +140,21 @@ class AutomationPlanner:
     def plan(self, automation_id: str, agent=None, model=None, thinking=None) -> dict:
         item = automations.get(self.config, automation_id)
         kind = agent or item.agent or self.config.start_agent
-        if kind not in ("claude", "pi"):
-            raise PlanError("The planner must be claude or pi", "usage")
-        if thinking and kind != "pi":
-            raise PlanError("--thinking works only with pi", "usage")
-        if thinking and thinking not in THINKING_LEVELS:
-            raise PlanError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
+        if kind not in AGENTS:
+            raise PlanError("The planner must be claude, pi or codex", "usage")
+        levels = thinking_levels(kind)
+        if thinking and not levels:
+            raise PlanError("--thinking works only with pi or codex", "usage")
+        if thinking and thinking not in levels:
+            raise PlanError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise PlanError("The model must be one name, such as opus or zai/glm-5.3", "usage")
         if kind == "pi":
-            thinking = thinking or self.config.start_thinking
+            # One model for the launch and for its level, as `plan` does for a card.
+            model = agent_model(self.config, model)
+            thinking = thinking_level(self.config, model, thinking)
+        elif thinking is None and self.config.start_thinking in levels:
+            thinking = self.config.start_thinking
         ref = item.id
         repoless = item.board == "inbox"
         with _lock(f".plan-{ref}.lock"):

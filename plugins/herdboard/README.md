@@ -547,7 +547,7 @@ A due time in the hour that daylight saving time skips runs one hour later. A du
 - Linux: a systemd user timer, `~/.config/systemd/user/herdboard-automations.timer`, and its service. `journalctl --user -u herdboard-automations` shows the output.
 - macOS: a launchd agent, `~/Library/LaunchAgents/com.nulluminati.herdboard-automations.plist`. The output goes to `~/.local/state/herdboard/automations.log`. macOS shows a "Background item added" notice once.
 
-The timer files hold absolute paths: the `herdboard` command, the `herdr` binary, the config file, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when they are set, and a `PATH` with the folders of `herdr`, `gh`, `git`, `uv`, `claude` and `pi`. Run `timer install` again after one of them moves; it writes the files again. `timer status` shows whether the timer runs, and `timer remove` removes it. `herdboard doctor` warns when automations are on and the timer does not run.
+The timer files hold absolute paths: the `herdboard` command, the `herdr` binary, the config file, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when they are set, and a `PATH` with the folders of `herdr`, `gh`, `git`, `uv`, `claude`, `pi` and `codex`. Run `timer install` again after one of them moves; it writes the files again. `timer status` shows whether the timer runs, and `timer remove` removes it. `herdboard doctor` warns when automations are on and the timer does not run.
 
 ### What a run does
 
@@ -756,7 +756,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard migrate <TODO.md> [--board] [--yes]` | Convert a free-form `TODO.md` into cards |
 | `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
 | `herdboard automation list` | List the automations, with the next due time and the last run |
-| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox` |
+| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` works with pi or codex |
 | `herdboard automation edit <aid> [the add options] [--no-merge-prs]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
 | `herdboard automation remove <aid> [--yes]` | Remove an automation. Its cards stay |
 | `herdboard automation pause\|resume <aid>` | Stop or restart the scheduled runs |

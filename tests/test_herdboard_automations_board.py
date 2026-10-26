@@ -12,7 +12,7 @@ from textual.widgets import Input, Select, TextArea  # noqa: E402
 
 from herdboard import automations, board  # noqa: E402
 from herdboard.board import (AutomationFormScreen, AutomationsScreen, ConfirmScreen, HerdboardApp,  # noqa: E402
-                             KeyBar, NotesScreen, PullRequestsScreen, TabBar)
+                             KeyBar, ModelScreen, NotesScreen, PullRequestsScreen, TabBar)
 from herdboard.config import Config  # noqa: E402
 from herdboard.pr_reviews import Page  # noqa: E402
 from herdboard.store import Store  # noqa: E402
@@ -211,6 +211,25 @@ class ListTests(AutomationsBoardTestCase):
                 await self.settle(app, pilot)
                 plan.assert_called_once_with(added.id, agent="claude", model="opus", thinking=None)
 
+    async def test_P_plans_with_codex_and_its_thinking_level(self):
+        added = self.add()
+        app = self.app()
+        planned = {"id": added.id, "agent": "codex", "model": "gpt-6.1", "pane_id": "w1:p1", "plan": "x",
+                   "workspace_id": "w1", "worktree_path": "/w", "branch": None, "base": None}
+        with patch("herdboard.automation_plan.AutomationPlanner.plan", return_value=planned) as plan, \
+                patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])):
+            async with app.run_test(size=(160, 30)) as pilot:
+                await self.open_tab(app, pilot)
+                await pilot.press("P")
+                await self.settle(app, pilot)
+                await pilot.press("down", "down", "enter")  # codex
+                await self.settle(app, pilot)
+                self.assertIsInstance(app.screen, ModelScreen)
+                app.screen.query_one("#thinking").value = "ultra"
+                await pilot.press("down", "enter")  # gpt-6.1
+                await self.settle(app, pilot)
+                plan.assert_called_once_with(added.id, agent="codex", model="gpt-6.1", thinking="ultra")
+
 
 class FormTests(AutomationsBoardTestCase):
     async def test_add_validates_the_schedule_then_saves(self):
@@ -236,6 +255,22 @@ class FormTests(AutomationsBoardTestCase):
             self.assertEqual([(a.title, a.schedule, a.body, a.board) for a in saved],
                              [("Say hello", "every day at 10:00", "Write hello.txt", "inbox")])
             self.assertEqual(screen.rows()[0][2], "Say hello")
+
+    async def test_the_form_offers_codex_and_its_thinking_levels(self):
+        app = self.app()
+        async with app.run_test(size=(160, 40)) as pilot:
+            await self.open_tab(app, pilot)
+            await pilot.press("a")
+            await self.settle(app, pilot)
+            form = app.screen
+            form.query_one("#automation-title", Input).value = "Say hello"
+            form.query_one("#automation-schedule", Input).value = "every day at 10:00"
+            form.query_one("#automation-agent", Select).value = "codex"
+            form.query_one("#automation-thinking", Select).value = "ultra"
+            await pilot.press("ctrl+s")
+            await self.settle(app, pilot)
+            saved = automations.load(self.store.config)
+            self.assertEqual([(a.agent, a.thinking) for a in saved], [("codex", "ultra")])
 
     async def test_edit_keeps_the_fields_and_saves_changes(self):
         added = self.add(tags=["security"], may_merge_prs=True, body="Look")

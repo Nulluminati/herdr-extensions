@@ -3781,7 +3781,7 @@ class AutomationFormScreen(ModalBase):
         titled = CardFormScreen._titled
         error = Static("", id="automation-error", classes="error")
         error.plain = ""
-        agents = [("default", "default"), ("claude", "claude"), ("pi", "pi")]
+        agents = [("default", "default"), *((agent, agent) for agent in AGENTS)]
         levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
         with Vertical(classes="dialog card-form"):
             yield Static(Text(self.heading), id="automation-heading")
@@ -3805,7 +3805,7 @@ class AutomationFormScreen(ModalBase):
                                    id="automation-model", select_on_focus=False), "Model")
                 yield titled(Select(levels, allow_blank=False,
                                     value=item.thinking if item and item.thinking else "default",
-                                    id="automation-thinking"), "Thinking (pi)")
+                                    id="automation-thinking"), "Thinking (pi, codex)")
             yield Checkbox("Agent may merge PRs that pass checks and need no change",
                            value=bool(item and item.may_merge_prs), id="automation-merge")
             yield titled(TextArea(item.body if item else "", id="automation-body",
@@ -4179,9 +4179,10 @@ class AutomationsScreen(Screen):
         def chosen_agent(agent: str | None) -> None:
             if agent == "claude":
                 self.app.push_screen(ClaudeModelScreen(), lambda choice: choice and plan(agent, choice[0], None))
-            elif agent == "pi":
-                self.app.push_screen(ModelScreen(*pi_model_choices(self.store.config)),
-                                     lambda choice: choice and plan(agent, *choice))
+            elif thinking_levels(agent):
+                screen = (ModelScreen(*codex_model_choices(self.store.config), agent=agent)
+                          if agent == "codex" else pi_model_screen(self.store.config))
+                self.app.push_screen(screen, lambda choice: choice and plan(agent, *choice))
 
         self.app.push_screen(AgentScreen("Choose the planner"), chosen_agent)
 

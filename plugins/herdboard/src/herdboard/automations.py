@@ -25,7 +25,7 @@ import tempfile
 import tomllib
 
 from . import activity, attachments, start as start_module
-from .config import THINKING_LEVELS, Config
+from .config import AGENTS, Config, thinking_levels
 from .model import ConflictError, HerdboardError, IoError, NotFoundError, join_title, with_type
 from .start import Starter, _lock, _read, _write, notify, state_dir
 from .store import ID_ALPHABET, CardView
@@ -328,13 +328,14 @@ def _check(store, item: Automation) -> Automation:
         except NotFoundError as error:
             raise AutomationError(f"No board named {item.board!r}", "unknown_board") from error
     parse_schedule(item.schedule)
-    if item.agent not in (None, "claude", "pi"):
-        raise AutomationError("The agent must be claude or pi")
+    if item.agent is not None and item.agent not in AGENTS:
+        raise AutomationError("The agent must be claude, pi or codex")
     agent = item.agent or config.start_agent
-    if item.thinking and agent != "pi":
-        raise AutomationError("Thinking works only with pi")
-    if item.thinking and item.thinking not in THINKING_LEVELS:
-        raise AutomationError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}")
+    levels = thinking_levels(agent)
+    if item.thinking and not levels:
+        raise AutomationError("Thinking works only with pi or codex")
+    if item.thinking and item.thinking not in levels:
+        raise AutomationError(f"Thinking must be one of {', '.join(levels)}")
     if item.model is not None and (not item.model or any(ch.isspace() for ch in item.model)):
         raise AutomationError("The model must be one name, such as zai/glm-5.3")
     # Card text is one line; the title and tags make it.
@@ -589,7 +590,7 @@ SERVICE = "herdboard-automations"
 LAUNCH_LABEL = "com.nulluminati.herdboard-automations"
 TICK_SECONDS = 300
 # The tools that a started agent needs: background jobs get a minimal PATH.
-PATH_TOOLS = ("herdr", "gh", "git", "uv", "claude", "pi")
+PATH_TOOLS = ("herdr", "gh", "git", "uv", "claude", "pi", "codex")
 SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 

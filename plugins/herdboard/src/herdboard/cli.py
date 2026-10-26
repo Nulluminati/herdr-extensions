@@ -298,9 +298,9 @@ def build_parser() -> argparse.ArgumentParser:
                            + (" (default: inbox)" if adding else ""))
         found.add_argument("--schedule", required=adding,
                            help="such as `every weekday at 07:30`, `every week on monday`, `every month on the 1st`")
-        found.add_argument("--agent", help=f"claude or pi; default: start_agent{clear}")
+        found.add_argument("--agent", help=f"claude, pi or codex; default: start_agent{clear}")
         found.add_argument("--model", help=f"the agent's model; default: start_model{clear}")
-        found.add_argument("--thinking", help=f"pi's thinking level; default: start_thinking{clear}")
+        found.add_argument("--thinking", help=f"pi's or Codex's thinking level; default: start_thinking{clear}")
         merge = found.add_mutually_exclusive_group()
         merge.add_argument("--may-merge-prs", dest="may_merge_prs", action="store_const", const=True,
                            help="let the agent merge pull requests whose checks pass and that need no change")
@@ -321,9 +321,9 @@ def build_parser() -> argparse.ArgumentParser:
         action(name, help).add_argument("id")
     found = action("plan", "plan an automation with an agent; the plan goes into each spawned card's brief")
     found.add_argument("id")
-    found.add_argument("--agent", choices=["claude", "pi"])
+    found.add_argument("--agent", choices=AGENTS)
     found.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
-    found.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's thinking level")
+    found.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's or Codex's thinking level")
     found = action("plan-wait", "log each save of an automation's plan until the planner ends (run by plan)")
     found.add_argument("id")
     found.add_argument("--pane", required=True, help="the planner's pane")

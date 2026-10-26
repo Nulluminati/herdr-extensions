@@ -180,6 +180,14 @@ class StorageTests(AutomationTestCase):
             self.add(agent="claude", thinking="high")
         self.assertEqual(raised.exception.code, "usage")
 
+    def test_codex_takes_its_own_thinking_levels(self):
+        added = self.add(agent="codex", model="gpt-5.5", thinking="ultra")
+        self.assertEqual((added.agent, added.thinking), ("codex", "ultra"))
+        for agent, thinking in (("codex", "off"), ("pi", "ultra")):
+            with self.subTest(agent=agent), self.assertRaises(HerdboardError) as raised:
+                self.add(agent=agent, thinking=thinking)
+            self.assertEqual(raised.exception.code, "usage")
+
     def test_edit_pause_resume_and_remove(self):
         added = self.add()
         edited = automations.edit(self.store, added.id, title="Check alerts", tags=["sec"])
@@ -240,6 +248,14 @@ class RunTests(AutomationTestCase):
         self.assertIn("pi", call)
         self.assertIn("zai/glm-5.3", call)
         self.assertIn("high", call)
+
+    def test_a_codex_automation_starts_codex(self):
+        added = self.add(agent="codex", model="gpt-5.5", thinking="xhigh")
+        result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+        self.assertEqual(result["result"], "started")
+        call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
+        self.assertEqual(call[call.index("--kind") + 1], "codex")
+        self.assertIn("gpt-5.5", call)
 
     def test_a_start_failure_keeps_the_card_logs_and_notifies(self):
         added = self.add()
@@ -464,6 +480,18 @@ class CliTests(CliTestCase):
         self.fake = FakeHerdr(Path(self.tmp.name))
         self.enterContext(patch.object(start, "command", self.fake))
 
+    def test_plan_takes_codex(self):
+        added = self.run_json("automation", "add", "--title", "Check alerts", "--schedule", "every day",
+                              "--agent", "codex", "--thinking", "ultra")["automation"]
+        self.assertEqual((added["agent"], added["thinking"]), ("codex", "ultra"))
+        with patch("herdboard.automation_plan.AutomationPlanner.plan",
+                   return_value={"id": added["id"], "agent": "codex", "model": None, "pane_id": "w1:p1",
+                                 "plan": "x", "workspace_id": "w1", "worktree_path": "/w", "branch": None,
+                                 "base": None}) as plan:
+            self.run_json("automation", "plan", added["id"], "--agent", "codex", "--thinking", "ultra")
+        self.assertEqual(plan.call_args.kwargs["agent"], "codex")
+        self.assertEqual(plan.call_args.kwargs["thinking"], "ultra")
+
     def test_add_list_edit_pause_resume_remove(self):
         added = self.run_json("automation", "add", "--title", "Check alerts", "--body", "Look\nclosely",
                               "--tag", "security", "--type", "chore", "--schedule", "every weekday at 07:30",
@@ -590,6 +618,17 @@ class TimerTests(unittest.TestCase):
         patcher = patch.object(automations.sys, "platform", name)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_the_job_path_has_the_codex_folder(self):
+        self.platform("linux")
+        codex = self.root / "codex-bin"
+        codex.mkdir()
+        (codex / "codex").write_text("#!/bin/sh\n")
+        (codex / "codex").chmod(0o755)
+        os.environ["PATH"] += f":{codex}"
+        automations.timer("install")
+        service = (self.root / "config" / "systemd" / "user" / "herdboard-automations.service").read_text()
+        self.assertIn(str(codex), service)
 
     def test_linux_install_writes_units_and_enables_the_timer(self):
         self.platform("linux")
@@ -759,6 +798,17 @@ class PlanAutomationTests(LocalTime):
         self.assertTrue(folder.is_dir())
         self.assertEqual(result["worktree_path"], str(folder))
         self.assertFalse(self.fake.find("worktree", "create"))
+
+    def test_codex_plans_an_automation(self):
+        added = self.add("inbox")
+        result = self.planner.plan(added.id, agent="codex", model="gpt-5.5", thinking="high")
+        self.assertEqual(result["agent"], "codex")
+        call = self.fake.find("agent", "start")[0]
+        self.assertEqual(call[call.index("--kind") + 1], "codex")
+        self.assertIn("gpt-5.5", call)
+        with self.assertRaises(HerdboardError) as raised:
+            self.planner.plan(self.add("inbox").id, agent="claude", thinking="high")
+        self.assertEqual(raised.exception.code, "usage")
 
     def test_a_running_planner_blocks_a_second_one(self):
         added = self.add("inbox")
