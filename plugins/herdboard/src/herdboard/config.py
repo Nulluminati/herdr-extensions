@@ -32,7 +32,9 @@ AGENTS = ("claude", "pi", "codex")
 # pi's thinking levels (`pi --thinking`).
 PI_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 CODEX_THINKING_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
-THINKING_LEVELS = tuple(dict.fromkeys((*PI_THINKING_LEVELS, *CODEX_THINKING_LEVELS)))
+# Claude Code's effort levels (`claude --effort`).
+CLAUDE_THINKING_LEVELS = ("low", "medium", "high", "xhigh", "max")
+THINKING_LEVELS = tuple(dict.fromkeys((*PI_THINKING_LEVELS, *CODEX_THINKING_LEVELS, *CLAUDE_THINKING_LEVELS)))
 
 MERGE_MODES = ("local", "pr")
 # The names that a card's `#type/<name>` tag takes in `add --type`, `edit --type` and the board.
@@ -46,7 +48,7 @@ KEY_COMMAND_TIMEOUT = 30
 
 def thinking_levels(agent: str) -> tuple[str, ...]:
     """The thinking levels accepted by an agent's command line."""
-    return {"pi": PI_THINKING_LEVELS, "codex": CODEX_THINKING_LEVELS}.get(agent, ())
+    return {"pi": PI_THINKING_LEVELS, "codex": CODEX_THINKING_LEVELS, "claude": CLAUDE_THINKING_LEVELS}.get(agent, ())
 
 
 def _run_key_command(argv: list[str]) -> str:

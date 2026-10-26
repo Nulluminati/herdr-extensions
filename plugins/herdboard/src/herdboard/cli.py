@@ -184,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--agent", choices=AGENTS)
     sub.add_argument("--no-agent", action="store_true")
     sub.add_argument("--model", help="the agent's model, such as openai-codex/gpt-6.1-sol or opus")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's or Codex's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the agent's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--no-repo", action="store_true",
                      help="run the card in its own folder, without a repository; write the result as attachments")
@@ -197,7 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("--agent", choices=AGENTS)
     sub.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's or Codex's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the agent's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
     sub.add_argument("--no-repo", action="store_true",
                      help="plan the card in its own folder, without a repository")
@@ -222,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--reviewer", choices=AGENTS,
                      help="the reviewing agent; default rotation: claude to pi, pi to codex, codex to claude")
     sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi or Codex reviewer's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the reviewer's thinking level")
 
     sub = command("review-wait", "wait for an agent review and deliver it (run by review --agent)")
     sub.add_argument("ref")
@@ -262,7 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("number", type=int)
     sub.add_argument("--agent", choices=AGENTS, help="the reviewer; default: start_agent")
     sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
-    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="a pi or Codex reviewer's thinking level")
+    sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the reviewer's thinking level")
 
     sub = command("pr-review-wait", "wait for a pull request reviewer and notify (run by pr-review)")
     sub.add_argument("key", help="owner/repo#N")
@@ -300,7 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
                            help="such as `every weekday at 07:30`, `every week on monday`, `every month on the 1st`")
         found.add_argument("--agent", help=f"claude, pi or codex; default: start_agent{clear}")
         found.add_argument("--model", help=f"the agent's model; default: start_model{clear}")
-        found.add_argument("--thinking", help=f"pi's or Codex's thinking level; default: start_thinking{clear}")
+        found.add_argument("--thinking", help=f"the agent's thinking level; default: start_thinking{clear}")
         merge = found.add_mutually_exclusive_group()
         merge.add_argument("--may-merge-prs", dest="may_merge_prs", action="store_const", const=True,
                            help="let the agent merge pull requests whose checks pass and that need no change")
@@ -323,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     found.add_argument("id")
     found.add_argument("--agent", choices=AGENTS)
     found.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
-    found.add_argument("--thinking", choices=THINKING_LEVELS, help="pi's or Codex's thinking level")
+    found.add_argument("--thinking", choices=THINKING_LEVELS, help="the agent's thinking level")
     found = action("plan-wait", "log each save of an automation's plan until the planner ends (run by plan)")
     found.add_argument("id")
     found.add_argument("--pane", required=True, help="the planner's pane")

@@ -332,8 +332,6 @@ def _check(store, item: Automation) -> Automation:
         raise AutomationError("The agent must be claude, pi or codex")
     agent = item.agent or config.start_agent
     levels = thinking_levels(agent)
-    if item.thinking and not levels:
-        raise AutomationError("Thinking works only with pi or codex")
     if item.thinking and item.thinking not in levels:
         raise AutomationError(f"Thinking must be one of {', '.join(levels)}")
     if item.model is not None and (not item.model or any(ch.isspace() for ch in item.model)):

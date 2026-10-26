@@ -143,8 +143,6 @@ class AutomationPlanner:
         if kind not in AGENTS:
             raise PlanError("The planner must be claude, pi or codex", "usage")
         levels = thinking_levels(kind)
-        if thinking and not levels:
-            raise PlanError("--thinking works only with pi or codex", "usage")
         if thinking and thinking not in levels:
             raise PlanError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):

@@ -76,7 +76,8 @@ class StartCliTests(unittest.TestCase):
         from herdboard.config import Config
         config = Config()
         for kind, level, expected in (("codex", "ultra", "ultra"), ("codex", "off", None),
-                                      ("pi", "ultra", None), ("claude", "high", None)):
+                                      ("pi", "ultra", None), ("claude", "high", "high"),
+                                      ("claude", "ultra", None)):
             with self.subTest(kind=kind, level=level):
                 config.start_thinking = level
                 args = SimpleNamespace(agent=kind, model=None, thinking=None, number=42)

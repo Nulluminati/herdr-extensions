@@ -265,7 +265,7 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 6. Move the card to In progress (`start_column`). A Linear issue moves to its started state.
 7. Start the agent in the worktree as `hb-<id>`. Its first message has the card and these rules: record progress with `herdboard log`, do not change the card text, commit with conventional commits, and do not push, merge or remove the worktree.
 
-`--agent claude|pi|codex`, `--model` and `--thinking` (pi or Codex) choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
+`--agent claude|pi|codex`, `--model` and `--thinking` choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
 
 Without `--thinking`, pi uses the thinking level that you last chose for that model, from the `[thinking]` table of the config file. A model without a saved level uses `start_thinking`. See [thinking levels](#thinking-levels).
 
@@ -285,7 +285,7 @@ When planning ends with a changed plan and the card's work agent still runs, the
 
 Codex planners use `workspace-write` with the attachments folder as an extra writable directory. Writes there and in the worktree need no approval. Other approval requests go to Codex's automatic reviewer (`approvals_reviewer = "auto_review"`), which uses extra model calls. You stay in the tab for requests it denies.
 
-`--agent claude|pi|codex`, `--model`, `--thinking` (pi or Codex) and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
+`--agent claude|pi|codex`, `--model`, `--thinking` and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
 
 ### Mockups
 
@@ -560,9 +560,11 @@ The timer files hold absolute paths: the `herdboard` command, the `herdr` binary
 - When the start fails, the card stays in (or goes back to) its first column, its log says `Auto start failed: <reason>`, and herdboard shows a notification. No later tick retries it. Start the card by hand.
 - A resumed automation, or one with a changed schedule, waits for its next due time. It does not catch up.
 
-### Merge permission
+### Merge instruction
 
-By default the agent follows the usual rules: it does not push or merge. With `--may-merge-prs`, its brief also lets it run `gh pr merge` on pull requests whose checks pass and that need no code change. It logs each pull request it merged or left, and why. It still never pushes or merges its own card branch.
+By default the agent follows the usual rules: it does not push or merge. With `--may-merge-prs`, or the form's "Tell the agent it may merge other PRs" checkbox, its brief also tells it that it may run `gh pr merge` on other pull requests whose checks pass and that need no code change. It logs each pull request it merged or left, and why. It still never pushes or merges its own card branch.
+
+This is an instruction in the brief only. herdboard does not change the agent's tools or permissions, so the agent still asks before it runs `gh pr merge` when its permission mode asks for that command.
 
 ### Plan an automation
 
@@ -575,7 +577,7 @@ The tab lists each automation: on or paused, ID, title, board, schedule, next ru
 | Key | Action |
 |---|---|
 | `enter` | Details: the fields, attachments and last result. `o` opens an attachment |
-| `a` / `e` | Add or edit an automation. The form checks the schedule |
+| `a` / `e` | Add or edit an automation. The form checks the schedule. The Model and Thinking fields offer the choices of the selected agent; "default" is `start_agent` |
 | `P` | Plan the automation with an agent |
 | `space` | Pause or resume |
 | `n` | Run now: spawn and start one card, after you confirm |
@@ -756,7 +758,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard migrate <TODO.md> [--board] [--yes]` | Convert a free-form `TODO.md` into cards |
 | `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
 | `herdboard automation list` | List the automations, with the next due time and the last run |
-| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` works with pi or codex |
+| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
 | `herdboard automation edit <aid> [the add options] [--no-merge-prs]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
 | `herdboard automation remove <aid> [--yes]` | Remove an automation. Its cards stay |
 | `herdboard automation pause\|resume <aid>` | Stop or restart the scheduled runs |
@@ -820,7 +822,7 @@ archive_titles = []        # added to the English "Archive"
 # vault_root = "~/Notes"   # resolves [[note]] links in `show` and `promote`
 start_agent = "claude"     # or "pi" or "codex"
 # start_model = "openai-codex/gpt-6.1-sol"   # default: the agent's own default
-# start_thinking = "medium"                  # pi or Codex; pi uses it when the model has no [thinking] row
+# start_thinking = "medium"                  # pi uses it when the model has no [thinking] row
 mockup_model = "gpt-6.1-sol"                 # the Codex model that `mockup` makes images with
 # pi_models = ["zai/glm-5.3"]                # the board's pi model list; default: pi's enabledModels
 # codex_models = ["gpt-5.2-codex"]           # default: visible models in ~/.codex/models_cache.json
@@ -864,9 +866,9 @@ Press `c` to open configuration. It has two tabs. Switch tabs with a click, or f
 
 The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. Codex offers `codex_models`, else models with `visibility = "list"` in `~/.codex/models_cache.json`. Its default label reads `model` and `model_reasoning_effort` from `~/.codex/config.toml`.
 
-"Agent default" removes `start_model`, so the agent uses its own default. A saved model outside the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking control follows the agent's levels. Claude keeps the saved level but disables the control.
+"Agent default" removes `start_model`, so the agent uses its own default. A saved model outside the list stays as "current configured model". A change of agent resets the model to "Agent default". The thinking control follows the agent's levels.
 
-pi accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. Codex accepts `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; model support varies. An explicit invalid level returns a `usage` error. herdboard drops a configured level that the chosen agent does not accept.
+pi accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. Codex accepts `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; model support varies. Claude accepts `low`, `medium`, `high`, `xhigh` and `max`, which herdboard passes as `claude --effort`. An explicit invalid level returns a `usage` error. herdboard drops a configured level that the chosen agent does not accept.
 
 The Thinking field follows the selected model. A named model shows its own level, from the `[thinking]` table. With "Agent default" as the model, the field shows `start_thinking`. "Agent default" in the field clears the level of the selected model, so that model uses `start_thinking` again. See [thinking levels](#thinking-levels).
 

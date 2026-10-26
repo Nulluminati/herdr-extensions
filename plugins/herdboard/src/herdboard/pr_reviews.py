@@ -476,7 +476,7 @@ def reviewer_arguments(kind: str, prompt: str, model: str | None, thinking: str 
                 *start.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
-            "--allowedTools", "Read", "Grep", "Glob", *REVIEWER_BASH]
+            *(["--effort", thinking] if thinking else []), "--allowedTools", "Read", "Grep", "Glob", *REVIEWER_BASH]
 
 
 def prompt_text(record: dict, pr: PullRequest, kind: str | None = None) -> str:
@@ -601,8 +601,6 @@ def _validate(kind: str, model: str | None, thinking: str | None) -> None:
     if model is not None and (not model or any(ch.isspace() for ch in model)):
         raise PrReviewError("The model must be one name, such as sonnet or zai/glm-5.3", "usage")
     levels = thinking_levels(kind)
-    if thinking is not None and not levels:
-        raise PrReviewError("--thinking works only with pi or codex", "usage")
     if thinking is not None and thinking not in levels:
         raise PrReviewError(f"Thinking must be one of {', '.join(levels)}", "usage")
 

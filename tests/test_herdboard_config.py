@@ -32,7 +32,7 @@ class ConfigTest(unittest.TestCase):
     def test_codex_settings_and_agent_thinking_levels(self):
         from herdboard.config import AGENTS, thinking_levels, save_global_config
         self.assertEqual(AGENTS, ("claude", "pi", "codex"))
-        self.assertEqual(thinking_levels("claude"), ())
+        self.assertEqual(thinking_levels("claude"), ("low", "medium", "high", "xhigh", "max"))
         self.assertIn("off", thinking_levels("pi"))
         self.assertNotIn("off", thinking_levels("codex"))
         self.assertIn("ultra", thinking_levels("codex"))

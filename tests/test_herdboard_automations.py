@@ -175,9 +175,11 @@ class StorageTests(AutomationTestCase):
         self.assertEqual(raised.exception.code, "bad_schedule")
         self.assertEqual(automations.load(self.config), [])
 
-    def test_thinking_works_only_with_pi(self):
+    def test_claude_takes_its_own_thinking_levels(self):
+        added = self.add(agent="claude", thinking="max")
+        self.assertEqual((added.agent, added.thinking), ("claude", "max"))
         with self.assertRaises(HerdboardError) as raised:
-            self.add(agent="claude", thinking="high")
+            self.add(agent="claude", thinking="off")
         self.assertEqual(raised.exception.code, "usage")
 
     def test_codex_takes_its_own_thinking_levels(self):
@@ -841,7 +843,7 @@ class PlanAutomationTests(LocalTime):
         self.assertEqual(call[call.index("--kind") + 1], "codex")
         self.assertIn("gpt-5.5", call)
         with self.assertRaises(HerdboardError) as raised:
-            self.planner.plan(self.add("inbox").id, agent="claude", thinking="high")
+            self.planner.plan(self.add("inbox").id, agent="claude", thinking="ultra")
         self.assertEqual(raised.exception.code, "usage")
 
     def test_a_running_planner_blocks_a_second_one(self):

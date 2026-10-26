@@ -795,10 +795,18 @@ class StartTests(unittest.TestCase):
         self.assertTrue(args[0].startswith("Start work on herdboard card"))
         self.assertEqual(args[1:], ["--model", "opus"])
 
-    def test_thinking_is_only_for_pi(self):
-        with self.assertRaises(start.StartError) as caught:
-            self.starter.start(self.card.ref, agent="claude", thinking="high")
-        self.assertEqual(caught.exception.code, "usage")
+    def test_claude_gets_its_effort_after_its_prompt(self):
+        self.assertEqual(start.agent_arguments("claude", "task", None, "high"), ["task", "--effort", "high"])
+        self.starter.start(self.card.ref, agent="claude", model="opus", thinking="max")
+        args = self.agent_args()
+        self.assertTrue(args[0].startswith("Start work on herdboard card"))
+        self.assertEqual(args[1:], ["--model", "opus", "--effort", "max"])
+
+    def test_claude_takes_only_its_own_thinking_levels(self):
+        for level in ("off", "ultra"):
+            with self.subTest(level=level), self.assertRaises(start.StartError) as caught:
+                self.starter.start(self.card.ref, agent="claude", thinking=level)
+            self.assertEqual(caught.exception.code, "usage")
 
     def test_bad_thinking_level_or_model(self):
         for kwargs in ({"thinking": "huge"}, {"model": "two words"}):

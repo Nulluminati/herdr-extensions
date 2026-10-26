@@ -317,11 +317,20 @@ class RequestTests(AgentReviewTestCase):
         args = args[args.index("--") + 1:]
         self.assertEqual(args[1:5], ["--permission-mode", "dontAsk", "--model", "sonnet"])
 
-    def test_thinking_works_only_with_pi(self):
+    def test_claude_takes_only_its_own_thinking_levels(self):
         self.started()
         with self.assertRaises(review.ReviewError) as raised:
-            self.reviewer.request(self.card.ref, reviewer="claude", thinking="high")
+            self.reviewer.request(self.card.ref, reviewer="claude", thinking="off")
         self.assertEqual(raised.exception.code, "usage")
+
+    def test_a_claude_effort_goes_before_the_allowed_tools(self):
+        self.started()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.request(reviewer="claude", model="sonnet", thinking="high")
+        args = self.reviewer_start()
+        args = args[args.index("--") + 1:]
+        self.assertEqual(args[1:8], ["--permission-mode", "dontAsk", "--model", "sonnet", "--effort", "high",
+                                     "--allowedTools"])
 
     def test_a_pi_reviewer_without_a_level_takes_the_saved_one_of_its_model(self):
         self.store.config.thinking = {"zai/glm-5.3": "xhigh", "start/one": "minimal"}

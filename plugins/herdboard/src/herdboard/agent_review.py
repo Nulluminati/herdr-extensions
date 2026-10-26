@@ -81,7 +81,7 @@ def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     extra = ["Bash(terminal-browser:*)"] if browser else []
     return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
-            "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)", *extra]
+            *(["--effort", thinking] if thinking else []), "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)", *extra]
 
 
 def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = (),
@@ -187,8 +187,6 @@ class AgentReviewer(Reviewer):
                               f"Use `herdboard review {ref} --agent`.", "no_repository")
         kind = reviewer or REVIEWERS[record.get("agent") or self.config.start_agent]
         levels = thinking_levels(kind)
-        if thinking is not None and not levels:
-            raise ReviewError("--thinking works only with pi or codex", "usage")
         if thinking is not None and thinking not in levels:
             raise ReviewError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if kind == "pi":

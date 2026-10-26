@@ -236,7 +236,7 @@ def agent_arguments(agent: str, message: str, model: str | None, thinking: str |
             ["-c", f'model_reasoning_effort="{thinking}"'] if thinking else [])
         return [*options, message]
     # Claude takes its prompt first: options after it cannot swallow the prompt.
-    return [message, *(["--model", model] if model else [])]
+    return [message, *(["--model", model] if model else []), *(["--effort", thinking] if thinking else [])]
 
 
 def export_config(pane_id: str, config_file: Path | None) -> None:
@@ -1210,8 +1210,6 @@ class Starter:
         if agent not in AGENTS:
             raise StartError("Agent must be claude, pi or codex", "usage")
         levels = thinking_levels(agent)
-        if thinking is not None and not levels:
-            raise StartError("--thinking works only with pi or codex", "usage")
         if thinking is not None and thinking not in levels:
             raise StartError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):

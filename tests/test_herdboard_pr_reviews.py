@@ -372,6 +372,12 @@ class ReviewerTests(PrReviewTestCase):
         self.assertNotIn("Bash", tools)
         self.assertNotIn("Edit", tools)
 
+    def test_claude_gets_its_effort_before_its_allowed_tools(self):
+        arguments = pr_reviews.reviewer_arguments("claude", "Read it", None, "xhigh")
+        self.assertEqual(arguments[0], "Read it")
+        self.assertLess(arguments.index("--effort"), arguments.index("--allowedTools"))
+        self.assertEqual(arguments[arguments.index("--effort") + 1], "xhigh")
+
     def test_pi_gets_bash_and_its_thinking_level(self):
         arguments = pr_reviews.reviewer_arguments("pi", "Read it", "zai/glm-5.3", "high")
         self.assertEqual(arguments[:2], ["--tools", "read,grep,find,ls,bash"])
@@ -529,9 +535,9 @@ class RequestTests(PrReviewTestCase):
         self.assertEqual(pr_reviews._saved_notes(KEY), [{"filePath": "a.py", "newLine": 3, "summary": "Bug"}])
         self.assertEqual(self.fake.made("herdr", "agent", "start"), [])
 
-    def test_thinking_works_only_with_pi(self):
+    def test_claude_takes_only_its_own_thinking_levels(self):
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
-            pr_reviews.request(self.checkout, REPO, 7, "claude", None, "high")
+            pr_reviews.request(self.checkout, REPO, 7, "claude", None, "off")
         self.assertEqual(raised.exception.code, "usage")
 
 

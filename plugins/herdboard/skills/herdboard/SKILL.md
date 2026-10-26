@@ -127,7 +127,7 @@ herdboard --json promote tep3                 # add --team ENG or --project NAME
 herdboard --json add --linear "Fix the login timeout" --team ENG
 ```
 
-`start`, `plan` and `pr-review` accept `--agent claude|pi|codex`. Agent reviews accept `--reviewer claude|pi|codex`. `--thinking` applies to pi or Codex. Codex levels are `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; support depends on the model. The default review rotation is Claude to pi, pi to Codex, Codex to Claude.
+`start`, `plan` and `pr-review` accept `--agent claude|pi|codex`. Agent reviews accept `--reviewer claude|pi|codex`. `--thinking` sets the agent's thinking level. Codex levels are `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; support depends on the model. Claude levels are `low`, `medium`, `high`, `xhigh` and `max` (`claude --effort`). The default review rotation is Claude to pi, pi to Codex, Codex to Claude.
 
 `start` without `--agent` starts the default agent (Claude, unless the user's config says otherwise). `--no-agent` still creates the worktree and moves the card. Without `--base`, the card starts from the branch of the main checkout.
 

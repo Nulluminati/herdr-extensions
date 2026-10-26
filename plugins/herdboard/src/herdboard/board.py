@@ -2122,7 +2122,7 @@ class ConfigScreen(ModalBase):
 
         The saved model stays an option for the saved agent, so a save of other settings keeps it.
         """
-        if thinking_levels(agent):
+        if agent != "claude":
             default, models = self.codex_choices if agent == "codex" else self.pi_choices
             first = f"Agent default ({default})" if default else "Agent default"
         else:
@@ -3767,7 +3767,7 @@ class AutomationFormScreen(ModalBase):
     AUTO_FOCUS = "#automation-title"
 
     def __init__(self, heading: str, boards: list[str], types: list[str], save: Callable[[dict], None],
-                 item: automations.Automation | None = None):
+                 config, item: automations.Automation | None = None):
         super().__init__()
         self.heading = heading
         self.item = item
@@ -3775,6 +3775,27 @@ class AutomationFormScreen(ModalBase):
         self.boards = boards + ([item.board] if item and item.board not in boards else [])
         self.types = list(types) + ([item.type] if item and item.type and item.type not in types else [])
         self.save = save
+        # The agent that "default" runs.
+        self.start_agent = config.start_agent
+        self.models = {"claude": [model for model in ClaudeModelScreen.MODELS if model],
+                       "pi": pi_model_choices(config)[1], "codex": codex_model_choices(config)[1]}
+        self.agent = item.agent if item and item.agent else "default"
+
+    def _model_options(self, agent: str) -> list[tuple[str, str]]:
+        """The models of `agent` after "default". The saved model stays a choice for the saved agent."""
+        options = [("default", "default")]
+        for model in self.models[self.start_agent if agent == "default" else agent]:
+            if model not in (value for _, value in options):
+                options.append((model, model))
+        saved = self.item.model if self.item else None
+        saved_agent = (self.item.agent or "default") if self.item else None
+        if agent == saved_agent and saved and saved not in (value for _, value in options):
+            options.append((saved, saved))
+        return options
+
+    def _thinking_options(self, agent: str) -> list[tuple[str, str]]:
+        levels = thinking_levels(self.start_agent if agent == "default" else agent)
+        return [("default", "default"), *((level, level) for level in levels)]
 
     def compose(self) -> ComposeResult:
         item = self.item
@@ -3782,7 +3803,8 @@ class AutomationFormScreen(ModalBase):
         error = Static("", id="automation-error", classes="error")
         error.plain = ""
         agents = [("default", "default"), *((agent, agent) for agent in AGENTS)]
-        levels = [("default", "default"), *((level, level) for level in THINKING_LEVELS)]
+        levels = self._thinking_options(self.agent)
+        thinking = item.thinking if item and item.thinking else "default"
         with Vertical(classes="dialog card-form"):
             yield Static(Text(self.heading), id="automation-heading")
             yield titled(Input(value=item.title if item else "", placeholder="What each run does",
@@ -3799,14 +3821,16 @@ class AutomationFormScreen(ModalBase):
                 yield titled(Input(value=" ".join(item.tags) if item else "", placeholder="security, deps",
                                    id="automation-tags", select_on_focus=False), "Tags")
             with Horizontal(classes="form-row"):
-                yield titled(Select(agents, allow_blank=False, value=(item.agent if item and item.agent else "default"),
-                                    id="automation-agent"), "Agent")
-                yield titled(Input(value=(item.model or "") if item else "", placeholder="default",
-                                   id="automation-model", select_on_focus=False), "Model")
+                yield titled(Select(agents, allow_blank=False, value=self.agent, id="automation-agent"), "Agent")
+                yield titled(Select(self._model_options(self.agent), allow_blank=False,
+                                    value=item.model if item and item.model else "default",
+                                    id="automation-model"), "Model")
+                # A saved level that the agent does not take shows as "default"; a save then clears it.
                 yield titled(Select(levels, allow_blank=False,
-                                    value=item.thinking if item and item.thinking else "default",
-                                    id="automation-thinking"), "Thinking (pi, codex)")
-            yield Checkbox("Agent may merge PRs that pass checks and need no change",
+                                    value=thinking if thinking in (value for _, value in levels) else "default",
+                                    id="automation-thinking"), "Thinking")
+            yield Checkbox("Tell the agent it may merge other PRs that pass checks and need no change "
+                           "(instruction only, no extra permissions)",
                            value=bool(item and item.may_merge_prs), id="automation-merge")
             yield titled(TextArea(item.body if item else "", id="automation-body",
                                   placeholder="What the agent does on each run"), "Details")
@@ -3826,7 +3850,7 @@ class AutomationFormScreen(ModalBase):
             "type": choice("type"),
             "tags": plain_tags(parse_tags(self.query_one("#automation-tags", Input).value)),
             "agent": choice("agent"),
-            "model": self.query_one("#automation-model", Input).value.strip() or None,
+            "model": choice("model"),
             "thinking": choice("thinking"),
             "may_merge_prs": self.query_one("#automation-merge", Checkbox).value,
             "body": self.query_one("#automation-body", TextArea).text.rstrip("\n"),
@@ -3839,6 +3863,19 @@ class AutomationFormScreen(ModalBase):
         error = self.query_one("#automation-error", Static)
         error.plain = message
         error.update(Text(message))
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """A change of agent offers its own models and levels, and keeps only a choice that it takes."""
+        if event.select.id != "automation-agent" or event.value == self.agent:
+            return
+        event.stop()
+        self.agent = str(event.value)
+        for name, options in (("model", self._model_options(self.agent)),
+                              ("thinking", self._thinking_options(self.agent))):
+            select = self.query_one(f"#automation-{name}", Select)
+            value = select.value
+            select.set_options(options)
+            select.value = value if value in (choice for _, choice in options) else "default"
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
@@ -3874,7 +3911,7 @@ class AutomationDetailScreen(ModalBase):
                  ("Next run", _short_time(entry["next_due"])), ("Type", entry["type"] or "none"),
                  ("Tags", ", ".join(entry["tags"]) or "none"),
                  ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
-                 ("Merges PRs", "yes" if entry["may_merge_prs"] else "no"),
+                 ("May merge other PRs (instruction)", "yes" if entry["may_merge_prs"] else "no"),
                  ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
                  ("Last result", entry["last_result"] or "-")]
         if entry["schedule_error"]:
@@ -4062,7 +4099,7 @@ class AutomationsScreen(Screen):
             automations.add(self.store, **values)
 
         self.app.push_screen(AutomationFormScreen("Add an automation", self._boards(), self.store.config.types,
-                                                  save), lambda saved: saved and self.action_load())
+                                                  save, self.store.config), lambda saved: saved and self.action_load())
 
     def action_edit(self) -> None:
         entry = self.current()
@@ -4074,7 +4111,8 @@ class AutomationsScreen(Screen):
             automations.edit(self.store, item.id, **values)
 
         self.app.push_screen(AutomationFormScreen(f"Edit {item.id}", self._boards(), self.store.config.types, save,
-                                                  item=item), lambda saved: saved and self.action_load())
+                                                  self.store.config, item=item),
+                             lambda saved: saved and self.action_load())
 
     def action_toggle(self) -> None:
         entry = self.current()
@@ -5810,7 +5848,7 @@ class HerdboardApp(App):
     def _chosen_agent(self, ref: str, agent: str | None) -> None:
         if agent is None:
             return
-        if not thinking_levels(agent):
+        if agent == "claude":
             self._start_card(ref, agent)
             return
 

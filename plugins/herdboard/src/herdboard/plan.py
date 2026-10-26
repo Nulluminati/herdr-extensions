@@ -74,7 +74,7 @@ def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model
                 "-c", 'approvals_reviewer="auto_review"',
                 *start_module.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
-    return [prompt, *(["--model", model] if model else []),
+    return [*start_module.agent_arguments(kind, prompt, model, thinking),
             "--allowedTools", "Read", "Grep", "Glob",
             f"Edit(/{worktree}/**)", f"Write(/{worktree}/**)",
             f"Edit(/{folder}/**)", f"Write(/{folder}/**)", "Bash(terminal-browser:*)"]
@@ -225,8 +225,6 @@ class Planner:
         if kind not in AGENTS:
             raise PlanError("The planner must be claude, pi or codex", "usage")
         levels = thinking_levels(kind)
-        if thinking is not None and not levels:
-            raise PlanError("--thinking works only with pi or codex", "usage")
         if thinking is not None and thinking not in levels:
             raise PlanError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):

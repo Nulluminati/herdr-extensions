@@ -266,11 +266,93 @@ class FormTests(AutomationsBoardTestCase):
             form.query_one("#automation-title", Input).value = "Say hello"
             form.query_one("#automation-schedule", Input).value = "every day at 10:00"
             form.query_one("#automation-agent", Select).value = "codex"
+            await pilot.pause()
             form.query_one("#automation-thinking", Select).value = "ultra"
             await pilot.press("ctrl+s")
             await self.settle(app, pilot)
             saved = automations.load(self.store.config)
             self.assertEqual([(a.agent, a.thinking) for a in saved], [("codex", "ultra")])
+
+    def options(self, form, name: str) -> list[str]:
+        return [value for _, value in form.query_one(f"#automation-{name}", Select)._options]
+
+    async def open_form(self, app, pilot, key: str = "a"):
+        await self.open_tab(app, pilot)
+        await pilot.press(key)
+        await self.settle(app, pilot)
+        self.assertIsInstance(app.screen, AutomationFormScreen)
+        return app.screen
+
+    async def test_the_model_and_thinking_options_follow_the_agent(self):
+        from herdboard.config import CLAUDE_THINKING_LEVELS, CODEX_THINKING_LEVELS, PI_THINKING_LEVELS
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])), \
+                patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])):
+            async with app.run_test(size=(160, 40)) as pilot:
+                form = await self.open_form(app, pilot)
+                # "default" is the configured start agent, Claude.
+                self.assertEqual(self.options(form, "model"), ["default", "opus", "sonnet", "haiku"])
+                self.assertEqual(self.options(form, "thinking"), ["default", *CLAUDE_THINKING_LEVELS])
+                for agent, models, levels in (("pi", ["zai/glm-5.3"], PI_THINKING_LEVELS),
+                                              ("codex", ["gpt-6.1"], CODEX_THINKING_LEVELS),
+                                              ("claude", ["opus", "sonnet", "haiku"], CLAUDE_THINKING_LEVELS)):
+                    with self.subTest(agent=agent):
+                        form.query_one("#automation-agent", Select).value = agent
+                        await pilot.pause()
+                        self.assertEqual(self.options(form, "model"), ["default", *models])
+                        self.assertEqual(self.options(form, "thinking"), ["default", *levels])
+
+    async def test_an_agent_change_keeps_only_a_valid_model_and_level(self):
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(160, 40)) as pilot:
+                form = await self.open_form(app, pilot)
+                form.query_one("#automation-model", Select).value = "opus"
+                form.query_one("#automation-thinking", Select).value = "high"
+                form.query_one("#automation-agent", Select).value = "pi"
+                await pilot.pause()
+                self.assertEqual(form.query_one("#automation-model", Select).value, "default")
+                self.assertEqual(form.query_one("#automation-thinking", Select).value, "high")
+                form.query_one("#automation-thinking", Select).value = "off"
+                form.query_one("#automation-agent", Select).value = "claude"
+                await pilot.pause()
+                self.assertEqual(form.query_one("#automation-thinking", Select).value, "default")
+
+    async def test_the_form_saves_a_claude_model_and_effort(self):
+        app = self.app()
+        async with app.run_test(size=(160, 40)) as pilot:
+            form = await self.open_form(app, pilot)
+            form.query_one("#automation-title", Input).value = "Say hello"
+            form.query_one("#automation-schedule", Input).value = "every day at 10:00"
+            form.query_one("#automation-agent", Select).value = "claude"
+            await pilot.pause()
+            form.query_one("#automation-model", Select).value = "sonnet"
+            form.query_one("#automation-thinking", Select).value = "max"
+            await pilot.press("ctrl+s")
+            await self.settle(app, pilot)
+            saved = automations.load(self.store.config)
+            self.assertEqual([(a.agent, a.model, a.thinking) for a in saved], [("claude", "sonnet", "max")])
+
+    async def test_edit_keeps_a_saved_model_that_is_not_in_the_list(self):
+        added = self.add(agent="pi", model="custom/model")
+        app = self.app()
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+            async with app.run_test(size=(160, 40)) as pilot:
+                form = await self.open_form(app, pilot, "e")
+                self.assertEqual(self.options(form, "model"), ["default", "zai/glm-5.3", "custom/model"])
+                self.assertEqual(form.query_one("#automation-model", Select).value, "custom/model")
+                form.query_one("#automation-title", Input).value = "Check all alerts"
+                await pilot.press("ctrl+s")
+                await self.settle(app, pilot)
+                self.assertEqual(automations.get(self.store.config, added.id).model, "custom/model")
+
+    async def test_the_merge_checkbox_says_it_is_an_instruction_only(self):
+        app = self.app()
+        async with app.run_test(size=(160, 40)) as pilot:
+            form = await self.open_form(app, pilot)
+            label = str(form.query_one("#automation-merge").label)
+            self.assertIn("Tell the agent", label)
+            self.assertIn("no extra permissions", label)
 
     async def test_edit_keeps_the_fields_and_saves_changes(self):
         added = self.add(tags=["security"], may_merge_prs=True, body="Look")

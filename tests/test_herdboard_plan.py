@@ -227,6 +227,12 @@ class RequestTests(PlanTestCase):
                                     "Bash(terminal-browser:*)"])
         self.assertNotIn("dontAsk", args, "the user is there to answer permission prompts")
 
+    def test_claude_gets_its_effort_before_the_allowed_tools(self):
+        self.planner.plan(self.card.ref, model="opus", thinking="high")
+        call = self.planner_start()
+        args = call[call.index("--") + 1:]
+        self.assertEqual(args[1:6], ["--model", "opus", "--effort", "high", "--allowedTools"])
+
     def test_pi_gets_read_write_and_shell_tools(self):
         self.planner.plan(self.card.ref, agent="pi", model="zai/glm-5.3", thinking="high")
         call = self.planner_start()
@@ -418,9 +424,9 @@ class RequestTests(PlanTestCase):
                 self.planner.plan(self.card.ref)
             self.assertEqual(raised.exception.code, "herdr_error")
 
-    def test_thinking_works_only_with_pi(self):
+    def test_claude_takes_only_its_own_thinking_levels(self):
         with self.assertRaises(plan.PlanError) as raised:
-            self.planner.plan(self.card.ref, thinking="high")
+            self.planner.plan(self.card.ref, thinking="off")
         self.assertEqual(raised.exception.code, "usage")
 
     def test_the_last_thinking_level_of_the_planner_model_is_used_again(self):

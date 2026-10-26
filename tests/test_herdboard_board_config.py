@@ -170,8 +170,8 @@ class ConfigScreenTests(BoardTestCase):
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
-            # Theme, agent, model and merge come first; Claude's thinking level is off.
-            await pilot.press("tab", "tab", "tab", "tab")
+            # Theme, agent, model, thinking and merge come first.
+            await pilot.press("tab", "tab", "tab", "tab", "tab")
             self.assertIs(app.focused, screen.query_one("#config-icon-style"))
             await pilot.press("enter", "down", "enter")
             self.assertEqual(screen.query_one("#config-icon-style").value, "nerd")
@@ -741,7 +741,8 @@ class ConfigScreenTests(BoardTestCase):
             self.assertTrue(app.query(".card"))
         self.assertEqual(load_config(app.config_file).theme, "nord")
 
-    async def test_claude_models_and_its_disabled_thinking_level(self):
+    async def test_claude_models_and_its_thinking_level(self):
+        from herdboard.config import CLAUDE_THINKING_LEVELS
         self.config.start_model = "sonnet"
         self.config.start_thinking = "high"
         app = self.make_app()
@@ -752,9 +753,9 @@ class ConfigScreenTests(BoardTestCase):
             self.assertEqual(self.options(model), ["default", "opus", "sonnet", "haiku"])
             self.assertEqual(self.labels(model)[0], "Agent default")
             self.assertEqual(model.value, "sonnet")
-            self.assertEqual(self.options(thinking), ["default", *THINKING_LEVELS])
+            self.assertEqual(self.options(thinking), ["default", *CLAUDE_THINKING_LEVELS])
             self.assertEqual(thinking.value, "high")
-            self.assertTrue(thinking.disabled)
+            self.assertFalse(thinking.disabled)
             await pilot.press("ctrl+s")
             await settle(pilot)
         self.assertFalse(app.config_file.exists())
@@ -865,7 +866,8 @@ class ConfigScreenTests(BoardTestCase):
                 screen.query_one("#config-agent").value = "claude"
                 await pilot.pause()
                 self.assertEqual(model.value, "default")
-                self.assertTrue(thinking.disabled)
+                self.assertFalse(thinking.disabled)
+                self.assertEqual(thinking.value, "high")
                 screen.query_one("#config-agent").value = "pi"
                 await pilot.pause()
                 await pilot.press("ctrl+s")
