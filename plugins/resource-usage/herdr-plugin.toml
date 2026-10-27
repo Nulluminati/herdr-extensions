@@ -1,0 +1,30 @@
+id = "nulluminati.resource-usage"
+name = "Resource Usage"
+version = "0.1.0"
+# Verified against 0.9.5: api snapshot with worktree metadata, pane process-info,
+# worktree list, plugin list --json and workspace report-metadata with a TTL.
+min_herdr_version = "0.9.5"
+description = "Put each workspace's processor and memory usage in the $resource_usage token, so the sidebar Spaces list can show it."
+platforms = ["linux", "macos"]
+
+# Herdr runs these from the plugin root. --ensure-running starts the session's
+# background worker unless it runs already or you disabled it.
+[[startup]]
+command = ["python3", "bin/resource_usage.py", "--ensure-running"]
+
+# Startup hooks do not run when the plugin is installed or linked into a running
+# server. A focus change starts the worker then. The check exits at once when
+# the worker runs.
+[[events]]
+on = "workspace.focused"
+command = ["python3", "bin/resource_usage.py", "--ensure-running"]
+
+[[actions]]
+id = "enable"
+title = "Resource usage: enable"
+command = ["python3", "bin/resource_usage.py", "--enable"]
+
+[[actions]]
+id = "disable"
+title = "Resource usage: disable"
+command = ["python3", "bin/resource_usage.py", "--disable"]

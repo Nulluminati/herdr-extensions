@@ -9,6 +9,7 @@ Plugins for [Herdr](https://herdr.dev), the terminal multiplexer for coding agen
 | [default-layout](plugins/default-layout/) | Opens the projects, tabs and panes listed in a TOML file when the Herdr server starts, and relaunches their programs after a restore. |
 | [herdboard](plugins/herdboard/) | A kanban board for Markdown todos and Linear issues. A card can start work in its own worktree with an agent, then go through review and merge, locally or as a draft GitHub pull request. |
 | [peer-review](plugins/peer-review/) | Has a second agent review your agent's work: Claude to pi, pi to Codex, Codex to Claude. It reviews uncommitted changes, else the branch commits since the upstream. |
+| [resource-usage](plugins/resource-usage/) | Shows each workspace's processor and memory use in the sidebar Spaces list. A main checkout's workspace also shows the total of its open worktrees. |
 
 ## Install
 
