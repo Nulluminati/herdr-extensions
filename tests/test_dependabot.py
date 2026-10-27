@@ -23,6 +23,11 @@ class DependabotTests(unittest.TestCase):
     def test_uses_configuration_version_two(self):
         self.assertEqual(self.config["version"], 2)
 
+    def test_holds_no_entry_beyond_the_expected_ones(self):
+        self.assertEqual(
+            sorted((entry["package-ecosystem"], entry["directory"]) for entry in self.updates),
+            [("github-actions", "/"), ("uv", "/"), ("uv", "/plugins/herdboard")])
+
     def test_updates_pinned_github_actions_in_the_root(self):
         entry = self.update("github-actions", "/")
         self.assertEqual(entry["schedule"]["interval"], "weekly")

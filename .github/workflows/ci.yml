@@ -25,3 +25,9 @@ jobs:
         uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
       - name: Run tests
         run: uv run --locked python -m unittest discover -s tests
+      # The root run never resolves plugins/herdboard/uv.lock. Check that its
+      # lock file matches its manifest and that its own packages import.
+      - name: Check the herdboard lock file
+        run: uv lock --check --project plugins/herdboard
+      - name: Import herdboard from its own lock file
+        run: uv run --locked --project plugins/herdboard python -c "import textual, yaml, tomlkit, herdboard.board, herdboard.cli"
