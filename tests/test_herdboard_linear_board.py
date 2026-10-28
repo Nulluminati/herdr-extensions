@@ -14,6 +14,7 @@ from herdboard.board import AttachmentChoiceScreen, DetailScreen, HerdboardApp  
 from herdboard.linear_links import ProjectLink  # noqa: E402
 from herdboard.linear_source import LinearSource  # noqa: E402
 from herdboard.linear_writes import LinearWriter  # noqa: E402
+from textual.widgets import OptionList  # noqa: E402
 from herdboard.views import Views  # noqa: E402
 from linear_data import PR_URL, attachment  # noqa: E402
 from test_herdboard_attachment_board import fake_opener  # noqa: E402
@@ -298,6 +299,34 @@ class LinearBoardTests(LinearBoardCase):
                 await pilot.press("down", "enter")
                 await settle(pilot)
         self.assertEqual(popen.call_args.args[0], ["xdg-open", "https://example.com/spec"])
+
+    async def test_the_chooser_shows_brackets_in_titles_as_text(self):
+        issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
+        issue["attachments"]["nodes"] = [attachment(PR_URL, "Fix [/api] route"),
+                                         attachment("https://example.com/spec", "[b]Spec[/b]")]
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await self.open_issue(pilot, "ENG-1")
+            await pilot.press("o")
+            await settle(pilot)
+            self.assertIsInstance(app.screen, AttachmentChoiceScreen)
+            options = app.screen.query_one(OptionList)
+            self.assertEqual([str(options.get_option_at_index(i).prompt) for i in range(2)],
+                             ["Fix [/api] route", "[b]Spec[/b]"])
+
+    async def test_a_url_that_is_not_a_web_address_does_not_open(self):
+        issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
+        issue["attachments"]["nodes"] = [attachment("file:///etc/passwd", "Local file")]
+        app = self.make_linear_app()
+        popen = fake_opener()
+        with mock.patch.object(board.subprocess, "Popen", popen):
+            async with app.run_test(size=SIZE) as pilot:
+                await self.open_issue(pilot, "ENG-1")
+                await pilot.press("o")
+                await settle(pilot)
+                self.assertIn(("Cannot open file:///etc/passwd: only http and https addresses open", "error"),
+                              self.notifications(app))
+        popen.assert_not_called()
 
     async def test_a_click_on_a_linear_attachment_opens_it(self):
         app = self.make_linear_app()

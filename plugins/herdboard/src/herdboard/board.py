@@ -15,6 +15,7 @@ import threading
 import time
 import zlib
 from typing import Callable, Iterable
+from urllib.parse import urlsplit
 
 from rich.console import Group
 from rich.style import Style
@@ -1208,7 +1209,11 @@ class DetailScreen(ModalBase):
                                  lambda entry: self.open_attachment(entry) if entry else None)
 
     def open_url(self, url: str) -> None:
-        """Open a Linear attachment in the system's default browser."""
+        """Open a Linear attachment in the system's default browser. Linear integrations set the URL,
+        so only a web address opens: another scheme could start a local application."""
+        if urlsplit(url).scheme.lower() not in ("http", "https"):
+            self.notify(f"Cannot open {url}: only http and https addresses open", severity="error")
+            return
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         try:
             process = subprocess.Popen([opener, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1272,7 +1277,8 @@ class AttachmentChoiceScreen(ModalBase):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label("Open an attachment")
-            yield OptionList(*(entry["name"] for entry in self.files))
+            # Text, so a name with square brackets, such as a Linear attachment title, is not markup.
+            yield OptionList(*(Text(entry["name"]) for entry in self.files))
             yield Label("enter: open, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
