@@ -28,6 +28,7 @@ from textual._context import NoActiveAppError
 from textual.driver import Driver
 from textual.errors import NoWidget
 from textual.message import Message
+from textual.reactive import reactive
 from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (Checkbox, DataTable, Input, Label, Markdown, OptionList, Select, Static,
@@ -2401,6 +2402,7 @@ class TabBar(Vertical):
     def on_mount(self) -> None:
         self.place_tabs()
         self.show_texts()
+        self.watch(self.app, "pr_count", self.show_counts, init=False)
 
     def on_resize(self, event: events.Resize) -> None:
         self.place_tabs()
@@ -3240,9 +3242,6 @@ class PullRequestsScreen(Screen):
         self.query_one(HeaderBar).show(repo, self.app.view)
         if page is not None and not searched:
             self.app.pr_count = page.total
-            for screen in self.app.screen_stack + [self]:
-                for bar in screen.query(TabBar):
-                    bar.show_counts()
         heading = self.query_one("#pr-repo", Static)
         heading.display = True
         heading.update(pr_label("github", f"github.com/{repo}", self.icon_style))
@@ -4304,6 +4303,9 @@ class CellMouseDriver(LinuxDriver):
 
 class HerdboardApp(App):
     TITLE = "herdboard"
+    # The open pull request count of the last read, for the tab; None before the first read. Every tab bar
+    # watches it, also the bars of the tabs that are installed but hidden.
+    pr_count: reactive[int | None] = reactive(None)
     CSS = """
     /* The header row of the board and the pull requests: herdboard | board or repository, view, version. */
     #header-bar { height: 2; padding: 0 1; border-bottom: solid $surface-lighten-2; }
@@ -4573,8 +4575,6 @@ class HerdboardApp(App):
         self.open_prs = open_prs
         # The agent logo font is installed, so agent names show their logos.
         self.agent_logos = agent_logos
-        # The open pull request count of the last read, for the tab; None before the first read.
-        self.pr_count: int | None = None
         # Passed on to the background workers, so they read the same boards.
         self.config_file = config_file
         # The board changes that run in thread workers. An action blocks only the cards of its job.

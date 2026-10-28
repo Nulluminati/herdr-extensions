@@ -218,6 +218,42 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             self.assertEqual(self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7", "✎ Notes", "↻ Automations"])
 
+    async def test_a_tab_opened_before_the_read_shows_the_count_when_it_comes_back(self):
+        # The Notes and Automations tabs stay installed after they hide, so a read must reach their bars too.
+        self.service.page.return_value = ("acme/api", Page([], 7, None))
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await self.settle(app, pilot)
+            await pilot.click("#tab-automations")
+            await self.settle(app, pilot)
+            await pilot.click("#tab-notes")
+            await self.settle(app, pilot)
+            await pilot.click("#tab-prs")
+            await self.settle(app, pilot)
+            for tab in ("notes", "automations", "board"):
+                await pilot.click(f"#tab-{tab}")
+                await self.settle(app, pilot)
+                self.assertEqual(self.bar(app).active, tab)
+                self.assertEqual(self.bar(app).tab_labels(),
+                                 ["▦ Board", "⑂ Pull requests 7", "✎ Notes", "↻ Automations"], tab)
+
+    async def test_a_later_read_changes_the_count_on_every_tab(self):
+        self.service.page.return_value = ("acme/api", Page([], 7, None))
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            await pilot.press("G", "G", "G", "G")
+            await self.settle(app, pilot)
+            self.service.page.return_value = ("acme/api", Page([], 3, None))
+            app.get_screen("pull-requests").read_at -= 61
+            await pilot.press("G")
+            await self.settle(app, pilot)
+            self.assertEqual(self.bar(app).tab_labels()[1], "⑂ Pull requests 3")
+            for tab in ("notes", "automations", "board"):
+                await pilot.press("G")
+                await self.settle(app, pilot)
+                self.assertEqual(self.bar(app).active, tab)
+                self.assertEqual(self.bar(app).tab_labels()[1], "⑂ Pull requests 3", tab)
+
     async def test_the_tabs_use_nerd_icons_only_in_nerd_mode(self):
         self.store.config.icon_style = "nerd"
         app = self.app()
