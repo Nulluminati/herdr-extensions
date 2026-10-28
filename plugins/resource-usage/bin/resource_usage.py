@@ -40,6 +40,11 @@ REGISTRATION_EVERY = 15
 # The worker exits after this many failed cycles in a row, about one minute.
 MAX_FAILURES = 30
 LOG_LIMIT_BYTES = 256 * 1024
+# After a failed worktree lookup, the worker asks again after this many seconds.
+RELATIONSHIP_RETRY_SECONDS = 30.0
+# Herdr errors that mean a workspace or pane is gone or has no Git checkout, not a passing failure.
+PANE_GONE = {"pane_not_found"}
+NOT_A_WORKTREE = {"not_git_worktree", "workspace_not_found"}
 MIB = 1024 * 1024
 GIB = 1024 * MIB
 
@@ -54,6 +59,27 @@ def herdr_bin() -> str:
 
 def herdr_json(*arguments: str) -> dict:
     return json.loads(command([herdr_bin(), *arguments]).stdout or "{}")
+
+
+def error_code(error: Exception) -> str | None:
+    # Herdr writes a failed request's error as JSON to standard output.
+    if not isinstance(error, subprocess.CalledProcessError):
+        return None
+    try:
+        return (json.loads(error.stdout or "{}").get("error") or {}).get("code")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def log(message: str) -> None:
+    # The worker's standard error is its log file. Empty it when it passes the limit.
+    try:
+        descriptor = sys.stderr.fileno()
+        if os.fstat(descriptor).st_size > LOG_LIMIT_BYTES:
+            os.ftruncate(descriptor, 0)
+    except (OSError, ValueError):
+        pass
+    print(f"resource-usage: {message}", file=sys.stderr, flush=True)
 
 
 def failure(error: Exception) -> str:
@@ -72,19 +98,24 @@ class Process:
     start: str
     cpu_seconds: float
     rss_bytes: int
+    # Seconds since the process started, when the platform tells us.
+    age_seconds: float | None = None
 
 
-def parse_linux_stat(pid: int, text: str, clock_ticks: int, page_size: int) -> Process:
+def parse_linux_stat(pid: int, text: str, clock_ticks: int, page_size: int,
+                     uptime: float | None = None) -> Process:
     # The command name is in parentheses and can hold spaces and parentheses itself,
     # so the fields start after the last closing parenthesis. fields[0] is field 3 in proc(5).
     fields = text[text.rindex(")") + 2:].split()
-    utime, stime = int(fields[11]), int(fields[12])
+    utime, stime, start = int(fields[11]), int(fields[12]), int(fields[19])
     return Process(
         pid=pid,
         ppid=int(fields[1]),
         start=fields[19],
         cpu_seconds=(utime + stime) / clock_ticks,
         rss_bytes=int(fields[21]) * page_size,
+        # The start time counts clock ticks since boot.
+        age_seconds=None if uptime is None else uptime - start / clock_ticks,
     )
 
 
@@ -92,6 +123,10 @@ def collect_linux_processes(proc_dir: Path = Path("/proc"), clock_ticks: int | N
                             page_size: int | None = None) -> dict[int, Process]:
     clock_ticks = clock_ticks or os.sysconf("SC_CLK_TCK")
     page_size = page_size or os.sysconf("SC_PAGE_SIZE")
+    try:
+        uptime = float((proc_dir / "uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        uptime = None
     processes = {}
     for entry in proc_dir.iterdir():
         if not entry.name.isdigit():
@@ -99,7 +134,7 @@ def collect_linux_processes(proc_dir: Path = Path("/proc"), clock_ticks: int | N
         pid = int(entry.name)
         try:
             text = (entry / "stat").read_text()
-            processes[pid] = parse_linux_stat(pid, text, clock_ticks, page_size)
+            processes[pid] = parse_linux_stat(pid, text, clock_ticks, page_size, uptime)
         except (OSError, ValueError, IndexError):
             # The process exited after the listing, or we may not read it.
             continue
@@ -121,12 +156,12 @@ def parse_ps_time(text: str) -> float:
 def collect_macos_processes() -> dict[int, Process]:
     # One ps call per cycle. The C locale fixes the lstart date words and the decimal point.
     env = {**os.environ, "LC_ALL": "C"}
-    output = command(["ps", "-A", "-o", "pid=,ppid=,lstart=,time=,rss="], env=env).stdout
+    output = command(["ps", "-A", "-o", "pid=,ppid=,lstart=,etime=,time=,rss="], env=env).stdout
     processes = {}
     for line in output.splitlines():
         # lstart is five words, such as "Tue Oct 27 09:10:12 2026".
         fields = line.split()
-        if len(fields) != 9:
+        if len(fields) != 10:
             continue
         try:
             pid = int(fields[0])
@@ -134,8 +169,9 @@ def collect_macos_processes() -> dict[int, Process]:
                 pid=pid,
                 ppid=int(fields[1]),
                 start=" ".join(fields[2:7]),
-                cpu_seconds=parse_ps_time(fields[7]),
-                rss_bytes=int(fields[8]) * 1024,
+                cpu_seconds=parse_ps_time(fields[8]),
+                rss_bytes=int(fields[9]) * 1024,
+                age_seconds=parse_ps_time(fields[7]),
             )
         except ValueError:
             continue
@@ -266,10 +302,16 @@ def measure_usage(pids: set[int], processes: dict[int, Process], previous: dict 
         return Usage(cpu_percent=None, rss_bytes=rss)
     busy = 0.0
     for process in live:
-        # A process not in the last sample started during the interval, so all its time counts.
-        before = previous.get((process.pid, process.start), 0.0)
-        busy += max(process.cpu_seconds - before, 0.0)
-    return Usage(cpu_percent=100 * busy / elapsed / cpu_count, rss_bytes=rss)
+        before = previous.get((process.pid, process.start))
+        if before is not None:
+            busy += max(process.cpu_seconds - before, 0.0)
+        elif process.age_seconds is not None and process.age_seconds <= elapsed + 1.0:
+            # It started during the interval, so all its time counts. The second of slack
+            # covers ps, which gives the age in whole seconds.
+            busy += process.cpu_seconds
+        # Else it is older than the interval but was missing from the last sample:
+        # this sample is its baseline.
+    return Usage(cpu_percent=min(100 * busy / elapsed / cpu_count, 100.0), rss_bytes=rss)
 
 
 def format_memory(rss_bytes: int) -> str:
@@ -299,11 +341,15 @@ def pane_root(pane_id: str) -> int | None:
 
 
 def worktree_list(workspace_id: str) -> dict | None:
+    """The workspace's `herdr worktree list` result, or None when it has no Git checkout.
+
+    Other failures raise, so the caller can ask again later."""
     try:
         return herdr_json("worktree", "list", "--workspace", workspace_id).get("result")
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        # Not a Git workspace, or the workspace closed.
-        return None
+    except subprocess.CalledProcessError as error:
+        if error_code(error) in NOT_A_WORKTREE:
+            return None
+        raise
 
 
 def report_usage(workspace_id: str, text: str) -> None:
@@ -344,9 +390,12 @@ class Collector:
         self.previous: dict | None = None
         self.previous_time = 0.0
         self.process_error: str | None = None
+        self.relationship_retry_at: float | None = None
 
-    def refresh_roots(self, panes: list[dict], processes: dict[int, Process]) -> dict[str, int]:
+    def refresh_roots(self, panes: list[dict], processes: dict[int, Process]) -> tuple[dict[str, int], set[str]]:
+        """Each pane's shell, and the workspaces with a pane whose shell we could not ask for."""
         current = {}
+        incomplete = set()
         for pane in panes:
             pane_id = pane.get("pane_id")
             cached = self.roots.get(pane_id)
@@ -355,20 +404,34 @@ class Collector:
                 continue
             try:
                 pid = pane_root(pane_id)
-            except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-                # The pane closed after the snapshot.
+            except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+                # A pane that closed after the snapshot has nothing to count.
+                if error_code(error) not in PANE_GONE:
+                    incomplete.add(pane.get("workspace_id"))
                 continue
             if pid in processes:
                 current[pane_id] = (pid, processes[pid].start)
         self.roots = current
-        return {pane_id: pid for pane_id, (pid, _start) in current.items()}
+        return {pane_id: pid for pane_id, (pid, _start) in current.items()}, incomplete
 
     def refresh_parents(self, workspaces: list[dict]) -> None:
         topology = sorted((workspace["workspace_id"], json.dumps(workspace.get("worktree"), sort_keys=True))
                           for workspace in workspaces)
-        if topology != self.topology:
-            self.parents = family_parents(workspaces, worktree_list)
-            self.topology = topology
+        retry = self.relationship_retry_at is not None and self.clock() >= self.relationship_retry_at
+        if topology == self.topology and not retry:
+            return
+        failed = []
+
+        def lookup(workspace_id: str) -> dict | None:
+            try:
+                return worktree_list(workspace_id)
+            except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+                failed.append(workspace_id)
+                return None
+
+        self.parents = family_parents(workspaces, lookup)
+        self.topology = topology
+        self.relationship_retry_at = self.clock() + RELATIONSHIP_RETRY_SECONDS if failed else None
 
     def cycle(self) -> dict[str, str]:
         workspaces, panes = collect_workspaces()
@@ -379,15 +442,17 @@ class Collector:
             # Log a failure once, not every cycle while it lasts.
             if failure(error) != self.process_error:
                 self.process_error = failure(error)
-                print(f"resource-usage: cannot read processes: {self.process_error}", file=sys.stderr)
+                log(f"cannot read processes: {self.process_error}")
             self.previous = None
             families = {parent for parent in self.parents.values()}
             return {workspace["workspace_id"]: format_usage(None, workspace["workspace_id"] in families)
                     for workspace in workspaces}
         self.process_error = None
         now = self.clock()
-        roots = self.refresh_roots(panes, processes)
+        roots, incomplete = self.refresh_roots(panes, processes)
         sets = workspace_process_sets(workspaces, panes, roots, processes)
+        # A workspace with a pane we could not measure would show too little.
+        sets.update({workspace_id: None for workspace_id in incomplete if workspace_id in sets})
         families = family_process_sets(sets, self.parents)
         elapsed = now - self.previous_time
         cpu_count = self.cpu_count()
@@ -510,15 +575,15 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
                         clear_closed(workspace_id)
                     reported = set(texts)
                     failures = 0
-                    last_error = None
                 except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
                     failures += 1
                     message = failure(error)
+                    # Log a failure once, also when it comes back after a success.
                     if message != last_error:
-                        print(f"resource-usage: {message}", file=sys.stderr)
+                        log(message)
                         last_error = message
                     if failures >= MAX_FAILURES:
-                        print(f"resource-usage: giving up after {failures} failed cycles", file=sys.stderr)
+                        log(f"giving up after {failures} failed cycles")
                         break
                 cycles += 1
                 sleep(INTERVAL_SECONDS)

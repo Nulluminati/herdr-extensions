@@ -32,8 +32,8 @@ def stat_line(pid, comm, ppid, utime, stime, start, rss):
     return f"{pid} ({comm}) " + " ".join(fields + ["0"] * 28) + "\n"
 
 
-def proc(pid, ppid, cpu=0.0, rss=0, start="s"):
-    return Process(pid=pid, ppid=ppid, start=f"{start}{pid}", cpu_seconds=cpu, rss_bytes=rss)
+def proc(pid, ppid, cpu=0.0, rss=0, start="s", age=None):
+    return Process(pid=pid, ppid=ppid, start=f"{start}{pid}", cpu_seconds=cpu, rss_bytes=rss, age_seconds=age)
 
 
 def table(*processes):
@@ -42,9 +42,14 @@ def table(*processes):
 
 class LinuxSamplingTests(unittest.TestCase):
     def test_parses_parent_cpu_start_and_resident_size(self):
+        text = stat_line(42, "python3", 7, utime=250, stime=50, start=10000, rss=3)
+        process = resource_usage.parse_linux_stat(42, text, clock_ticks=100, page_size=4096, uptime=150.0)
+        self.assertEqual(process, Process(pid=42, ppid=7, start="10000", cpu_seconds=3.0, rss_bytes=3 * 4096,
+                                          age_seconds=50.0))
+
+    def test_age_is_unknown_without_uptime(self):
         text = stat_line(42, "python3", 7, utime=250, stime=50, start=9999, rss=3)
-        process = resource_usage.parse_linux_stat(42, text, clock_ticks=100, page_size=4096)
-        self.assertEqual(process, Process(pid=42, ppid=7, start="9999", cpu_seconds=3.0, rss_bytes=3 * 4096))
+        self.assertIsNone(resource_usage.parse_linux_stat(42, text, clock_ticks=100, page_size=4096).age_seconds)
 
     def test_command_name_with_spaces_and_parentheses(self):
         text = stat_line(42, "my (odd) name) x", 7, utime=10, stime=0, start=5, rss=1)
@@ -61,6 +66,7 @@ class LinuxSamplingTests(unittest.TestCase):
             (root / "self").mkdir()
             (root / "4").mkdir()
             (root / "4" / "stat").write_text("")
+            (root / "uptime").write_text("12.50 40.00\n")
             real_read = Path.read_text
 
             def read_text(path, *arguments, **keywords):
@@ -73,6 +79,7 @@ class LinuxSamplingTests(unittest.TestCase):
         self.assertEqual(sorted(processes), [1, 2])
         self.assertEqual(processes[1].cpu_seconds, 1.0)
         self.assertEqual(processes[2].ppid, 1)
+        self.assertAlmostEqual(processes[2].age_seconds, 12.48)
 
 
 class MacSamplingTests(unittest.TestCase):
@@ -102,14 +109,15 @@ class MacSamplingTests(unittest.TestCase):
         processes = resource_usage.collect_macos_processes()
         self.assertEqual(sorted(processes), [1, 501, 502, 503])
         self.assertEqual(processes[502], Process(pid=502, ppid=501, start="Tue Oct 27 09:10:12 2026",
-                                                 cpu_seconds=0.25, rss_bytes=1024 * 1024))
+                                                 cpu_seconds=0.25, rss_bytes=1024 * 1024, age_seconds=59.0))
+        self.assertEqual(processes[1].age_seconds, 90611.0)
         self.assertEqual(processes[503].cpu_seconds, 93784.0)
 
     def test_runs_ps_once_with_c_locale_and_explicit_fields(self):
         resource_usage.collect_macos_processes()
         self.assertEqual(len(self.calls), 1)
         argv, env = self.calls[0]
-        self.assertEqual(argv, ["ps", "-A", "-o", "pid=,ppid=,lstart=,time=,rss="])
+        self.assertEqual(argv, ["ps", "-A", "-o", "pid=,ppid=,lstart=,etime=,time=,rss="])
         self.assertEqual(env["LC_ALL"], "C")
 
     def test_skips_malformed_lines(self):
@@ -152,9 +160,21 @@ class UsageTests(unittest.TestCase):
         self.assertIsNone(resource_usage.measure_usage({1}, processes, previous, elapsed=2.0, cpu_count=None).cpu_percent)
 
     def test_reused_pid_counts_new_process_from_zero(self):
-        processes = table(proc(1, 0, cpu=1.0, start="new"))
+        processes = table(proc(1, 0, cpu=0.5, start="new", age=0.8))
         usage = resource_usage.measure_usage({1}, processes, {(1, "s1"): 500.0}, elapsed=1.0, cpu_count=1)
-        self.assertAlmostEqual(usage.cpu_percent, 100.0)
+        self.assertAlmostEqual(usage.cpu_percent, 50.0)
+
+    def test_old_process_missing_from_last_sample_is_a_baseline(self):
+        # It was unreadable in the last sample; its lifetime time is not this interval's.
+        processes = table(proc(1, 0, cpu=0.5), proc(2, 0, cpu=900.0, age=3600.0), proc(3, 0, cpu=900.0))
+        previous = {(1, "s1"): 0.0}
+        usage = resource_usage.measure_usage({1, 2, 3}, processes, previous, elapsed=1.0, cpu_count=1)
+        self.assertAlmostEqual(usage.cpu_percent, 50.0)
+
+    def test_cpu_never_exceeds_100_percent(self):
+        processes = table(proc(1, 0, cpu=3.0))
+        usage = resource_usage.measure_usage({1}, processes, {(1, "s1"): 0.0}, elapsed=1.0, cpu_count=2)
+        self.assertEqual(usage.cpu_percent, 100.0)
 
     def test_counter_reset_counts_zero(self):
         processes = table(proc(1, 0, cpu=1.0))
@@ -306,6 +326,8 @@ class HerdrTestCase(unittest.TestCase):
         ]
         self.shells = {"w1:p1": 10, "w2:p1": 20, "w3:p1": 30}
         self.closed_panes = set()
+        self.failing_panes = set()
+        self.worktree_results = []
         self.plugins = [{"plugin_id": "nulluminati.resource-usage", "enabled": True}]
         self.snapshot_fails = False
         replacement = patch.object(resource_usage, "command", self.fake_command)
@@ -322,10 +344,18 @@ class HerdrTestCase(unittest.TestCase):
         if argv[1:3] == ["pane", "process-info"]:
             pane_id = argv[4]
             if pane_id in self.closed_panes:
-                raise subprocess.CalledProcessError(1, argv, "", "pane not found")
+                error = json.dumps({"error": {"code": "pane_not_found", "message": "pane not found"}})
+                raise subprocess.CalledProcessError(1, argv, error, "")
+            if pane_id in self.failing_panes:
+                raise subprocess.TimeoutExpired(argv, 10)
             info = {"pane_id": pane_id, "shell_pid": self.shells[pane_id]}
             return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"process_info": info}}), "")
         if argv[1:3] == ["worktree", "list"]:
+            result = self.worktree_results.pop(0) if self.worktree_results else None
+            if isinstance(result, Exception):
+                raise result
+            if result is not None:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"result": result}), "")
             error = json.dumps({"error": {"code": "not_git_worktree"}})
             raise subprocess.CalledProcessError(1, argv, error, "")
         if argv[1:3] == ["workspace", "report-metadata"]:
@@ -391,6 +421,7 @@ class CollectorTests(HerdrTestCase):
     def test_relationships_refresh_only_when_topology_changes(self):
         self.tables = [self.sample(), self.sample(), self.sample()]
         self.collector.cycle()
+        self.clock[0] += 3600.0
         self.collector.cycle()
         lookups = [argv for argv in self.calls if argv[1:3] == ["worktree", "list"]]
         self.assertEqual(len(lookups), 1)  # w3 has no worktree metadata
@@ -399,8 +430,35 @@ class CollectorTests(HerdrTestCase):
         self.collector.cycle()
         self.assertEqual(len([argv for argv in self.calls if argv[1:3] == ["worktree", "list"]]), 1)
 
+    def test_failed_worktree_lookup_is_retried_after_a_delay(self):
+        self.workspaces[1] = workspace("w2")
+        self.worktree_results = [
+            subprocess.TimeoutExpired(["herdr"], 10),  # w2, first cycle
+            None,  # w3: not a Git workspace
+            worktree_list("/r/.git", "w1", [("w1", False), ("w2", True)]),  # w2, retry
+            None,  # w3 again
+        ]
+        self.tables = [self.sample(), self.sample(), self.sample()]
+        self.assertEqual(self.collector.cycle()["w1"], "CPU --  MEM 100 MiB")
+        self.clock[0] += 2.0
+        self.assertEqual(self.collector.cycle()["w1"], "CPU 0%  MEM 100 MiB")
+        self.clock[0] += resource_usage.RELATIONSHIP_RETRY_SECONDS
+        self.assertEqual(self.collector.cycle()["w1"], "CPU 0%  MEM 301 MiB  total")
+        self.assertEqual(len([argv for argv in self.calls if argv[1:3] == ["worktree", "list"]]), 4)
+
+    def test_pane_with_failed_lookup_makes_workspace_unavailable(self):
+        self.panes.append({"pane_id": "w2:p2", "workspace_id": "w2"})
+        self.failing_panes = {"w2:p2"}
+        self.tables = [self.sample()]
+        texts = self.collector.cycle()
+        self.assertEqual(texts["w2"], "CPU --  MEM --")
+        self.assertEqual(texts["w1"], "CPU --  MEM --  total")
+        self.assertEqual(texts["w3"], "CPU --  MEM 1.0 GiB")
+
     def test_closing_pane_is_skipped(self):
         self.closed_panes = {"w3:p1"}
+        self.panes.append({"pane_id": "w2:p2", "workspace_id": "w2"})
+        self.closed_panes.add("w2:p2")
         self.tables = [self.sample()]
         texts = self.collector.cycle()
         self.assertEqual(texts["w3"], "CPU --  MEM --")
@@ -581,6 +639,20 @@ class WorkerTests(HerdrTestCase):
         self.assertEqual(self.stderr.getvalue().count("server busy"), 1)
         self.assertEqual(len(sleeps), 3)
         self.assertTrue(any("resource_usage=a" in argv for argv in self.reports()))
+
+    def test_same_failure_after_a_success_is_not_logged_again(self):
+        error = subprocess.CalledProcessError(1, ["herdr"], "", "server busy")
+        self.run_worker([error, {"w1": "a"}, error], cycles=3)
+        self.assertEqual(self.stderr.getvalue().count("server busy"), 1)
+
+    def test_log_is_emptied_when_it_passes_the_limit(self):
+        path = self.state / "worker.log"
+        with patch.object(resource_usage, "LOG_LIMIT_BYTES", 100):
+            with open(path, "a") as stream, contextlib.redirect_stderr(stream):
+                for number in range(20):
+                    resource_usage.log(f"failure {number}")
+        self.assertLessEqual(path.stat().st_size, 100 + len("resource-usage: failure 19\n"))
+        self.assertTrue(path.read_text().endswith("resource-usage: failure 19\n"))
 
     def test_worker_gives_up_after_repeated_failures(self):
         error = OSError("broken")

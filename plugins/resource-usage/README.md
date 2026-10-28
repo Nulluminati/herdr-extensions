@@ -21,7 +21,7 @@ A workspace's processes are the shell of each of its panes and every descendant 
 
 - **CPU** is the processor time those processes used in the last two seconds, on a whole-machine scale. 100% means every logical processor was busy. One busy processor on an 8-processor machine shows 12%.
 - **MEM** is the sum of the processes' resident set size (RSS). Below 1 GiB it shows whole MiB, above it GiB with one decimal place.
-- `--` means the value is unknown. Just after the worker starts, CPU shows `--` for one interval: it needs two samples to measure a rate. A workspace whose pane shells the plugin cannot find shows `CPU --  MEM --`.
+- `--` means the value is unknown. Just after the worker starts, CPU shows `--` for one interval: it needs two samples to measure a rate. A workspace shows `CPU --  MEM --` when the plugin cannot find any of its pane shells, or when Herdr does not answer for one of its panes. A pane that closes does not count as unknown.
 
 ### Worktree totals
 
@@ -89,9 +89,10 @@ A startup hook and a `workspace.focused` hook run `bin/resource_usage.py --ensur
 Every two seconds the worker:
 
 1. reads the workspaces and panes with `herdr api snapshot`;
-2. reads the process table once: `/proc/<pid>/stat` on Linux, `ps -A -o pid=,ppid=,lstart=,time=,rss=` on macOS;
+2. reads the process table once: `/proc/<pid>/stat` and `/proc/uptime` on Linux, `ps -A -o pid=,ppid=,lstart=,etime=,time=,rss=` on macOS;
 3. finds each pane's shell with `herdr pane process-info`, and keeps it until the shell changes;
-4. writes each workspace's text with `herdr workspace report-metadata --ttl-ms 8000`.
+4. asks `herdr worktree list` for a workspace whose worktree the snapshot does not give, when the open workspaces change, and again after 30 seconds when the question failed;
+5. writes each workspace's text with `herdr workspace report-metadata --ttl-ms 8000`.
 
 Each row expires eight seconds after its last update, so the rows go away when the worker stops. The worker exits when you disable collection, when Herdr disables or removes the plugin (checked every 30 seconds), when the Herdr server stops, or after one minute of failed cycles.
 
@@ -103,7 +104,7 @@ The plugin keeps its state in the plugin state folder, `~/.local/state/herdr/plu
 |---|---|
 | `preference` | `enabled` or `disabled` |
 | `worker-<session>.lock` | Held by the session's running worker |
-| `worker-<session>.log` | Errors from the worker; emptied at worker start when it is larger than 256 KiB |
+| `worker-<session>.log` | Errors from the worker; emptied when it is larger than 256 KiB |
 
 ## Known limits
 
@@ -111,6 +112,7 @@ The plugin keeps its state in the plugin state folder, `~/.local/state/herdr/plu
 - A process that leaves its pane's process tree, such as a daemon that detaches, does not count. Services that a pane only talks to, such as a database or a container, do not count.
 - RSS counts shared memory pages, such as shared libraries, once for each process that maps them. MEM can be more than the memory the workspace adds to the machine.
 - A process that starts and exits between two samples does not count.
+- A process missing from one sample, for example because it could not be read, counts from the next sample on. Its earlier processor time does not count.
 - Each Herdr session measures only its own panes on its own machine.
 - macOS support uses the documented `ps` fields but is not tested on a Mac yet.
 
