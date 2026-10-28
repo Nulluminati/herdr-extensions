@@ -57,6 +57,7 @@ NESTED_PAGE_SIZE = 50
 MAX_RATE_LIMIT_WAIT = 60.0
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 PAGE_INFO = "pageInfo { hasNextPage endCursor }"
+ATTACHMENT_FIELDS = "url title subtitle"
 # Nested connections are bounded to keep query complexity below Linear's
 # per-query limit. The first page comes inline; a follow-up query pages the rest.
 ISSUE_FIELDS = f"""
@@ -66,7 +67,7 @@ ISSUE_FIELDS = f"""
     project {{ id name }} parent {{ id identifier }}
     children(first: 100) {{ nodes {{ identifier }} {PAGE_INFO} }}
     assignee {{ id name }}
-    attachments(first: 50) {{ nodes {{ url }} {PAGE_INFO} }}
+    attachments(first: 50) {{ nodes {{ {ATTACHMENT_FIELDS} }} {PAGE_INFO} }}
 """
 STATE_FIELDS = "id name type position"
 
@@ -116,7 +117,7 @@ STATES_QUERY = nested_query("TeamStates", "teams", "states", STATE_FIELDS)
 PROJECT_TEAMS_QUERY = nested_query("ProjectTeams", "projects", "teams", "id key")
 LABELS_PAGE_QUERY = nested_query("IssueLabels", "issues", "labels", "id name")
 CHILDREN_QUERY = nested_query("IssueChildren", "issues", "children", "identifier")
-ATTACHMENTS_QUERY = nested_query("IssueAttachments", "issues", "attachments", "url")
+ATTACHMENTS_QUERY = nested_query("IssueAttachments", "issues", "attachments", ATTACHMENT_FIELDS)
 MY_ISSUES_QUERY = f"""query MyIssues($first: Int!, $after: String, $filter: IssueFilter) {{
     viewer {{ assignedIssues(first: $first, after: $after, filter: $filter) {{
         nodes {{ {ISSUE_FIELDS} }} {PAGE_INFO}
@@ -538,8 +539,7 @@ class LinearClient:
         issue["labels"] = self._rest(issue, "labels", "IssueLabels", LABELS_PAGE_QUERY, "issues")
         children = self._rest(issue, "children", "IssueChildren", CHILDREN_QUERY, "issues")
         issue["children"] = [child["identifier"] for child in children]
-        attachments = self._rest(issue, "attachments", "IssueAttachments", ATTACHMENTS_QUERY, "issues")
-        issue["attachments"] = [attachment["url"] for attachment in attachments]
+        issue["attachments"] = self._rest(issue, "attachments", "IssueAttachments", ATTACHMENTS_QUERY, "issues")
         return issue
 
 

@@ -12,7 +12,7 @@ from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink  # noqa: E402
 from herdboard.linear_pins import IssuePin  # noqa: E402
 from herdboard.store import Store  # noqa: E402
-from linear_data import PR_URL  # noqa: E402
+from linear_data import PR_URL, attachment  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_linear_source import DEAD, LinearEnvTestCase  # noqa: E402
 
@@ -352,15 +352,16 @@ class TextTests(LinearCliCase):
         self.assertIsNotNone(card["fetched_at"])
         # The issue ID is board-only, so the CLI card schema stays as it is.
         self.assertNotIn("issue_id", card)
+        self.assertNotIn("linear_attachments", card)
         self.assertNotIn("worktree", card)
 
     def test_pr_marker_needs_a_pull_request_of_this_repository(self):
         cards = {c["ref"]: c["pr"] for c in self.listing()["cards"]}
         self.assertEqual(cards, {"ENG-1": True, "ENG-2": False, "ENG-3": False})
         self.fixtures["issues"][1]["attachments"]["nodes"] = [
-            {"url": "https://github.com/acme/other/pull/1"}, {"url": PR_URL.replace("API", "api")}]
+            attachment("https://github.com/acme/other/pull/1"), attachment(PR_URL.replace("API", "api"))]
         self.assertTrue({c["ref"]: c["pr"] for c in self.listing()["cards"]}["ENG-2"])
-        self.fixtures["issues"][1]["attachments"]["nodes"] = [{"url": "https://github.com/acme/other/pull/1"}]
+        self.fixtures["issues"][1]["attachments"]["nodes"] = [attachment("https://github.com/acme/other/pull/1")]
         self.assertFalse({c["ref"]: c["pr"] for c in self.listing()["cards"]}["ENG-2"])
 
     def test_show_text(self):

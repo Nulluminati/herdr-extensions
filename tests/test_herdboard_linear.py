@@ -43,7 +43,7 @@ def issue(i):
             "parent": {"id": "parent", "identifier": "T0-99"} if i else None,
             "children": {"nodes": [{"identifier": "T0-100"}] if i else []},
             "assignee": {"id": "u1", "name": "Nate"},
-            "attachments": {"nodes": [{"url": "https://github.com/acme/api/pull/1"}]}}
+            "attachments": {"nodes": [{"url": "https://github.com/acme/api/pull/1", "title": "Fix login", "subtitle": "Open"}]}}
 
 
 RECENT_OR = [{"completedAt": {"null": True}}, {"completedAt": {"gte": "-P14D"}}]
@@ -138,7 +138,7 @@ class LinearTests(unittest.TestCase):
             mapped = copy.deepcopy(original)
             mapped["labels"] = original["labels"]["nodes"]
             mapped["children"] = [c["identifier"] for c in original["children"]["nodes"]]
-            mapped["attachments"] = [a["url"] for a in original["attachments"]["nodes"]]
+            mapped["attachments"] = original["attachments"]["nodes"]
             expected.append(mapped)
         self.assertEqual(result, expected)
         self.assert_pages("ProjectIssues")
@@ -148,11 +148,12 @@ class LinearTests(unittest.TestCase):
                 self.assertIn("branchName", request["query"])
             self.assertNotIn("gitBranchName", request["query"])
 
-    def test_attachment_urls_paginate(self):
-        urls = [f"https://github.com/acme/api/pull/{i}" for i in range(5)]
-        self.fixtures["issues"][0]["attachments"]["nodes"] = [{"url": url} for url in urls]
+    def test_attachments_paginate(self):
+        nodes = [{"url": f"https://github.com/acme/api/pull/{i}", "title": f"PR {i}", "subtitle": None}
+                 for i in range(5)]
+        self.fixtures["issues"][0]["attachments"]["nodes"] = nodes
         result = self.client.project_issues("p0")
-        self.assertEqual(result[0]["attachments"], urls)
+        self.assertEqual(result[0]["attachments"], nodes)
         requests = [r for r in self.fake.requests if r["operationName"] == "IssueAttachments"
                     and r["variables"]["id"] == "i0"]
         self.assertEqual([r["variables"]["after"] for r in requests], ["2", "4"])
@@ -411,7 +412,8 @@ class LinearTests(unittest.TestCase):
         found = self.client.issue("T0-2")
         self.assertEqual(found["id"], "i2")
         self.assertEqual(found["labels"], [{"id": "l0", "name": "repo:api"}])
-        self.assertEqual(found["attachments"], ["https://github.com/acme/api/pull/1"])
+        self.assertEqual(found["attachments"], [
+            {"url": "https://github.com/acme/api/pull/1", "title": "Fix login", "subtitle": "Open"}])
         self.assertEqual(self.fake.requests[0]["variables"], {"id": "T0-2"})
 
     def test_issue_not_found(self):

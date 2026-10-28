@@ -970,6 +970,25 @@ def attachment_lines(files: list[dict]) -> Text:
     return text
 
 
+def link_lines(links: list[dict]) -> Text:
+    """One entry per Linear attachment: its title and subtitle, then its URL in a dim line below.
+    An attachment without its own title shows only the URL."""
+    text = Text()
+    for index, link in enumerate(links):
+        if text:
+            text.append("\n")
+        start = len(text)
+        if link["title"] == link["url"]:
+            text.append(link["url"])
+        else:
+            text.append(link["title"])
+            if link["subtitle"]:
+                text.append(f" · {link['subtitle']}", style="dim")
+            text.append(f"\n  {link['url']}", style="dim")
+        text.stylize(Style(meta={"@click": f"screen.open_link({index})"}), start, len(text))
+    return text
+
+
 class DetailScreen(ModalBase):
     """A card in full: title, tags and date, where it lives, its details, linked notes and attachments."""
 
@@ -987,6 +1006,7 @@ class DetailScreen(ModalBase):
         self.notes = notes or []
         self.entries = log or []
         self.files = files or []
+        self.links = card.linear_attachments
         self.tag_style = tag_style
         self.icon_style = icon_style
         self.cursor = 0
@@ -1009,7 +1029,7 @@ class DetailScreen(ModalBase):
         if action == "toggle":
             return bool(self.items)
         if action == "open_attachment":
-            return bool(self.files)
+            return bool(self.files or self.links)
         if action == "edit":
             return self.card.source != "linear"
         return True
@@ -1055,6 +1075,11 @@ class DetailScreen(ModalBase):
         """A click on an attachment line opens that attachment."""
         if 0 <= index < len(self.files):
             self.open_attachment(self.files[index])
+
+    def action_open_link(self, index: int) -> None:
+        """A click on a Linear attachment opens its URL."""
+        if 0 <= index < len(self.links):
+            self.open_url(self.links[index]["url"])
 
     def _title_parts(self) -> tuple[str, list[str], str | None]:
         card = self.card
@@ -1153,12 +1178,18 @@ class DetailScreen(ModalBase):
                 # A text drag that ends on an attachment line would also open it.
                 block.ALLOW_SELECT = False
                 yield block
+            if self.links:
+                block = RichStatic(link_lines(self.links), id="detail-links", classes="detail-block")
+                block.border_title = "Linear attachments"
+                # A text drag that ends on an attachment line would also open it.
+                block.ALLOW_SELECT = False
+                yield block
             if self.entries:
                 block = RichStatic(log_lines(self.entries), id="detail-log", classes="detail-block")
                 block.border_title = "Log"
                 yield block
             hint = "j/k: select item · space: check · " if self.items else ""
-            if self.files:
+            if self.files or self.links:
                 hint += "o: open attachment · "
             yield Label(f"{hint}e: edit · escape: close", classes="dim")
 
@@ -1166,16 +1197,34 @@ class DetailScreen(ModalBase):
         self.dismiss("edit")
 
     def action_open_attachment(self) -> None:
-        if not self.files:
+        # The card's own files first, then the Linear attachments, in the order of the detail.
+        choices = self.files + [{"name": link["title"], "url": link["url"]} for link in self.links]
+        if not choices:
             self.notify("The card has no attachments", severity="warning")
-        elif len(self.files) == 1:
-            self.open_attachment(self.files[0])
+        elif len(choices) == 1:
+            self.open_attachment(choices[0])
         else:
-            self.app.push_screen(AttachmentChoiceScreen(self.files),
+            self.app.push_screen(AttachmentChoiceScreen(choices),
                                  lambda entry: self.open_attachment(entry) if entry else None)
 
+    def open_url(self, url: str) -> None:
+        """Open a Linear attachment in the system's default browser."""
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        try:
+            process = subprocess.Popen([opener, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.PIPE, start_new_session=True)
+        except OSError as error:
+            self.notify(f"Cannot open {url} with {opener}: {error}", severity="error")
+            return
+        self.notify(f"Opening {url} with {opener}")
+        threading.Thread(target=watch_opener, args=(self.app, url, opener, process), daemon=True).start()
+
     def open_attachment(self, entry: dict) -> None:
-        """Show a text attachment in the board. Another file opens in the system's default application."""
+        """Show a text attachment in the board. Another file opens in the system's default application,
+        and a Linear attachment in the default browser."""
+        if "url" in entry:
+            self.open_url(entry["url"])
+            return
         path = Path(entry["path"])
         try:
             text = attachments.view_text(path)

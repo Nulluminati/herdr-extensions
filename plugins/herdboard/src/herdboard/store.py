@@ -71,6 +71,8 @@ class CardView:
     state: str | None = None
     team: str | None = None
     pr: bool = False
+    # A Linear issue's attachments, each with its title, subtitle and URL.
+    linear_attachments: list[dict] = field(default_factory=list)
     # Linear's manual order inside a column (lowest first); None for todos.
     sort_order: float | None = None
     read_only: bool = False

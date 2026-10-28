@@ -39,6 +39,17 @@ def has_pull_request(urls: list[str], identities: set[str]) -> bool:
     return False
 
 
+def attachment_links(attachments: list) -> list[dict]:
+    """The title, subtitle and URL of each attachment. A cache from before titles holds only URLs."""
+    links = []
+    for entry in attachments:
+        if isinstance(entry, str):
+            entry = {"url": entry}
+        links.append({"title": entry.get("title") or entry["url"], "subtitle": entry.get("subtitle"),
+                      "url": entry["url"]})
+    return links
+
+
 def issue_card(
     config: Config,
     issue: dict,
@@ -54,6 +65,7 @@ def issue_card(
     project = issue.get("project")
     parent = issue.get("parent")
     kind, labels = type_and_labels(config, [label["name"] for label in issue["labels"]])
+    links = attachment_links(issue.get("attachments", []))
     return CardView(
         ref=issue["identifier"],
         issue_id=issue.get("id"),
@@ -70,7 +82,8 @@ def issue_card(
         url=issue.get("url"),
         state=state["name"],
         team=issue["team"]["key"] if issue.get("team") else None,
-        pr=has_pull_request(issue.get("attachments", []), identities),
+        pr=has_pull_request([link["url"] for link in links], identities),
+        linear_attachments=links,
         sort_order=issue.get("sortOrder"),
         read_only=True,
         fetched_at=fetched_at.isoformat(),

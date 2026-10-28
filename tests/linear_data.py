@@ -24,6 +24,11 @@ LABELS = [
 PR_URL = "https://github.com/Acme/API/pull/7"
 
 
+def attachment(url, title=None, subtitle=None):
+    """A Linear attachment node: Linear requires a title, so it defaults to the URL."""
+    return {"url": url, "title": title or url, "subtitle": subtitle}
+
+
 def make_issue(number, project="p-plat", state=("Todo", "unstarted"), labels=(), assignee="u1",
                attachments=(), title=None, description="Line one\nLine two", due="2026-10-20"):
     projects = {p["id"]: {"id": p["id"], "name": p["name"]} for p in PROJECTS}
@@ -39,7 +44,7 @@ def make_issue(number, project="p-plat", state=("Todo", "unstarted"), labels=(),
         "project": projects.get(project),
         "parent": None, "children": {"nodes": []},
         "assignee": {"id": assignee, "name": "x"} if assignee else None,
-        "attachments": {"nodes": [{"url": url} for url in attachments]},
+        "attachments": {"nodes": [attachment(url) for url in attachments]},
     }
 
 

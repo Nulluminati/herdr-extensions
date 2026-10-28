@@ -361,7 +361,7 @@ class CardTests(unittest.TestCase):
     def flat(self, issue):
         issue = dict(issue)
         issue["labels"] = issue["labels"]["nodes"]
-        issue["attachments"] = [a["url"] for a in issue["attachments"]["nodes"]]
+        issue["attachments"] = issue["attachments"]["nodes"]
         return issue
 
     def test_fields(self):
@@ -410,6 +410,23 @@ class CardTests(unittest.TestCase):
         self.assertTrue(self.card(issue, {"github.com/acme/api"}).pr)
         self.assertFalse(self.card(issue, {"github.com/acme/other"}).pr)
         self.assertFalse(self.card(issue, set()).pr)
+
+    def test_the_card_keeps_the_attachments(self):
+        issue = self.flat(linear_data.make_issue(1))
+        issue["attachments"] = [linear_data.attachment(linear_data.PR_URL, "Fix login", "Open"),
+                                linear_data.attachment("https://example.com/spec")]
+        self.assertEqual(self.card(issue).linear_attachments, [
+            {"title": "Fix login", "subtitle": "Open", "url": linear_data.PR_URL},
+            {"title": "https://example.com/spec", "subtitle": None, "url": "https://example.com/spec"}])
+
+    def test_a_cached_attachment_url_without_a_title_shows_the_url(self):
+        # Caches written before attachments had titles hold only their URLs.
+        issue = self.flat(linear_data.make_issue(1))
+        issue["attachments"] = [linear_data.PR_URL]
+        card = self.card(issue, {"github.com/acme/api"})
+        self.assertEqual(card.linear_attachments,
+                         [{"title": linear_data.PR_URL, "subtitle": None, "url": linear_data.PR_URL}])
+        self.assertTrue(card.pr)
 
     def test_pr_urls(self):
         ident = {"github.com/acme/api"}

@@ -3,16 +3,20 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard.board import DetailScreen, HerdboardApp  # noqa: E402
+from herdboard import board  # noqa: E402
+from herdboard.board import AttachmentChoiceScreen, DetailScreen, HerdboardApp  # noqa: E402
 from herdboard.linear_links import ProjectLink  # noqa: E402
 from herdboard.linear_source import LinearSource  # noqa: E402
 from herdboard.linear_writes import LinearWriter  # noqa: E402
 from herdboard.views import Views  # noqa: E402
+from linear_data import PR_URL, attachment  # noqa: E402
+from test_herdboard_attachment_board import fake_opener  # noqa: E402
 from test_herdboard_board import SIZE, BoardTestCase, fill, settle  # noqa: E402
 from test_herdboard_linear_source import DEAD, LinearEnvTestCase  # noqa: E402
 
@@ -238,6 +242,73 @@ class LinearBoardTests(LinearBoardCase):
             body = screen.query_one("#detail-body").plain
             self.assertIn("Line one", body)
             self.assertIn("Line two", body)
+
+    async def open_issue(self, pilot, ref):
+        await settle(pilot)
+        self.select(pilot.app, ref)
+        await pilot.press("enter")
+        await pilot.pause()
+        self.assertIsInstance(pilot.app.screen, DetailScreen)
+
+    async def test_the_issue_detail_lists_the_linear_attachments(self):
+        issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
+        issue["attachments"]["nodes"] = [attachment(PR_URL, "Fix login", "Open"),
+                                         attachment("https://example.com/spec")]
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await self.open_issue(pilot, "ENG-1")
+            block = app.screen.query_one("#detail-links")
+            self.assertEqual(block.border_title, "Linear attachments")
+            self.assertEqual(block.plain.splitlines(), [
+                "Fix login · Open", f"  {PR_URL}", "https://example.com/spec"])
+            self.assertIn("o: open attachment", app.screen.query(".dim").last().render().plain)
+
+    async def test_an_issue_without_attachments_has_no_block(self):
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await self.open_issue(pilot, "ENG-2")
+            self.assertEqual(list(app.screen.query("#detail-links")), [])
+            self.assertNotIn("o: open attachment", app.screen.query(".dim").last().render().plain)
+
+    async def test_o_opens_the_only_linear_attachment_in_the_browser(self):
+        app = self.make_linear_app()
+        popen = fake_opener()
+        with mock.patch.object(board.subprocess, "Popen", popen), \
+                mock.patch.object(board.sys, "platform", "linux"):
+            async with app.run_test(size=SIZE) as pilot:
+                await self.open_issue(pilot, "ENG-1")
+                await pilot.press("o")
+                await settle(pilot)
+                self.assertIsInstance(app.screen, DetailScreen)
+        self.assertEqual(popen.call_args.args[0], ["xdg-open", PR_URL])
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
+    async def test_o_with_several_linear_attachments_asks_which_one(self):
+        issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
+        issue["attachments"]["nodes"] = [attachment(PR_URL, "Fix login"), attachment("https://example.com/spec")]
+        app = self.make_linear_app()
+        popen = fake_opener()
+        with mock.patch.object(board.subprocess, "Popen", popen), \
+                mock.patch.object(board.sys, "platform", "linux"):
+            async with app.run_test(size=SIZE) as pilot:
+                await self.open_issue(pilot, "ENG-1")
+                await pilot.press("o")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, AttachmentChoiceScreen)
+                await pilot.press("down", "enter")
+                await settle(pilot)
+        self.assertEqual(popen.call_args.args[0], ["xdg-open", "https://example.com/spec"])
+
+    async def test_a_click_on_a_linear_attachment_opens_it(self):
+        app = self.make_linear_app()
+        popen = fake_opener()
+        with mock.patch.object(board.subprocess, "Popen", popen), \
+                mock.patch.object(board.sys, "platform", "darwin"):
+            async with app.run_test(size=SIZE) as pilot:
+                await self.open_issue(pilot, "ENG-1")
+                app.screen.action_open_link(0)
+                await settle(pilot)
+        self.assertEqual(popen.call_args.args[0], ["open", PR_URL])
 
     async def test_add_always_adds_a_todo(self):
         app = self.make_linear_app("mine")
