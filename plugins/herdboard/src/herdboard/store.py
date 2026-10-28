@@ -86,6 +86,8 @@ class CardView:
     # Board-only start status: a worktree still there after Done, and the pull request state.
     worktree_left: bool = False
     pr_state: str | None = None
+    # Board-only: the URL of the card's pull request, from its start record.
+    pr_url: str | None = None
     # Board-only: the kind of agent that `start` started for the card, while its worktree exists.
     agent: str | None = None
     # Board-only: the kind of agent that reviews the card now, while an agent review runs.

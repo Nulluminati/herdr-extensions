@@ -991,7 +991,8 @@ def link_lines(links: list[dict]) -> Text:
 
 
 class DetailScreen(ModalBase):
-    """A card in full: title, tags and date, where it lives, its details, linked notes and attachments."""
+    """A card in full: title, tags and date, where it lives, its details, linked notes, its pull request
+    and attachments."""
 
     BINDINGS = [
         Binding("e", "edit", "Edit"),
@@ -1030,7 +1031,7 @@ class DetailScreen(ModalBase):
         if action == "toggle":
             return bool(self.items)
         if action == "open_attachment":
-            return bool(self.files or self.links)
+            return bool(self.card.pr_url or self.files or self.links)
         if action == "edit":
             return self.card.source != "linear"
         return True
@@ -1076,6 +1077,11 @@ class DetailScreen(ModalBase):
         """A click on an attachment line opens that attachment."""
         if 0 <= index < len(self.files):
             self.open_attachment(self.files[index])
+
+    def action_open_pr(self) -> None:
+        """A click on the pull request link opens it."""
+        if self.card.pr_url:
+            self.open_url(self.card.pr_url)
 
     def action_open_link(self, index: int) -> None:
         """A click on a Linear attachment opens its URL."""
@@ -1173,6 +1179,13 @@ class DetailScreen(ModalBase):
                         yield Label("Note not found", classes="dim")
                     else:
                         yield Markdown(content)
+            if self.card.pr_url:
+                link = Text(self.card.pr_url, style=Style(meta={"@click": "screen.open_pr"}))
+                block = RichStatic(link, id="detail-pr", classes="detail-block")
+                block.border_title = icon_label("pr", "Pull request", self.icon_style)
+                # A text drag that ends on the link would also open it.
+                block.ALLOW_SELECT = False
+                yield block
             if self.files:
                 block = RichStatic(attachment_lines(self.files), id="detail-files", classes="detail-block")
                 block.border_title = icon_label("attachment", "Attachments", self.icon_style)
@@ -1190,7 +1203,7 @@ class DetailScreen(ModalBase):
                 block.border_title = "Log"
                 yield block
             hint = "j/k: select item · space: check · " if self.items else ""
-            if self.files or self.links:
+            if self.card.pr_url or self.files or self.links:
                 hint += "o: open attachment · "
             yield Label(f"{hint}e: edit · escape: close", classes="dim")
 
@@ -1198,8 +1211,9 @@ class DetailScreen(ModalBase):
         self.dismiss("edit")
 
     def action_open_attachment(self) -> None:
-        # The card's own files first, then the Linear attachments, in the order of the detail.
-        choices = self.files + [{"name": link["title"], "url": link["url"]} for link in self.links]
+        # The pull request, the card's own files, then the Linear attachments, in the order of the detail.
+        choices = [{"name": "Pull request", "url": self.card.pr_url}] if self.card.pr_url else []
+        choices += self.files + [{"name": link["title"], "url": link["url"]} for link in self.links]
         if not choices:
             self.notify("The card has no attachments", severity="warning")
         elif len(choices) == 1:
@@ -1209,8 +1223,8 @@ class DetailScreen(ModalBase):
                                  lambda entry: self.open_attachment(entry) if entry else None)
 
     def open_url(self, url: str) -> None:
-        """Open a Linear attachment in the system's default browser. Linear integrations set the URL,
-        so only a web address opens: another scheme could start a local application."""
+        """Open a pull request or a Linear attachment in the system's default browser. Linear integrations
+        set the URL, so only a web address opens: another scheme could start a local application."""
         if urlsplit(url).scheme.lower() not in ("http", "https"):
             self.notify(f"Cannot open {url}: only http and https addresses open", severity="error")
             return

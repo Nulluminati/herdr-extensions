@@ -331,6 +331,8 @@ Attachments hold documents that are too large for the card text, such as a speci
 
 The card detail on the board lists the attachments with their sizes. Press `o` to open one. With more than one attachment, you choose it from a list. herdboard shows a UTF-8 text file of 1 MB or less itself, and draws a `.md` file as Markdown. Other files open in the default application, with `xdg-open` on Linux or `open` on macOS.
 
+When the card has a pull request, the detail shows its link above the attachments. A click or `o` opens it in the default browser. With attachments too, `o` lists the pull request first.
+
 The detail of a Linear card also lists the issue's Linear attachments, such as pull requests and links, with their titles and URLs. `o` and a click open them in the default browser. Only `http` and `https` addresses open. herdboard shows them only: `show` and `--json` leave them out, and `attach` does not change them.
 
 When `start` starts the work agent, its brief includes the `plan.md` attachment in full, and lists the other attachments by path. `review` and a rebase conflict give a brief only to a new agent, when the card's agent is gone. A running agent gets no new brief. An agent review gets the path of each attachment, and checks the work against the plan.

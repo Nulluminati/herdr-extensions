@@ -604,7 +604,8 @@ def validate_branch(branch):
 
 def mark_removed(cards):
     """Set the board-only start status of cards: a removed or existing worktree and its agent, a worktree left after Done,
-    the PR state, a running agent review, a pull request description that an agent writes, and the last agent review."""
+    the PR state and URL, a running agent review, a pull request description that an agent writes, and the last agent
+    review."""
     records = _read(state_dir() / "starts.json")
     for card in cards:
         record = records.get(card.ref)
@@ -618,6 +619,7 @@ def mark_removed(cards):
         card.agent = record.get("agent") if card.worktree else None
         card.worktree_left = bool(path and card.checked and Path(path).exists())
         card.pr_state = record.get("pr_state") if record.get("pr_url") else None
+        card.pr_url = record.get("pr_url") or None
         review = record.get("agent_review")
         card.agent_review = review.get("kind") if isinstance(review, dict) else None
         card.pr_writing = isinstance(record.get("pr_write"), dict)
