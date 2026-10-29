@@ -116,6 +116,7 @@ Write `{folder / 'pr.md'}`. Its first line is the title. The rest is the descrip
   When nothing shows testing, say that the change has no tests.
 - Do not name the tools, the agent or the task card. Do not add a Linear link.
 - Do not run `gh`, push, or change any file other than `{folder / 'pr.md'}`.
+- Do not run the project's code, tests or builds. Do not start a server. Do not use `terminal-browser`.
 - To change the description after the pull request opens, edit `{folder / 'pr.md'}` and run
   `herdboard pr-sync {ref}`.
 """
@@ -126,7 +127,8 @@ def prompt_text(folder: Path, ref: str) -> str:
             f"and follow it. Write the result to {folder / 'pr.md'} and nowhere else. "
             f"To change the description after the pull request opens, edit {folder / 'pr.md'} "
             f"and run `herdboard pr-sync {ref}`. "
-            "Do not run gh, push, or change code.")
+            "Do not run gh, push, or change code. Do not run the project's code, tests or builds. "
+            "Do not use terminal-browser.")
 
 
 def check_running(ref: str, record: dict) -> None:

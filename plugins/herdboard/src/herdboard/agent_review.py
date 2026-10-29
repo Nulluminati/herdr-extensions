@@ -65,7 +65,8 @@ def reviewer_arguments(kind: str, prompt: str, folder: Path, repository: Path, m
 
     `browser` lets terminal-browser run outside the sandbox: the reviewer may check pages, HTML files
     and servers that already run. The PR writer starts without it. Codex runs terminal-browser outside
-    its sandbox by a rule in the user's Codex config, so the prompt alone decides for Codex."""
+    its sandbox by a rule in the user's Codex config, so for Codex the prompt decides: the review
+    request has the browser instructions, and the PR writer request forbids the browser."""
     if kind == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return [*sandbox.pi_reviewer_options(folder, repository, browser, hunk=False), *options, "--", prompt]

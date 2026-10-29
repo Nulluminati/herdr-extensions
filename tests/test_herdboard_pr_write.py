@@ -130,7 +130,9 @@ class RequestTests(PrWriteTestCase):
                      "Chose a fixed timeout over a setting.",
                      "## Why", "## What changed", "## Trade-offs", "## Testing", "humanizer",
                      "Do not name the tools", "Do not add a Linear link", "Do not run `gh`",
-                     "Describe only the testing that the notes or the change show", "you did not run"):
+                     "Describe only the testing that the notes or the change show", "you did not run",
+                     "Do not run the project's code, tests or builds", "Do not start a server",
+                     "Do not use `terminal-browser`"):
             self.assertIn(part, text)
 
     def test_the_title_always_follows_one_conventional_commit_guide(self):
@@ -374,6 +376,8 @@ class StartedTimeTests(PrWriteTestCase):
         prompt = pr_write.prompt_text(self.folder, self.card.ref)
         self.assertIn(f"herdboard pr-sync {self.card.ref}", prompt)
         self.assertIn("Do not run gh", prompt)
+        self.assertIn("Do not run the project's code, tests or builds", prompt)
+        self.assertIn("Do not use terminal-browser", prompt)
 
 
 class SyncTests(PrWriteTestCase):

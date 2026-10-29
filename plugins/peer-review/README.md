@@ -56,7 +56,7 @@ Each review has a folder, `~/.local/state/peer-review/<timestamp>/`. A second re
 
 ## Reviewer permissions
 
-Each reviewer may run any shell command inside an operating system sandbox. The sandbox reads the whole disk, writes only the review folder, blocks writes to the repository, and lets the shell reach only GitHub (`github.com`, its subdomains and `*.githubusercontent.com`). No approval prompts appear: nobody answers them in the reviewer pane. The request tells the reviewer not to run the project's code and not to change Git state. The plugin passes the sandbox for one run; it does not change your agent config.
+Each reviewer may run any shell command inside an operating system sandbox. The sandbox reads the whole disk, writes only the review folder, blocks writes to the repository, and lets the shell reach only GitHub (`github.com`, its subdomains and `*.githubusercontent.com`). No approval prompts appear: nobody answers them in the reviewer pane. The request tells the reviewer not to run the project's code, not to change Git state and not to use `terminal-browser`. The plugin passes the sandbox for one run; it does not change your agent config.
 
 - Claude runs in `dontAsk` mode with a `--settings` sandbox (`failIfUnavailable`, no unsandboxed commands). Its allowed tools are `Read`, `Grep`, `Glob`, `Bash`, `WebFetch`, `WebSearch`, `Skill`, the `context7` and `grep_app` MCP servers, and `Edit` and `Write` in the review folder.
 - pi runs with `--approval-mode off` and a `--sandbox` policy. Its tools are `read`, `grep`, `find`, `ls`, `bash`, `write`, `web_fetch`, `web_search`, the context7 tools and `code_search`. These flags and tools come from pi-extensions (`worker-sandbox` and `approval-mode`), which must be installed.

@@ -197,6 +197,7 @@ Do not change any file in the repository.
 You may run any read-only command, such as `git log`, `git show`, `grep` or `gh`.
 Do not run the project's code, tests or builds from the shell. Do not start a server.
 Do not change Git state: no checkout, commit, reset or push.
+Do not use `terminal-browser`.
 
 Write your findings to `{review / "findings.md"}` in this format:
 

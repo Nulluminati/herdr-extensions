@@ -154,6 +154,7 @@ class PeerReviewTests(unittest.TestCase):
         self.assertIn("You may run any read-only command", request)
         self.assertIn("Do not run the project's code, tests or builds", request)
         self.assertIn("Do not change Git state", request)
+        self.assertIn("Do not use `terminal-browser`", request)
 
     def test_request_starts_a_sandboxed_pi_next_to_claude(self):
         (self.repository / "app.py").write_text("print('two')\n")
