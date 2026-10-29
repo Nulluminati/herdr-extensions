@@ -3886,7 +3886,7 @@ class AutomationFormScreen(ModalBase):
         agents = [("default", "default"), *((agent, agent) for agent in AGENTS)]
         levels = self._thinking_options(self.agent)
         thinking = item.thinking if item and item.thinking else "default"
-        with Vertical(classes="dialog card-form"):
+        with VerticalScroll(classes="dialog card-form automation-form", can_focus=False):
             yield Static(Text(self.heading), id="automation-heading")
             yield titled(Input(value=item.title if item else "", placeholder="What each run does",
                                id="automation-title", select_on_focus=False), "Title")
@@ -3910,9 +3910,10 @@ class AutomationFormScreen(ModalBase):
                 yield titled(Select(levels, allow_blank=False,
                                     value=thinking if thinking in (value for _, value in levels) else "default",
                                     id="automation-thinking"), "Thinking")
-            yield Checkbox("Tell the agent it may merge other PRs that pass checks and need no change "
-                           "(instruction only, no extra permissions)",
+            yield Checkbox("Tell the agent it may merge other PRs",
                            value=bool(item and item.may_merge_prs), id="automation-merge")
+            yield Label("Only PRs that pass checks and need no change "
+                        "(instruction only, no extra permissions)", id="automation-merge-help", classes="dim")
             yield titled(TextArea(item.body if item else "", id="automation-body",
                                   placeholder="What the agent does on each run"), "Details")
             yield error
@@ -4458,7 +4459,11 @@ class HerdboardApp(App):
     #automation-thinking > SelectCurrent { border: none; }
     #automation-board:focus-within, #automation-type:focus-within, #automation-agent:focus-within,
     #automation-thinking:focus-within { border: round $primary; }
-    #automation-schedule, #automation-tags, #automation-model { width: 2fr; }
+    .automation-form { width: 120; max-width: 95%; scrollbar-size-vertical: 1; }
+    #automation-board { width: 2fr; }
+    #automation-schedule { width: 1fr; }
+    #automation-tags, #automation-model { width: 2fr; }
+    #automation-body { height: 7; }
     .config Select { border: round $surface-lighten-2; height: auto; }
     .config Select > SelectCurrent { border: none; }
     .config Select:focus-within { border: round $primary; }
@@ -4491,7 +4496,7 @@ class HerdboardApp(App):
     #pr-list { height: 1fr; scrollbar-size-vertical: 1; }
     #automation-status { height: 1; padding: 0 1; color: $text-muted; }
     #automation-list { height: 1fr; scrollbar-size-vertical: 1; }
-    #automation-merge { border: none; padding: 0 1; }
+    #automation-merge { width: 100%; border: none; padding: 0 1; }
     .pr-row { height: auto; padding: 0 1; }
     """ + pr_row_css() + """
     .pr-row.selected { background: $accent 20%; }

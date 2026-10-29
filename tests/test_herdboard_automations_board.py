@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/herdboard/src"))
+from textual.containers import VerticalScroll  # noqa: E402
 from textual.widgets import Input, Select, TextArea  # noqa: E402
 
 from herdboard import automations, board  # noqa: E402
@@ -232,6 +233,48 @@ class ListTests(AutomationsBoardTestCase):
 
 
 class FormTests(AutomationsBoardTestCase):
+    async def test_long_board_names_fit_the_choice_and_dropdown(self):
+        name = "nulluminati-herdr-extensions"
+        app = self.app()
+        async with app.run_test(size=(160, 40)) as pilot:
+            await self.settle(app, pilot)
+            form = AutomationFormScreen("Add an automation", ["inbox", name], self.store.config.types,
+                                        Mock(), self.store.config)
+            app.push_screen(form)
+            await pilot.pause()
+            select = form.query_one("#automation-board", Select)
+            select.value = name
+            await pilot.pause()
+            # Leave room for the dropdown arrow as well as the complete board name.
+            self.assertGreaterEqual(select.content_size.width, len(name) + 4)
+            select.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            options = select.query_one("SelectOverlay")
+            self.assertGreaterEqual(options.content_size.width, len(name))
+            await pilot.resize_terminal(80, 24)
+            await pilot.pause()
+            self.assertGreaterEqual(select.content_size.width, len(name) + 4)
+            self.assertGreaterEqual(options.content_size.width, len(name))
+
+    async def test_small_terminal_can_reach_the_end_of_the_form(self):
+        app = self.app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            form = await self.open_form(app, pilot)
+            dialog = form.query_one(".dialog", VerticalScroll)
+            self.assertLessEqual(dialog.region.right, 80)
+            self.assertLessEqual(dialog.region.bottom, 24)
+            self.assertGreater(dialog.max_scroll_y, 0)
+            form.query_one("#automation-body", TextArea).focus()
+            await pilot.pause()
+            self.assertTrue(dialog.scrollable_content_region.contains_region(
+                form.query_one("#automation-body", TextArea).region))
+            hint = list(form.query(".dim"))[-1]
+            hint.scroll_visible(animate=False, immediate=True)
+            await pilot.pause()
+            self.assertGreater(dialog.scroll_y, 0)
+            self.assertTrue(dialog.scrollable_content_region.contains_region(hint.region))
+
     async def test_add_validates_the_schedule_then_saves(self):
         app = self.app()
         async with app.run_test(size=(160, 40)) as pilot:
@@ -348,11 +391,14 @@ class FormTests(AutomationsBoardTestCase):
 
     async def test_the_merge_checkbox_says_it_is_an_instruction_only(self):
         app = self.app()
-        async with app.run_test(size=(160, 40)) as pilot:
+        async with app.run_test(size=(80, 24)) as pilot:
             form = await self.open_form(app, pilot)
-            label = str(form.query_one("#automation-merge").label)
+            checkbox = form.query_one("#automation-merge")
+            label = str(checkbox.label)
             self.assertIn("Tell the agent", label)
-            self.assertIn("no extra permissions", label)
+            self.assertGreaterEqual(checkbox.content_size.width, len(label) + 4)
+            self.assertTrue(form.query_one(".dialog").content_region.contains_region(checkbox.region))
+            self.assertIn("no extra permissions", str(form.query_one("#automation-merge-help").render()))
 
     async def test_edit_keeps_the_fields_and_saves_changes(self):
         added = self.add(tags=["security"], may_merge_prs=True, body="Look")
