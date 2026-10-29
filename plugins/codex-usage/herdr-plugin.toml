@@ -16,6 +16,11 @@ command = ["python3", "bin/codex_usage.py"]
 on = "pane.agent_status_changed"
 command = ["python3", "bin/codex_usage.py"]
 
+# A new agent in a pane where Codex ran gets the old Codex values cleared.
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "bin/codex_usage.py"]
+
 [[actions]]
 id = "refresh"
 title = "Codex usage: refresh"

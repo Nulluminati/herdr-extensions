@@ -10,6 +10,7 @@ price list, so Codex and pi price a model the same way.
 
 With no event it covers every Codex pane (startup and the refresh action).
 Driven by a Herdr event it covers only the pane that the event names.
+A pane that no longer runs Codex has its Codex values cleared.
 """
 
 import json
@@ -61,7 +62,7 @@ def find_pane_id(value) -> str | None:
     return None
 
 
-def codex_agents() -> list[dict]:
+def agents_in_scope() -> list[dict]:
     event = os.environ.get("HERDR_PLUGIN_EVENT_JSON")
     wanted = None
     if event:
@@ -73,8 +74,12 @@ def codex_agents() -> list[dict]:
             return []
     agents = herdr_json("agent", "list").get("result", {}).get("agents") or []
     return [agent for agent in agents
-            if agent.get("agent") == "codex" and isinstance(agent.get("pane_id"), str)
-            and wanted in (None, agent["pane_id"])]
+            if isinstance(agent.get("pane_id"), str) and wanted in (None, agent["pane_id"])]
+
+
+def shows_codex_values(agent: dict) -> bool:
+    tokens = agent.get("tokens")
+    return isinstance(tokens, dict) and (CONTEXT_TOKEN in tokens or COST_TOKEN in tokens)
 
 
 def session_log(agent: dict) -> Path | None:
@@ -89,8 +94,8 @@ def session_log(agent: dict) -> Path | None:
     return found[-1] if found else None
 
 
-def read_usage(path: Path) -> tuple[str | None, list[dict], dict | None]:
-    """The model, the token use of each model call, and the last token count with a context size."""
+def read_usage(path: Path) -> tuple[list[tuple[str | None, dict]], dict | None]:
+    """The model and the token use of each model call, and the last token count with a context size."""
     model = None
     calls = []
     last = None
@@ -113,9 +118,9 @@ def read_usage(path: Path) -> tuple[str | None, list[dict], dict | None]:
             if info.get("total_token_usage") == seen_total:
                 continue
             seen_total = info.get("total_token_usage")
-            calls.append(info["last_token_usage"])
+            calls.append((model, info["last_token_usage"]))
             last = info
-    return model, calls, last
+    return calls, last
 
 
 def load_price(model: str | None) -> dict | None:
@@ -158,14 +163,17 @@ def tokens(agent: dict) -> tuple[str | None, str | None]:
     path = session_log(agent)
     if path is None:
         return None, None
-    model, calls, last = read_usage(path)
+    calls, last = read_usage(path)
     context = None
     window = (last or {}).get("model_context_window")
     used = ((last or {}).get("last_token_usage") or {}).get("total_tokens")
     if isinstance(window, (int, float)) and window > 0 and isinstance(used, (int, float)):
         context = f"ctx {round(100 * used / window)}%"
-    price = load_price(model)
-    cost = f"${sum(call_cost(call, price) for call in calls):.3f}" if price and calls else None
+    # The user can change the model during a session, so each call has the price of its own model.
+    # A call of a model with no price adds nothing.
+    prices = {model: load_price(model) for model in {model for model, _ in calls}}
+    priced = [call_cost(usage, prices[model]) for model, usage in calls if prices[model]]
+    cost = f"${sum(priced):.3f}" if priced else None
     return context, cost
 
 
@@ -186,14 +194,18 @@ def failure(error: Exception) -> str:
 def main() -> None:
     # A startup or event hook has no one to show an error to, so log it and go on.
     try:
-        agents = codex_agents()
+        agents = agents_in_scope()
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
         print(f"codex-usage: cannot list agents: {failure(error)}", file=sys.stderr)
         return
     for agent in agents:
         pane_id = agent["pane_id"]
         try:
-            report(pane_id, *tokens(agent))
+            if agent.get("agent") == "codex":
+                report(pane_id, *tokens(agent))
+            # Another agent can start in a pane where Codex ran. Its old Codex values must go.
+            elif shows_codex_values(agent):
+                report(pane_id, None, None)
         except (OSError, subprocess.SubprocessError) as error:
             print(f"codex-usage: {pane_id}: {failure(error)}", file=sys.stderr)
 

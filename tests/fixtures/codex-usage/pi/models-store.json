@@ -31,6 +31,15 @@
       }
      ]
     }
+   },
+   {
+    "id": "gpt-6.1-mini",
+    "cost": {
+     "input": 1,
+     "output": 4,
+     "cacheRead": 0.1,
+     "cacheWrite": 1
+    }
    }
   ]
  }

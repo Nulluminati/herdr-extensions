@@ -1,0 +1,5 @@
+{"type": "session_meta", "payload": {"id": "s-model-change"}}
+{"type": "turn_context", "payload": {"model": "gpt-6.1-sol"}}
+{"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 100000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 10000, "reasoning_output_tokens": 0, "total_tokens": 110000}, "last_token_usage": {"input_tokens": 100000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 10000, "reasoning_output_tokens": 0, "total_tokens": 110000}, "model_context_window": 500000}}}
+{"type": "turn_context", "payload": {"model": "gpt-6.1-mini"}}
+{"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 200000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 20000, "reasoning_output_tokens": 0, "total_tokens": 220000}, "last_token_usage": {"input_tokens": 100000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 10000, "reasoning_output_tokens": 0, "total_tokens": 110000}, "model_context_window": 500000}}}

@@ -15,7 +15,7 @@ Your Herdr config decides where the tokens show.
 
 Codex writes a token count to its session log (`~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`) after each model call. Herdr knows the session ID of each Codex pane, so the plugin finds the log of that pane.
 
-Codex does not report a cost. On a ChatGPT plan it does not bill per token. The plugin prices each model call with pi's price list (`~/.pi/agent/models-store.json`, provider `openai-codex`, else `openai`), the same way pi prices its own calls. A model that pi does not list gets no cost token. The cost is an estimate of the API price, not a charge.
+Codex does not report a cost. On a ChatGPT plan it does not bill per token. The plugin prices each model call with pi's price list (`~/.pi/agent/models-store.json`, provider `openai-codex`, else `openai`), the same way pi prices its own calls. If you change the model during a session, each call gets the price of its own model. Calls of a model that pi does not list add no cost. If no call has a price, the cost token does not show. The cost is an estimate of the API price, not a charge.
 
 ## Install
 
@@ -51,6 +51,7 @@ Then run `herdr server reload-config`.
 - At Herdr startup, for every Codex pane.
 - When a Codex agent changes state, such as from working to idle, for that pane.
 - When you run the action "Codex usage: refresh", for every Codex pane.
+- When another agent starts in a pane where Codex ran. The plugin clears the old Codex values of that pane.
 
 The values do not change while a turn runs. They catch up when the agent changes state.
 
