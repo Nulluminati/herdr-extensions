@@ -298,7 +298,7 @@ A failed `start` reports the steps that worked. Run `start` again to continue fr
 
 `herdboard plan <id>` starts a planner agent in a `plan <id>` tab in the card's worktree. It creates the worktree and the branch when the card has none, as `start` does, and finds the repository and the checkout the same way. It takes the same `--repo`, `--checkout` and `--base`. The card stays in its column, and the worktree stays open: `herdboard start <id>` later starts the work agent in the same worktree.
 
-The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. It may change code and run commands in the worktree to test ideas. Before planning ends, it reverts its own changes, so the work agent starts clean; it does not commit. When the worktree is not clean, the brief names the changes that were already there, and when the card's work agent still runs, the brief says so. Claude can read the repository and edit the worktree and the card's attachments without a question. For other tools, it follows your default permission mode. pi gets read, search, write and shell tools, and it runs them without a question. The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
+The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. It may change code and run commands in the worktree to test ideas. Before planning ends, it reverts its own changes, so the work agent starts clean; it does not commit. When the worktree is not clean, the brief names the changes that were already there, and when the card's work agent still runs, the brief says so. The planner has the work agent's permissions and can also write the card's attachments. See [Agent permissions](#agent-permissions). The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
 
 A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours, but a planner that still runs still blocks a second one.
 
@@ -306,7 +306,7 @@ When planning ends with a changed plan and the card's work agent still runs, the
 
 `plan` on a card that has a plan gives the planner the current plan to revise. A second `plan` for a card whose planner still runs fails with `plan_running`.
 
-Codex planners use `workspace-write` with the attachments folder as an extra writable directory. Writes there and in the worktree need no approval. Other approval requests go to Codex's automatic reviewer (`approvals_reviewer = "auto_review"`), which uses extra model calls. You stay in the tab for requests it denies.
+Codex planners use `workspace-write` with network access and the attachments folder as an extra writable directory. Writes there and in the worktree need no approval. Other approval requests go to Codex's automatic reviewer (`approvals_reviewer = "auto_review"`), which uses extra model calls. You stay in the tab for requests it denies. Codex work agents use the same options without the attachments folder. Codex keeps every `.git` folder read-only in `workspace-write`, so each `git add` and `git commit` of a work agent goes to the automatic reviewer.
 
 `--agent claude|pi|codex`, `--model`, `--thinking` and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
 
@@ -377,11 +377,9 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 
 When the card's agent no longer runs, `review` starts a new one of the same kind. Its first message has the card and the full log.
 
-The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It can read the repository, and it can write only its findings file. No card reviewer may run project code, tests or builds from the shell, or start servers. Claude and pi reviewers may use `terminal-browser` to check pages, HTML files and servers that already run. They run no other command. The pi reviewer also gets `bash`, and only its prompt limits it to `terminal-browser`. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent answers with a table: one row for each finding, with its number, a short description, its severity, and whether the agent agrees or disagrees, and why. The agent logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
+The agent reviewer gets the commits since the base, the uncommitted changes and the untracked files. It starts in a split as `hb-<id>-review`, in the background: herdboard does not move you to the card's workspace. It may run any read-only command in a sandbox that writes only its review folder and reaches only GitHub. See [Agent permissions](#agent-permissions). No card reviewer may run project code, tests or builds from the shell, or start servers. Every reviewer may use `terminal-browser` to check pages, HTML files and servers that already run. A background worker waits up to 30 minutes for the findings. Then it closes the reviewer pane and sends the findings to the card's agent. The agent answers with a table: one row for each finding, with its number, a short description, its severity, and whether the agent agrees or disagrees, and why. The agent logs its answer, changes no code, and waits for you. A Herdr notification tells you when the review is done or failed.
 
 On the board, `R` asks for Human, Agent or Both. For an agent review, it then asks for the reviewer and the model: `opus`, `sonnet` or `haiku` for Claude, the pi model list for pi, or the Codex model list for Codex.
-
-Codex card reviewers and fallback pull request writers use approvals `never`. Their permission profile reads the whole disk, writes only the review or description folder, and blocks network access. Codex has a shell, but the sandbox limits its writes. Codex card reviewers may run only read-only inspection commands. Codex card reviewers cannot use `terminal-browser` because their profile blocks network access. These profiles apply to one run; herdboard does not change `~/.codex`.
 
 ### merge
 
@@ -399,7 +397,7 @@ herdboard does not push the base.
 
 Pull request:
 
-1. herdboard writes a request for the card's agent: the card, its log, the branch diff, and the repository's pull request templates. When the card's agent no longer runs, a read-only writer agent of the same kind starts in a split as `hb-<id>-pr`.
+1. herdboard writes a request for the card's agent: the card, its log, the branch diff, and the repository's pull request templates. When the card's agent no longer runs, a sandboxed writer agent of the same kind starts in a split as `hb-<id>-pr`.
 2. The agent writes the title and the description. The title is a conventional commit, such as `feat(auth): add magic links`. With a template, the description follows its headings in the same order. Without one, it uses Why, What changed, Trade-offs (only when there are some) and Testing. The agent describes only the testing that the log or the change shows. The text does not name herdboard, the agent or the card.
 3. A background worker waits up to 30 minutes for the text. Then it pushes the branch to `origin` and runs `gh pr create --draft`. For a Linear card, it adds the issue link at the end of the description.
 4. The worker logs `PR opened: <url>` and shows a Herdr notification. The card stays in Review.
@@ -430,6 +428,36 @@ A worktree with uncommitted or untracked files always stops `finish`. `--force` 
 For a card without a repository, `finish` closes the card's workspace, deletes the card folder with everything in it, and moves the card to Done. There is no branch to check. This also drops a card that was planned with `--new-repo` before its repository exists.
 
 The board never runs `finish` itself.
+
+### Agent permissions
+
+Each role gets the same permissions in Claude, pi and Codex. The work agent and the planner run with you in the tab, so each agent's automatic judge decides on risky actions. Reviewers run unattended, so no judge runs: an operating system sandbox is the limit.
+
+| Role | Claude | pi | Codex |
+|---|---|---|---|
+| Work agent (`start`) | `--permission-mode auto` | Approval Mode (pi's default) | `workspace-write` with network, approvals `on-request` with auto-review, `web_search="live"` |
+| Planner (`plan`) | as the work agent, plus `--add-dir` for the attachments folder | as the work agent, with all its tools | as the work agent, plus `--add-dir` for the attachments folder |
+| Card reviewer (`review --agent`) | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser |
+| PR writer (`merge --pr`) | sandbox, writes the description folder | sandbox, writes the description folder | sandbox, writes the description folder |
+| PR reviewer (`pr-review`) | sandbox, writes nothing, browser, Hunk | sandbox, writes nothing, browser, Hunk | sandbox, writes nothing, browser, Hunk |
+
+The reviewer sandbox:
+
+- The reviewer may run any shell command. The sandbox reads the whole disk and writes only the role's folder. The repository or PR checkout stays read-only.
+- The shell reaches only GitHub: `github.com`, its subdomains and `*.githubusercontent.com`. `gh` uses your token. Claude's and pi's sandboxes do not accept all hosts, so Codex gets the same list.
+- Web tools run outside the sandbox and read other pages: Claude `WebFetch` and `WebSearch`, pi `web_fetch` and `web_search`, Codex live web search. The context7 and grep_app documentation tools (pi: the context7 tools and `code_search`) also run outside it.
+- With the browser, `terminal-browser` runs outside the sandbox, because it splits panes through the Herdr socket.
+- The PR reviewer reaches the Hunk daemon on `127.0.0.1` (port `HUNK_MCP_PORT`, default 47657). Claude runs `hunk session` outside its sandbox instead, because its sandbox does not send `127.0.0.1` through its proxy.
+- Claude runs in `dontAsk` mode with a `--settings` sandbox that fails when the sandbox is not available. Its allowed tools are `Read`, `Grep`, `Glob`, `Bash`, `WebFetch`, `WebSearch`, `Skill`, the `context7` and `grep_app` MCP servers, and `Edit` and `Write` in the role's folder.
+- pi runs with `--approval-mode off` and a `--sandbox` policy. Its tools are `read`, `grep`, `find`, `ls`, `bash`, `web_fetch`, `web_search`, the context7 tools, `code_search`, and `write` when the role has a folder.
+- Codex runs with approvals `never` and a permission profile for one run (`hb-review` or `hb-pr-review`). herdboard does not change `~/.codex`.
+- The prompts set the other limits: do not run the project's code, tests or builds, do not start a server, do not change Git state, and never submit to GitHub.
+
+What each agent needs on your machine:
+
+- pi: the `worker-sandbox` and `approval-mode` extensions from pi-extensions, with the `--sandbox` and `--approval-mode` flags and the context7 and `code_search` tools in sandboxed sessions.
+- Codex reviewers: a rule in `~/.codex/rules/` that runs `terminal-browser` outside the sandbox (`prefix_rule(pattern=["terminal-browser"], decision="allow")`), and the `context7` and `grep_app` MCP servers in `~/.codex/config.toml`.
+- Codex work agents and planners: a rule in `~/.codex/rules/` that allows the safe `herdboard` subcommands (`show`, `list`, `log`, `attach`, `mockup`, `move`).
 
 ## Pull request reviews
 
@@ -488,9 +516,9 @@ description = "herdboard: review pull requests"
 
 What the reviewer can do:
 
-- Claude runs with `--permission-mode dontAsk`. It can use `Read`, `Grep` and `Glob`, and Bash only for `hunk session`, `hunk skill path`, `gh pr view`, `gh pr diff`, `gh pr checks` and `terminal-browser`.
-- pi cannot limit its bash tool to some commands. It gets `read`, `grep`, `find`, `ls` and `bash`, and only its prompt tells it not to edit files, run code, change Git or write to GitHub, and to use `terminal-browser` only to open and check pages. Choose pi only for PRs whose code you trust that far.
-- Codex runs with approvals set to `never`. Its permission profile reads the whole disk, blocks file writes, and allows open network access. This includes GitHub and the local Hunk service. It can run any read-only command. The prompt forbids code execution and submission to GitHub.
+- Every reviewer may run any read-only command in a sandbox that writes no file and keeps the PR checkout read-only. The shell reaches only GitHub and the local Hunk service. See [Agent permissions](#agent-permissions).
+- Every reviewer may use `terminal-browser` to check the PR page or a server that already runs.
+- The prompt forbids code execution, Git changes and any submission to GitHub. The sandbox cannot block a submit through `gh`: it uses your token.
 - No reviewer runs the tests or the code of the PR.
 
 Limits:

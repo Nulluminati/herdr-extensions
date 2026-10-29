@@ -145,6 +145,8 @@ A repoless card writes its result to the card's attachments (for example `findin
 
 A pull request reviewer only adds notes to the Hunk session. The user submits the review from Hunk. Never submit, approve or comment on GitHub for them.
 
+Reviewers (`review --agent`, the `merge --pr` writer, `pr-review`) run in a sandbox: any read-only command, writes only in their own folder, and shell network only to GitHub. Use the web tools for other pages. A write in the repository fails; that is the sandbox, not a bug. The README section "Agent permissions" lists each role.
+
 ## When a card was handed to you
 
 `herdboard start` opens you in a new worktree. Your first message names the card and a brief file. Then:

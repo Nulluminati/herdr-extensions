@@ -37,3 +37,6 @@ uv run python -m unittest discover -s tests
 - `herdr agent start` can report `agent_not_ready` or `timeout` for an agent that works: one blocked at a startup prompt, or one busy with its first message.
 - Claude's `--allowedTools` takes every value after it. Put a positional prompt before it.
 - The user's machine is linked to this checkout with `herdr plugin link`, so edits are live.
+- Claude's and pi's reviewer sandbox writes the working directory unless `denyWrite` names it. Name the repository there.
+- `terminal-browser` splits panes through the Herdr socket, so it must run outside a reviewer sandbox. Claude and pi exclude it with `excludedCommands`. Codex runs it outside with a rule in `~/.codex/rules/`, not by allowing the socket: with the socket allowed, `herdr pane run` lets any command escape the sandbox.
+- herdboard's reviewer sandbox options live in `plugins/herdboard/src/herdboard/sandbox.py`. `peer_review.py` keeps a copy, and `tests/test_peer_review.py` checks that the two match.
