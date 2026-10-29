@@ -37,7 +37,12 @@ class FakeHerdr:
             return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": "broken", "message": "test failure"}}))
         result = {}
         if operation == "workspace list":
-            result = {"workspaces": []}
+            result = {"workspaces": [
+                {"workspace_id": w["open_workspace_id"], "worktree": {"checkout_path": w["path"]}}
+                for w in self.worktrees if isinstance(w.get("open_workspace_id"), str)
+                and w["open_workspace_id"] not in self.closed]}
+        elif operation == "agent list":
+            result = {"agents": [{"name": None, "pane_id": "w9:p1", "workspace_id": "w9"}] if self.agent else []}
         elif operation == "worktree list":
             result = {"worktrees": self.worktrees}
         elif operation in ("worktree create", "worktree open"):
@@ -1491,6 +1496,18 @@ class SidebarRefreshTests(unittest.TestCase):
         self.unreachable = True
         start.sidebar_refresh(self.card_for)
         self.assertEqual(self.reports(), {})
+
+    def test_a_card_change_reaches_the_workspace_and_agent_that_hold_the_card(self):
+        start.update_card_token(self.card_for("tgz1"))
+        self.assertEqual(self.reports(), {
+            ("workspace", "w7K"): ["herdboard_card=▶ Card tgz1 · In progress"],
+            ("pane", "w7K:p1"): ["herdboard_card=▶ Card tgz1 · In progress"],
+        })
+
+    def test_a_card_change_leaves_a_reused_workspace_id_alone(self):
+        start.update_card_token(self.card_for("tgpz"))
+        start.update_card_token(self.card_for("tgpz"), removed=True)
+        self.assertFalse(any(args[1:2] == ["report-metadata"] for args in self.calls))
 
 
 class StartCliTests(CliTestCase):

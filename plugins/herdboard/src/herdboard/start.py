@@ -295,14 +295,22 @@ def update_card_token(card: CardView, removed: bool = False) -> None:
         records = _read(state_dir() / "starts.json")
     except HerdboardError:
         return
-    for key, record in records.items():
-        if not isinstance(record, dict) or card.ref not in (key, record.get("ref")):
-            continue
-        token = None if removed else card_token(card)
-        if record.get("agent_name") and isinstance(record.get("pane_id"), str):
-            report_card_token(record["pane_id"], token)
-        if isinstance(record.get("workspace_id"), str):
-            report_card_token(record["workspace_id"], token, "workspace")
+    records = {key: record for key, record in records.items()
+               if isinstance(record, dict) and card.ref in (key, record.get("ref"))}
+    if not records:
+        return
+    try:
+        workspaces = herdr("workspace", "list").get("workspaces") or []
+        agents = herdr("agent", "list").get("agents") or []
+    except HerdboardError:
+        return
+    token = None if removed else card_token(card)
+    for record in records.values():
+        workspace_id, pane_id = _record_targets(record, card.ref, workspaces, agents)
+        if pane_id:
+            report_card_token(pane_id, token)
+        if workspace_id:
+            report_card_token(workspace_id, token, "workspace")
 
 
 def _record_workspace(record, ref, workspaces):
@@ -321,6 +329,20 @@ def _record_workspace(record, ref, workspaces):
     return None
 
 
+def _record_targets(record, ref, workspaces, agents):
+    """The workspace ID and agent pane ID that show a start record's card, each None when not open."""
+    workspace = _record_workspace(record, ref, workspaces)
+    if workspace is None:
+        return None, None
+    workspace_id = workspace["workspace_id"]
+    here = [a for a in agents if a.get("workspace_id") == workspace_id and isinstance(a.get("pane_id"), str)]
+    # Herdr forgets agent names over a restart, so the recorded pane is the second way to find the agent.
+    agent = (next((a for a in here if record.get("agent_name") and a.get("name") == record["agent_name"]), None)
+             or next((a for a in here if record.get("agent_name") and a["pane_id"] == record.get("pane_id")),
+                     None))
+    return workspace_id, agent["pane_id"] if agent else None
+
+
 def sidebar_refresh(card_for) -> None:
     """Report the sidebar tokens of every started card again. Herdr keeps tokens in memory only,
     so a Herdr restart clears them. `card_for(ref)` returns the card, or None when it is gone."""
@@ -334,10 +356,9 @@ def sidebar_refresh(card_for) -> None:
         if not isinstance(record, dict):
             continue
         ref = record.get("ref") or key
-        workspace = _record_workspace(record, ref, workspaces)
-        if workspace is None:
+        workspace_id, pane_id = _record_targets(record, ref, workspaces, agents)
+        if workspace_id is None:
             continue
-        workspace_id = workspace["workspace_id"]
         if record.get("mode") != REPOLESS and isinstance(record.get("checkout"), str):
             report_card_token(workspace_id, Path(record["checkout"]).name, "workspace", REPO_TOKEN)
         try:
@@ -348,13 +369,8 @@ def sidebar_refresh(card_for) -> None:
             continue
         token = card_token(card)
         report_card_token(workspace_id, token, "workspace")
-        here = [a for a in agents if a.get("workspace_id") == workspace_id and isinstance(a.get("pane_id"), str)]
-        # Herdr forgets agent names over a restart, so the recorded pane is the second way to find the agent.
-        agent = (next((a for a in here if record.get("agent_name") and a.get("name") == record["agent_name"]), None)
-                 or next((a for a in here if record.get("agent_name") and a["pane_id"] == record.get("pane_id")),
-                         None))
-        if agent is not None:
-            report_card_token(agent["pane_id"], token)
+        if pane_id is not None:
+            report_card_token(pane_id, token)
 
 
 def find_record(ref):
