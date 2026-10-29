@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -17,6 +18,9 @@ if spec is None or spec.loader is None:
     raise RuntimeError("Cannot load peer review script")
 peer_review = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(peer_review)
+sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
+
+from herdboard import sandbox  # noqa: E402
 
 
 def git(repository, *arguments):
@@ -117,14 +121,17 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(peer_review.reviewer_for("pi"), "codex")
         self.assertEqual(peer_review.reviewer_for("codex"), "claude")
 
-    def test_codex_review_profile_quotes_the_folder(self):
-        import tomllib
-        folder = Path('/reviews/a"b\\c')
-        args = peer_review.reviewer_arguments("codex", folder)
-        self.assertEqual(args[:4], ["-a", "never", "-c", 'default_permissions="hb-review"'])
-        self.assertEqual(tomllib.loads(args[5])["permissions"]["hb-review"]["filesystem"],
-                         {":root": "read", str(folder): "write"})
-        self.assertIn(str(folder / "request.md"), args[-1])
+    def test_reviewers_get_the_herdboard_sandbox_without_a_browser(self):
+        folder, repo = Path('/reviews/a"b\\c'), Path("/repo")
+        prompt = peer_review.reviewer_arguments("codex", folder, repo)[-1]
+        self.assertIn(str(folder / "request.md"), prompt)
+        self.assertEqual(peer_review.reviewer_arguments("codex", folder, repo),
+                         [*sandbox.codex_reviewer_options("hb-review", folder, hunk=False), prompt])
+        self.assertEqual(peer_review.reviewer_arguments("pi", folder, repo),
+                         [*sandbox.pi_reviewer_options(folder, repo, browser=False, hunk=False), "--", prompt])
+        self.assertEqual(peer_review.reviewer_arguments("claude", folder, repo),
+                         [prompt, *sandbox.claude_reviewer_options(folder, repo, browser=False, hunk=False),
+                          *sandbox.claude_reviewer_tools(folder)])
 
     def test_other_agents_are_rejected(self):
         with self.assertRaisesRegex(peer_review.ReviewError, "unsupported"):
@@ -144,8 +151,11 @@ class PeerReviewTests(unittest.TestCase):
         self.assertIn("new.py", request)
         self.assertIn(str(review / "diff.patch"), request)
         self.assertIn(str(review), output)
+        self.assertIn("You may run any read-only command", request)
+        self.assertIn("Do not run the project's code, tests or builds", request)
+        self.assertIn("Do not change Git state", request)
 
-    def test_request_starts_read_only_pi_next_to_claude(self):
+    def test_request_starts_a_sandboxed_pi_next_to_claude(self):
         (self.repository / "app.py").write_text("print('two')\n")
 
         self.run_request()
@@ -158,7 +168,7 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(start[start.index("--pane") + 1], "w1:p9")
         review = self.only_review()
         prompt = start[-1]
-        self.assertEqual(start[start.index("--") + 1:], ["--tools", "read,grep,find,ls,write", "--", prompt])
+        self.assertEqual(start[start.index("--") + 1:], peer_review.reviewer_arguments("pi", review, self.repository))
         self.assertIn(str(review / "request.md"), prompt)
         self.assertIn(str(review / "findings.md"), prompt)
 
@@ -186,7 +196,8 @@ class PeerReviewTests(unittest.TestCase):
         review = self.only_review()
         call = next(argv for argv in self.calls if argv[:3] == ["herdr", "agent", "start"])
         self.assertEqual(call[call.index("--kind") + 1], "codex")
-        self.assertEqual(call[call.index("--") + 1:], peer_review.reviewer_arguments("codex", review))
+        self.assertEqual(call[call.index("--") + 1:],
+                         peer_review.reviewer_arguments("codex", review, self.repository))
 
     def test_claude_reviewer_may_only_write_inside_the_review(self):
         self.agents["w1:p1"]["agent"] = "codex"
@@ -199,10 +210,12 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(start[start.index("--kind") + 1], "claude")
         prompt = start[start.index("--") + 1]
         self.assertIn(str(review / "request.md"), prompt)
-        self.assertEqual(start[start.index("--") + 2:], [
-            "--permission-mode", "dontAsk",
-            "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{review}/**)",
-        ])
+        self.assertEqual(start[start.index("--") + 2:],
+                         peer_review.reviewer_arguments("claude", review, self.repository)[1:])
+        settings = json.loads(start[start.index("--settings") + 1])["sandbox"]
+        self.assertEqual(settings["filesystem"], {"allowWrite": [str(review)],
+                                                  "denyWrite": [str(self.repository)]})
+        self.assertIn(f"Edit(/{review}/**)", start)
 
     def test_two_requests_in_one_second_get_two_review_folders(self):
         (self.repository / "app.py").write_text("print('two')\n")

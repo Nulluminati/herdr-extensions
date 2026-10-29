@@ -21,6 +21,12 @@ REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large diff can take a long time; the worker runs in the background.
 REVIEW_TIMEOUT_MS = 30 * 60 * 1000
 POLL_SECONDS = 5
+# Claude's and pi's sandbox reject "*", so the shell reaches GitHub only. Codex matches them.
+GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
+CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
+# Tools outside pi's sandbox that only read remote documentation and search results.
+PI_READ_TOOLS = ("read", "grep", "find", "ls", "bash", "web_fetch", "web_search", "context7_resolve_library_id",
+                 "context7_get_library_docs", "context7_get_cached_doc_raw", "code_search")
 
 
 class ReviewError(RuntimeError):
@@ -82,25 +88,43 @@ def review_root() -> Path:
     return Path(state) / "peer-review"
 
 
-def reviewer_arguments(reviewer: str, review: Path) -> list[str]:
+def sandbox_policy(review: Path, repository: Path) -> dict:
+    """The sandbox-runtime policy for Claude's `sandbox` settings and pi's `--sandbox`.
+
+    The same shape as herdboard's reviewer sandbox (herdboard/sandbox.py), without the browser.
+    The sandbox writes the working directory unless denyWrite names it."""
+    return {"network": {"allowedDomains": list(GITHUB_DOMAINS)},
+            "filesystem": {"allowWrite": [str(review)], "denyWrite": [str(repository)]}}
+
+
+def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[str]:
     # The review instruction is the first message, not typed into the pane later:
     # typed text can land in a startup prompt (such as Claude's folder trust check).
     prompt = (
         f"Read {review / 'request.md'} and do the review it asks for. "
         f"Write your findings to {review / 'findings.md'} and nowhere else."
     )
-    # The reviewer reads the repository and writes only its findings; it never edits code.
+    # The reviewer may run any shell command in an OS sandbox: it reads the whole disk, writes only
+    # the review folder and reaches only GitHub. Nobody answers prompts, so no approval judge runs.
     if reviewer == "pi":
-        return ["--tools", "read,grep,find,ls,write", "--", prompt]
+        tools = ",".join((*PI_READ_TOOLS, "write"))
+        return ["--approval-mode", "off", "--sandbox", json.dumps(sandbox_policy(review, repository)),
+                "--tools", tools, "--", prompt]
     if reviewer == "codex":
         path = json.dumps(str(review), ensure_ascii=False)
-        return ["-a", "never", "-c", 'default_permissions="hb-review"',
-                "-c", f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}', prompt]
+        domains = ",".join(f'{json.dumps(domain)}="allow"' for domain in CODEX_GITHUB_DOMAINS)
+        return ["-a", "never", "-c", "features.network_proxy=true", "-c", 'web_search="live"',
+                "-c", 'default_permissions="hb-review"',
+                "-c", f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}',
+                "-c", f"permissions.hb-review.network={{enabled=true,domains={{{domains}}}}}", prompt]
+    settings = {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+                            **sandbox_policy(review, repository)}}
     # The prompt goes first because --allowedTools takes every value after it.
     return [
         prompt,
-        "--permission-mode", "dontAsk",
-        "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{review}/**)",
+        "--permission-mode", "dontAsk", "--settings", json.dumps(settings),
+        "--allowedTools", "Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Skill",
+        "mcp__context7", "mcp__grep_app", f"Edit(/{review}/**)", f"Write(/{review}/**)",
     ]
 
 
@@ -170,6 +194,9 @@ def write_request(repository: Path, requester: str) -> Path:
 Review these changes for bugs, security problems and missing tests.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
+You may run any read-only command, such as `git log`, `git show`, `grep` or `gh`.
+Do not run the project's code, tests or builds from the shell. Do not start a server.
+Do not change Git state: no checkout, commit, reset or push.
 
 Write your findings to `{review / "findings.md"}` in this format:
 
@@ -200,7 +227,7 @@ def request(pane_option: str | None) -> int:
     try:
         herdr(
             "agent", "start", f"review-{review.name}", "--kind", reviewer, "--pane", reviewer_pane,
-            "--", *reviewer_arguments(reviewer, review),
+            "--", *reviewer_arguments(reviewer, review, repository),
         )
     except ReviewError as error:
         # A startup prompt (such as Claude's folder trust check) is for the user to answer,
