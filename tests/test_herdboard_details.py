@@ -15,6 +15,8 @@ from herdboard import activity, details  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.store import CardView, Store  # noqa: E402
 
+from test_herdboard_cli import CliTestCase  # noqa: E402
+
 
 def card(**fields):
     values = dict(ref="t123", board="acme-api", path=None, column="In progress",
@@ -100,7 +102,7 @@ class DetailsLinesTests(unittest.TestCase):
         self.assertEqual(first, "ENG-12 │ Speed up search  In Review ")
 
 
-class DetailsDataTests(unittest.TestCase):
+class StoreCase:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -117,6 +119,8 @@ class DetailsDataTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(records))
 
+
+class DetailsDataTests(StoreCase, unittest.TestCase):
     def test_collects_the_card_record_attachments_and_log(self):
         ref = self.card.ref
         self.write_records({ref: {**RECORD, "ref": ref}})
@@ -152,6 +156,49 @@ class DetailsDataTests(unittest.TestCase):
         before = details.signature(paths)
         activity.append(self.store, ref, "Started.", "claude")
         self.assertNotEqual(details.signature(paths), before)
+
+
+class CachedLookupTests(unittest.TestCase):
+    def test_asks_again_only_after_the_interval(self):
+        from herdboard.details_view import CachedLookup
+        now = [0.0]
+        calls = []
+        lookup = CachedLookup(lambda ref: calls.append(ref) or len(calls), seconds=60, clock=lambda: now[0])
+        self.assertEqual((lookup("ENG-1"), lookup("ENG-1")), (1, 1))
+        now[0] = 59
+        self.assertEqual(lookup("ENG-1"), 1)
+        now[0] = 60
+        self.assertEqual(lookup("ENG-1"), 2)
+
+
+class DetailsAppTests(StoreCase, unittest.IsolatedAsyncioTestCase):
+    async def test_draws_the_card_and_redraws_after_a_log_entry(self):
+        from herdboard.details_view import DetailsApp
+        from textual.widgets import Static
+        ref = self.card.ref
+        app = DetailsApp(self.store, self.config, ref, check_seconds=0.05)
+        async with app.run_test(size=(60, 8)) as pilot:
+            await pilot.pause()
+            box = app.query_one("#details", Static)
+            self.assertEqual(box.border_title, f"{ref} details")
+            shown = str(box.render())
+            self.assertIn("Fix login timeout", shown)
+            self.assertIn(f"no start record for {ref}", shown)
+            self.assertIn("no log entries", shown)
+            activity.append(self.store, ref, "Moved to Review.", "claude")
+            await pilot.pause(0.2)
+            self.assertIn("Moved to Review.", str(box.render()))
+
+
+class DetailsCliTests(CliTestCase):
+    def test_details_runs_the_view_for_the_card_and_creates_no_board(self):
+        ref = self.run_json("add", "Ship it", directory=self.plain)["card"]["ref"]
+        with mock.patch("herdboard.details_view.DetailsApp.run") as run, \
+                mock.patch("herdboard.details_view.DetailsApp.__init__", return_value=None) as made:
+            self.run_cli("details", ref, directory=self.repo)
+        run.assert_called_once_with()
+        self.assertEqual(made.call_args.args[2], ref)
+        self.assertFalse(list(self.todos.glob("acme*.md")))
 
 
 if __name__ == "__main__":

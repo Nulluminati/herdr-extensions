@@ -158,6 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--option", type=int, action="append", dest="numbers", help="the option number of each draft")
     sub.add_argument("--total", type=int, help="the number of options asked for")
 
+    sub = command("details", "show a card's compact status: the view of the details pane")
+    sub.add_argument("ref")
+
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
     sub.add_argument("--yes", action="store_true", help="delete without asking")
@@ -722,6 +725,20 @@ def _cmd_mockup(ctx: _Context) -> dict:
 def _cmd_mockup_view(ctx: _Context) -> dict:
     args = ctx.args
     return {"exit_code": mockup.view(args.paths, numbers=args.numbers, total=args.total)}
+
+
+def _cmd_details(ctx: _Context) -> dict:
+    ref = ctx.args.ref
+    try:
+        from .details_view import DetailsApp
+    except ImportError as error:
+        raise HerdboardError(f"The details pane needs Textual: {error}") from error
+    linear_card = None
+    if LINEAR_REF.match(ref) and ctx.views.source.active:
+        def linear_card(found: str) -> CardView:
+            return _find_linear_card(ctx, found)[0]
+    DetailsApp(ctx.store, ctx.config, ref.upper() if LINEAR_REF.match(ref) else ref, linear_card).run()
+    return {"exit_code": 0}
 
 
 def _require_todo_options(args: argparse.Namespace) -> None:
@@ -1575,6 +1592,7 @@ COMMANDS = {
     "attach": _cmd_attach,
     "mockup": _cmd_mockup,
     "mockup-view": _cmd_mockup_view,
+    "details": _cmd_details,
     "promote": _cmd_promote,
     "start": _cmd_start,
     "plan": _cmd_plan,
@@ -1649,7 +1667,7 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view", "details"):
         return
     if command == "mockup":
         if as_json:
@@ -1860,13 +1878,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if result["summary"]["error"] else 0
         ctx = _Context(args)
         # Add validates its input first. Migration previews write nothing. The sidebar refresh
-        # runs from the plugin folder at Herdr startup and needs no board.
-        if args.command not in ("init", "migrate", "add", "sidebar-refresh"):
+        # runs from the plugin folder at Herdr startup and needs no board. The details pane
+        # only reads.
+        if args.command not in ("init", "migrate", "add", "sidebar-refresh", "details"):
             _ensure_repo_board(ctx)
         result = COMMANDS[args.command](ctx)
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json, getattr(args, "action", None))
-        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view", "details"):
             return result["exit_code"]
         if args.command == "automation" and "exit_code" in result:
             return result["exit_code"]
