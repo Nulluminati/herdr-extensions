@@ -890,6 +890,8 @@ tag_style = "outline"      # tag text on a tint of its color; "round" (Nerd Font
 card_style = "full"        # cards with a border and a detail line; "compact" without both
 icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
 types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
+details_pane = true        # a card details pane on top of each card agent and planner
+details_pane_ratio = 0.25  # its share of the agent pane's height, from 0.1 to 0.6
 
 [thinking]
 # "zai/glm-5.3" = "high"   # pi only: the level that herdboard last chose for this model
@@ -918,7 +920,7 @@ To make pull requests the default for one repository, add `merge: pr` to the fro
 
 Press `c` to open configuration. It has two tabs. Switch tabs with a click, or focus the tab row with shift+tab and press left or right.
 
-- **Global (all boards)** sets values in the config file: theme, agent, model, thinking level, merge mode, icons, tags and cards. It works outside a repository too.
+- **Global (all boards)** sets values in the config file: theme, agent, model, thinking level, merge mode, icons, tags, cards and the [details pane](#details-pane). It works outside a repository too.
 - **Current board** shows the board name. It sets the board's merge mode, linked Linear projects and pinned issues in the board's frontmatter. Without a repository board, it tells you how to create one.
 
 The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. Codex offers `codex_models`, else models with `visibility = "list"` in `~/.codex/models_cache.json`. Its default label reads `model` and `model_reasoning_effort` from `~/.codex/config.toml`.

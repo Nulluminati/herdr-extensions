@@ -395,6 +395,24 @@ class ConfigScreenTests(BoardTestCase):
         config = load_config(app.config_file)
         self.assertEqual((config.card_style, config.tag_style), ("compact", "outline"))
 
+    async def test_details_pane_settings_save(self):
+        self.config.details_pane_ratio = 0.3
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await settle(pilot)
+            screen = await self.open_config(pilot)
+            self.assertEqual(screen.query_one("#config-details-pane").value, True)
+            # A saved ratio that the list does not offer stays a choice.
+            self.assertEqual(screen.query_one("#config-details-ratio").value, 0.3)
+            screen.query_one("#config-details-pane").value = False
+            screen.query_one("#config-details-ratio").value = 0.4
+            await pilot.press("ctrl+s")
+            await settle(pilot)
+            self.assertNotIsInstance(app.screen, ConfigScreen)
+            self.assertEqual((app.store.config.details_pane, app.store.config.details_pane_ratio), (False, 0.4))
+        config = load_config(app.config_file)
+        self.assertEqual((config.details_pane, config.details_pane_ratio), (False, 0.4))
+
     async def test_display_and_board_changes_save_together(self):
         app = self.make_app()
         async with app.run_test(size=(100, 40)) as pilot:

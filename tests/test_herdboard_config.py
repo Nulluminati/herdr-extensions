@@ -389,6 +389,40 @@ class ConfigTest(unittest.TestCase):
         config = load_config(path)
         self.assertEqual((config.start_agent, config.merge), ("pi", "pr"))
 
+    def test_details_pane_settings_default_to_on_and_a_quarter(self):
+        config = load_config()
+        self.assertEqual((config.details_pane, config.details_pane_ratio), (True, 0.25))
+
+    def test_details_pane_settings_from_file(self):
+        path = self.write(self.dir / "a.toml", "details_pane = false\ndetails_pane_ratio = 0.4\n")
+        config = load_config(path)
+        self.assertEqual((config.details_pane, config.details_pane_ratio), (False, 0.4))
+
+    def test_details_pane_settings_must_be_valid(self):
+        for text in ('details_pane = "yes"', "details_pane = 1", "details_pane_ratio = 0.05",
+                     "details_pane_ratio = 0.7", 'details_pane_ratio = "0.3"', "details_pane_ratio = true"):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "a.toml", text + "\n")
+                with self.assertRaises(HerdboardError):
+                    load_config(path)
+
+    def test_save_global_writes_the_details_pane_settings(self):
+        from herdboard.config import save_global_config
+        path = self.dir / "a.toml"
+        save_global_config(path, details_pane=False, details_pane_ratio=0.3)
+        config = load_config(path)
+        self.assertEqual((config.details_pane, config.details_pane_ratio), (False, 0.3))
+
+    def test_check_global_rejects_bad_details_pane_values(self):
+        from herdboard.config import check_global_config
+        check_global_config(details_pane=True, details_pane_ratio=0.1)
+        check_global_config(details_pane_ratio=0.6)
+        for values in ({"details_pane": "true"}, {"details_pane": None}, {"details_pane_ratio": 0.61},
+                       {"details_pane_ratio": True}, {"details_pane_ratio": None}):
+            with self.subTest(values=values):
+                with self.assertRaises(HerdboardError):
+                    check_global_config(**values)
+
     def test_types_default(self):
         self.assertEqual(load_config().types, ["bug", "feature", "chore", "docs", "refactor"])
 

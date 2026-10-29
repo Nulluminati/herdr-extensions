@@ -44,6 +44,8 @@ CARD_STYLES = ("full", "compact")
 
 
 KEY_COMMAND_TIMEOUT = 30
+# The share of the agent pane's height that the details pane takes. Herdr splits panes by ratio.
+DETAILS_PANE_RATIOS = (0.1, 0.6)
 
 
 def thinking_levels(agent: str) -> tuple[str, ...]:
@@ -148,6 +150,9 @@ class Config:
     # "plain" uses text labels; "nerd" adds Nerd Font icons beside them.
     icon_style: str = "plain"
     types: list[str] = field(default_factory=lambda: list(DEFAULT_TYPES))
+    # Open a read-only card details pane on top of each card agent and planner.
+    details_pane: bool = True
+    details_pane_ratio: float = 0.25
 
     def __post_init__(self):
         if self.start_column is None:
@@ -247,6 +252,13 @@ def _check_global(key: str, value) -> None:
     """Raise when `value` is not a valid value of the global setting `key`."""
     if value is None and key in _OPTIONAL_SETTINGS:
         return
+    if key == "details_pane":
+        if not isinstance(value, bool):
+            raise HerdboardError("details_pane must be true or false")
+        return
+    if key == "details_pane_ratio":
+        _check_details_ratio(value, "details_pane_ratio")
+        return
     choices = {"start_agent": AGENTS, "start_thinking": THINKING_LEVELS, "merge": MERGE_MODES,
                "icon_style": ("plain", "nerd"), "tag_style": TAG_STYLES, "card_style": CARD_STYLES}.get(key)
     if choices is not None:
@@ -258,6 +270,12 @@ def _check_global(key: str, value) -> None:
         raise HerdboardError("start_model must be one model name, such as zai/glm-5.3")
 
 
+def _check_details_ratio(value, label: str) -> None:
+    low, high = DETAILS_PANE_RATIOS
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+        raise HerdboardError(f"{label} must be a number from {low} to {high}")
+
+
 def check_global_config(**settings) -> None:
     """Raise when a value is not valid for `save_global_config`, before any write."""
     for key, value in settings.items():
@@ -266,7 +284,8 @@ def check_global_config(**settings) -> None:
 
 def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent=UNCHANGED,
                        start_model=UNCHANGED, start_thinking=UNCHANGED, merge=UNCHANGED,
-                       icon_style=UNCHANGED, tag_style=UNCHANGED, card_style=UNCHANGED) -> None:
+                       icon_style=UNCHANGED, tag_style=UNCHANGED, card_style=UNCHANGED,
+                       details_pane=UNCHANGED, details_pane_ratio=UNCHANGED) -> None:
     """Save only the given settings, with comments, permissions and other values intact.
 
     None removes `start_model` or `start_thinking`. Every value is checked before any write.
@@ -274,7 +293,8 @@ def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent
     changes = {key: value for key, value in (
         ("theme", theme), ("start_agent", start_agent), ("start_model", start_model),
         ("start_thinking", start_thinking), ("merge", merge), ("icon_style", icon_style),
-        ("tag_style", tag_style), ("card_style", card_style)) if value is not UNCHANGED}
+        ("tag_style", tag_style), ("card_style", card_style), ("details_pane", details_pane),
+        ("details_pane_ratio", details_pane_ratio)) if value is not UNCHANGED}
     check_global_config(**changes)
     if not changes:
         return
@@ -508,4 +528,11 @@ def load_config(path: Path | None = None) -> Config:
         if not all(re.fullmatch(r"[A-Za-z0-9_-]+", kind) for kind in types):
             raise HerdboardError(f"{path}: types must be single words, such as bug or feature")
         config.types = types
+    if "details_pane" in data:
+        if not isinstance(data["details_pane"], bool):
+            raise HerdboardError(f"{path}: details_pane must be true or false")
+        config.details_pane = data["details_pane"]
+    if "details_pane_ratio" in data:
+        _check_details_ratio(data["details_pane_ratio"], f"{path}: details_pane_ratio")
+        config.details_pane_ratio = float(data["details_pane_ratio"])
     return config

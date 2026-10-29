@@ -2148,7 +2148,9 @@ class ConfigScreen(ModalBase):
     AUTO_FOCUS = "#config-theme"
     # The global settings that the Global tab shows, in the order of its fields.
     GLOBAL_KEYS = ("theme", "start_agent", "start_model", "start_thinking", "merge", "icon_style",
-                   "tag_style", "card_style")
+                   "tag_style", "card_style", "details_pane", "details_pane_ratio")
+    # The details pane heights that the Global tab offers, as a share of the agent pane.
+    DETAILS_RATIOS = (0.15, 0.2, 0.25, 0.33, 0.4, 0.5)
 
     def __init__(self, path: Path | None, meta: BoardMeta, can_link: bool, settings: dict[str, str | None],
                  themes: list[str], pi_choices: tuple[str | None, list[str]],
@@ -2213,6 +2215,13 @@ class ConfigScreen(ModalBase):
             options.append((f"{saved} (current configured model)", saved))
         return options
 
+    def _details_ratio_options(self) -> list[tuple[str, float]]:
+        """The details pane heights. The saved height stays a choice when the list does not offer it."""
+        ratios = list(self.DETAILS_RATIOS)
+        if self.settings["details_pane_ratio"] not in ratios:
+            ratios = sorted([*ratios, self.settings["details_pane_ratio"]])
+        return [(f"{round(ratio * 100)}% of the agent pane", ratio) for ratio in ratios]
+
     def _board_merge_options(self, default: str) -> list[tuple[str, str]]:
         return [(f"Global default ({default})", "default"),
                 ("local: merge into the base branch", "local"),
@@ -2265,6 +2274,13 @@ class ConfigScreen(ModalBase):
                                                    ("compact: title, tags and status", "compact")],
                                                   value=settings["card_style"], allow_blank=False,
                                                   id="config-card-style"), "Cards")
+                        yield self._titled(Select([("on: open with each card agent and planner", True),
+                                                   ("off", False)],
+                                                  value=settings["details_pane"], allow_blank=False,
+                                                  id="config-details-pane"), "Details pane")
+                        yield self._titled(Select(self._details_ratio_options(),
+                                                  value=settings["details_pane_ratio"], allow_blank=False,
+                                                  id="config-details-ratio"), "Details pane height")
                         yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
                         yield Label("Thinking is kept for each model; Agent default clears the chosen model's level.",
                                     classes="dim")
@@ -2360,7 +2376,8 @@ class ConfigScreen(ModalBase):
         """
         values = {}
         for key, widget in zip(self.GLOBAL_KEYS, ("theme", "agent", "model", "thinking", "default-merge",
-                                                  "icon-style", "tag-style", "card-style")):
+                                                  "icon-style", "tag-style", "card-style",
+                                                  "details-pane", "details-ratio")):
             value = self.query_one(f"#config-{widget}", Select).value
             values[key] = None if value == "default" else value
         return values
