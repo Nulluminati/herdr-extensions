@@ -238,7 +238,16 @@ def agent_arguments(agent: str, message: str, model: str | None, thinking: str |
             ["-c", f'model_reasoning_effort="{thinking}"'] if thinking else [])
         return [*options, message]
     # Claude takes its prompt first: options after it cannot swallow the prompt.
-    return [message, *(["--model", model] if model else []), *(["--effort", thinking] if thinking else [])]
+    return [message, "--permission-mode", "auto", *(["--model", model] if model else []),
+            *(["--effort", thinking] if thinking else [])]
+
+
+def codex_auto_review_options() -> list[str]:
+    """Codex in the workspace sandbox with network, and a reviewer model in place of approval prompts.
+
+    For the work agent and the planner only: reviewers build on agent_arguments and pass `-a never`."""
+    return ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-a", "on-request",
+            "-c", 'approvals_reviewer="auto_review"', "-c", 'web_search="live"']
 
 
 def export_config(pane_id: str, config_file: Path | None) -> None:
@@ -1013,6 +1022,8 @@ class Starter:
         # Record intent before Herdr can return an unknown startup result.
         persist()
         args = agent_arguments(agent, message, model, thinking)
+        if agent == "codex":
+            args = [*codex_auto_review_options(), *args]
         export_config(record["pane_id"], self.config_file)
         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
               tolerated=("timeout", "agent_not_ready"))

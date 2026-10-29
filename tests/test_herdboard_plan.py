@@ -164,9 +164,10 @@ class PlanTestCase(unittest.TestCase):
 class RequestTests(PlanTestCase):
     def test_codex_planner_arguments_and_record(self):
         args = plan.planner_arguments("codex", "task", "/repo", Path("/plans"), "gpt-6.1", "ultra")
-        self.assertEqual(args, ["-s", "workspace-write", "--add-dir", "/plans", "-a", "on-request",
-                                "-c", 'approvals_reviewer="auto_review"', "--model", "gpt-6.1",
+        self.assertEqual(args, [*start.codex_auto_review_options(), "--add-dir", "/plans", "--model", "gpt-6.1",
                                 "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertIn("sandbox_workspace_write.network_access=true", args)
+        self.assertIn('web_search="live"', args)
         self.planner.plan(self.card.ref, agent="codex", thinking="ultra")
         card = self.store.show(self.card.ref)
         plan.mark_planning([card])
@@ -214,30 +215,27 @@ class RequestTests(PlanTestCase):
         self.assertIn("upstream", record["steps_done"])
         self.assertNotIn("agent_name", record)
 
-    def test_claude_edits_the_worktree_and_the_attachments(self):
+    def test_claude_plans_in_auto_mode_with_the_attachments_folder(self):
         self.planner.plan(self.card.ref, model="opus")
         call = self.planner_start()
         args = call[call.index("--") + 1:]
         self.assertIn("Plan herdboard card", args[0])
         folder = attachments.folder(self.config, self.card.ref)
-        worktree = self.record()["worktree_path"]
-        self.assertEqual(args[1:], ["--model", "opus", "--allowedTools", "Read", "Grep", "Glob",
-                                    f"Edit(/{worktree}/**)", f"Write(/{worktree}/**)",
-                                    f"Edit(/{folder}/**)", f"Write(/{folder}/**)",
-                                    "Bash(terminal-browser:*)"])
-        self.assertNotIn("dontAsk", args, "the user is there to answer permission prompts")
+        self.assertEqual(args[1:], ["--permission-mode", "auto", "--model", "opus", "--add-dir", str(folder)])
+        self.assertNotIn("--allowedTools", args)
 
-    def test_claude_gets_its_effort_before_the_allowed_tools(self):
+    def test_claude_gets_its_effort_after_its_prompt(self):
         self.planner.plan(self.card.ref, model="opus", thinking="high")
         call = self.planner_start()
         args = call[call.index("--") + 1:]
-        self.assertEqual(args[1:6], ["--model", "opus", "--effort", "high", "--allowedTools"])
+        self.assertEqual(args[1:7], ["--permission-mode", "auto", "--model", "opus", "--effort", "high"])
 
-    def test_pi_gets_read_write_and_shell_tools(self):
+    def test_pi_gets_all_tools_as_the_work_agent(self):
         self.planner.plan(self.card.ref, agent="pi", model="zai/glm-5.3", thinking="high")
         call = self.planner_start()
         args = call[call.index("--") + 1:]
-        self.assertEqual(args[:-2], ["--tools", "read,grep,find,ls,write,edit,bash", "--model", "zai/glm-5.3",
+        self.assertNotIn("--tools", args)
+        self.assertEqual(args[:-2], ["--model", "zai/glm-5.3",
                                      "--thinking", "high"])
         self.assertEqual(args[-2], "--")
 

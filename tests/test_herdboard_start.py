@@ -501,7 +501,7 @@ class StartTests(unittest.TestCase):
     def test_agent_message_is_safe_for_herdr_shell_encoding(self):
         self.starter.start(self.card.ref)
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
-        message = call[-1]
+        message = call[call.index("--") + 1]
         self.assertNotIn("\n", message)
         self.assertNotIn("\r", message)
         self.assertIn(self.card.ref, message)
@@ -751,7 +751,8 @@ class StartTests(unittest.TestCase):
 
     def test_codex_start_accepts_its_own_thinking_levels(self):
         self.starter.start(self.card.ref, agent="codex", thinking="ultra")
-        self.assertEqual(self.agent_args()[:2], ["-c", 'model_reasoning_effort="ultra"'])
+        args = self.agent_args()
+        self.assertEqual(args[len(start.codex_auto_review_options()):][:2], ["-c", 'model_reasoning_effort="ultra"'])
 
     def test_explicit_thinking_must_match_the_agent(self):
         for agent, level in (("codex", "off"), ("pi", "ultra")):
@@ -762,7 +763,20 @@ class StartTests(unittest.TestCase):
     def test_invalid_config_thinking_uses_the_agent_default(self):
         self.config.start_thinking = "off"
         self.starter.start(self.card.ref, agent="codex")
-        self.assertEqual(len(self.agent_args()), 1)
+        self.assertEqual(len(self.agent_args()), len(start.codex_auto_review_options()) + 1)
+
+    def test_codex_work_agent_uses_auto_review_with_network_and_live_search(self):
+        self.assertEqual(start.codex_auto_review_options(),
+                         ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true",
+                          "-a", "on-request", "-c", 'approvals_reviewer="auto_review"', "-c", 'web_search="live"'])
+        self.starter.start(self.card.ref, agent="codex")
+        args = self.agent_args()
+        self.assertEqual(args[:-1], start.codex_auto_review_options())
+        self.assertTrue(args[-1].startswith("Start work on herdboard card"))
+
+    def test_codex_arguments_hold_no_approval_policy(self):
+        # Reviewers build on agent_arguments and pass `-a never`.
+        self.assertNotIn("on-request", start.agent_arguments("codex", "task", "gpt-6.1", "high"))
 
     def test_codex_model_choices(self):
         home = self.root / "codex-home"
@@ -798,14 +812,15 @@ class StartTests(unittest.TestCase):
         self.starter.start(self.card.ref, agent="claude", model="opus")
         args = self.agent_args()
         self.assertTrue(args[0].startswith("Start work on herdboard card"))
-        self.assertEqual(args[1:], ["--model", "opus"])
+        self.assertEqual(args[1:], ["--permission-mode", "auto", "--model", "opus"])
 
     def test_claude_gets_its_effort_after_its_prompt(self):
-        self.assertEqual(start.agent_arguments("claude", "task", None, "high"), ["task", "--effort", "high"])
+        self.assertEqual(start.agent_arguments("claude", "task", None, "high"),
+                         ["task", "--permission-mode", "auto", "--effort", "high"])
         self.starter.start(self.card.ref, agent="claude", model="opus", thinking="max")
         args = self.agent_args()
         self.assertTrue(args[0].startswith("Start work on herdboard card"))
-        self.assertEqual(args[1:], ["--model", "opus", "--effort", "max"])
+        self.assertEqual(args[1:], ["--permission-mode", "auto", "--model", "opus", "--effort", "max"])
 
     def test_claude_takes_only_its_own_thinking_levels(self):
         for level in ("off", "ultra"):
@@ -920,8 +935,9 @@ class StartTests(unittest.TestCase):
     def test_claude_gets_the_message_as_its_prompt(self):
         self.starter.start(self.card.ref, agent="claude")
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
-        self.assertEqual(call[-2], "--")
-        self.assertTrue(call[-1].startswith(f"Start work on herdboard card {self.card.ref}:"))
+        args = call[call.index("--") + 1:]
+        self.assertTrue(args[0].startswith(f"Start work on herdboard card {self.card.ref}:"))
+        self.assertEqual(args[1:], ["--permission-mode", "auto"])
 
     def test_the_agent_pane_shows_the_card_in_the_sidebar(self):
         self.starter.start(self.card.ref)

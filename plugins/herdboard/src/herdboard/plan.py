@@ -65,19 +65,14 @@ def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model
     """The planner's arguments after Herdr's `--`: it reads the repository, may try code in the worktree,
     and writes the attachments.
 
-    Claude keeps the user's default permission mode, because the user is in the tab to answer its prompts."""
+    Each agent has the work agent's permissions plus the attachments folder: Claude auto mode, pi
+    Approval Mode with all its tools, Codex auto-review with network. The user is in the tab too."""
     if kind == "pi":
-        options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
-        return ["--tools", "read,grep,find,ls,write,edit,bash", *options, "--", prompt]
+        return start_module.agent_arguments(kind, prompt, model, thinking)
     if kind == "codex":
-        return ["-s", "workspace-write", "--add-dir", str(folder), "-a", "on-request",
-                "-c", 'approvals_reviewer="auto_review"',
+        return [*start_module.codex_auto_review_options(), "--add-dir", str(folder),
                 *start_module.agent_arguments(kind, prompt, model, thinking)]
-    # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
-    return [*start_module.agent_arguments(kind, prompt, model, thinking),
-            "--allowedTools", "Read", "Grep", "Glob",
-            f"Edit(/{worktree}/**)", f"Write(/{worktree}/**)",
-            f"Edit(/{folder}/**)", f"Write(/{folder}/**)", "Bash(terminal-browser:*)"]
+    return [*start_module.agent_arguments(kind, prompt, model, thinking), "--add-dir", str(folder)]
 
 
 def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, work_agent: bool,
