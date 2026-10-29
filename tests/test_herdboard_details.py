@@ -1,6 +1,7 @@
 """The card details pane: its data and its lines, without a terminal."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard import activity, details  # noqa: E402
+from herdboard import activity, details, start  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.store import CardView, Store  # noqa: E402
 
@@ -199,6 +200,91 @@ class DetailsCliTests(CliTestCase):
         run.assert_called_once_with()
         self.assertEqual(made.call_args.args[2], ref)
         self.assertFalse(list(self.todos.glob("acme*.md")))
+
+
+class PaneHerdr:
+    """A fake `herdr` for the details pane: one tab with the agent pane, and maybe a details pane."""
+
+    def __init__(self, labels=None, focused="w1:t1"):
+        self.calls = []
+        self.labels = labels or {}
+        self.focused = focused
+        self.fail = None
+
+    def __call__(self, argv, timeout=120, stdin=None):
+        args = argv[1:]
+        self.calls.append(args)
+        operation = " ".join(args[:2])
+        if self.fail == operation:
+            return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": "broken", "message": "no"}}))
+        result = {}
+        if operation == "pane get":
+            result = {"pane": {"pane_id": args[2], "tab_id": "w1:t1", "workspace_id": "w1"}}
+        elif operation == "pane list":
+            result = {"panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1"},
+                                *({"pane_id": pane, "tab_id": "w1:t1", "label": label}
+                                  for pane, label in self.labels.items())]}
+        elif operation == "tab list":
+            result = {"tabs": [{"tab_id": "w1:t1", "focused": self.focused == "w1:t1"},
+                               {"tab_id": "w2:t1", "focused": self.focused == "w2:t1"}]}
+        elif operation == "pane split":
+            result = {"pane": {"pane_id": "w1:p2", "tab_id": "w1:t1"}}
+        elif operation == "pane run":
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": result}), "")
+
+    def operations(self):
+        return [" ".join(call[:2]) for call in self.calls]
+
+
+class OpenDetailsPaneTests(unittest.TestCase):
+    def setUp(self):
+        self.config = Config()
+        self.fake = PaneHerdr()
+        patcher = mock.patch.object(start, "command", self.fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        command = mock.patch.object(start, "herdboard_command", return_value="herdboard")
+        command.start()
+        self.addCleanup(command.stop)
+
+    def test_splits_swaps_renames_and_runs_the_view(self):
+        self.assertEqual(start.open_details_pane("t123", "w1:p1", self.config), "w1:p2")
+        self.assertEqual(self.fake.calls, [
+            ["pane", "get", "w1:p1"],
+            ["pane", "list", "--workspace", "w1"],
+            ["tab", "list"],
+            ["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.25", "--no-focus"],
+            ["pane", "swap", "--source-pane", "w1:p1", "--target-pane", "w1:p2"],
+            ["pane", "rename", "w1:p2", "details t123"],
+            ["pane", "run", "w1:p2", "herdboard details t123"],
+        ])
+
+    def test_the_swap_gives_the_focus_back_to_the_users_tab(self):
+        self.fake.focused = "w2:t1"
+        self.config.details_pane_ratio = 0.4
+        start.open_details_pane("t123", "w1:p1", self.config)
+        self.assertIn(["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.4", "--no-focus"],
+                      self.fake.calls)
+        operations = self.fake.operations()
+        self.assertEqual(operations[operations.index("pane swap") + 1], "tab focus")
+        self.assertIn(["tab", "focus", "w2:t1"], self.fake.calls)
+
+    def test_nothing_when_the_setting_is_off(self):
+        self.config.details_pane = False
+        self.assertIsNone(start.open_details_pane("t123", "w1:p1", self.config))
+        self.assertEqual(self.fake.calls, [])
+
+    def test_no_second_pane_in_the_tab(self):
+        self.fake.labels = {"w1:p5": "details t123"}
+        self.assertIsNone(start.open_details_pane("t123", "w1:p1", self.config))
+        self.assertNotIn("pane split", self.fake.operations())
+
+    def test_a_failed_run_closes_the_pane_and_notifies(self):
+        self.fake.fail = "pane run"
+        self.assertIsNone(start.open_details_pane("t123", "w1:p1", self.config))
+        self.assertIn(["pane", "close", "w1:p2"], self.fake.calls)
+        self.assertEqual(self.fake.operations()[-1], "notification show")
 
 
 if __name__ == "__main__":

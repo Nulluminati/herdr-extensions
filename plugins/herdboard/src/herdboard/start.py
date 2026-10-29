@@ -266,6 +266,66 @@ def export_config(pane_id: str, config_file: Path | None) -> None:
         pass
 
 
+def details_label(ref: str) -> str:
+    """The Herdr label of a card's details pane, which tells an open pane from a missing one."""
+    return f"details {ref}"
+
+
+def _focused_tab() -> str | None:
+    tabs = (herdr("tab", "list") or {}).get("tabs")
+    return next((tab.get("tab_id") for tab in tabs or [] if isinstance(tab, dict) and tab.get("focused")), None)
+
+
+def open_details_pane(ref: str, host_pane: str, config, config_file: Path | None = None) -> str | None:
+    """Open the card details pane on top of `host_pane`, in its tab, and return the new pane's ID.
+
+    Herdr splits only right or down, so the pane opens below the host and the two swap places.
+    The swap focuses the host's tab, so the tab that the user had gets the focus back.
+    A failure is only a notification: it never fails a start, a review or a plan.
+    """
+    if not config.details_pane:
+        return None
+    label = details_label(ref)
+    pane = None
+    try:
+        host = herdr("pane", "get", host_pane).get("pane") or {}
+        tab, workspace = host.get("tab_id"), host.get("workspace_id")
+        if not tab or not workspace:
+            raise StartError(f"Herdr gave no tab for pane {host_pane}", "herdr_error")
+        panes = herdr("pane", "list", "--workspace", workspace)["panes"]
+        if any(entry.get("tab_id") == tab and entry.get("label") == label for entry in panes):
+            return None
+        focused = _focused_tab()
+        split = herdr("pane", "split", host_pane, "--direction", "down",
+                      "--ratio", str(config.details_pane_ratio), "--no-focus")
+        pane = (split.get("pane") or {}).get("pane_id")
+        if not isinstance(pane, str) or not pane:
+            raise StartError(f"Unexpected Herdr split result: {split}", "herdr_error")
+        herdr("pane", "swap", "--source-pane", host_pane, "--target-pane", pane)
+        if focused and focused != tab:
+            herdr("tab", "focus", focused, tolerated=("tab_not_found",))
+        herdr("pane", "rename", pane, label)
+        export_config(pane, config_file)
+        # Herdr prints nothing for `pane run` when it works, so only the exit code counts.
+        try:
+            result = command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "run", pane,
+                              f"{herdboard_command(config_file)} details {shlex.quote(ref)}"])
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise StartError(f"Herdr is not reachable: {error}", "herdr_unavailable") from error
+        if result.returncode:
+            raise StartError(f"Herdr cannot run the details view: {(result.stderr or result.stdout).strip()}",
+                             "herdr_error")
+        return pane
+    except HerdboardError as error:
+        if pane:
+            try:
+                herdr("pane", "close", pane, tolerated=("pane_not_found",))
+            except HerdboardError:
+                pass
+        notify("herdboard: no details pane", f"{ref}: {error}")
+        return None
+
+
 def write_brief(name: str, text: str) -> Path:
     """Write an agent brief to the state folder and return its path."""
     path = state_dir() / "briefs" / f"{name}.md"
