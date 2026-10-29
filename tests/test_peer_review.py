@@ -121,6 +121,21 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(peer_review.reviewer_for("pi"), "codex")
         self.assertEqual(peer_review.reviewer_for("codex"), "claude")
 
+    def test_a_linked_worktree_reviewer_matches_herdboard(self):
+        linked = self.base / "linked"
+        subprocess.run(["git", "-C", str(self.repository), "worktree", "add", "-q", str(linked), "-b", "card"],
+                       check=True, capture_output=True)
+        review = Path("/reviews/r1")
+        for kind in ("claude", "pi"):
+            with self.subTest(kind=kind):
+                args = peer_review.reviewer_arguments(kind, review, linked)
+                prompt = args[0] if kind == "claude" else args[-1]
+                expected = ([prompt, *sandbox.claude_reviewer_options(review, linked, browser=False, hunk=False),
+                             *sandbox.claude_reviewer_tools(review)] if kind == "claude" else
+                            [*sandbox.pi_reviewer_options(review, linked, browser=False, hunk=False), "--", prompt])
+                self.assertEqual(args, expected)
+                self.assertIn(str((self.repository / ".git").resolve()), " ".join(args))
+
     def test_reviewers_get_the_herdboard_sandbox_without_a_browser(self):
         folder, repo = Path('/reviews/a"b\\c'), Path("/repo")
         prompt = peer_review.reviewer_arguments("codex", folder, repo)[-1]

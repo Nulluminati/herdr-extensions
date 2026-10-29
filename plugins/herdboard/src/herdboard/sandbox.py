@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 
 # Claude's and pi's sandbox reject "*", so the shell reaches GitHub only. Codex matches them.
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
@@ -29,11 +30,26 @@ def hunk_port() -> int:
         return HUNK_DEFAULT_PORT
 
 
+def shared_git_folder(path: Path) -> list[Path]:
+    """The Git folder that a linked worktree shares with its main checkout, when it lies outside `path`.
+
+    Commits and branch changes write there, so the sandbox denies it with the worktree."""
+    try:
+        result = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True)
+    except OSError:
+        return []
+    if result.returncode or not result.stdout.strip():
+        return []
+    common = Path(result.stdout.strip()).resolve()
+    return [] if common.is_relative_to(Path(path).resolve()) else [common]
+
+
 def _policy(writable: Path | None, read_only: Path, domains: list[str], excluded: list[str]) -> dict:
     """The sandbox-runtime policy that Claude's `sandbox` settings and pi's `--sandbox` share."""
     filesystem = {"allowWrite": [str(writable)]} if writable else {}
     # The sandbox writes the working directory unless denyWrite names it.
-    filesystem["denyWrite"] = [str(read_only)]
+    filesystem["denyWrite"] = [str(read_only), *map(str, shared_git_folder(read_only))]
     policy = {"network": {"allowedDomains": domains}, "filesystem": filesystem}
     if excluded:
         # terminal-browser splits panes through the Herdr socket, which the sandbox blocks.

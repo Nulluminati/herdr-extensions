@@ -60,7 +60,7 @@ class PlanError(HerdboardError):
         self.code = code
 
 
-def planner_arguments(kind: str, prompt: str, worktree: str, folder: Path, model: str | None,
+def planner_arguments(kind: str, prompt: str, folder: Path, model: str | None,
                       thinking: str | None) -> list[str]:
     """The planner's arguments after Herdr's `--`: it reads the repository, may try code in the worktree,
     and writes the attachments.
@@ -282,7 +282,7 @@ class Planner:
             # A startup prompt (such as Claude's folder trust check) waits for the user: the worker watches it.
             try:
                 herdr("agent", "start", f"hb-{ref.lower()}-plan", "--kind", kind, "--pane", pane, "--",
-                      *planner_arguments(kind, prompt, str(worktree), plan_file.parent, model, thinking),
+                      *planner_arguments(kind, prompt, plan_file.parent, model, thinking),
                       tolerated=("timeout", "agent_not_ready"))
                 activity.record_pane_agent(pane, kind)
             except HerdboardError:

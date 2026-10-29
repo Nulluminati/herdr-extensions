@@ -846,6 +846,20 @@ class PlanAutomationTests(LocalTime):
             self.planner.plan(self.add("inbox").id, agent="claude", thinking="ultra")
         self.assertEqual(raised.exception.code, "usage")
 
+    def test_the_automation_planner_gets_the_card_planner_arguments(self):
+        from herdboard import plan
+        for kind in ("claude", "pi", "codex"):
+            with self.subTest(kind=kind):
+                added = self.add("inbox")
+                self.fake.calls.clear()
+                self.planner.plan(added.id, agent=kind)
+                call = self.fake.find("agent", "start")[0]
+                args = call[call.index("--") + 1:]
+                prompt = next(arg for arg in args if arg.startswith("Plan herdboard automation"))
+                folder = attachments.plan_path(self.config, added.id).parent
+                model = args[args.index("--model") + 1] if "--model" in args else None
+                self.assertEqual(args, plan.planner_arguments(kind, prompt, folder, model, None))
+
     def test_a_running_planner_blocks_a_second_one(self):
         added = self.add("inbox")
         self.planner.plan(added.id)

@@ -163,7 +163,7 @@ class PlanTestCase(unittest.TestCase):
 
 class RequestTests(PlanTestCase):
     def test_codex_planner_arguments_and_record(self):
-        args = plan.planner_arguments("codex", "task", "/repo", Path("/plans"), "gpt-6.1", "ultra")
+        args = plan.planner_arguments("codex", "task", Path("/plans"), "gpt-6.1", "ultra")
         self.assertEqual(args, [*start.codex_auto_review_options(), "--add-dir", "/plans", "--model", "gpt-6.1",
                                 "-c", 'model_reasoning_effort="ultra"', "task"])
         self.assertIn("sandbox_workspace_write.network_access=true", args)

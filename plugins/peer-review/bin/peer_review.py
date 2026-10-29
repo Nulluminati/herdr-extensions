@@ -88,13 +88,27 @@ def review_root() -> Path:
     return Path(state) / "peer-review"
 
 
+def shared_git_folder(path: Path) -> list[Path]:
+    """The Git folder that a linked worktree shares with its main checkout, when it lies outside `path`."""
+    try:
+        result = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True)
+    except OSError:
+        return []
+    if result.returncode or not result.stdout.strip():
+        return []
+    common = Path(result.stdout.strip()).resolve()
+    return [] if common.is_relative_to(Path(path).resolve()) else [common]
+
+
 def sandbox_policy(review: Path, repository: Path) -> dict:
     """The sandbox-runtime policy for Claude's `sandbox` settings and pi's `--sandbox`.
 
     The same shape as herdboard's reviewer sandbox (herdboard/sandbox.py), without the browser.
     The sandbox writes the working directory unless denyWrite names it."""
     return {"network": {"allowedDomains": list(GITHUB_DOMAINS)},
-            "filesystem": {"allowWrite": [str(review)], "denyWrite": [str(repository)]}}
+            "filesystem": {"allowWrite": [str(review)],
+                           "denyWrite": [str(repository), *map(str, shared_git_folder(repository))]}}
 
 
 def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[str]:

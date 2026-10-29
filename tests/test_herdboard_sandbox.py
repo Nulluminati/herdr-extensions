@@ -1,7 +1,9 @@
 """Reviewer sandbox options: any shell command, writes in one folder, shell network to GitHub only."""
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -35,9 +37,36 @@ class PortTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(sandbox.hunk_port(), 47657)
 
+    def test_hunk_port_ignores_a_value_that_is_not_a_number(self):
+        with patch.dict(os.environ, {"HUNK_MCP_PORT": "abc"}):
+            self.assertEqual(sandbox.hunk_port(), 47657)
+
     def test_hunk_port_follows_the_environment(self):
         with patch.dict(os.environ, {"HUNK_MCP_PORT": "5000"}):
             self.assertEqual(sandbox.hunk_port(), 5000)
+
+
+class GitFolderTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.main, self.linked = self.root / "main", self.root / "linked"
+        self.main.mkdir()
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(self.main)]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        subprocess.run([*git, "worktree", "add", "-q", str(self.linked), "-b", "card"], check=True)
+
+    def test_a_linked_worktree_also_denies_its_shared_git_folder(self):
+        expected = [str(self.linked), str(self.main / ".git")]
+        for options in (sandbox.claude_reviewer_options, sandbox.pi_reviewer_options):
+            with self.subTest(options=options.__name__):
+                args = options(None, self.linked, browser=False, hunk=False)
+                policy = claude_settings(args) if "--settings" in args else pi_policy(args)
+                self.assertEqual(policy["filesystem"]["denyWrite"], expected)
+
+    def test_a_main_checkout_denies_only_itself(self):
+        settings = claude_settings(sandbox.claude_reviewer_options(None, self.main, browser=False, hunk=False))
+        self.assertEqual(settings["filesystem"]["denyWrite"], [str(self.main)])
 
 
 class ClaudeTests(unittest.TestCase):

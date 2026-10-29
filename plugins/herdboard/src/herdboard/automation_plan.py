@@ -176,7 +176,7 @@ class AutomationPlanner:
             export_config(pane, self.config_file)
             try:
                 herdr("agent", "start", f"hb-{ref}-plan", "--kind", kind, "--pane", pane, "--",
-                      *planner_arguments(kind, prompt, str(worktree), plan_file.parent, model, thinking),
+                      *planner_arguments(kind, prompt, plan_file.parent, model, thinking),
                       tolerated=("timeout", "agent_not_ready"))
             except HerdboardError:
                 try:
