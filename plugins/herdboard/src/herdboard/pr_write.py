@@ -170,7 +170,7 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
         thinking = config.start_thinking if config.start_thinking in thinking_levels(kind) else None
         # A startup prompt waits for the user, and a busy writer never looks ready: the worker watches it.
         herdr("agent", "start", f"hb-{ref.lower()}-pr", "--kind", kind, "--pane", pane, "--",
-              *reviewer_arguments(kind, prompt_text(folder, ref), folder, model, thinking),
+              *reviewer_arguments(kind, prompt_text(folder, ref), folder, worktree, model, thinking),
               tolerated=("timeout", "agent_not_ready"))
         activity.record_pane_agent(pane, kind)
         own, writer = True, f"a {kind} writer agent"

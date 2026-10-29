@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard import activity, merge, pr_write, start  # noqa: E402
+from herdboard import activity, merge, pr_write, sandbox, start  # noqa: E402
 from herdboard.agent_review import reviewer_arguments  # noqa: E402
 from test_herdboard_agent_review import ReviewerHerdr  # noqa: E402
 from test_herdboard_merge import PullRequestTestCase  # noqa: E402
@@ -102,7 +102,8 @@ class RequestTests(PrWriteTestCase):
         self.request()
         call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
         self.assertIn('model_reasoning_effort="ultra"', call)
-        self.assertIn('default_permissions="hb-review"', call)
+        options = sandbox.codex_reviewer_options("hb-review", self.folder, hunk=False)
+        self.assertEqual(call[call.index("--") + 1:][:len(options)], options)
 
     def test_the_card_agent_is_asked_by_the_worker(self):
         result = self.request()
@@ -175,7 +176,8 @@ class RequestTests(PrWriteTestCase):
         self.assertEqual(start_call[2], f"hb-{self.card.ref}-pr")
         self.assertEqual(start_call[start_call.index("--kind") + 1], "pi")
         args = start_call[start_call.index("--") + 1:]
-        self.assertEqual(args[:2], ["--tools", "read,grep,find,ls,write"])
+        options = sandbox.pi_reviewer_options(self.folder, self.worktree, browser=False, hunk=False)
+        self.assertEqual(args[:len(options)], options)
         self.assertIn(str(self.folder / "request.md"), args[-1])
         stored = self.records()[self.card.ref]["pr_write"]
         self.assertEqual((stored["pane_id"], stored["own_pane"]), (result["pane_id"], True))
@@ -191,15 +193,15 @@ class RequestTests(PrWriteTestCase):
         start_call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
         self.assertEqual(start_call[start_call.index("--kind") + 1], "claude")
         args = start_call[start_call.index("--") + 1:]
-        self.assertNotIn("Bash(terminal-browser:*)", args)
-        self.assertNotIn("--tools", args)
+        options = sandbox.claude_reviewer_options(self.folder, self.worktree, browser=False, hunk=False)
+        self.assertEqual(args[1:1 + len(options)], options)
+        self.assertEqual(args[-len(sandbox.claude_reviewer_tools(self.folder)):],
+                         sandbox.claude_reviewer_tools(self.folder))
 
-    def test_a_read_only_writer_gets_no_bash_and_no_browser(self):
+    def test_a_writer_gets_no_browser_by_default(self):
         for kind in ("claude", "pi"):
-            args = reviewer_arguments(kind, "Read it", Path("/tmp/ask"), None, None)
-            self.assertNotIn("Bash(terminal-browser:*)", args, kind)
-            if kind == "pi":
-                self.assertEqual(args[1], "read,grep,find,ls,write", kind)
+            args = reviewer_arguments(kind, "Read it", Path("/tmp/ask"), Path("/repo"), None, None)
+            self.assertFalse(any("terminal-browser" in arg for arg in args), kind)
 
     def test_a_running_writer_blocks_a_second_request(self):
         self.request()

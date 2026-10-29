@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from herdboard import agent_review, attachments, review, start  # noqa: E402
+from herdboard import agent_review, attachments, review, sandbox, start  # noqa: E402
 from test_herdboard_cli import CliTestCase  # noqa: E402
 from test_herdboard_merge import GitHerdr, MergeTestCase  # noqa: E402
 
@@ -122,25 +122,30 @@ class WorkerTests(CliTestCase):
 
 
 class RequestTests(AgentReviewTestCase):
-    def test_codex_review_profile_quotes_the_folder(self):
-        import tomllib
-        folder = Path('/reviews/a"b\\c')
-        args = agent_review.reviewer_arguments("codex", "task", folder, "gpt-6.1", "ultra")
-        self.assertEqual(args[:4], ["-a", "never", "-c", 'default_permissions="hb-review"'])
-        profile = tomllib.loads(args[5])["permissions"]["hb-review"]["filesystem"]
-        self.assertEqual(profile, {":root": "read", str(folder): "write"})
-        self.assertEqual(args[6:], ["--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+    def test_codex_reviewer_gets_the_sandbox_profile_then_its_model(self):
+        folder = Path("/reviews/r1")
+        args = agent_review.reviewer_arguments("codex", "task", folder, Path("/repo"), "gpt-6.1", "ultra")
+        options = sandbox.codex_reviewer_options("hb-review", folder, hunk=False)
+        self.assertEqual(args, [*options, "--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertNotIn("on-request", args)
         self.assertEqual(agent_review.REVIEWERS, {"claude": "pi", "pi": "codex", "codex": "claude"})
 
-    def test_codex_review_keeps_its_no_network_profile_without_browser_instructions(self):
+    def test_every_reviewer_gets_the_sandbox_with_its_folder_and_repository(self):
+        folder, repo = Path("/reviews/r1"), Path("/repo")
+        for browser in (False, True):
+            with self.subTest(browser=browser):
+                args = agent_review.reviewer_arguments("claude", "task", folder, repo, None, None, browser=browser)
+                self.assertEqual(args, ["task", *sandbox.claude_reviewer_options(folder, repo, browser, hunk=False),
+                                        *sandbox.claude_reviewer_tools(folder)])
+                args = agent_review.reviewer_arguments("pi", "task", folder, repo, None, None, browser=browser)
+                self.assertEqual(args, [*sandbox.pi_reviewer_options(folder, repo, browser, hunk=False),
+                                        "--", "task"])
+
+    def test_the_codex_reviewer_is_asked_to_use_the_browser(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="codex")
-        request = (self.folder / "request.md").read_text()
-        self.assertNotIn("terminal-browser", request)
-        args = self.reviewer_start()
-        self.assertIn('default_permissions="hb-review"', args)
-        self.assertFalse(any("network={enabled=true}" in arg for arg in args))
+        self.assertIn("terminal-browser open --no-merge --split right", (self.folder / "request.md").read_text())
 
     def test_codex_reviewer_uses_valid_config_thinking(self):
         self.config.start_thinking = "high"
@@ -176,7 +181,8 @@ class RequestTests(AgentReviewTestCase):
                 with self.subTest(browser=browser, repoless=bool(index)):
                     self.assertIn("Do not run the project's code, tests or builds from the shell.", text)
                     self.assertIn("Do not start a server.", text)
-                    self.assertIn("Run only read-only inspection commands.", text)
+                    self.assertIn("You may run any read-only command", text)
+                    self.assertNotIn("Run no other command", text)
                     if browser:
                         self.assertLess(text.index("Do not run the project's code"),
                                         text.index("terminal-browser open"))
@@ -258,20 +264,21 @@ class RequestTests(AgentReviewTestCase):
         folder = Path(result["folder"])
         args = start_call[start_call.index("--") + 1:]
         self.assertIn(str(folder / "request.md"), args[-1])
-        self.assertEqual(args[:-1], agent_review.codex_review_options(folder))
+        self.assertEqual(args[:-1], sandbox.codex_reviewer_options("hb-review", folder, hunk=False))
         self.assertEqual(result["reviewer"], "codex")
         request = (folder / "request.md").read_text()
         self.assertIn("Herdboard automatically delivers", request)
         self.assertIn("You do not need to run a command or send a notification", request)
         self.assertIn("Do not report that you cannot run tests", request)
         self.assertNotIn("state those limits", request)
-        self.assertNotIn("terminal-browser", request)
+        self.assertIn("terminal-browser open", request)
 
     def test_claude_reviewer_keeps_browser_support(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="claude")
-        self.assertIn("Bash(terminal-browser:*)", self.reviewer_start())
+        settings = json.loads(self.reviewer_start()[self.reviewer_start().index("--settings") + 1])
+        self.assertEqual(settings["sandbox"]["excludedCommands"], ["terminal-browser *"])
         request = (self.folder / "request.md").read_text()
         self.assertIn("When the change has a page", request)
         self.assertIn("terminal-browser open --no-merge --split right", request)
@@ -305,8 +312,8 @@ class RequestTests(AgentReviewTestCase):
         self.request(reviewer="pi", model="zai/glm-5.3", thinking="high")
         args = self.reviewer_start()
         args = args[args.index("--") + 1:]
-        self.assertEqual(args[:-2], ["--tools", "read,grep,find,ls,write,bash", "--model", "zai/glm-5.3",
-                                     "--thinking", "high"])
+        options = sandbox.pi_reviewer_options(self.folder, self.worktree, browser=True, hunk=False)
+        self.assertEqual(args[:-2], [*options, "--model", "zai/glm-5.3", "--thinking", "high"])
         self.assertEqual(args[-2], "--")
 
     def test_a_claude_model_goes_before_the_allowed_tools(self):
@@ -315,7 +322,9 @@ class RequestTests(AgentReviewTestCase):
         self.request(reviewer="claude", model="sonnet")
         args = self.reviewer_start()
         args = args[args.index("--") + 1:]
-        self.assertEqual(args[1:5], ["--permission-mode", "dontAsk", "--model", "sonnet"])
+        self.assertEqual(args[1:2], ["--permission-mode"])
+        self.assertLess(args.index("--model"), args.index("--allowedTools"))
+        self.assertEqual(args[args.index("--model") + 1], "sonnet")
 
     def test_claude_takes_only_its_own_thinking_levels(self):
         self.started()
@@ -329,8 +338,8 @@ class RequestTests(AgentReviewTestCase):
         self.request(reviewer="claude", model="sonnet", thinking="high")
         args = self.reviewer_start()
         args = args[args.index("--") + 1:]
-        self.assertEqual(args[1:8], ["--permission-mode", "dontAsk", "--model", "sonnet", "--effort", "high",
-                                     "--allowedTools"])
+        self.assertEqual(args[1:3], ["--permission-mode", "dontAsk"])
+        self.assertEqual(args[5:10], ["--model", "sonnet", "--effort", "high", "--allowedTools"])
 
     def test_a_pi_reviewer_without_a_level_takes_the_saved_one_of_its_model(self):
         self.store.config.thinking = {"zai/glm-5.3": "xhigh", "start/one": "minimal"}

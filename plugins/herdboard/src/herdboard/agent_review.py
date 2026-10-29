@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time
 
-from . import activity, attachments, start as start_module
+from . import activity, attachments, sandbox, start as start_module
 from .config import AGENTS, THINKING_LEVELS, thinking_levels
 from .model import HerdboardError
 from .review import Reviewer, ReviewError
@@ -26,9 +26,10 @@ REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large change can take long; the worker gives up after this.
 REVIEW_TIMEOUT_SECONDS = 30 * 60
 POLL_SECONDS = 5
-REVIEW_COMMAND_RULES = """Do not run the project's code, tests or builds from the shell.
+REVIEW_COMMAND_RULES = """You may run any read-only command, such as `git log`, `git show`, `grep` or `gh`.
+Do not run the project's code, tests or builds from the shell.
 Do not start a server.
-Run only read-only inspection commands. Browser commands require explicit permission below.
+Do not change Git state: no checkout, commit, reset or push.
 """
 BROWSER_INSTRUCTIONS = """When the change has a page, an HTML file or a server that already runs, check it with
 `terminal-browser open --no-merge --split right <url-or-file>` and `terminal-browser action -- <command>`.
@@ -36,7 +37,6 @@ Before your turn ends, close it with `terminal-browser action --browser <key> --
 the open output or `terminal-browser ls`. Check `terminal-browser ls` after the close: close can report
 success and leave the browser running, so say so in the findings when it stays listed.
 Do not run `terminal-browser shutdown`: it closes every browser on the machine.
-Run no other command.
 """
 
 
@@ -58,30 +58,24 @@ def _git(worktree: Path, *args: str) -> str:
     return result.stdout
 
 
-def codex_review_options(folder: Path) -> list[str]:
-    """Read the whole disk and write only the review folder, without network access."""
-    path = json.dumps(str(folder), ensure_ascii=False)
-    return ["-a", "never", "-c", 'default_permissions="hb-review"',
-            "-c", f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}']
-
-
-def reviewer_arguments(kind: str, prompt: str, folder: Path, model: str | None,
+def reviewer_arguments(kind: str, prompt: str, folder: Path, repository: Path, model: str | None,
                        thinking: str | None, browser: bool = False) -> list[str]:
-    """The reviewer's arguments after Herdr's `--`: it reads the repository and writes only its findings.
+    """The reviewer's arguments after Herdr's `--`: any shell command in a sandbox that writes only `folder`,
+    never `repository`, and reaches only GitHub.
 
-    `browser` also allows terminal-browser (and, for pi, bash): the reviewer may check pages, HTML files
-    and servers that already run. The read-only PR writer starts without it."""
+    `browser` lets terminal-browser run outside the sandbox: the reviewer may check pages, HTML files
+    and servers that already run. The PR writer starts without it. Codex runs terminal-browser outside
+    its sandbox by a rule in the user's Codex config, so the prompt alone decides for Codex."""
     if kind == "pi":
-        # pi cannot limit bash to some commands: the prompt holds the limits.
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
-        tools = "read,grep,find,ls,write" + (",bash" if browser else "")
-        return ["--tools", tools, *options, "--", prompt]
+        return [*sandbox.pi_reviewer_options(folder, repository, browser, hunk=False), *options, "--", prompt]
     if kind == "codex":
-        return [*codex_review_options(folder), *start_module.agent_arguments(kind, prompt, model, thinking)]
+        return [*sandbox.codex_reviewer_options("hb-review", folder, hunk=False),
+                *start_module.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
-    extra = ["Bash(terminal-browser:*)"] if browser else []
-    return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
-            *(["--effort", thinking] if thinking else []), "--allowedTools", "Read", "Grep", "Glob", f"Edit(/{folder}/**)", *extra]
+    return [prompt, *sandbox.claude_reviewer_options(folder, repository, browser, hunk=False),
+            *(["--model", model] if model else []), *(["--effort", thinking] if thinking else []),
+            *sandbox.claude_reviewer_tools(folder)]
 
 
 def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = (),
@@ -234,11 +228,11 @@ class AgentReviewer(Reviewer):
                 folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-",
                                                dir=reviews))
                 if record.get("mode") == REPOLESS:
-                    request = repoless_request_text(card, record, folder, files, browser=kind != "codex")
+                    request = repoless_request_text(card, record, folder, files, browser=True)
                 else:
                     (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
                     (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
-                    request = request_text(card, record, base, folder, untracked, files, browser=kind != "codex")
+                    request = request_text(card, record, base, folder, untracked, files, browser=True)
                 (folder / "request.md").write_text(request, encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
@@ -249,7 +243,7 @@ class AgentReviewer(Reviewer):
             # A startup prompt (such as Claude's folder trust check) waits for the user,
             # and a reviewer busy with its first message never looks ready: the worker watches it.
             herdr("agent", "start", f"hb-{ref.lower()}-review", "--kind", kind, "--pane", pane, "--",
-                  *reviewer_arguments(kind, prompt, folder, model, thinking, browser=kind != "codex"),
+                  *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
                   tolerated=("timeout", "agent_not_ready"))
             activity.record_pane_agent(pane, kind)
             record["agent_review"] = {"folder": str(folder), "pane_id": pane, "kind": kind, "model": model,

@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 
-from . import activity, agent_review, start
+from . import activity, agent_review, sandbox, start
 from .model import HerdboardError
 from .start import _lock, _read, _write, herdr, safe_key, state_dir
 
@@ -460,23 +460,20 @@ def _comments(session_id: str, kind: str) -> list[dict]:
 
 # The reviewer agent
 
-REVIEWER_BASH = ("Bash(hunk session:*)", "Bash(hunk skill path:*)", "Bash(gh pr view:*)", "Bash(gh pr diff:*)",
-                 "Bash(gh pr checks:*)", "Bash(terminal-browser:*)")
-
-
-def reviewer_arguments(kind: str, prompt: str, model: str | None, thinking: str | None) -> list[str]:
-    """The reviewer's arguments after Herdr's `--`: it reads, runs `hunk session` and reads PR data."""
+def reviewer_arguments(kind: str, prompt: str, checkout: Path, model: str | None,
+                       thinking: str | None) -> list[str]:
+    """The reviewer's arguments after Herdr's `--`: any shell command in a sandbox that writes nothing, keeps
+    `checkout` read-only and reaches only GitHub and the Hunk daemon. terminal-browser runs outside it."""
     if kind == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
-        return ["--tools", "read,grep,find,ls,bash", "--bash-allow", ",".join(REVIEWER_BASH), *options, "--", prompt]
+        return [*sandbox.pi_reviewer_options(None, checkout, browser=True, hunk=True), *options, "--", prompt]
     if kind == "codex":
-        return ["-a", "never", "-c", 'default_permissions="hb-pr-review"',
-                "-c", 'permissions.hb-pr-review.filesystem={":root"="read"}',
-                "-c", 'permissions.hb-pr-review.network={enabled=true}',
+        return [*sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
                 *start.agent_arguments(kind, prompt, model, thinking)]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
-    return [prompt, "--permission-mode", "dontAsk", *(["--model", model] if model else []),
-            *(["--effort", thinking] if thinking else []), "--allowedTools", "Read", "Grep", "Glob", *REVIEWER_BASH]
+    return [prompt, *sandbox.claude_reviewer_options(None, checkout, browser=True, hunk=True),
+            *(["--model", model] if model else []), *(["--effort", thinking] if thinking else []),
+            *sandbox.claude_reviewer_tools(None)]
 
 
 def prompt_text(record: dict, pr: PullRequest, kind: str | None = None) -> str:
@@ -508,8 +505,8 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 ## Rules
 
 - Do not edit, create or delete files.
-- Do not run tests, builds or any code of the PR. Run no command other than the ones above,
-  and do not start a server.
+- You may run any read-only command, such as `git log`, `grep` or other `gh` reads.
+- Do not run tests, builds or any code of the PR, and do not start a server.
 - Never run `terminal-browser shutdown`: it closes every browser on the machine.
 - Do not change Git state: no checkout, commit, fetch, reset or push.
 - Do not submit, approve or comment on GitHub. Do not run `gh pr review` or `gh pr comment`.
@@ -574,7 +571,7 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
             herdr("agent", "prompt", record["pane_id"], message)
         else:
             herdr("agent", "start", name, "--kind", kind, "--pane", record["pane_id"], "--",
-                  *reviewer_arguments(kind, message, model, thinking), tolerated=("timeout", "agent_not_ready"))
+                  *reviewer_arguments(kind, message, Path(record["worktree_path"]), model, thinking), tolerated=("timeout", "agent_not_ready"))
             activity.record_pane_agent(record["pane_id"], kind)
     except HerdboardError as error:
         # No worker starts, so without this the PR would show `reviewing` for good.

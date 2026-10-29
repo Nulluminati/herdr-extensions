@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
-from herdboard import agent_review, pr_reviews, start  # noqa: E402
+from herdboard import agent_review, pr_reviews, sandbox, start  # noqa: E402
 
 REPO = "acme/api"
 KEY = "acme/api#7"
@@ -349,11 +349,9 @@ class HunkTests(PrReviewTestCase):
 
 
 class ReviewerTests(PrReviewTestCase):
-    def test_codex_pr_reviewer_is_read_only_with_network(self):
-        args = pr_reviews.reviewer_arguments("codex", "task", "gpt-6.1", "ultra")
-        self.assertEqual(args, ["-a", "never", "-c", 'default_permissions="hb-pr-review"',
-                                "-c", 'permissions.hb-pr-review.filesystem={":root"="read"}',
-                                "-c", 'permissions.hb-pr-review.network={enabled=true}',
+    def test_codex_pr_reviewer_writes_nothing_and_reaches_github_and_hunk(self):
+        args = pr_reviews.reviewer_arguments("codex", "task", Path("/pr"), "gpt-6.1", "ultra")
+        self.assertEqual(args, [*sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
                                 "--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
         self.assertEqual(pr_reviews.AUTHORS["codex"], "Codex")
         pr_reviews._validate("codex", None, "ultra")
@@ -361,39 +359,43 @@ class ReviewerTests(PrReviewTestCase):
             pr_reviews._validate("codex", None, "off")
         self.assertEqual(raised.exception.code, "usage")
 
-    def test_claude_gets_the_prompt_before_its_allowed_tools(self):
-        arguments = pr_reviews.reviewer_arguments("claude", "Read it", "sonnet", None)
+    def test_claude_gets_the_sandbox_with_browser_and_hunk(self):
+        arguments = pr_reviews.reviewer_arguments("claude", "Read it", Path("/pr"), "sonnet", None)
         self.assertEqual(arguments[0], "Read it")
+        options = sandbox.claude_reviewer_options(None, Path("/pr"), browser=True, hunk=True)
+        self.assertEqual(arguments[1:1 + len(options)], options)
         self.assertLess(arguments.index("--model"), arguments.index("--allowedTools"))
-        tools = arguments[arguments.index("--allowedTools") + 1:]
-        self.assertIn("Bash(hunk session:*)", tools)
-        self.assertIn("Bash(gh pr diff:*)", tools)
-        self.assertIn("Bash(terminal-browser:*)", tools)
-        self.assertNotIn("Bash", tools)
-        self.assertNotIn("Edit", tools)
+        self.assertEqual(arguments[arguments.index("--allowedTools"):], sandbox.claude_reviewer_tools(None))
 
     def test_claude_gets_its_effort_before_its_allowed_tools(self):
-        arguments = pr_reviews.reviewer_arguments("claude", "Read it", None, "xhigh")
+        arguments = pr_reviews.reviewer_arguments("claude", "Read it", Path("/pr"), None, "xhigh")
         self.assertEqual(arguments[0], "Read it")
         self.assertLess(arguments.index("--effort"), arguments.index("--allowedTools"))
         self.assertEqual(arguments[arguments.index("--effort") + 1], "xhigh")
 
-    def test_pi_gets_bash_and_its_thinking_level(self):
-        arguments = pr_reviews.reviewer_arguments("pi", "Read it", "zai/glm-5.3", "high")
-        self.assertEqual(arguments[:2], ["--tools", "read,grep,find,ls,bash"])
-        allow = arguments[arguments.index("--bash-allow") + 1]
-        self.assertEqual(allow, "Bash(hunk session:*),Bash(hunk skill path:*),Bash(gh pr view:*),"
-                                "Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(terminal-browser:*)")
+    def test_pi_gets_the_sandbox_and_its_thinking_level(self):
+        arguments = pr_reviews.reviewer_arguments("pi", "Read it", Path("/pr"), "zai/glm-5.3", "high")
+        options = sandbox.pi_reviewer_options(None, Path("/pr"), browser=True, hunk=True)
+        self.assertEqual(arguments[:len(options)], options)
+        self.assertNotIn("--bash-allow", arguments)
         self.assertEqual(arguments[-2:], ["--", "Read it"])
         self.assertIn("high", arguments)
+
+    def test_start_reviewer_keeps_the_checkout_read_only(self):
+        record = self.record(status=None, reviewed_sha=None)
+        pr_reviews.start_reviewer(KEY, record, self.pr(), "pi", None, None)
+        agent = self.fake.made("herdr", "agent", "start")[0]
+        policy = json.loads(agent[agent.index("--sandbox") + 1])
+        self.assertEqual(policy["filesystem"], {"denyWrite": [str(self.worktree)]})
 
     def test_the_prompt_names_the_session_and_forbids_a_submit(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
         for part in ("s-new", "hunk skill path", f"gh pr diff 7 --repo {REPO}", HEAD, str(self.worktree),
                      "--author Claude", "Do not submit", "terminal-browser open --no-merge --split right",
                      "terminal-browser action", "do not start a server", "Do not open a file from the PR checkout",
-                     "Never run `terminal-browser shutdown`"):
+                     "Never run `terminal-browser shutdown`", "You may run any read-only command"):
             self.assertIn(part, text)
+        self.assertNotIn("Run no command other than", text)
 
     def test_start_reviewer_starts_the_agent_and_its_worker(self):
         record = self.record(status=None, reviewed_sha=None)
