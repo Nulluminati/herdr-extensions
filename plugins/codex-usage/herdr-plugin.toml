@@ -1,0 +1,22 @@
+id = "nulluminati.codex-usage"
+name = "Codex Usage"
+version = "0.1.0"
+# Needs pane tokens in sidebar rows.
+min_herdr_version = "0.9.0"
+description = "Put each Codex agent's context use and estimated cost in the $codex_context and $codex_cost tokens, so the sidebar Agents list can show them."
+platforms = ["linux", "macos"]
+
+# Herdr runs these from the plugin root. With no event the script covers every
+# Codex pane; with an event it covers the one pane in the event. Codex writes
+# its token counts during a turn, so a state change is the time to read them.
+[[startup]]
+command = ["python3", "bin/codex_usage.py"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "bin/codex_usage.py"]
+
+[[actions]]
+id = "refresh"
+title = "Codex usage: refresh"
+command = ["python3", "bin/codex_usage.py"]
