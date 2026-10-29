@@ -267,11 +267,28 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 2. Find the local checkout. herdboard records every main checkout that it runs in. When it knows none, it asks for a path, or `--checkout PATH` gives one.
 3. Choose the branch. A Linear issue uses its own branch name. A todo uses its ID and a short name from its title, such as `t3m9-fix-login-timeout`. A typed todo's branch starts with the commit type, such as `fix/t3m9-fix-login-timeout`.
 4. Choose the base: `--base`, else the recorded base of an earlier start, else the parent's branch for a sub-card, else the branch of the main checkout. A Linear sub-issue does not use its parent's branch, because the parent can belong to another repository.
-5. Open the worktree with `herdr worktree create`, or reuse the card's worktree when it exists. The workspace opens in the background: you stay on the board. Press `g` to go to it. The base becomes the upstream of the card branch, so `git status` and Hunk compare the branch with its base.
+5. Open the worktree with `herdr worktree create`, or reuse the card's worktree when it exists. The workspace opens in the background: you stay on the board. Press `g` to go to it. The base becomes the upstream of the card branch, so `git status` and Hunk compare the branch with its base. A workspace that herdboard opens gets the repository's folder name, such as `herdr-extensions`, because the sidebar shows the card under it.
 6. Move the card to In progress (`start_column`). A Linear issue moves to its started state.
 7. Start the agent in the worktree as `hb-<id>`. Its first message has the card and these rules: record progress with `herdboard log`, do not change the card text, commit with conventional commits, and do not push, merge or remove the worktree.
 
 `--agent claude|pi|codex`, `--model` and `--thinking` choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
+
+herdboard writes the card title and column to the `herdboard_card` token of the card's workspace and of its agent pane, such as `▶ Fix login timeout · In progress`. The token changes when the card moves. Add `$herdboard_card` to the Herdr sidebar rows to show it:
+
+```toml
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace"],
+  ["$herdboard_card", "branch", "git_status"],
+]
+
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "agent"],
+  ["workspace", "tab"],
+  ["$herdboard_card"],
+]
+```
 
 Without `--thinking`, pi uses the thinking level that you last chose for that model, from the `[thinking]` table of the config file. A model without a saved level uses `start_thinking`. See [thinking levels](#thinking-levels).
 

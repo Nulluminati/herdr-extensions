@@ -274,18 +274,20 @@ def write_brief(name: str, text: str) -> Path:
     return path
 
 
-def report_card_token(pane_id: str, token: str | None) -> None:
-    """Set or clear the sidebar card on an agent's pane. Best effort: the sidebar is display only."""
+def report_card_token(target_id: str, token: str | None, kind: str = "pane") -> None:
+    """Set or clear the sidebar card on an agent's pane or on the card's workspace (`kind`).
+
+    Best effort: the sidebar is display only."""
     change = ["--token", f"{CARD_TOKEN}={token}"] if token else ["--clear-token", CARD_TOKEN]
     try:
-        command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "report-metadata", pane_id,
+        command([os.environ.get("HERDR_BIN_PATH") or "herdr", kind, "report-metadata", target_id,
                  "--source", TOKEN_SOURCE, "--seq", str(time.time_ns()), *change])
     except (OSError, subprocess.TimeoutExpired):
         pass
 
 
 def update_card_token(card: CardView, removed: bool = False) -> None:
-    """Show a started card's current column in its agent's sidebar row, or clear it."""
+    """Show a started card's current column in its agent and workspace sidebar rows, or clear it."""
     try:
         records = _read(state_dir() / "starts.json")
     except HerdboardError:
@@ -293,8 +295,11 @@ def update_card_token(card: CardView, removed: bool = False) -> None:
     for key, record in records.items():
         if not isinstance(record, dict) or card.ref not in (key, record.get("ref")):
             continue
+        token = None if removed else card_token(card)
         if record.get("agent_name") and isinstance(record.get("pane_id"), str):
-            report_card_token(record["pane_id"], None if removed else card_token(card))
+            report_card_token(record["pane_id"], token)
+        if isinstance(record.get("workspace_id"), str):
+            report_card_token(record["workspace_id"], token, "workspace")
 
 
 def find_record(ref):
@@ -906,6 +911,11 @@ class Starter:
                 raise ValueError("missing workspace, root pane or worktree path")
         except (KeyError, TypeError, AttributeError, ValueError) as error:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
+        # The sidebar shows the card under the workspace, so its name is the repository, not the branch.
+        try:
+            herdr("workspace", "rename", workspace, Path(checkout).name)
+        except StartError:
+            pass
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
 
     def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False,
@@ -1272,6 +1282,9 @@ class Starter:
                     else:
                         card = self.store.move(card.ref, column)
                 save("move")
+                if record.get("workspace_id"):
+                    report_card_token(record["workspace_id"], card_token(replace(card, column=column)),
+                                      "workspace")
                 if not no_agent:
                     if not agent_live(record):
                         self.launch_agent(replace(card, column=column), record, agent, model, thinking,

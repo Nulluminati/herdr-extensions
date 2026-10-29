@@ -947,6 +947,47 @@ class StartTests(unittest.TestCase):
         call = next(c for c in self.fake.calls if c[:2] == ["pane", "report-metadata"])
         self.assertEqual(call[call.index("--clear-token") + 1], "herdboard_card")
 
+    def workspace_tokens(self):
+        return [c for c in self.fake.calls if c[:2] == ["workspace", "report-metadata"]]
+
+    def test_the_card_workspace_shows_the_card_in_the_sidebar(self):
+        self.starter.start(self.card.ref, no_agent=True)
+        call = self.workspace_tokens()[-1]
+        self.assertEqual(call[2], "w9")
+        self.assertEqual(call[call.index("--source") + 1], "user:herdboard")
+        token = call[call.index("--token") + 1]
+        self.assertTrue(token.startswith("herdboard_card=▶ "))
+        self.assertTrue(token.endswith(" · In progress"))
+
+    def test_a_card_change_updates_the_workspace_card(self):
+        self.starter.start(self.card.ref, no_agent=True)
+        self.fake.calls.clear()
+        with patch.object(start, "command", self.fake):
+            start.update_card_token(self.store.move(self.card.ref, "Review"))
+        call = self.workspace_tokens()[-1]
+        self.assertEqual(call[2], "w9")
+        self.assertTrue(call[call.index("--token") + 1].endswith(" · Review"))
+        self.assertFalse(any(c[:2] == ["pane", "report-metadata"] for c in self.fake.calls))
+
+    def test_a_deleted_card_clears_the_workspace_card(self):
+        self.starter.start(self.card.ref)
+        self.fake.calls.clear()
+        with patch.object(start, "command", self.fake):
+            start.update_card_token(self.store.delete(self.card.ref), removed=True)
+        call = self.workspace_tokens()[-1]
+        self.assertEqual(call[call.index("--clear-token") + 1], "herdboard_card")
+
+    def test_a_card_workspace_is_named_after_its_repository(self):
+        self.starter.start(self.card.ref)
+        self.starter.start(self.card.ref)
+        renames = [c for c in self.fake.calls if c[:2] == ["workspace", "rename"]]
+        self.assertEqual(renames, [["workspace", "rename", "w9", "repo"]])
+
+    def test_a_failed_rename_does_not_stop_the_start(self):
+        self.fake.fail = "workspace rename"
+        result = self.starter.start(self.card.ref)
+        self.assertEqual(result["workspace_id"], "w9")
+
     def test_a_card_that_was_never_started_calls_no_herdr(self):
         other = self.store.add(self.board, "Not started")
         self.fake.calls.clear()
