@@ -1019,6 +1019,9 @@ class Starter:
         message = agent_message(card, brief)
         record["agent_name"] = name
         record["agent"] = agent
+        # The details pane shows them; None is the agent's own default.
+        record["model"] = model
+        record["thinking"] = thinking
         # Record intent before Herdr can return an unknown startup result.
         persist()
         args = agent_arguments(agent, message, model, thinking)

@@ -264,6 +264,16 @@ class StartTests(unittest.TestCase):
         record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
         self.assertEqual(record["agent"], "pi")
 
+    def test_the_record_keeps_the_model_and_thinking_level(self):
+        self.starter.start(self.card.ref, agent="claude", model="opus", thinking="high")
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual((record["model"], record["thinking"]), ("opus", "high"))
+
+    def test_the_record_keeps_no_model_for_the_agent_default(self):
+        self.starter.start(self.card.ref, agent="claude")
+        record = json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
+        self.assertEqual((record["model"], record["thinking"]), (None, None))
+
     def test_stored_closed_workspace_opens(self):
         self.starter.start(self.card.ref, no_agent=True)
         self.fake.worktrees[0]["open_workspace_id"] = None
