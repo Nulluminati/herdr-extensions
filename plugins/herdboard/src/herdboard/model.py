@@ -240,6 +240,20 @@ def split_title(title: str) -> tuple[str, list[str], str | None]:
     return " ".join(text.split()), tags, due_match.group("date") if due_match else None
 
 
+# Starts the title of a card that an automation spawned.
+AUTOMATION_PREFIX = "Automation: "
+
+
+def is_automation_title(text: str) -> bool:
+    """Whether a card's title text starts with the automation prefix, in any case."""
+    return text.lower().startswith(AUTOMATION_PREFIX.lower())
+
+
+def automation_title(text: str) -> str:
+    """The title text with the automation prefix in front, once."""
+    return text if is_automation_title(text) else f"{AUTOMATION_PREFIX}{text}"
+
+
 def join_title(text: str, tags: list[str], due: str | None) -> str:
     """The first-line text of a card: text, then `#tags`, then `📅 date`."""
     text = " ".join(text.split())

@@ -42,7 +42,7 @@ from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
 from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_writes import LinearWriter
-from .model import HerdboardError, is_triage, join_title, parse_tags, plain_tags, split_title
+from .model import HerdboardError, is_automation_title, is_triage, join_title, parse_tags, plain_tags, split_title
 from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from . import agent_states
 from . import start as start_module
@@ -135,9 +135,12 @@ ICONS = {
     "phase/reviewing": "\uf002",
     "phase/reviewed": "\uf058",
     "phase/new commits": PR_STATES["agent:new commits"][0],
+    "automation": "\uf01e",
 }
 # The plain glyphs of the planning and review phases on a card's status row.
 PHASE_ICONS = {"planning": "✎", "planned": "▤", "reviewing": "⌕", "reviewed": "✔", "new commits": "↑"}
+# The plain glyph of a card that an automation spawned.
+AUTOMATION_MARK = "↻"
 
 
 # The help screen: a title, then its keys. A screen's keys are in its own section; the keys of
@@ -262,6 +265,7 @@ HELP_SECTIONS = [
         ("⌕", "an agent review runs, then the reviewer's state and agent"),
         ("✔", "the agent review findings are ready"),
         ("↑", "new commits since the agent review"),
+        ("↻", "an automation spawned the card"),
         ("⠋", "the board starts, plans, reviews, merges or changes the card; other cards stay free"),
         ("nerd", "with the Nerd Font icon style, the phase icons are Nerd Font glyphs; the agent states stay the same"),
     ]),
@@ -683,6 +687,9 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
 
     if busy:
         add(Text(f"{SPINNER[frame % len(SPINNER)]} {busy}", style="bold yellow"), f"busy: {busy}", mark=True)
+    if is_automation_title(title or card.title):
+        add(Text(ICONS["automation"] if icon_style == "nerd" else AUTOMATION_MARK, style="bold"),
+            "automation", mark=True)
     if card.source == "linear" and card.pr:
         add(Text(icon_label("pr", "PR", icon_style), style="bold"))
     if show_board:

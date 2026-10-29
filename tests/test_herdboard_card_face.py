@@ -336,6 +336,17 @@ class AgentGlyphTests(unittest.TestCase):
                          "Ship it  t123\nplanning: claude")
 
 
+    def test_an_automation_card_shows_the_automation_mark(self):
+        item = card(title="Automation: Ship it")
+        self.assertEqual(mark_row(item), "↻")
+        self.assertEqual(mark_row(item, icon_style="nerd"), "\uf01e")
+        self.assertEqual(mark_row(card(planned=True, title="Automation: Ship it")), "↻ · ▤")
+        self.assertEqual(mark_row(card()), "")
+        self.assertEqual(mark_row(card(title="Automations are fun")), "")
+        plain = board.CardWidget(item, False).plain
+        self.assertTrue(plain.startswith("Automation: Ship it"), plain)
+        self.assertEqual(plain.splitlines()[-1], "automation")
+
     def test_the_detail_screen_names_each_state_in_words(self):
         item = card(worktree=True, agent="claude", agent_status="working", planning="pi", planning_status="idle",
                     agent_review="pi", review_status="blocked", planned=True)
@@ -356,7 +367,7 @@ class AgentGlyphTests(unittest.TestCase):
 
     def test_the_help_screen_explains_each_glyph(self):
         icons = dict(next(entries for title, entries in board.HELP_SECTIONS if title == "Icons"))
-        for glyph in ("◐", "×", "✓", "○", "·", "●", "✎", "▤", "⌕", "✔", "↑"):
+        for glyph in ("◐", "×", "✓", "○", "·", "●", "✎", "▤", "⌕", "✔", "↑", "↻"):
             self.assertIn(glyph, icons)
 
 

@@ -26,7 +26,8 @@ import tomllib
 
 from . import activity, attachments, start as start_module
 from .config import AGENTS, Config, thinking_levels
-from .model import ConflictError, HerdboardError, IoError, NotFoundError, join_title, with_type
+from .model import (ConflictError, HerdboardError, IoError, NotFoundError, automation_title, join_title,
+                    with_type)
 from .start import Starter, _lock, _read, _write, notify, state_dir
 from .store import ID_ALPHABET, CardView
 
@@ -441,10 +442,11 @@ def _stamp(moment: datetime) -> str:
 
 
 def spawn(store, automation: Automation, due: datetime) -> CardView:
-    """Add the automation's card to the first column of its board, with a copy of its attachments."""
+    """Add the automation's card to the first column of its board, with a copy of its attachments.
+    The card's title starts with `Automation: `, so the board and the user see where it came from."""
     config = store.config
     path = store.ensure_inbox() if automation.board == "inbox" else store.resolve_board(automation.board)
-    text = join_title(automation.title, automation.tags, None)
+    text = join_title(automation_title(automation.title), automation.tags, None)
     if automation.type:
         text = with_type(text, config.type_named(automation.type))
     body = automation.body.splitlines() if automation.body.strip() else None

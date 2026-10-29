@@ -606,7 +606,8 @@ The timer files hold absolute paths: the `herdboard` command, the `herdr` binary
 
 ### What a run does
 
-- The card gets the automation's title, details, type and tags, and a copy of every attachment of the automation. A `plan.md` attachment becomes the plan in the agent's brief.
+- The card gets the automation's title after `Automation: `, details, type and tags, and a copy of every attachment of the automation. A `plan.md` attachment becomes the plan in the agent's brief.
+- The board shows `↻` (or a Nerd Font repeat icon) after the state icon of a card whose title starts with `Automation: `.
 - The card's log says which automation spawned it, and for which due time.
 - An automation on the `inbox` board starts its cards without a repository, as `start --no-repo` does.
 - The agent starts exactly as a manual `start` does: same permission mode, no extra allowed tools. When it waits at a prompt, the card shows a red `×`. herdboard shows a Herdr notification for each run.

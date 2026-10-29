@@ -221,12 +221,17 @@ class SpawnTests(AutomationTestCase):
         card = automations.spawn(self.store, added, local(2026, 10, 23, 9, 0))
         self.assertEqual(card.board, "inbox")
         self.assertEqual(card.column, self.config.columns[0])
-        self.assertEqual(card.title, "Check security alerts #type/chore #security")
+        self.assertEqual(card.title, "Automation: Check security alerts #type/chore #security")
         self.assertEqual(card.body, ["\tLook at Dependabot.", "\t- merge the safe ones"])
         self.assertEqual([e["name"] for e in attachments.listing(self.config, card.ref)], ["plan.md"])
         log = activity.read(self.config, card.ref)
         self.assertEqual(log[0]["message"], f"Spawned by automation {added.id} for 2026-10-23 09:00.")
         self.assertEqual(log[0]["author"], "herdboard")
+
+    def test_spawn_does_not_repeat_the_automation_prefix(self):
+        added = self.add(title="automation: Check security alerts")
+        card = automations.spawn(self.store, added, local(2026, 10, 23, 9, 0))
+        self.assertEqual(card.title, "automation: Check security alerts")
 
 
 class RunTests(AutomationTestCase):
