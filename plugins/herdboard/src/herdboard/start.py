@@ -305,6 +305,58 @@ def update_card_token(card: CardView, removed: bool = False) -> None:
             report_card_token(record["workspace_id"], token, "workspace")
 
 
+def _record_workspace(record, ref, workspaces):
+    """The open workspace of a start record, or None. Herdr can give an old workspace ID to another
+    workspace, so a worktree workspace must still hold the worktree, and a repoless one its card label."""
+    if record.get("mode") == REPOLESS:
+        return next((w for w in workspaces if w.get("workspace_id") == record.get("workspace_id")
+                     and w.get("label") == ref), None)
+    path = record.get("worktree_path")
+    if not isinstance(path, str) or not path:
+        return None
+    for workspace in workspaces:
+        checkout = (workspace.get("worktree") or {}).get("checkout_path")
+        if isinstance(checkout, str) and Path(checkout).resolve() == Path(path).resolve():
+            return workspace
+    return None
+
+
+def sidebar_refresh(card_for) -> None:
+    """Report the sidebar tokens of every started card again. Herdr keeps tokens in memory only,
+    so a Herdr restart clears them. `card_for(ref)` returns the card, or None when it is gone."""
+    try:
+        records = _read(state_dir() / "starts.json")
+        workspaces = herdr("workspace", "list").get("workspaces") or []
+        agents = herdr("agent", "list").get("agents") or []
+    except HerdboardError:
+        return
+    for key, record in records.items():
+        if not isinstance(record, dict):
+            continue
+        ref = record.get("ref") or key
+        workspace = _record_workspace(record, ref, workspaces)
+        if workspace is None:
+            continue
+        workspace_id = workspace["workspace_id"]
+        if record.get("mode") != REPOLESS and isinstance(record.get("checkout"), str):
+            report_card_token(workspace_id, Path(record["checkout"]).name, "workspace", REPO_TOKEN)
+        try:
+            card = card_for(ref)
+        except HerdboardError:
+            card = None
+        if card is None:
+            continue
+        token = card_token(card)
+        report_card_token(workspace_id, token, "workspace")
+        here = [a for a in agents if a.get("workspace_id") == workspace_id and isinstance(a.get("pane_id"), str)]
+        # Herdr forgets agent names over a restart, so the recorded pane is the second way to find the agent.
+        agent = (next((a for a in here if record.get("agent_name") and a.get("name") == record["agent_name"]), None)
+                 or next((a for a in here if record.get("agent_name") and a["pane_id"] == record.get("pane_id")),
+                         None))
+        if agent is not None:
+            report_card_token(agent["pane_id"], token)
+
+
 def find_record(ref):
     """The start record of a card as (key, record), or None. Linear records are keyed by issue ID."""
     records = _read(state_dir() / "starts.json")

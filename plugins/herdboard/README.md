@@ -273,7 +273,7 @@ A parent with sub-cards that are not done does not merge. `--force` merges it an
 
 `--agent claude|pi|codex`, `--model` and `--thinking` choose the agent. `--no-agent` opens the worktree without one. herdboard does not start a second agent for a card whose agent still runs.
 
-herdboard writes the card title and column to the `herdboard_card` token of the card's workspace and of its agent pane, such as `▶ Fix login timeout · In progress`. The token changes when the card moves. It also writes the repository's folder name, such as `herdr-extensions`, to the `herdboard_repo` token of the workspace. The workspace keeps the name that Herdr gives it, so the space switcher and notifications can tell cards apart. Add the tokens to the Herdr sidebar rows to show them:
+herdboard writes the card title and column to the `herdboard_card` token of the card's workspace and of its agent pane, such as `▶ Fix login timeout · In progress`. The token changes when the card moves. It also writes the repository's folder name, such as `herdr-extensions`, to the `herdboard_repo` token of the workspace. The workspace keeps the name that Herdr gives it, so the space switcher and notifications can tell cards apart. Herdr keeps these tokens in memory only. At Herdr startup, and when Herdr finds an agent in a pane, herdboard reports them again for every started card whose workspace is still open (`herdboard sidebar-refresh`). A Linear card's title then comes from the cache. Add the tokens to the Herdr sidebar rows to show them:
 
 ```toml
 [ui.sidebar.spaces]
@@ -763,6 +763,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
 | `herdboard mockup <id> PROMPT... [--image FILE]... [--quality Q] [--no-show]` | Make UI mockup drafts with Codex, one per prompt (four at most), and show them in a pane |
 | `herdboard plan <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
+| `herdboard sidebar-refresh` | Report the Herdr sidebar tokens of the started cards again. Herdr runs it at startup and when it finds an agent |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |

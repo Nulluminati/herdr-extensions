@@ -208,6 +208,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("--pane", required=True, help="the planner's pane")
 
+    sub = command("sidebar-refresh", "report the Herdr sidebar tokens of the started cards again "
+                  "(run at Herdr startup)")
+    # Linear cards come from the cache, so a startup without a connection does not wait for Linear.
+    sub.set_defaults(offline=True)
+
     sub = command("review", "review a started card's work: in Hunk next to its agent, by another agent, or both")
     sub.add_argument("ref")
     kind = sub.add_mutually_exclusive_group()
@@ -967,6 +972,20 @@ def _cmd_plan_wait(ctx: _Context) -> dict:
     return {"ref": ref, "exit_code": plan.wait(ctx.store, ref, ctx.args.pane)}
 
 
+def _cmd_sidebar_refresh(ctx: _Context) -> dict:
+    from .start import sidebar_refresh
+
+    def card_for(ref):
+        if not LINEAR_REF.match(ref):
+            return ctx.store.show(ref, archived=True)
+        if not ctx.views.source.active:
+            return None
+        return _find_linear_card(ctx, ref)[0]
+
+    sidebar_refresh(card_for)
+    return {}
+
+
 def _cmd_review(ctx: _Context) -> dict:
     args = ctx.args
     ref = args.ref
@@ -1560,6 +1579,7 @@ COMMANDS = {
     "start": _cmd_start,
     "plan": _cmd_plan,
     "plan-wait": _cmd_plan_wait,
+    "sidebar-refresh": _cmd_sidebar_refresh,
     "review": _cmd_review,
     "review-wait": _cmd_review_wait,
     "pr-wait": _cmd_pr_wait,
@@ -1611,7 +1631,7 @@ def _linear_warnings(result: LinearResult) -> None:
 
 
 def _render(command: str, result: dict, as_json: bool, action: str | None = None) -> None:
-    if command == "board":
+    if command in ("board", "sidebar-refresh"):
         return
     if command == "start":
         if as_json:
@@ -1839,8 +1859,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(render(result))
             return 1 if result["summary"]["error"] else 0
         ctx = _Context(args)
-        # Add validates its input first. Migration previews write nothing.
-        if args.command not in ("init", "migrate", "add"):
+        # Add validates its input first. Migration previews write nothing. The sidebar refresh
+        # runs from the plugin folder at Herdr startup and needs no board.
+        if args.command not in ("init", "migrate", "add", "sidebar-refresh"):
             _ensure_repo_board(ctx)
         result = COMMANDS[args.command](ctx)
         _update_sidebar(args.command, result)

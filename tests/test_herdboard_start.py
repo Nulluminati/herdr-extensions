@@ -1385,12 +1385,130 @@ class NewRepositoryStartTests(unittest.TestCase):
         self.assertFalse(start.work_folder(self.config, self.card.ref).exists())
 
 
+class SidebarRefreshTests(unittest.TestCase):
+    """After a Herdr restart, `sidebar_refresh` reports the card tokens of every start record again."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.enterContext(patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}))
+        self.calls = []
+        self.workspaces = [
+            {"workspace_id": "w7K", "label": "feat-tgz1-redesign",
+             "worktree": {"checkout_path": "/wt/feat-tgz1-redesign"}},
+            # Herdr gave an old record's workspace ID to another workspace.
+            {"workspace_id": "w30", "label": "top-level · ~/Projects/dotfiles",
+             "worktree": {"checkout_path": "/home/me/Projects/dotfiles"}},
+            {"workspace_id": "x1", "label": "t660"},
+        ]
+        self.agents = [{"name": "hb-tgz1", "pane_id": "w7K:p1", "workspace_id": "w7K"},
+                       {"name": "hb-tgpz", "pane_id": "w30:p1", "workspace_id": "w30"}]
+        self.unreachable = False
+        self.enterContext(patch.object(start, "command", self.fake))
+        self.records = {
+            "tgz1": {"ref": "tgz1", "mode": "repo", "workspace_id": "w7K", "pane_id": "w7K:p1",
+                     "agent_name": "hb-tgz1", "worktree_path": "/wt/feat-tgz1-redesign",
+                     "checkout": "/home/me/Projects/herdr-extensions"},
+            "tgpz": {"ref": "tgpz", "workspace_id": "w30", "pane_id": "w30:p1", "agent_name": "hb-tgpz",
+                     "worktree_path": "/wt/fix-tgpz-gone", "checkout": "/home/me/Projects/herdr-extensions"},
+            "t660": {"ref": "t660", "mode": "repoless", "workspace_id": "x1", "pane_id": "x1:p1",
+                     "agent_name": None, "worktree_path": "/todos/.herdboard/work/t660", "checkout": None},
+        }
+        path = self.root / "state/herdboard/starts.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(self.records))
+
+    def fake(self, argv, timeout=120):
+        args = argv[1:]
+        self.calls.append(args)
+        if self.unreachable:
+            raise OSError("no herdr")
+        result = {"type": "ok"}
+        if args[:2] == ["workspace", "list"]:
+            result = {"workspaces": self.workspaces}
+        elif args[:2] == ["agent", "list"]:
+            result = {"agents": self.agents}
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": result}), "")
+
+    def card_for(self, ref):
+        if ref == "gone":
+            return None
+        return start.CardView(ref=ref, board="b", path=Path("/b.md"), column="In progress",
+                              title=f"Card {ref}", checked=False, due=None, tags=[], body=[])
+
+    def reports(self):
+        found = {}
+        for args in self.calls:
+            if args[1:2] == ["report-metadata"]:
+                self.assertEqual(args[args.index("--source") + 1], "user:herdboard")
+                found.setdefault((args[0], args[2]), []).append(args[args.index("--token") + 1])
+        return found
+
+    def test_reports_the_repository_and_card_on_the_workspace_and_the_card_on_the_agent(self):
+        start.sidebar_refresh(self.card_for)
+        self.assertEqual(self.reports(), {
+            ("workspace", "w7K"): ["herdboard_repo=herdr-extensions", "herdboard_card=▶ Card tgz1 · In progress"],
+            ("pane", "w7K:p1"): ["herdboard_card=▶ Card tgz1 · In progress"],
+            ("workspace", "x1"): ["herdboard_card=▶ Card t660 · In progress"],
+        })
+
+    def test_a_workspace_id_that_now_holds_another_folder_gets_nothing(self):
+        start.sidebar_refresh(self.card_for)
+        self.assertNotIn(("workspace", "w30"), self.reports())
+        self.assertNotIn(("pane", "w30:p1"), self.reports())
+
+    def test_a_card_without_its_agent_shows_on_the_workspace_only(self):
+        self.agents = []
+        start.sidebar_refresh(self.card_for)
+        self.assertIn(("workspace", "w7K"), self.reports())
+        self.assertNotIn(("pane", "w7K:p1"), self.reports())
+
+    def test_an_agent_that_lost_its_name_is_found_by_its_pane(self):
+        # Herdr forgets agent names over a restart; the agent stays in the recorded pane.
+        self.agents = [{"name": None, "pane_id": "w7K:p1", "workspace_id": "w7K"}]
+        start.sidebar_refresh(self.card_for)
+        self.assertEqual(self.reports()[("pane", "w7K:p1")], ["herdboard_card=▶ Card tgz1 · In progress"])
+
+    def test_an_agent_in_another_workspace_gets_nothing(self):
+        self.agents = [{"name": "hb-tgz1", "pane_id": "w9:p1", "workspace_id": "w9"}]
+        start.sidebar_refresh(self.card_for)
+        self.assertNotIn(("pane", "w9:p1"), self.reports())
+
+    def test_a_card_that_is_gone_shows_only_the_repository(self):
+        start.sidebar_refresh(lambda ref: None)
+        self.assertEqual(self.reports(), {("workspace", "w7K"): ["herdboard_repo=herdr-extensions"]})
+
+    def test_a_card_lookup_error_does_not_stop_the_other_records(self):
+        def card_for(ref):
+            if ref == "tgz1":
+                raise start.HerdboardError("broken board")
+            return self.card_for(ref)
+        start.sidebar_refresh(card_for)
+        self.assertIn(("workspace", "x1"), self.reports())
+
+    def test_no_herdr_reports_nothing(self):
+        self.unreachable = True
+        start.sidebar_refresh(self.card_for)
+        self.assertEqual(self.reports(), {})
+
+
 class StartCliTests(CliTestCase):
     """`start` and `plan` pass the new flags, and print a repoless start without a branch."""
 
     STARTED = {"ref": "t123", "workspace_id": "x1", "pane_id": "x1:p1",
                "worktree_path": "/todos/.herdboard/work/t123", "branch": None, "base": None,
                "agent_name": None, "steps_done": [], "mode": "repoless"}
+
+    def test_sidebar_refresh_looks_up_todos_and_prints_nothing(self):
+        card = self.run_json("add", "Refresh me", directory=self.plain)["card"]
+        with patch("herdboard.start.sidebar_refresh") as refresh:
+            out, err = self.run_cli("sidebar-refresh", directory=self.plain)
+        self.assertEqual((out, err), ("", ""))
+        card_for = refresh.call_args.args[0]
+        self.assertEqual(card_for(card["ref"]).title, "Refresh me")
+        with self.assertRaises(start.HerdboardError):
+            card_for("tzzz")
 
     def test_start_no_repo_reaches_the_starter_and_prints_the_folder(self):
         with patch("herdboard.cli.Starter") as starter:
