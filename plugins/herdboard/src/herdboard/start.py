@@ -33,8 +33,10 @@ from .store import TEMP_REF, CardView
 # A card's Hunk review pane stays open only while the card is in this column.
 REVIEW_COLUMN = "Review"
 
-# The pane token that shows a started card in the Herdr sidebar: `$herdboard_card`.
+# The pane and workspace token that shows a started card in the Herdr sidebar: `$herdboard_card`.
 CARD_TOKEN = "herdboard_card"
+# The workspace token that shows the repository of a card's worktree: `$herdboard_repo`.
+REPO_TOKEN = "herdboard_repo"
 TOKEN_SOURCE = "user:herdboard"
 
 # How a card without a repository runs: in a plain folder (`repoless`), or in a repository that
@@ -274,11 +276,12 @@ def write_brief(name: str, text: str) -> Path:
     return path
 
 
-def report_card_token(target_id: str, token: str | None, kind: str = "pane") -> None:
-    """Set or clear the sidebar card on an agent's pane or on the card's workspace (`kind`).
+def report_card_token(target_id: str, token: str | None, kind: str = "pane", name: str = CARD_TOKEN) -> None:
+    """Set or clear a sidebar token, by default the card, on an agent's pane or on the card's
+    workspace (`kind`).
 
     Best effort: the sidebar is display only."""
-    change = ["--token", f"{CARD_TOKEN}={token}"] if token else ["--clear-token", CARD_TOKEN]
+    change = ["--token", f"{name}={token}"] if token else ["--clear-token", name]
     try:
         command([os.environ.get("HERDR_BIN_PATH") or "herdr", kind, "report-metadata", target_id,
                  "--source", TOKEN_SOURCE, "--seq", str(time.time_ns()), *change])
@@ -911,11 +914,6 @@ class Starter:
                 raise ValueError("missing workspace, root pane or worktree path")
         except (KeyError, TypeError, AttributeError, ValueError) as error:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
-        # The sidebar shows the card under the workspace, so its name is the repository, not the branch.
-        try:
-            herdr("workspace", "rename", workspace, Path(checkout).name)
-        except StartError:
-            pass
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
 
     def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False,
@@ -1197,6 +1195,8 @@ class Starter:
             record["base"] = self._base(local, base or record.get("base"), branch)
             save("base")
             record.update(self._workspace(local, branch, record, focus=False))
+            # The workspace keeps the branch name, so Herdr can tell cards apart; the sidebar adds the repository.
+            report_card_token(record["workspace_id"], Path(local).name, "workspace", REPO_TOKEN)
             save("worktree")
             # Hunk and `git status` compare a branch with its upstream, so the base is the upstream.
             if _git(local, "branch", f"--set-upstream-to={record['base']}", branch) is None:
