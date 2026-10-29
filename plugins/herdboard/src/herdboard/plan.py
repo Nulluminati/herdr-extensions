@@ -276,8 +276,10 @@ class Planner:
             plan_mtime = _mtime(plan_file)
             prompt = _one_line(f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "
                                "it has the card and how to plan it with me.")
-            pane = herdr("tab", "create", "--workspace", workspace, "--cwd", str(worktree),
-                         "--label", f"plan {ref}", "--no-focus")["root_pane"]["pane_id"]
+            created = herdr("tab", "create", "--workspace", workspace, "--cwd", str(worktree),
+                            "--label", f"plan {ref}", "--no-focus")
+            pane = created["root_pane"]["pane_id"]
+            tab = created["root_pane"].get("tab_id") or (created.get("tab") or {}).get("tab_id")
             export_config(pane, self.config_file)
             # A startup prompt (such as Claude's folder trust check) waits for the user: the worker watches it.
             try:
@@ -289,11 +291,12 @@ class Planner:
                 # Only the plan pane closes: the worktree and its workspace stay for the work.
                 herdr("pane", "close", pane, tolerated=("pane_not_found",))
                 raise
+            start_module.open_details_pane(ref, pane, self.config, self.config_file)
             with _lock(wait=2):
                 records = _read(_plans_path())
                 records[ref] = {"pane_id": pane, "kind": kind, "model": model, "started": time.time(),
                                 "plan_mtime": plan_mtime, "workspace_id": workspace,
-                                "worktree_path": str(worktree)}
+                                "tab_id": tab, "worktree_path": str(worktree)}
                 _write(_plans_path(), records)
         activity.append(self.store, ref, f"Planning started: {kind}{f' ({model})' if model else ''}.", "herdboard")
         config = ["--config", str(self.config_file)] if self.config_file else []
@@ -410,6 +413,7 @@ def wait(store, ref, pane: str) -> int:
                         f"{PLAN_TIMEOUT_SECONDS // 3600} hours.", "herdboard")
         return 0
     _forget(ref, pane)
+    _close_details(ref, record)
     if saves:
         message = "Planning ended."
     elif record.get("plan_mtime") is not None:
@@ -420,6 +424,20 @@ def wait(store, ref, pane: str) -> int:
     if saves:
         _send_plan(store, ref, plan_file)
     return 0
+
+
+def _close_details(ref: str, record: dict) -> None:
+    """Close the details pane in the planner's tab, so the tab closes with the planner."""
+    tab, workspace = record.get("tab_id"), record.get("workspace_id")
+    if not tab or not workspace:
+        return
+    try:
+        found = herdr("pane", "list", "--workspace", workspace, tolerated=("workspace_not_found",))
+        for entry in (found or {}).get("panes", []):
+            if entry.get("tab_id") == tab and entry.get("label") == start_module.details_label(ref):
+                herdr("pane", "close", entry["pane_id"], tolerated=("pane_not_found",))
+    except HerdboardError as error:
+        print(f"herdboard: cannot close the details pane: {error}", file=sys.stderr)
 
 
 def _send_plan(store, ref: str, plan_file: Path) -> None:

@@ -159,7 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--total", type=int, help="the number of options asked for")
 
     sub = command("details", "show a card's compact status: the view of the details pane")
-    sub.add_argument("ref")
+    sub.add_argument("ref", nargs="?")
+    sub.add_argument("--open", action="store_true",
+                     help="open the details pane in Herdr; without a card, for the card of the pane's workspace")
+    sub.add_argument("--pane", help="with --open: the Herdr pane to start from; default: this pane")
 
     sub = command("delete", "remove a todo and its indented lines")
     sub.add_argument("ref")
@@ -728,7 +731,17 @@ def _cmd_mockup_view(ctx: _Context) -> dict:
 
 
 def _cmd_details(ctx: _Context) -> dict:
-    ref = ctx.args.ref
+    args = ctx.args
+    ref = args.ref
+    if args.open:
+        from . import details, start
+        ref, host = details.open_target(ref, args.pane or os.environ.get("HERDR_PANE_ID"))
+        pane = start.open_details_pane(ref, host, ctx.config, config_path(args.config))
+        return {"ref": ref, "host_pane_id": host, "pane_id": pane}
+    if args.pane:
+        raise UsageError("--pane works only with --open")
+    if not ref:
+        raise UsageError("Give a card, or --open to open the details pane")
     try:
         from .details_view import DetailsApp
     except ImportError as error:
@@ -1667,7 +1680,17 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
                   f"agent: {result['agent_name'] or 'none'}")
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view", "details"):
+    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+        return
+    if command == "details":
+        if "exit_code" in result:
+            return
+        if as_json:
+            _emit_json(result)
+        elif result["pane_id"]:
+            print(f"{result['ref']}: details pane {result['pane_id']} above pane {result['host_pane_id']}")
+        else:
+            print(f"{result['ref']}: no new details pane")
         return
     if command == "mockup":
         if as_json:
@@ -1885,7 +1908,9 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](ctx)
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json, getattr(args, "action", None))
-        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view", "details"):
+        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+            return result["exit_code"]
+        if args.command == "details" and "exit_code" in result:
             return result["exit_code"]
         if args.command == "automation" and "exit_code" in result:
             return result["exit_code"]

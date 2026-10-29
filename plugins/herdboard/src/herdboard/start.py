@@ -1091,6 +1091,7 @@ class Starter:
         herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
               tolerated=("timeout", "agent_not_ready"))
         record_pane_agent(record["pane_id"], agent)
+        open_details_pane(card.ref, record["pane_id"], self.config, self.config_file)
 
     def _repoless_workspace(self, ref, folder, record, focus=True):
         """Open the card folder as a Herdr workspace, reusing the open one that the record names."""

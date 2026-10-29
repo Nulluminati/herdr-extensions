@@ -42,6 +42,8 @@ class PlanHerdr:
         # Worktree workspaces that Herdr has open, as `start` records them.
         self.worktrees = []
         self.branches = {}
+        # Pane labels by pane ID, from `pane rename`; such panes are in the plan tab.
+        self.labels = {}
 
     def reply(self, argv, result=None, error=None):
         if error:
@@ -82,7 +84,13 @@ class PlanHerdr:
             return self.reply(argv, {"workspace": {"workspace_id": args[2]},
                                      "root_pane": {"pane_id": args[2] + ":p1"}})
         if operation == "pane list":
-            return self.reply(argv, {"panes": [{"pane_id": args[3] + ":p1"}]})
+            return self.reply(argv, {"panes": [{"pane_id": args[3] + ":p1"},
+                                               *({"pane_id": pane, "tab_id": "w1:t4", "label": label}
+                                                 for pane, label in self.labels.items())]})
+        if operation == "pane split":
+            return self.reply(argv, {"pane": {"pane_id": "w1:p8"}})
+        if operation == "pane rename":
+            self.labels[args[2]] = args[3]
         if operation == "agent get" and args[2] in self.work_agents:
             return self.reply(argv, {"agent": {"agent_status": "working", "pane_id": args[2]}})
         if operation == "agent get":
@@ -97,7 +105,7 @@ class PlanHerdr:
         if operation == "pane get":
             if not (self.panes.pop(0) if self.panes else True):
                 return self.reply(argv, error="pane_not_found")
-            return self.reply(argv, {"pane": {"pane_id": args[2]}})
+            return self.reply(argv, {"pane": {"pane_id": args[2], "tab_id": "w1:t4", "workspace_id": "w1"}})
         if operation == "workspace create":
             return self.reply(argv, {"workspace": {"workspace_id": "x1"},
                                      "root_pane": {"pane_id": "x1:p1"}})
@@ -402,12 +410,12 @@ class RequestTests(PlanTestCase):
     def test_the_plan_pane_exports_a_config_file_that_is_not_the_default(self):
         custom = self.root / "custom.toml"
         plan.Planner(self.store, self.repo, config_file=custom).plan(self.card.ref)
-        export = self.fake.find("pane", "run")
+        export = self.fake.find("pane", "run", "w1:p7")
         self.assertEqual(export, [["pane", "run", "w1:p7", f"export HERDBOARD_CONFIG={custom}"]])
         self.assertLess(self.fake.calls.index(export[0]), self.fake.calls.index(self.planner_start()))
         self.fake.panes = [False]  # the first plan tab is gone
         self.planner.plan(self.card.ref)
-        self.assertEqual(len(self.fake.find("pane", "run")), 1, "the default config needs no export")
+        self.assertEqual(len(self.fake.find("pane", "run", "w1:p7")), 1, "the default config needs no export")
 
     def test_a_tab_without_a_root_pane_is_a_herdr_error(self):
         original = self.fake.__call__
@@ -618,6 +626,17 @@ class WaitTests(PlanTestCase):
         self.wait()
         self.assertEqual(self.log().count(f"Plan saved: {self.plan_file}"), 1)
 
+    def test_the_planner_tab_gets_the_details_pane_and_loses_it_when_planning_ends(self):
+        self.planner.plan(self.card.ref)
+        self.assertEqual(self.fake.find("pane", "split"),
+                         [["pane", "split", "w1:p7", "--direction", "down", "--ratio", "0.25", "--no-focus"]])
+        self.assertEqual(self.fake.labels, {"w1:p8": f"details {self.card.ref}"})
+        self.assertEqual(json.loads((start.state_dir() / "plans.json").read_text())[self.card.ref]["tab_id"], "w1:t4")
+        self.assertEqual(self.fake.find("pane", "close"), [])
+        self.fake.states = ["working", None]
+        self.wait()
+        self.assertEqual(self.fake.find("pane", "close"), [["pane", "close", "w1:p8"]])
+
     def test_a_planner_that_ends_without_a_plan_logs_that(self):
         self.planner.plan(self.card.ref)
         self.fake.states = ["working", None]
@@ -657,6 +676,7 @@ class WaitTests(PlanTestCase):
     def test_a_planner_not_shown_yet_is_awaited_while_its_pane_exists(self):
         # Herdr can show no agent while Claude waits at its folder trust prompt.
         self.planner.plan(self.card.ref)
+        self.fake.calls.clear()
         self.fake.states = [None, None, None]
         self.fake.panes = [True, True, False]
         self.assertEqual(self.wait(), 0)

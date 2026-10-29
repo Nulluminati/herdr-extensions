@@ -33,6 +33,14 @@ title = "herdboard PRs"
 placement = "tab"
 command = ["sh", "-c", "exec uv run --quiet --project \"$HERDR_PLUGIN_ROOT\" herdboard board --prs"]
 
+# Reopen the card details pane above the card's agent or planner, for the focused
+# pane's workspace. It opens no second pane when one is open.
+[[actions]]
+id = "details"
+title = "herdboard: show card details"
+contexts = ["pane", "workspace"]
+command = ["python3", "bin/open_details.py"]
+
 # Herdr keeps sidebar tokens in memory only. After a restart, report the
 # started cards' tokens again. An agent can come back after startup, so the
 # refresh also runs when Herdr finds an agent. The script returns at once.

@@ -287,5 +287,64 @@ class OpenDetailsPaneTests(unittest.TestCase):
         self.assertEqual(self.fake.operations()[-1], "notification show")
 
 
+class OpenTargetTests(StoreCase, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.fake = PaneHerdr()
+        patcher = mock.patch.object(start, "command", self.fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write_plans(self, records):
+        path = self.root / "state" / "herdboard" / "plans.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(records))
+
+    def test_finds_the_started_card_of_the_workspace(self):
+        self.write_records({"t555": {"ref": "t555", "workspace_id": "w9", "pane_id": "w9:p1"},
+                            "issue-id": {"ref": "ENG-1", "workspace_id": "w1", "pane_id": "w1:p1"}})
+        self.assertEqual(details.open_target(None, "w1:p3"), ("ENG-1", "w1:p1"))
+
+    def test_a_planner_tab_wins_over_the_workspace_record(self):
+        self.write_records({"t123": {"ref": "t123", "workspace_id": "w1", "pane_id": "w1:p1"}})
+        self.write_plans({"t123": {"pane_id": "w1:p7", "workspace_id": "w1", "tab_id": "w1:t1"}})
+        self.assertEqual(details.open_target(None, "w1:p3"), ("t123", "w1:p7"))
+
+    def test_a_workspace_without_a_card_is_an_error(self):
+        self.write_records({"t555": {"ref": "t555", "workspace_id": "w9", "pane_id": "w9:p1"}})
+        with self.assertRaisesRegex(details.HerdboardError, "No herdboard card"):
+            details.open_target(None, "w1:p3")
+
+    def test_a_named_card_uses_its_agent_pane_else_its_planner_else_the_given_pane(self):
+        self.write_records({"t123": {"ref": "t123", "workspace_id": "w1", "pane_id": "w1:p1"}})
+        self.write_plans({"t456": {"pane_id": "w2:p7", "workspace_id": "w2", "tab_id": "w2:t3"}})
+        self.assertEqual(details.open_target("t123", "w5:p1"), ("t123", "w1:p1"))
+        self.assertEqual(details.open_target("t456", "w5:p1"), ("t456", "w2:p7"))
+        self.assertEqual(details.open_target("t789", "w5:p1"), ("t789", "w5:p1"))
+        with self.assertRaisesRegex(details.HerdboardError, "pane"):
+            details.open_target("t789", None)
+
+
+class DetailsOpenCliTests(CliTestCase):
+    def test_open_without_a_ref_opens_the_pane_for_the_workspace_card(self):
+        with mock.patch("herdboard.details.open_target", return_value=("t123", "w1:p1")) as target, \
+                mock.patch("herdboard.start.open_details_pane", return_value="w1:p2") as opened:
+            result = self.run_json("details", "--open", "--pane", "w1:p3", directory=self.repo)
+        target.assert_called_once_with(None, "w1:p3")
+        self.assertEqual(opened.call_args.args[:2], ("t123", "w1:p1"))
+        self.assertEqual(result, {"ref": "t123", "host_pane_id": "w1:p1", "pane_id": "w1:p2"})
+
+    def test_the_pane_defaults_to_this_herdr_pane(self):
+        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w4:p2"}), \
+                mock.patch("herdboard.details.open_target", return_value=("t123", "w4:p2")) as target, \
+                mock.patch("herdboard.start.open_details_pane", return_value=None):
+            self.run_json("details", "--open", directory=self.repo)
+        target.assert_called_once_with(None, "w4:p2")
+
+    def test_the_view_needs_a_ref(self):
+        out, err = self.run_cli("details", directory=self.repo, expect=1)
+        self.assertIn("card", err)
+
+
 if __name__ == "__main__":
     unittest.main()

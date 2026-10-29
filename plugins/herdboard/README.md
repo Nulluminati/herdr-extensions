@@ -367,6 +367,47 @@ herdboard sets the author. In a card's agent pane, the author is the agent kind 
 
 Agents record progress in the log, not in the card. `edit` fails with `agent_edit_denied` in a card's agent pane. This guards against mistakes. It is not a security boundary.
 
+### Details pane
+
+Each card agent and each planner gets a small read-only pane on top, labeled `details <id>`. It shows the card without going back to the board:
+
+```text
+╭─ tr88 details ───────────────────────────────────────────────────────────╮
+│ tr88 │ Some kind of details pane in workspaces  In progress      feature │
+│ claude opus (high) · tr88-details-pane → main · PR #12 open              │
+│ ☑ 2/5  mockup-details-pane.png  plan.md                                  │
+│ ── log ───────────────────────────────────────────────────────────────── │
+│ 10-29 14:02  herdboard  Plan saved: …/attachments/tr88/plan.md           │
+│ 10-29 15:10  claude     Moved to Review                                  │
+╰──────────────────────────────────────────────────────────────────────────╯
+```
+
+- The first line has the card ID, the title without tags, the column (a Linear card's state) and the type.
+- The second line has the agent, its model and thinking level, the branch and its base, and the pull request. A card without a repository shows `no repository`. A card without a start record, such as one that only has a planner, shows `no start record`.
+- The third line has the checklist count and the attachment names. Without both, the line is left out.
+- The newest log entries fill the rest of the pane, newest at the bottom.
+
+The pane reads only herdboard's files, so it shows no live Herdr agent state; the sidebar shows that. It checks the files every two seconds and draws again after a change. A Linear card asks Linear at most once a minute.
+
+`start` opens the pane in the card's workspace, also when `review` or a rebase conflict starts a new agent. `plan` opens it in the planner tab, and the tab closes when the planner ends. The agent keeps the focus, and your own focus stays where it was. An agent review opens to the right of the agent, under the full-width details pane.
+
+Two global settings control it. The configuration dialog (`c`) has both:
+
+- `details_pane = false` opens no pane.
+- `details_pane_ratio` is the pane's share of the agent pane's height, from 0.1 to 0.6 (default 0.25). Herdr sets a split size only as a ratio.
+
+After you close the pane, the Herdr action `nulluminati.herdboard.details` opens it again for the focused pane's workspace: the planner of that tab, else the started card of the workspace. It opens no second pane. `herdboard details --open [<id>] [--pane ID]` does the same from a shell. A suggested key:
+
+```toml
+[[keys.command]]
+key = "prefix+shift+d"
+type = "plugin_action"
+command = "nulluminati.herdboard.details"
+description = "herdboard: show card details"
+```
+
+Herdr does not keep the pane after a restart. Use the action to open it again.
+
 ### review
 
 `herdboard review <id>` has three modes:
@@ -791,6 +832,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
 | `herdboard mockup <id> PROMPT... [--image FILE]... [--quality Q] [--no-show]` | Make UI mockup drafts with Codex, one per prompt (four at most), and show them in a pane |
+| `herdboard details <id>` / `details --open [<id>] [--pane ID]` | Show the card's compact status, the view of the [details pane](#details-pane); or open that pane in Herdr |
 | `herdboard plan <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
 | `herdboard sidebar-refresh` | Report the Herdr sidebar tokens of the started cards again. Herdr runs it at startup and when it finds an agent |
 | `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |

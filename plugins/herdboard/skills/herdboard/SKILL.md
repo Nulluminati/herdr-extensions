@@ -109,6 +109,7 @@ herdboard --json pin ENG-123 --remove         # remove the pin
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json plan tep3 --agent claude --model opus   # a planner asks the user questions, then writes plan.md
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
+herdboard --json details --open tep3          # reopen the card's details pane above its agent or planner
 herdboard --json review tep3 --agent --reviewer pi --model zai/glm-5.3   # another agent reviews; the card's agent gets the findings
 herdboard --json review tep3 --both           # an agent review first, then Hunk
 herdboard --json merge tep3                   # the repository's mode: local (rebase, fast-forward, finish) or PR

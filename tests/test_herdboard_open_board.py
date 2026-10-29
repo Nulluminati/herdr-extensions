@@ -67,9 +67,10 @@ class OpenBoardTests(unittest.TestCase):
         manifest = tomllib.loads((PLUGIN / "herdr-plugin.toml").read_text())
 
         self.assertEqual(manifest["id"], "nulluminati.herdboard")
-        self.assertEqual([action["id"] for action in manifest["actions"]], ["board", "prs"])
+        self.assertEqual([action["id"] for action in manifest["actions"]], ["board", "prs", "details"])
         self.assertEqual(manifest["actions"][0]["command"], ["python3", "bin/open_board.py"])
         self.assertEqual(manifest["actions"][1]["command"], ["python3", "bin/open_board.py", "prs"])
+        self.assertEqual(manifest["actions"][2]["command"], ["python3", "bin/open_details.py"])
         self.assertEqual([pane["id"] for pane in manifest["panes"]], ["board", "prs"])
         self.assertIn("herdboard board --prs", manifest["panes"][1]["command"][-1])
 

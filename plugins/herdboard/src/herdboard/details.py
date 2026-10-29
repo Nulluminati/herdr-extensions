@@ -17,7 +17,7 @@ from .config import Config
 from .linear_cards import LINEAR_REF
 from .linear_source import state_dir
 from .model import HerdboardError
-from .start import REPOLESS, find_record
+from .start import REPOLESS, _read, find_record, herdr
 
 CHECK_ITEM = re.compile(r"^\s*[-*+] \[(?P<mark>.)\] ")
 PR_NUMBER = re.compile(r"/pull/(\d+)")
@@ -46,6 +46,34 @@ def details_data(store, config: Config, ref: str, linear_card=None) -> dict:
         except HerdboardError:
             pass
     return data
+
+
+def open_target(ref: str | None, pane: str | None) -> tuple[str, str]:
+    """The card and the host pane for `details --open`.
+
+    Without `ref`, the card is the planner's of the pane's tab, else the started card of the
+    pane's workspace. With `ref`, the host is the card's agent pane, else its planner, else `pane`.
+    """
+    plans = _read(state_dir() / "plans.json")
+    if ref is None:
+        if not pane:
+            raise HerdboardError("Give a card or a Herdr pane: no HERDR_PANE_ID is set")
+        info = herdr("pane", "get", pane).get("pane") or {}
+        tab, workspace = info.get("tab_id"), info.get("workspace_id")
+        for key, record in plans.items():
+            if isinstance(record, dict) and tab and record.get("tab_id") == tab and record.get("pane_id"):
+                return key, record["pane_id"]
+        for key, record in _read(state_dir() / "starts.json").items():
+            if isinstance(record, dict) and workspace and record.get("workspace_id") == workspace:
+                return record.get("ref") or key, record.get("pane_id") or pane
+        raise HerdboardError(f"No herdboard card works in the workspace of pane {pane}")
+    found = find_record(ref)
+    planner = plans.get(ref)
+    host = ((found[1].get("pane_id") if found else None)
+            or (planner.get("pane_id") if isinstance(planner, dict) else None) or pane)
+    if not host:
+        raise HerdboardError(f"{ref} has no agent or planner pane: give a Herdr pane with --pane")
+    return ref, host
 
 
 def watched_paths(config: Config, ref: str, board_path: Path | None) -> list[Path]:
