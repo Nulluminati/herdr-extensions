@@ -310,6 +310,59 @@ class FormatTests(unittest.TestCase):
         baseline = resource_usage.Usage(cpu_percent=None, rss_bytes=240 * MIB)
         self.assertEqual(resource_usage.format_usage(baseline), "CPU --  MEM 240 MiB")
 
+    def test_nerd_icons_replace_labels(self):
+        usage = resource_usage.Usage(cpu_percent=12.4, rss_bytes=int(1.1 * GIB))
+        self.assertEqual(resource_usage.format_usage(usage, icon_style="nerd"), "\uf4bc 12%  \U000f035b 1.1 GiB")
+        self.assertEqual(resource_usage.format_usage(None, total=True, icon_style="nerd"),
+                         "\uf4bc --  \U000f035b --  total")
+
+
+class ConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.environment = patch.dict(os.environ, {"HERDR_PLUGIN_CONFIG_DIR": self.directory.name})
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def write(self, text):
+        (Path(self.directory.name) / "config.toml").write_text(text)
+
+    def test_missing_config_is_plain(self):
+        self.assertEqual(resource_usage.load_icon_style(), ("plain", None))
+
+    def test_missing_config_dir_is_plain(self):
+        os.environ.pop("HERDR_PLUGIN_CONFIG_DIR")
+        self.assertEqual(resource_usage.load_icon_style(), ("plain", None))
+
+    def test_nerd_style(self):
+        self.write('icon_style = "nerd"\n')
+        self.assertEqual(resource_usage.load_icon_style(), ("nerd", None))
+
+    def test_bad_value_is_plain_with_error(self):
+        self.write('icon_style = "emoji"\n')
+        style, error = resource_usage.load_icon_style()
+        self.assertEqual(style, "plain")
+        self.assertIn("icon_style", error)
+
+    def test_non_string_value_is_plain_with_error(self):
+        self.write('icon_style = ["nerd"]\n')
+        style, error = resource_usage.load_icon_style()
+        self.assertEqual(style, "plain")
+        self.assertIn("icon_style", error)
+
+    def test_file_that_is_not_utf8_is_plain_with_error(self):
+        (Path(self.directory.name) / "config.toml").write_bytes(b"icon_style = \"\xff\"\n")
+        style, error = resource_usage.load_icon_style()
+        self.assertEqual(style, "plain")
+        self.assertIn("config.toml", error)
+
+    def test_bad_toml_is_plain_with_error(self):
+        self.write("icon_style = \n")
+        style, error = resource_usage.load_icon_style()
+        self.assertEqual(style, "plain")
+        self.assertIn("config.toml", error)
+
 
 class HerdrTestCase(unittest.TestCase):
     def setUp(self):
@@ -406,6 +459,23 @@ class CollectorTests(HerdrTestCase):
         self.assertEqual(texts["w1"], "CPU 75%  MEM 301 MiB  total")
         self.assertEqual(texts["w2"], "CPU 50%  MEM 201 MiB")
         self.assertEqual(texts["w3"], "CPU 12%  MEM 1.0 GiB")
+
+    def test_icon_style_is_read_every_cycle(self):
+        styles = [("plain", None), ("nerd", None)]
+        self.collector.icon_style = lambda: styles.pop(0)
+        self.tables = [self.sample(), self.sample()]
+        self.assertEqual(self.collector.cycle()["w3"], "CPU --  MEM 1.0 GiB")
+        self.clock[0] += 2.0
+        self.assertEqual(self.collector.cycle()["w3"], "\uf4bc 0%  \U000f035b 1.0 GiB")
+
+    def test_config_error_is_logged_once(self):
+        self.collector.icon_style = lambda: ("plain", "config.toml: bad icon_style")
+        self.tables = [self.sample(), self.sample()]
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.collector.cycle()
+            self.collector.cycle()
+        self.assertEqual(stderr.getvalue().count("bad icon_style"), 1)
 
     def test_roots_are_cached_and_refreshed_when_shell_changes(self):
         self.tables = [self.sample(), self.sample(), self.sample(shell_20_start="t")]

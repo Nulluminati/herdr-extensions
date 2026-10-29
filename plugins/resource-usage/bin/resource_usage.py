@@ -27,6 +27,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import tomllib
 
 
 TOKEN = "resource_usage"
@@ -47,6 +48,8 @@ PANE_GONE = {"pane_not_found"}
 NOT_A_WORKTREE = {"not_git_worktree", "workspace_not_found"}
 MIB = 1024 * 1024
 GIB = 1024 * MIB
+# The labels before the processor and memory values: text, or Nerd Font glyphs (nf-oct-cpu, nf-md-memory).
+LABELS = {"plain": ("CPU", "MEM"), "nerd": ("\uf4bc", "\U000f035b")}
 
 
 def command(argv: list[str], env: dict | None = None):
@@ -320,11 +323,35 @@ def format_memory(rss_bytes: int) -> str:
     return f"{rss_bytes / GIB:.1f} GiB"
 
 
-def format_usage(usage: Usage | None, total: bool = False) -> str:
+def format_usage(usage: Usage | None, total: bool = False, icon_style: str = "plain") -> str:
     cpu = "--" if usage is None or usage.cpu_percent is None else f"{usage.cpu_percent:.0f}%"
     memory = "--" if usage is None else format_memory(usage.rss_bytes)
-    text = f"CPU {cpu}  MEM {memory}"
+    cpu_label, memory_label = LABELS[icon_style]
+    text = f"{cpu_label} {cpu}  {memory_label} {memory}"
     return f"{text}  total" if total else text
+
+
+# Config
+
+def load_icon_style() -> tuple[str, str | None]:
+    """The `icon_style` from the plugin's config.toml, and an error to log when the file is bad.
+
+    A missing file, a bad file or a bad value gives "plain", which needs no special font."""
+    config_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
+    if not config_dir:
+        return "plain", None
+    path = Path(config_dir) / "config.toml"
+    try:
+        values = tomllib.loads(path.read_text())
+    except FileNotFoundError:
+        return "plain", None
+    except (OSError, ValueError) as error:
+        # ValueError covers bad TOML and a file that is not UTF-8.
+        return "plain", f"{path}: {error}; using plain labels"
+    style = values.get("icon_style", "plain")
+    if not isinstance(style, str) or style not in LABELS:
+        return "plain", f"{path}: icon_style must be plain or nerd, not {style!r}; using plain labels"
+    return style, None
 
 
 # Herdr
@@ -380,10 +407,13 @@ class Collector:
     """One collection cycle per call. Keeps what the next cycle needs: pane shells,
     worktree relationships and the last processor counters."""
 
-    def __init__(self, collect=collect_processes, clock=time.monotonic, cpu_count=os.cpu_count):
+    def __init__(self, collect=collect_processes, clock=time.monotonic, cpu_count=os.cpu_count,
+                 icon_style=load_icon_style):
         self.collect = collect
         self.clock = clock
         self.cpu_count = cpu_count
+        self.icon_style = icon_style
+        self.config_error: str | None = None
         self.roots: dict[str, tuple[int, str]] = {}
         self.topology = None
         self.parents: dict[str, str] = {}
@@ -433,7 +463,16 @@ class Collector:
         self.topology = topology
         self.relationship_retry_at = self.clock() + RELATIONSHIP_RETRY_SECONDS if failed else None
 
+    def read_icon_style(self) -> str:
+        # The config is read every cycle, so a change shows without a restart. Log a bad config once.
+        style, error = self.icon_style()
+        if error and error != self.config_error:
+            log(error)
+        self.config_error = error
+        return style
+
     def cycle(self) -> dict[str, str]:
+        style = self.read_icon_style()
         workspaces, panes = collect_workspaces()
         self.refresh_parents(workspaces)
         try:
@@ -445,7 +484,7 @@ class Collector:
                 log(f"cannot read processes: {self.process_error}")
             self.previous = None
             families = {parent for parent in self.parents.values()}
-            return {workspace["workspace_id"]: format_usage(None, workspace["workspace_id"] in families)
+            return {workspace["workspace_id"]: format_usage(None, workspace["workspace_id"] in families, style)
                     for workspace in workspaces}
         self.process_error = None
         now = self.clock()
@@ -463,9 +502,9 @@ class Collector:
         texts = {}
         for workspace_id, pids in sets.items():
             if workspace_id in families:
-                texts[workspace_id] = format_usage(measure(families[workspace_id]), total=True)
+                texts[workspace_id] = format_usage(measure(families[workspace_id]), total=True, icon_style=style)
             else:
-                texts[workspace_id] = format_usage(measure(pids))
+                texts[workspace_id] = format_usage(measure(pids), icon_style=style)
         self.previous = {(process.pid, process.start): process.cpu_seconds for process in processes.values()}
         self.previous_time = now
         return texts

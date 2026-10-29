@@ -82,6 +82,19 @@ The rows show after about two seconds, and CPU after about four.
 
 The choice stays across Herdr restarts. A fresh install collects.
 
+## Config
+
+Put the config in `config.toml` in the plugin config folder. `herdr plugin config-dir nulluminati.resource-usage` prints the folder.
+
+```toml
+# "plain" shows the words CPU and MEM; "nerd" shows Nerd Font icons in their place.
+icon_style = "nerd"
+```
+
+With `nerd`, a row looks like ` 12%  󰍛 1.1 GiB`. The icons are `nf-oct-cpu` and `nf-md-memory`. Use a Nerd Font Mono font in your terminal: other Nerd Font variants can draw wider icons. The plugin does not detect the font. Without the file, or with a bad value, the rows use the plain words, and a bad value goes to the worker log.
+
+The worker reads the file every cycle, so a change shows within two seconds.
+
 ## How it works
 
 A startup hook and a `workspace.focused` hook run `bin/resource_usage.py --ensure-running`. It starts one background worker for each Herdr session, unless one runs or you disabled collection. A lock file in the plugin state folder makes sure only one worker runs for each session.
