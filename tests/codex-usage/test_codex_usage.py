@@ -14,16 +14,18 @@ codex_usage = load_script("codex-usage", "codex_usage")
 
 
 def codex(pane_id, session="s-1"):
-    return {"pane_id": pane_id, "agent": "codex",
-            "agent_session": {"agent": "codex", "kind": "id", "value": session}}
+    return {"pane_id": pane_id, "agent": "codex", "agent_session": {"agent": "codex", "kind": "id", "value": session}}
 
 
 class CodexUsageTests(unittest.TestCase):
     def setUp(self):
-        self.environment = patch.dict(os.environ, {
-            "CODEX_HOME": str(FIXTURES / "codex"),
-            "PI_CODING_AGENT_DIR": str(FIXTURES / "pi"),
-        })
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "CODEX_HOME": str(FIXTURES / "codex"),
+                "PI_CODING_AGENT_DIR": str(FIXTURES / "pi"),
+            },
+        )
         self.environment.start()
         self.addCleanup(self.environment.stop)
         os.environ.pop("HERDR_BIN_PATH", None)
@@ -62,62 +64,73 @@ class CodexUsageTests(unittest.TestCase):
         self.run_main()
         # Call 1: 600 input, 400 cached, 100 output at the base price. A repeated count is not
         # charged twice. Call 2: 300000 input tokens pass 272000, so the tier price applies.
-        self.assertEqual(self.reports(), {
-            "w1:p1": ["--token", "codex_context=ctx 60%", "--token", "codex_cost=$0.457"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p1": ["--token", "codex_context=ctx 60%", "--token", "codex_cost=$0.457"],
+            },
+        )
 
     def test_unknown_model_shows_context_only(self):
         os.environ["PI_CODING_AGENT_DIR"] = str(FIXTURES / "missing")
         self.run_main()
-        self.assertEqual(self.reports()["w1:p1"],
-                         ["--token", "codex_context=ctx 60%", "--clear-token", "codex_cost"])
+        self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 60%", "--clear-token", "codex_cost"])
 
     def test_a_model_change_prices_each_call_at_its_own_model(self):
         self.agents = [codex("w1:p1", session="s-model-change")]
         self.run_main()
         # 100000 input and 10000 output tokens at gpt-6.1-sol ($0.300), then at gpt-6.1-mini ($0.140).
-        self.assertEqual(self.reports()["w1:p1"],
-                         ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.440"])
+        self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.440"])
 
     def test_calls_of_an_unpriced_model_do_not_hide_the_cost_of_priced_calls(self):
         self.agents = [codex("w1:p1", session="s-unknown-model")]
         self.run_main()
-        self.assertEqual(self.reports()["w1:p1"],
-                         ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.300"])
+        self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.300"])
 
     def test_missing_session_log_clears_both_tokens(self):
         self.agents = [codex("w1:p1", session="unknown")]
         self.run_main()
-        self.assertEqual(self.reports()["w1:p1"],
-                         ["--clear-token", "codex_context", "--clear-token", "codex_cost"])
+        self.assertEqual(self.reports()["w1:p1"], ["--clear-token", "codex_context", "--clear-token", "codex_cost"])
 
     def test_codex_without_a_session_clears_both_tokens(self):
         self.agents = [{"pane_id": "w1:p1", "agent": "codex"}]
         self.run_main()
-        self.assertEqual(self.reports()["w1:p1"],
-                         ["--clear-token", "codex_context", "--clear-token", "codex_cost"])
+        self.assertEqual(self.reports()["w1:p1"], ["--clear-token", "codex_context", "--clear-token", "codex_cost"])
 
     def test_a_pane_that_no_longer_runs_codex_loses_its_codex_values(self):
-        self.agents = [{"pane_id": "w1:p2", "agent": "claude",
-                        "tokens": {"codex_context": "ctx 60%", "codex_cost": "$0.457", "claude_cost": "$1.000"}}]
+        self.agents = [
+            {
+                "pane_id": "w1:p2",
+                "agent": "claude",
+                "tokens": {"codex_context": "ctx 60%", "codex_cost": "$0.457", "claude_cost": "$1.000"},
+            }
+        ]
         self.run_main()
-        self.assertEqual(self.reports(), {
-            "w1:p2": ["--clear-token", "codex_context", "--clear-token", "codex_cost"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p2": ["--clear-token", "codex_context", "--clear-token", "codex_cost"],
+            },
+        )
 
     def test_an_event_clears_the_codex_values_of_its_pane_after_an_agent_change(self):
         self.agents = [codex("w1:p1"), {"pane_id": "w1:p2", "agent": "pi", "tokens": {"codex_cost": "$0.457"}}]
         os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps(
-            {"event": "pane.agent_detected", "data": {"pane_id": "w1:p2"}})
+            {"event": "pane.agent_detected", "data": {"pane_id": "w1:p2"}}
+        )
         self.run_main()
-        self.assertEqual(self.reports(), {
-            "w1:p2": ["--clear-token", "codex_context", "--clear-token", "codex_cost"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p2": ["--clear-token", "codex_context", "--clear-token", "codex_cost"],
+            },
+        )
 
     def test_event_reports_only_the_event_pane(self):
         self.agents.append(codex("w1:p3"))
         os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps(
-            {"event": "pane.agent_status_changed", "data": {"pane_id": "w1:p3"}})
+            {"event": "pane.agent_status_changed", "data": {"pane_id": "w1:p3"}}
+        )
         self.run_main()
         self.assertEqual(list(self.reports()), ["w1:p3"])
 

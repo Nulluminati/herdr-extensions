@@ -33,10 +33,26 @@ class OpenBoardTests(unittest.TestCase):
 
         self.assertEqual(self.run_script(), 0)
 
-        self.assertEqual(self.calls, [[
-            "herdr", "plugin", "pane", "open", "--plugin", "nulluminati.herdboard",
-            "--entrypoint", "board", "--placement", "tab", "--cwd", "/work/api", "--focus",
-        ]])
+        self.assertEqual(
+            self.calls,
+            [
+                [
+                    "herdr",
+                    "plugin",
+                    "pane",
+                    "open",
+                    "--plugin",
+                    "nulluminati.herdboard",
+                    "--entrypoint",
+                    "board",
+                    "--placement",
+                    "tab",
+                    "--cwd",
+                    "/work/api",
+                    "--focus",
+                ]
+            ],
+        )
 
     def test_falls_back_to_the_workspace_directory(self):
         os.environ["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"workspace_cwd": "/work"})

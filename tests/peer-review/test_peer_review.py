@@ -32,11 +32,14 @@ class PeerReviewTests(unittest.TestCase):
         git(self.repository, "add", "app.py")
         git(self.repository, "commit", "--quiet", "-m", "initial")
         self.state = self.base / "state"
-        self.environment = patch.dict(os.environ, {
-            "HERDR_BIN_PATH": "herdr",
-            "HERDR_PANE_ID": "w1:p1",
-            "XDG_STATE_HOME": str(self.state),
-        })
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "HERDR_BIN_PATH": "herdr",
+                "HERDR_PANE_ID": "w1:p1",
+                "XDG_STATE_HOME": str(self.state),
+            },
+        )
         self.environment.start()
         self.addCleanup(self.environment.stop)
         os.environ.pop("HERDR_PLUGIN_CONTEXT_JSON", None)
@@ -86,21 +89,35 @@ class PeerReviewTests(unittest.TestCase):
     def run_request(self, *arguments):
         output = io.StringIO()
         self.errors = io.StringIO()
-        with patch.object(peer_review, "command", self.fake_command), \
-                patch.object(peer_review, "start_worker", lambda arguments, log: self.workers.append((arguments, log))), \
-                contextlib.redirect_stdout(output), contextlib.redirect_stderr(self.errors):
+        with (
+            patch.object(peer_review, "command", self.fake_command),
+            patch.object(peer_review, "start_worker", lambda arguments, log: self.workers.append((arguments, log))),
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(self.errors),
+        ):
             status = peer_review.main(["request", *arguments])
         return status, output.getvalue()
 
     def run_deliver(self, review):
         self.review = review
-        with patch.object(peer_review, "command", self.fake_command), \
-                patch.object(peer_review.time, "sleep", lambda seconds: None), \
-                contextlib.redirect_stderr(io.StringIO()):
-            return peer_review.main([
-                "deliver", "--review", str(review), "--requester", "w1:p1",
-                "--reviewer-pane", "w1:p9", "--reviewer", "pi",
-            ])
+        with (
+            patch.object(peer_review, "command", self.fake_command),
+            patch.object(peer_review.time, "sleep", lambda seconds: None),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            return peer_review.main(
+                [
+                    "deliver",
+                    "--review",
+                    str(review),
+                    "--requester",
+                    "w1:p1",
+                    "--reviewer-pane",
+                    "w1:p9",
+                    "--reviewer",
+                    "pi",
+                ]
+            )
 
     def only_review(self):
         reviews = list((self.state / "peer-review").iterdir())
@@ -114,16 +131,25 @@ class PeerReviewTests(unittest.TestCase):
 
     def test_a_linked_worktree_reviewer_matches_herdboard(self):
         linked = self.base / "linked"
-        subprocess.run(["git", "-C", str(self.repository), "worktree", "add", "-q", str(linked), "-b", "card"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repository), "worktree", "add", "-q", str(linked), "-b", "card"],
+            check=True,
+            capture_output=True,
+        )
         review = Path("/reviews/r1")
         for kind in ("claude", "pi"):
             with self.subTest(kind=kind):
                 args = peer_review.reviewer_arguments(kind, review, linked)
                 prompt = args[0] if kind == "claude" else args[-1]
-                expected = ([prompt, *sandbox.claude_reviewer_options(review, linked, browser=False, hunk=False),
-                             *sandbox.claude_reviewer_tools(review)] if kind == "claude" else
-                            [*sandbox.pi_reviewer_options(review, linked, browser=False, hunk=False), "--", prompt])
+                expected = (
+                    [
+                        prompt,
+                        *sandbox.claude_reviewer_options(review, linked, browser=False, hunk=False),
+                        *sandbox.claude_reviewer_tools(review),
+                    ]
+                    if kind == "claude"
+                    else [*sandbox.pi_reviewer_options(review, linked, browser=False, hunk=False), "--", prompt]
+                )
                 self.assertEqual(args, expected)
                 self.assertIn(str((self.repository / ".git").resolve()), " ".join(args))
 
@@ -131,13 +157,22 @@ class PeerReviewTests(unittest.TestCase):
         folder, repo = Path('/reviews/a"b\\c'), Path("/repo")
         prompt = peer_review.reviewer_arguments("codex", folder, repo)[-1]
         self.assertIn(str(folder / "request.md"), prompt)
-        self.assertEqual(peer_review.reviewer_arguments("codex", folder, repo),
-                         [*sandbox.codex_reviewer_options("hb-review", folder, hunk=False), prompt])
-        self.assertEqual(peer_review.reviewer_arguments("pi", folder, repo),
-                         [*sandbox.pi_reviewer_options(folder, repo, browser=False, hunk=False), "--", prompt])
-        self.assertEqual(peer_review.reviewer_arguments("claude", folder, repo),
-                         [prompt, *sandbox.claude_reviewer_options(folder, repo, browser=False, hunk=False),
-                          *sandbox.claude_reviewer_tools(folder)])
+        self.assertEqual(
+            peer_review.reviewer_arguments("codex", folder, repo),
+            [*sandbox.codex_reviewer_options("hb-review", folder, hunk=False), prompt],
+        )
+        self.assertEqual(
+            peer_review.reviewer_arguments("pi", folder, repo),
+            [*sandbox.pi_reviewer_options(folder, repo, browser=False, hunk=False), "--", prompt],
+        )
+        self.assertEqual(
+            peer_review.reviewer_arguments("claude", folder, repo),
+            [
+                prompt,
+                *sandbox.claude_reviewer_options(folder, repo, browser=False, hunk=False),
+                *sandbox.claude_reviewer_tools(folder),
+            ],
+        )
 
     def test_other_agents_are_rejected(self):
         with self.assertRaisesRegex(peer_review.ReviewError, "unsupported"):
@@ -175,7 +210,7 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(start[start.index("--pane") + 1], "w1:p9")
         review = self.only_review()
         prompt = start[-1]
-        self.assertEqual(start[start.index("--") + 1:], peer_review.reviewer_arguments("pi", review, self.repository))
+        self.assertEqual(start[start.index("--") + 1 :], peer_review.reviewer_arguments("pi", review, self.repository))
         self.assertIn(str(review / "request.md"), prompt)
         self.assertIn(str(review / "findings.md"), prompt)
 
@@ -203,8 +238,7 @@ class PeerReviewTests(unittest.TestCase):
         review = self.only_review()
         call = next(argv for argv in self.calls if argv[:3] == ["herdr", "agent", "start"])
         self.assertEqual(call[call.index("--kind") + 1], "codex")
-        self.assertEqual(call[call.index("--") + 1:],
-                         peer_review.reviewer_arguments("codex", review, self.repository))
+        self.assertEqual(call[call.index("--") + 1 :], peer_review.reviewer_arguments("codex", review, self.repository))
 
     def test_claude_reviewer_may_only_write_inside_the_review(self):
         self.agents["w1:p1"]["agent"] = "codex"
@@ -217,11 +251,11 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(start[start.index("--kind") + 1], "claude")
         prompt = start[start.index("--") + 1]
         self.assertIn(str(review / "request.md"), prompt)
-        self.assertEqual(start[start.index("--") + 2:],
-                         peer_review.reviewer_arguments("claude", review, self.repository)[1:])
+        self.assertEqual(
+            start[start.index("--") + 2 :], peer_review.reviewer_arguments("claude", review, self.repository)[1:]
+        )
         settings = json.loads(start[start.index("--settings") + 1])["sandbox"]
-        self.assertEqual(settings["filesystem"], {"allowWrite": [str(review)],
-                                                  "denyWrite": [str(self.repository)]})
+        self.assertEqual(settings["filesystem"], {"allowWrite": [str(review)], "denyWrite": [str(self.repository)]})
         self.assertIn(f"Edit(/{review}/**)", start)
 
     def test_two_requests_in_one_second_get_two_review_folders(self):
@@ -244,10 +278,25 @@ class PeerReviewTests(unittest.TestCase):
         self.run_request()
 
         review = self.only_review()
-        self.assertEqual(self.workers, [([
-            "deliver", "--review", str(review), "--requester", "w1:p1",
-            "--reviewer-pane", "w1:p9", "--reviewer", "pi",
-        ], review / "worker.log")])
+        self.assertEqual(
+            self.workers,
+            [
+                (
+                    [
+                        "deliver",
+                        "--review",
+                        str(review),
+                        "--requester",
+                        "w1:p1",
+                        "--reviewer-pane",
+                        "w1:p9",
+                        "--reviewer",
+                        "pi",
+                    ],
+                    review / "worker.log",
+                )
+            ],
+        )
         self.assertFalse(any(argv[:3] == ["herdr", "agent", "prompt"] for argv in self.calls))
 
     def test_reviewer_waiting_for_input_still_gets_the_review(self):
@@ -289,8 +338,12 @@ class PeerReviewTests(unittest.TestCase):
 
     def branch_with_upstream(self):
         """A `feature` branch whose upstream is the first branch, with one commit on it."""
-        first = subprocess.run(["git", "-C", str(self.repository), "symbolic-ref", "--short", "HEAD"],
-                               check=True, capture_output=True, text=True).stdout.strip()
+        first = subprocess.run(
+            ["git", "-C", str(self.repository), "symbolic-ref", "--short", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         git(self.repository, "checkout", "--quiet", "-b", "feature")
         git(self.repository, "branch", f"--set-upstream-to={first}")
         (self.repository / "app.py").write_text("print('committed')\n")

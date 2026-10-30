@@ -1,4 +1,5 @@
 """The card details pane: its data and its lines, without a terminal."""
+
 import unittest
 
 from herdboard import activity
@@ -10,6 +11,7 @@ class DetailsAppTests(StoreCase, unittest.IsolatedAsyncioTestCase):
         from textual.widgets import Static
 
         from herdboard.details_view import DetailsApp
+
         ref = self.card.ref
         app = DetailsApp(self.store, self.config, ref, check_seconds=0.05)
         async with app.run_test(size=(60, 8)) as pilot:

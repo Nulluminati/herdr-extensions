@@ -25,7 +25,9 @@ class IconBoardTests(BoardTestCase):
                     async with app.run_test(size=(width, 30)) as pilot:
                         await pilot.pause()
                         widget = app.query_one(".card")
-                        self.assertIn(f"{TYPE_ICONS['feature']} feature" if style == "nerd" else "feature", widget.plain)
+                        self.assertIn(
+                            f"{TYPE_ICONS['feature']} feature" if style == "nerd" else "feature", widget.plain
+                        )
                         self.assertIn(f"{CALENDAR} Due Nov 1" if style == "nerd" else "Due Nov 1", widget.plain)
                         label = ATTACHMENT if style == "nerd" else "files"
                         self.assertIn(label, widget.plain)
@@ -36,12 +38,18 @@ class IconBoardTests(BoardTestCase):
                         await settle(pilot)
                         screen = app.screen
                         self.assertIsInstance(screen, board.DetailScreen)
-                        self.assertIn(f"{TYPE_ICONS['feature']} feature" if style == "nerd" else "feature",
-                                      screen.query_one("#detail-meta").plain)
-                        self.assertIn(f"{CALENDAR} Due Nov 1" if style == "nerd" else "Due Nov 1",
-                                      screen.query_one("#detail-chips").plain)
-                        self.assertEqual(str(screen.query_one("#detail-files").border_title),
-                                         f"{ATTACHMENT} Attachments" if style == "nerd" else "Attachments")
+                        self.assertIn(
+                            f"{TYPE_ICONS['feature']} feature" if style == "nerd" else "feature",
+                            screen.query_one("#detail-meta").plain,
+                        )
+                        self.assertIn(
+                            f"{CALENDAR} Due Nov 1" if style == "nerd" else "Due Nov 1",
+                            screen.query_one("#detail-chips").plain,
+                        )
+                        self.assertEqual(
+                            str(screen.query_one("#detail-files").border_title),
+                            f"{ATTACHMENT} Attachments" if style == "nerd" else "Attachments",
+                        )
                         await pilot.press("escape")
                         self.store.edit(item.ref, body=["Updated details"])
                         await app.reload(item.ref)

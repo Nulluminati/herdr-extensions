@@ -43,9 +43,15 @@ MAX_DAYS = 365
 MAX_WEEKS = 52
 # The search for a due time stops after this many days: longer than any allowed period.
 SEARCH_DAYS = 366 * 3
-FORMS = ("every day", "every weekday", "every week on monday[, thursday]", "every month on the 1st",
-         f"every N days (N up to {MAX_DAYS})", f"every N weeks (N up to {MAX_WEEKS})",
-         "each with an optional `at HH:MM` (default 09:00)")
+FORMS = (
+    "every day",
+    "every weekday",
+    "every week on monday[, thursday]",
+    "every month on the 1st",
+    f"every N days (N up to {MAX_DAYS})",
+    f"every N weeks (N up to {MAX_WEEKS})",
+    "each with an optional `at HH:MM` (default 09:00)",
+)
 
 
 class AutomationError(HerdboardError):
@@ -309,8 +315,11 @@ def _new_id(config: Config, taken: set[str]) -> str:
     while True:
         candidate = "a" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
         # A removed automation keeps its attachments and log, so its ID stays taken.
-        if candidate not in taken and not attachments.folder(config, candidate).exists() \
-                and not activity.log_path(config, candidate).exists():
+        if (
+            candidate not in taken
+            and not attachments.folder(config, candidate).exists()
+            and not activity.log_path(config, candidate).exists()
+        ):
             return candidate
 
 
@@ -343,16 +352,43 @@ def _check(store, item: Automation) -> Automation:
     return replace(item, title=title, type=kind, tags=list(item.tags))
 
 
-def add(store, *, title: str, schedule: str, board: str = "inbox", body: str = "", type: str | None = None,
-        tags: list[str] = (), agent: str | None = None, model: str | None = None, thinking: str | None = None,
-        may_merge_prs: bool = False, enabled: bool = True, created: datetime | None = None) -> Automation:
+def add(
+    store,
+    *,
+    title: str,
+    schedule: str,
+    board: str = "inbox",
+    body: str = "",
+    type: str | None = None,
+    tags: list[str] = (),
+    agent: str | None = None,
+    model: str | None = None,
+    thinking: str | None = None,
+    may_merge_prs: bool = False,
+    enabled: bool = True,
+    created: datetime | None = None,
+) -> Automation:
     created = (created or datetime.now()).astimezone()
     with _lock(DEFINITIONS_LOCK, wait=2):
         current = load(store.config)
-        item = _check(store, Automation(
-            id=_new_id(store.config, {a.id for a in current}), title=title, schedule=schedule, board=board,
-            body=body, type=type, tags=list(tags), enabled=enabled, agent=agent, model=model, thinking=thinking,
-            may_merge_prs=may_merge_prs, created=created.isoformat(timespec="seconds")))
+        item = _check(
+            store,
+            Automation(
+                id=_new_id(store.config, {a.id for a in current}),
+                title=title,
+                schedule=schedule,
+                board=board,
+                body=body,
+                type=type,
+                tags=list(tags),
+                enabled=enabled,
+                agent=agent,
+                model=model,
+                thinking=thinking,
+                may_merge_prs=may_merge_prs,
+                created=created.isoformat(timespec="seconds"),
+            ),
+        )
         save(store.config, [*current, item])
     return item
 
@@ -378,6 +414,7 @@ def edit(store, automation_id: str, now: datetime | None = None, **changes) -> A
     unknown = set(changes) - set(Automation.__dataclass_fields__) | ({"id", "created"} & set(changes))
     if unknown:
         raise AutomationError(f"Cannot change {', '.join(sorted(unknown))}")
+
     def saved(before: Automation, after: Automation) -> None:
         if after.schedule != before.schedule:
             _restart(automation_id, now)
@@ -387,6 +424,7 @@ def edit(store, automation_id: str, now: datetime | None = None, **changes) -> A
 
 def set_enabled(store, automation_id: str, enabled: bool, now: datetime | None = None) -> Automation:
     """Pause or resume. A resumed automation starts with its next due time: it does not catch up."""
+
     def saved(before: Automation, after: Automation) -> None:
         if enabled and not before.enabled:
             _restart(automation_id, now)
@@ -462,8 +500,7 @@ def spawn(store, automation: Automation, due: datetime) -> CardView:
     return card
 
 
-def run(store, automation: Automation, due: datetime, *, skipped: int = 0,
-        config_file: Path | None = None) -> dict:
+def run(store, automation: Automation, due: datetime, *, skipped: int = 0, config_file: Path | None = None) -> dict:
     """Spawn one card and start its agent. Failures are logged, recorded and notified, never retried."""
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     try:
@@ -476,12 +513,22 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0,
         notify(f"herdboard: automation {automation.id} failed", f"{automation.title}: {error}")
         return {"id": automation.id, "card": ref, "result": result, "skipped": skipped}
     if skipped:
-        activity.append(store, card.ref, f"Missed runs: skipped {skipped} earlier due "
-                        f"time{'' if skipped == 1 else 's'}.", "herdboard")
+        activity.append(
+            store,
+            card.ref,
+            f"Missed runs: skipped {skipped} earlier due time{'' if skipped == 1 else 's'}.",
+            "herdboard",
+        )
     starter = Starter(store, store.config.todos_dir, config_file=config_file)
     try:
-        starter.start(card.ref, agent=automation.agent, model=automation.model, thinking=automation.thinking,
-                      no_repo=automation.board == "inbox", may_merge_prs=automation.may_merge_prs)
+        starter.start(
+            card.ref,
+            agent=automation.agent,
+            model=automation.model,
+            thinking=automation.thinking,
+            no_repo=automation.board == "inbox",
+            may_merge_prs=automation.may_merge_prs,
+        )
     except HerdboardError as error:
         result = f"start_failed: {error}"
         activity.append(store, card.ref, f"Auto start failed: {error}", "herdboard")
@@ -577,9 +624,17 @@ def listing(store, now: datetime | None = None) -> list[dict]:
             files = attachments.listing(store.config, item.id)
         except HerdboardError:
             files = []
-        found.append({**_fields(item), "next_due": next_text, "schedule_error": problem,
-                      "last_run": entry.get("last_run"), "last_card": entry.get("last_card"),
-                      "last_result": entry.get("last_result"), "attachments": files})
+        found.append(
+            {
+                **_fields(item),
+                "next_due": next_text,
+                "schedule_error": problem,
+                "last_run": entry.get("last_run"),
+                "last_card": entry.get("last_card"),
+                "last_result": entry.get("last_result"),
+                "attachments": files,
+            }
+        )
     return found
 
 
@@ -615,8 +670,9 @@ def _tick_program(config_file: Path | None) -> list[str]:
 def _environment(config_file: Path | None) -> dict[str, str]:
     herdr = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr")
     if not herdr:
-        raise AutomationError("Cannot find the herdr binary: put it on the PATH or set HERDR_BIN_PATH",
-                              "herdr_not_found")
+        raise AutomationError(
+            "Cannot find the herdr binary: put it on the PATH or set HERDR_BIN_PATH", "herdr_not_found"
+        )
     folders = []
     for tool in PATH_TOOLS:
         found = herdr if tool == "herdr" else shutil.which(tool)
@@ -639,8 +695,7 @@ def _system(argv: list[str], tolerate: bool = False):
     except (OSError, subprocess.TimeoutExpired) as error:
         raise AutomationError(f"{argv[0]} failed: {error}", "timer_failed") from error
     if result.returncode and not tolerate:
-        raise AutomationError(f"{' '.join(argv)} failed: {(result.stderr or result.stdout).strip()}",
-                              "timer_failed")
+        raise AutomationError(f"{' '.join(argv)} failed: {(result.stderr or result.stdout).strip()}", "timer_failed")
     return result
 
 
@@ -672,15 +727,34 @@ def _systemd(action: str, config_file: Path | None) -> dict:
     if action == "install":
         program = _tick_program(config_file)
         env = _environment(config_file)
-        lines = ["[Unit]", "Description=herdboard automations: spawn and start due cards", "",
-                 "[Service]", "Type=oneshot",
-                 "ExecStart=" + " ".join(_systemd_quote(arg) for arg in program),
-                 *(f"Environment={_systemd_quote(f'{key}={value}')}" for key, value in env.items()), ""]
+        lines = [
+            "[Unit]",
+            "Description=herdboard automations: spawn and start due cards",
+            "",
+            "[Service]",
+            "Type=oneshot",
+            "ExecStart=" + " ".join(_systemd_quote(arg) for arg in program),
+            *(f"Environment={_systemd_quote(f'{key}={value}')}" for key, value in env.items()),
+            "",
+        ]
         _write_file(service, "\n".join(lines).encode("utf-8"))
-        _write_file(timer_file, "\n".join([
-            "[Unit]", "Description=Run herdboard automations every 5 minutes", "",
-            "[Timer]", "OnCalendar=*:0/5", "Persistent=true", "",
-            "[Install]", "WantedBy=timers.target", ""]).encode("utf-8"))
+        _write_file(
+            timer_file,
+            "\n".join(
+                [
+                    "[Unit]",
+                    "Description=Run herdboard automations every 5 minutes",
+                    "",
+                    "[Timer]",
+                    "OnCalendar=*:0/5",
+                    "Persistent=true",
+                    "",
+                    "[Install]",
+                    "WantedBy=timers.target",
+                    "",
+                ]
+            ).encode("utf-8"),
+        )
         _system(["systemctl", "--user", "daemon-reload"])
         _system(["systemctl", "--user", "enable", "--now", f"{SERVICE}.timer"])
     elif action == "remove":
@@ -689,8 +763,13 @@ def _systemd(action: str, config_file: Path | None) -> dict:
             path.unlink(missing_ok=True)
         _system(["systemctl", "--user", "daemon-reload"], tolerate=True)
     state = _system(["systemctl", "--user", "is-active", f"{SERVICE}.timer"], tolerate=True).stdout.strip()
-    return {"backend": "systemd", "active": state == "active", "state": state or "unknown",
-            "installed": service.exists() and timer_file.exists(), "files": [str(service), str(timer_file)]}
+    return {
+        "backend": "systemd",
+        "active": state == "active",
+        "state": state or "unknown",
+        "installed": service.exists() and timer_file.exists(),
+        "files": [str(service), str(timer_file)],
+    }
 
 
 def _launchd(action: str, config_file: Path | None) -> dict:
@@ -702,10 +781,20 @@ def _launchd(action: str, config_file: Path | None) -> dict:
             state_dir().mkdir(parents=True, exist_ok=True)
         except OSError as error:
             raise IoError(f"{state_dir()}: cannot create: {error}") from error
-        _write_file(path, plistlib.dumps({
-            "Label": LAUNCH_LABEL, "ProgramArguments": _tick_program(config_file),
-            "EnvironmentVariables": _environment(config_file), "StartInterval": TICK_SECONDS,
-            "RunAtLoad": True, "StandardOutPath": log, "StandardErrorPath": log}))
+        _write_file(
+            path,
+            plistlib.dumps(
+                {
+                    "Label": LAUNCH_LABEL,
+                    "ProgramArguments": _tick_program(config_file),
+                    "EnvironmentVariables": _environment(config_file),
+                    "StartInterval": TICK_SECONDS,
+                    "RunAtLoad": True,
+                    "StandardOutPath": log,
+                    "StandardErrorPath": log,
+                }
+            ),
+        )
         # A loaded job keeps its old definition until it is booted out.
         _system(["launchctl", "bootout", f"{domain}/{LAUNCH_LABEL}"], tolerate=True)
         _system(["launchctl", "bootstrap", domain, str(path)])
@@ -713,8 +802,13 @@ def _launchd(action: str, config_file: Path | None) -> dict:
         _system(["launchctl", "bootout", f"{domain}/{LAUNCH_LABEL}"], tolerate=True)
         path.unlink(missing_ok=True)
     loaded = _system(["launchctl", "print", f"{domain}/{LAUNCH_LABEL}"], tolerate=True).returncode == 0
-    return {"backend": "launchd", "active": loaded, "state": "loaded" if loaded else "not loaded",
-            "installed": path.exists(), "files": [str(path)]}
+    return {
+        "backend": "launchd",
+        "active": loaded,
+        "state": "loaded" if loaded else "not loaded",
+        "installed": path.exists(),
+        "files": [str(path)],
+    }
 
 
 def timer(action: str, config_file: Path | None = None) -> dict:
@@ -728,5 +822,6 @@ def timer(action: str, config_file: Path | None = None) -> dict:
         return _systemd(action, config_file)
     if sys.platform == "darwin":
         return _launchd(action, config_file)
-    raise AutomationError(f"Automations need systemd (Linux) or launchd (macOS), not {sys.platform}",
-                          "unsupported_platform")
+    raise AutomationError(
+        f"Automations need systemd (Linux) or launchd (macOS), not {sys.platform}", "unsupported_platform"
+    )

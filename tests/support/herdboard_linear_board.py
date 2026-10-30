@@ -37,10 +37,17 @@ class LinearBoardCase(BoardTestCase, LinearEnvTestCase):
                     self.running -= 1
 
         app = HerdboardApp(
-            self.store, view, paths_for=views.paths, repo_board=self.repo_path,
-            reload_interval=60.0, linear_for=fetch, linear_active=active,
-            available=views.available, linear_interval=linear_interval,
-            linear_writer=LinearWriter(self.config, source), **kwargs,
+            self.store,
+            view,
+            paths_for=views.paths,
+            repo_board=self.repo_path,
+            reload_interval=60.0,
+            linear_for=fetch,
+            linear_active=active,
+            available=views.available,
+            linear_interval=linear_interval,
+            linear_writer=LinearWriter(self.config, source),
+            **kwargs,
         )
         app.animation_level = "none"
         return app

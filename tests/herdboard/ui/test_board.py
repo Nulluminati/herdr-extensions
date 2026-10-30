@@ -31,11 +31,14 @@ def help_rows(screen):
 class RenderTests(BoardTestCase):
     def test_board_tests_use_a_private_state_folder_and_no_real_herdr(self):
         from herdboard import start as start_module
+
         self.assertTrue(str(start_module.state_dir()).startswith(tempfile.gettempdir()))
         self.assertEqual(os.environ["HERDR_BIN_PATH"], str(self.root / "no-herdr"))
 
     async def test_columns_counts_limits_and_cards(self):
-        text = FIXTURE.read_text().replace("kanban-plugin: board\n", "kanban-plugin: board\nrepo: github.com/acme/api\n", 1)
+        text = FIXTURE.read_text().replace(
+            "kanban-plugin: board\n", "kanban-plugin: board\nrepo: github.com/acme/api\n", 1
+        )
         self.repo_path.write_text(text)
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
@@ -71,9 +74,7 @@ class RenderTests(BoardTestCase):
             self.assertTrue(any("inbox card" in c and "inbox" in c for c in plain))
 
     async def test_columns_merge_by_name_and_follow_config_order(self):
-        self.repo_path.write_text(
-            self.repo_path.read_text().replace("## Done", "## Extra\n\n## Done", 1)
-        )
+        self.repo_path.write_text(self.repo_path.read_text().replace("## Done", "## Extra\n\n## Done", 1))
         app = self.make_app("all")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -111,8 +112,11 @@ class CardLookTests(BoardTestCase):
             widget = app.query_one(".card")
             first_line = widget.plain.splitlines()[0]
             self.assertEqual(first_line, f"Fix login  {card.ref}")
-            chips = [widget.rich_text.plain[span.start:span.end].strip() for span in widget.rich_text.spans
-                     if " on " in str(span.style)]
+            chips = [
+                widget.rich_text.plain[span.start : span.end].strip()
+                for span in widget.rich_text.spans
+                if " on " in str(span.style)
+            ]
             self.assertEqual(chips, ["auth", "web"])
             self.assertIn(" auth   web ", widget.plain)
             self.assertIn("Due Nov 1", widget.plain)
@@ -227,7 +231,6 @@ class FilterTests(BoardTestCase):
             await pilot.pause()
             self.assertEqual(self.visible(app), ["Another doc #docs", "Write release notes #docs"])
 
-
     async def test_an_agent_status_change_alone_redraws_the_card(self):
         self.store.add(self.repo_path, "Watch the agent", "Todo")
         status = {"value": None}
@@ -247,6 +250,7 @@ class FilterTests(BoardTestCase):
             await pilot.pause()
             first = [w for w in app.query(".card") if "Watch the agent" in w.plain][0]
             self.assertTrue(first.rich_text.plain.startswith("×"), first.rich_text.plain)
+
 
 class NavigationTests(BoardTestCase):
     def setUp(self):
@@ -463,6 +467,7 @@ class NavigationTests(BoardTestCase):
 
     async def test_board_changes_update_the_sidebar_card(self):
         from herdboard import start as start_module
+
         app = self.make_app()
         with mock.patch.object(start_module, "update_card_token") as update:
             async with app.run_test(size=SIZE) as pilot:
@@ -473,8 +478,10 @@ class NavigationTests(BoardTestCase):
                 await pilot.pause()
                 await pilot.press("y")
                 await settle(pilot)
-        calls = [(call.args[0].title, call.args[0].column, call.kwargs.get("removed", False))
-                 for call in update.call_args_list]
+        calls = [
+            (call.args[0].title, call.args[0].column, call.kwargs.get("removed", False))
+            for call in update.call_args_list
+        ]
         self.assertEqual(calls, [("a1", "Todo", False), ("a1", "Todo", True)])
 
     async def test_x_deletes_after_y(self):
@@ -624,8 +631,12 @@ class ActionTests(BoardTestCase):
             self.assertEqual(list(app.screen.query("#detail-log")), [])
 
     async def test_detail_shows_details_in_their_own_block(self):
-        self.store.add(self.repo_path, "Ship it", "Todo",
-                       body=["- [ ] write notes", "- [x] tag release", "plain line", "  - nested"])
+        self.store.add(
+            self.repo_path,
+            "Ship it",
+            "Todo",
+            body=["- [ ] write notes", "- [x] tag release", "plain line", "  - nested"],
+        )
         app = self.make_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -634,14 +645,16 @@ class ActionTests(BoardTestCase):
             await pilot.pause()
             block = app.screen.query_one("#detail-body")
             self.assertEqual(block.border_title, "Details")
-            self.assertEqual(block.plain.splitlines(),
-                             ["☐ write notes", "☑ tag release", "plain line", "\u00a0\u00a0• nested"])
+            self.assertEqual(
+                block.plain.splitlines(), ["☐ write notes", "☑ tag release", "plain line", "\u00a0\u00a0• nested"]
+            )
             done = [span for span in block.rich_text.spans if "strike" in str(span.style)]
-            self.assertEqual([block.plain[s.start:s.end] for s in done], ["tag release"])
+            self.assertEqual([block.plain[s.start : s.end] for s in done], ["tag release"])
 
     async def test_space_in_the_detail_toggles_a_checklist_item(self):
-        card = self.store.add(self.repo_path, "Ship it", "Todo",
-                              body=["notes first", "- [ ] write notes", "- [ ] tag release"])
+        card = self.store.add(
+            self.repo_path, "Ship it", "Todo", body=["notes first", "- [ ] write notes", "- [ ] tag release"]
+        )
         app = self.make_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -671,7 +684,7 @@ class ActionTests(BoardTestCase):
             await pilot.press("enter", "j")
             await pilot.pause()
             block = app.screen.query_one("#detail-body")
-            marked = [block.plain[s.start:s.end] for s in block.rich_text.spans if "reverse" in str(s.style)]
+            marked = [block.plain[s.start : s.end] for s in block.rich_text.spans if "reverse" in str(s.style)]
             self.assertEqual(marked, ["☐ two"])
 
     async def test_space_without_a_checklist_does_nothing(self):
@@ -819,8 +832,10 @@ class ReloadTests(BoardTestCase):
 
 class DialogWrapTests(BoardTestCase):
     async def test_long_dialog_text_wraps_inside_the_dialog(self):
-        detail = ("Local: rebase onto the base, move the base forward, remove the worktree. "
-                  "PR: an agent writes the description, then a draft pull request opens.")
+        detail = (
+            "Local: rebase onto the base, move the base forward, remove the worktree. "
+            "PR: an agent writes the description, then a draft pull request opens."
+        )
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -875,8 +890,7 @@ class TriageColumnTests(BoardTestCase):
         app = self.make_app("repo")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
-            self.assertEqual([h.split()[0] for h in self.headers(app)],
-                             ["Backlog", "Todo", "In", "Review", "Done"])
+            self.assertEqual([h.split()[0] for h in self.headers(app)], ["Backlog", "Todo", "In", "Review", "Done"])
             self.assertNotIn("Triage", [c.name for c in app.columns])
 
     async def test_a_triage_card_shows_the_column_first(self):
@@ -1178,9 +1192,7 @@ class ErrorTests(BoardTestCase):
             self.assertTrue(app.is_running)
 
     async def test_missing_target_column_notifies(self):
-        self.repo_path.write_text(
-            self.repo_path.read_text().replace("## Done", "## Extra\n\n## Done", 1)
-        )
+        self.repo_path.write_text(self.repo_path.read_text().replace("## Done", "## Extra\n\n## Done", 1))
         self.store.add(self.inbox_path, "inboxer", "Done")
         app = self.make_app("all")
         async with app.run_test(size=SIZE) as pilot:
@@ -1210,7 +1222,11 @@ class InitAssistTests(BoardTestCase):
             return [self.inbox_path] if name == "inbox" else self.store.board_paths()
 
         app = HerdboardApp(
-            self.store, "inbox", paths_for=paths_for, repo_board=None, reload_interval=60.0,
+            self.store,
+            "inbox",
+            paths_for=paths_for,
+            repo_board=None,
+            reload_interval=60.0,
             available=lambda name: name != "repo" or self.store.board_for_repo(identity) is not None,
             init_board=lambda: self.store.init_board(identity),
         )
@@ -1278,11 +1294,13 @@ class InitAssistTests(BoardTestCase):
             repo = root / "web"
             repo.mkdir()
             import subprocess
+
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
             seen = {}
-            with mock.patch.object(
-                HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)
-            ), mock.patch.object(HerdboardApp, "run"):
+            with (
+                mock.patch.object(HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)),
+                mock.patch.object(HerdboardApp, "run"),
+            ):
                 cli.main(["--config", str(config), "-C", str(repo), "board"])
             board = seen["repo_board"]
             self.assertTrue(board.exists())
@@ -1297,9 +1315,10 @@ class InitAssistTests(BoardTestCase):
             config = root / "config.toml"
             config.write_text(f'todos_dir = "{root / "todos"}"\n')
             seen = {}
-            with mock.patch.object(
-                HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)
-            ), mock.patch.object(HerdboardApp, "run"):
+            with (
+                mock.patch.object(HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)),
+                mock.patch.object(HerdboardApp, "run"),
+            ):
                 cli.main(["--config", str(config), "-C", str(root), "board"])
             self.assertIsNone(seen["init_board"])
 

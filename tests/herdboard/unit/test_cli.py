@@ -34,8 +34,10 @@ class CommandTests(CliTestCase):
         card = self.run_json("add", "harness bug", "--column", "Triage", directory=self.plain)["card"]
         self.assertEqual((card["board"], card["column"]), ("inbox", "Triage"))
         data = self.run_json("list", directory=self.plain)
-        self.assertEqual([c["title"] for c in data["boards"][0]["columns"]],
-                         ["Triage", "Backlog", "Todo", "In progress", "Review", "Done"])
+        self.assertEqual(
+            [c["title"] for c in data["boards"][0]["columns"]],
+            ["Triage", "Backlog", "Todo", "In progress", "Review", "Done"],
+        )
 
     def test_add_with_body(self):
         card = self.run_json("add", "notes", "--body", "line one\nline two\n")["card"]
@@ -51,8 +53,7 @@ class CommandTests(CliTestCase):
         body.write_text("line one\nline two é\n", encoding="utf-8")
         for path in (str(body), "body.txt"):
             with self.subTest(path=path):
-                card = self.run_json("add", "notes", "--body-file", path,
-                                     directory=self.plain)["card"]
+                card = self.run_json("add", "notes", "--body-file", path, directory=self.plain)["card"]
                 self.assertEqual(card["body"], ["\tline one", "\tline two é"])
 
     def test_add_body_options_are_mutually_exclusive(self):
@@ -67,14 +68,15 @@ class CommandTests(CliTestCase):
 
     def test_add_subcard_with_body(self):
         parent = self.run_json("add", "parent")["card"]
-        card = self.run_json("add", "child", "--parent", parent["ref"],
-                             "--body", "child detail")["card"]
+        card = self.run_json("add", "child", "--parent", parent["ref"], "--body", "child detail")["card"]
         self.assertEqual(card["parent"], parent["ref"])
         self.assertEqual(card["body"], ["\tchild detail"])
 
     def test_card_agent_can_add_body_but_cannot_edit_it(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
-                mock.patch.object(cli, "card_agent_panes", return_value={"w1:p2"}):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}),
+            mock.patch.object(cli, "card_agent_panes", return_value={"w1:p2"}),
+        ):
             card = self.run_json("add", "notes", "--body", "original")["card"]
             data = self.run_json("edit", card["ref"], "--body", "changed", expect=1)
             self.assertEqual(data["error"]["code"], "agent_edit_denied")
@@ -105,9 +107,27 @@ class CommandTests(CliTestCase):
         self.assertEqual(
             set(data["cards"][0]),
             {
-                "ref", "board", "path", "column", "title", "checked", "due", "tags", "body", "type",
-                "column_limit", "source", "url", "state", "team", "pr", "read_only", "fetched_at",
-                "stale", "parent", "archived",
+                "ref",
+                "board",
+                "path",
+                "column",
+                "title",
+                "checked",
+                "due",
+                "tags",
+                "body",
+                "type",
+                "column_limit",
+                "source",
+                "url",
+                "state",
+                "team",
+                "pr",
+                "read_only",
+                "fetched_at",
+                "stale",
+                "parent",
+                "archived",
             },
         )
         self.assertEqual(data["cards"][0]["source"], "todo")
@@ -143,8 +163,15 @@ class CommandTests(CliTestCase):
 
     def test_edit_title_and_body(self):
         card = self.run_json("add", "buy milk", directory=self.plain)["card"]
-        data = self.run_json("edit", card["ref"], "--title", "buy oat milk #errand",
-                             "--body", "two litres\nfrom the market", directory=self.plain)
+        data = self.run_json(
+            "edit",
+            card["ref"],
+            "--title",
+            "buy oat milk #errand",
+            "--body",
+            "two litres\nfrom the market",
+            directory=self.plain,
+        )
         self.assertEqual(data["card"]["title"], "buy oat milk #errand")
         self.assertEqual(data["card"]["body"], ["\ttwo litres", "\tfrom the market"])
         out, _ = self.run_cli("edit", card["ref"], "--body", "", directory=self.plain)
@@ -196,8 +223,7 @@ class CommandTests(CliTestCase):
 
     def test_edit_title_and_type(self):
         card = self.run_json("add", "fix login", directory=self.plain)["card"]
-        data = self.run_json("edit", card["ref"], "--title", "fix logout #web", "--type", "bug",
-                             directory=self.plain)
+        data = self.run_json("edit", card["ref"], "--title", "fix logout #web", "--type", "bug", directory=self.plain)
         self.assertEqual(data["card"]["title"], "fix logout #type/bug #web")
 
     def test_edit_refuses_an_unknown_type(self):
@@ -249,6 +275,7 @@ class CommandTests(CliTestCase):
 
     def test_card_changes_update_the_sidebar_card(self):
         from herdboard import start as start_module
+
         card = self.run_json("add", "buy milk", directory=self.plain)["card"]
         with mock.patch.object(start_module, "update_card_token") as update:
             self.run_json("move", card["ref"], "Todo", directory=self.plain)
@@ -260,6 +287,7 @@ class CommandTests(CliTestCase):
 
     def test_list_does_not_touch_the_sidebar(self):
         from herdboard import start as start_module
+
         self.run_json("add", "buy milk", directory=self.plain)
         with mock.patch.object(start_module, "update_card_token") as update:
             self.run_json("list", directory=self.plain)
@@ -283,13 +311,17 @@ class CommandTests(CliTestCase):
 
     def test_delete_asks_in_a_terminal(self):
         card = self.run_json("add", "buy milk", directory=self.plain)["card"]
-        with mock.patch.object(cli, "_interactive", return_value=True), \
-                mock.patch.object(cli, "_confirm", return_value=False):
+        with (
+            mock.patch.object(cli, "_interactive", return_value=True),
+            mock.patch.object(cli, "_confirm", return_value=False),
+        ):
             out, _ = self.run_cli("delete", card["ref"], directory=self.plain)
         self.assertEqual(out, "Nothing deleted.\n")
         self.assertEqual(len(self.run_json("list", directory=self.plain)["cards"]), 1)
-        with mock.patch.object(cli, "_interactive", return_value=True), \
-                mock.patch.object(cli, "_confirm", return_value=True):
+        with (
+            mock.patch.object(cli, "_interactive", return_value=True),
+            mock.patch.object(cli, "_confirm", return_value=True),
+        ):
             self.run_cli("delete", card["ref"], directory=self.plain)
         self.assertEqual(self.run_json("list", directory=self.plain)["cards"], [])
 
@@ -318,9 +350,7 @@ class CommandTests(CliTestCase):
         card = self.run_json("add", "x", directory=self.plain)["card"]
         out, _ = self.run_cli("move", card["ref"], "In progress", directory=self.plain)
         self.assertEqual(out, f"{card['ref']} → In progress (inbox)\n")
-        data = self.run_json(
-            "move", card["ref"], "Todo", "--position", "top", directory=self.plain
-        )
+        data = self.run_json("move", card["ref"], "Todo", "--position", "top", directory=self.plain)
         self.assertEqual(data["card"]["column"], "Todo")
 
     def test_done_text_and_json(self):
@@ -431,7 +461,6 @@ class ErrorTests(CliTestCase):
             _, err = self.run_cli("done", card["ref"], directory=self.plain, expect=2)
             self.assertEqual(err, "herdboard: card changed\n")
 
-
     def test_non_utf8_board_is_io_error(self):
         self.todos.mkdir()
         bad = self.todos / "inbox.md"
@@ -481,9 +510,7 @@ class LimitTests(CliTestCase):
         self.assertEqual(moved["column"], "Review")
         back = self.run_json("move", card["ref"], "Todo", directory=self.plain)["card"]
         self.assertEqual((back["column"], back["column_limit"]), ("Todo", 5))
-        self.assertEqual(
-            len(self.run_json("list", "--column", "todo", directory=self.plain)["cards"]), 1
-        )
+        self.assertEqual(len(self.run_json("list", "--column", "todo", directory=self.plain)["cards"]), 1)
 
 
 class NoteTests(CliTestCase):
@@ -556,6 +583,7 @@ class PullRequestReviewTests(CliTestCase):
     def setUp(self):
         super().setUp()
         from herdboard import pr_reviews
+
         self.pr_reviews = pr_reviews
         self.enterContext(mock.patch.object(pr_reviews, "base_repository", return_value="acme/api"))
 
@@ -563,8 +591,9 @@ class PullRequestReviewTests(CliTestCase):
         return self.enterContext(mock.patch.object(self.pr_reviews, name, **options))
 
     def test_prs_lists_the_open_prs_with_markers(self):
-        pr = self.pr_reviews.PullRequest(7, "Fix login", "https://github.com/acme/api/pull/7", "octo", True,
-                                         "a" * 40, "fix", True, False)
+        pr = self.pr_reviews.PullRequest(
+            7, "Fix login", "https://github.com/acme/api/pull/7", "octo", True, "a" * 40, "fix", True, False
+        )
         self.patch("list_page", return_value=self.pr_reviews.Page([pr], 1, None))
         self.patch("records", return_value={"acme/api#7": {"status": "reviewed", "reviewed_sha": "b" * 40}})
         data = self.run_json("prs", directory=self.repo)
@@ -599,43 +628,96 @@ class PullRequestReviewTests(CliTestCase):
         self.assertEqual(out, "No open pull requests in acme/api.\n")
 
     def test_pr_review_uses_the_main_checkout_and_the_options(self):
-        request = self.patch("request", return_value={
-            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
-            "hunk_session": "s1", "agent": "pi", "agent_name": "pr-api-7", "model": "zai/glm-5.3",
-            "thinking": "high", "prompted": False})
-        data = self.run_json("pr-review", "7", "--agent", "pi", "--model", "zai/glm-5.3", "--thinking", "high",
-                             directory=self.repo)
+        request = self.patch(
+            "request",
+            return_value={
+                "key": "acme/api#7",
+                "number": 7,
+                "workspace_id": "w9",
+                "pane_id": "w9:p1",
+                "hunk_pane": "w9:p2",
+                "hunk_session": "s1",
+                "agent": "pi",
+                "agent_name": "pr-api-7",
+                "model": "zai/glm-5.3",
+                "thinking": "high",
+                "prompted": False,
+            },
+        )
+        data = self.run_json(
+            "pr-review", "7", "--agent", "pi", "--model", "zai/glm-5.3", "--thinking", "high", directory=self.repo
+        )
         self.assertEqual(data["workspace_id"], "w9")
         checkout, repo, number, kind, model, thinking = request.call_args.args
         self.assertEqual(Path(checkout).resolve(), self.repo.resolve())
         self.assertEqual((repo, number, kind, model, thinking), ("acme/api", 7, "pi", "zai/glm-5.3", "high"))
 
     def test_pr_review_takes_the_remembered_level_of_its_model(self):
-        self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "pi"\nstart_model = "zai/glm-5.3"\n'
-                               'start_thinking = "low"\n[thinking]\n"zai/glm-5.3" = "xhigh"\n')
-        request = self.patch("request", return_value={
-            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
-            "hunk_session": "s1", "agent": "pi", "agent_name": "pr-api-7", "model": "zai/glm-5.3",
-            "thinking": "xhigh", "prompted": False})
+        self.config.write_text(
+            f'todos_dir = "{self.todos}"\nstart_agent = "pi"\nstart_model = "zai/glm-5.3"\n'
+            'start_thinking = "low"\n[thinking]\n"zai/glm-5.3" = "xhigh"\n'
+        )
+        request = self.patch(
+            "request",
+            return_value={
+                "key": "acme/api#7",
+                "number": 7,
+                "workspace_id": "w9",
+                "pane_id": "w9:p1",
+                "hunk_pane": "w9:p2",
+                "hunk_session": "s1",
+                "agent": "pi",
+                "agent_name": "pr-api-7",
+                "model": "zai/glm-5.3",
+                "thinking": "xhigh",
+                "prompted": False,
+            },
+        )
         self.run_json("pr-review", "7", directory=self.repo)
         self.assertEqual(request.call_args.args[3:], ("pi", "zai/glm-5.3", "xhigh"))
 
     def test_pr_review_takes_the_command_line_level_over_the_remembered_one(self):
-        self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "pi"\nstart_model = "zai/glm-5.3"\n'
-                               '[thinking]\n"zai/glm-5.3" = "xhigh"\n')
-        request = self.patch("request", return_value={
-            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
-            "hunk_session": "s1", "agent": "pi", "agent_name": "pr-api-7", "model": "zai/glm-5.3",
-            "thinking": "max", "prompted": False})
+        self.config.write_text(
+            f'todos_dir = "{self.todos}"\nstart_agent = "pi"\nstart_model = "zai/glm-5.3"\n'
+            '[thinking]\n"zai/glm-5.3" = "xhigh"\n'
+        )
+        request = self.patch(
+            "request",
+            return_value={
+                "key": "acme/api#7",
+                "number": 7,
+                "workspace_id": "w9",
+                "pane_id": "w9:p1",
+                "hunk_pane": "w9:p2",
+                "hunk_session": "s1",
+                "agent": "pi",
+                "agent_name": "pr-api-7",
+                "model": "zai/glm-5.3",
+                "thinking": "max",
+                "prompted": False,
+            },
+        )
         self.run_json("pr-review", "7", "--thinking", "max", directory=self.repo)
         self.assertEqual(request.call_args.args[3:], ("pi", "zai/glm-5.3", "max"))
 
     def test_pr_review_defaults_to_the_start_agent(self):
         self.config.write_text(f'todos_dir = "{self.todos}"\nstart_agent = "claude"\nstart_model = "opus"\n')
-        request = self.patch("request", return_value={
-            "key": "acme/api#7", "number": 7, "workspace_id": "w9", "pane_id": "w9:p1", "hunk_pane": "w9:p2",
-            "hunk_session": "s1", "agent": "claude", "agent_name": "pr-api-7", "model": "opus",
-            "thinking": None, "prompted": False})
+        request = self.patch(
+            "request",
+            return_value={
+                "key": "acme/api#7",
+                "number": 7,
+                "workspace_id": "w9",
+                "pane_id": "w9:p1",
+                "hunk_pane": "w9:p2",
+                "hunk_session": "s1",
+                "agent": "claude",
+                "agent_name": "pr-api-7",
+                "model": "opus",
+                "thinking": None,
+                "prompted": False,
+            },
+        )
         out, _ = self.run_cli("pr-review", "7", directory=self.repo)
         self.assertEqual(request.call_args.args[3:], ("claude", "opus", None))
         self.assertIn("PR #7: claude (opus) reviews in workspace w9", out)
@@ -646,12 +728,24 @@ class PullRequestReviewTests(CliTestCase):
         wait.assert_called_once_with("acme/api#7")
 
     def test_refresh_go_and_finish_take_the_number(self):
-        self.patch("refresh", return_value={"key": "acme/api#7", "number": 7, "hunk_pane": "w9:p3",
-                                            "hunk_session": "s2", "kept": 2, "dropped": ["a.py:1: old"],
-                                            "agent": "claude", "model": None, "thinking": None})
+        self.patch(
+            "refresh",
+            return_value={
+                "key": "acme/api#7",
+                "number": 7,
+                "hunk_pane": "w9:p3",
+                "hunk_session": "s2",
+                "kept": 2,
+                "dropped": ["a.py:1: old"],
+                "agent": "claude",
+                "model": None,
+                "thinking": None,
+            },
+        )
         self.patch("go", return_value={"key": "acme/api#7", "workspace_id": "w9"})
-        finish = self.patch("finish", return_value={"key": "acme/api#7", "number": 7, "worktree_removed": True,
-                                                    "branch_deleted": True})
+        finish = self.patch(
+            "finish", return_value={"key": "acme/api#7", "number": 7, "worktree_removed": True, "branch_deleted": True}
+        )
         out, _ = self.run_cli("pr-review-refresh", "7", directory=self.repo)
         self.assertIn("2 notes kept", out)
         self.assertIn("a.py:1: old", out)
@@ -674,7 +768,9 @@ class ModuleTests(unittest.TestCase):
         env = {**os.environ, "PYTHONPATH": str(SRC)}
         result = subprocess.run(
             [sys.executable, "-m", "herdboard", "--help"],
-            capture_output=True, text=True, env=env,
+            capture_output=True,
+            text=True,
+            env=env,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage: herdboard", result.stdout)

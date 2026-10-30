@@ -13,8 +13,10 @@ class CardStyleBoardTests(BoardTestCase):
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
             columns = list(app.query(".column"))
-            self.assertEqual([next(c for c in w.classes if c.startswith("col-")) for w in columns],
-                             ["col-0", "col-1", "col-2", "col-3", "col-done"])
+            self.assertEqual(
+                [next(c for c in w.classes if c.startswith("col-")) for w in columns],
+                ["col-0", "col-1", "col-2", "col-3", "col-done"],
+            )
             widget = app.query_one(".card")
             self.assertTrue(widget.has_class("compact") and widget.has_class("done"))
 

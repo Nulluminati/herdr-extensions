@@ -5,8 +5,20 @@ from herdboard.store import CardView
 
 
 def todo(**fields):
-    return CardView(**{"ref": "t1", "board": "api", "path": None, "column": "Todo", "title": "Task",
-                       "checked": False, "due": None, "tags": [], "body": [], **fields})
+    return CardView(
+        **{
+            "ref": "t1",
+            "board": "api",
+            "path": None,
+            "column": "Todo",
+            "title": "Task",
+            "checked": False,
+            "due": None,
+            "tags": [],
+            "body": [],
+            **fields,
+        }
+    )
 
 
 class MenuRuleTests(unittest.TestCase):

@@ -104,6 +104,7 @@ def record_pane_agent(pane: str, kind: str) -> None:
     """Remember that the agent `kind` runs in `pane`, for the log author when Herdr is unreachable."""
     # Imported here: linear_source imports the store, which imports this module.
     from .linear_source import state_dir
+
     if not pane or not re.fullmatch(r"[a-z]+", kind or ""):
         return
     path = state_dir() / PANE_AGENTS_FILE
@@ -128,6 +129,7 @@ def record_pane_agent(pane: str, kind: str) -> None:
 def pane_agent(pane: str) -> str | None:
     """The agent kind that herdboard last started in `pane`, or None."""
     from .linear_source import state_dir
+
     try:
         panes = json.loads((state_dir() / PANE_AGENTS_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):

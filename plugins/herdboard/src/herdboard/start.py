@@ -1,4 +1,5 @@
 """Resume card starts through Herdr without importing the board UI."""
+
 from __future__ import annotations
 
 import fcntl
@@ -91,18 +92,22 @@ def herdr(*args, tolerated=()):
     if not isinstance(found, dict):
         raise StartError(f"Unexpected Herdr result: {output}", "herdr_error")
     operation = tuple(args[:2])
-    lists = {("workspace", "list"): ("workspaces", "workspace_id"),
-             ("worktree", "list"): ("worktrees", "path"),
-             ("pane", "list"): ("panes", "pane_id")}
+    lists = {
+        ("workspace", "list"): ("workspaces", "workspace_id"),
+        ("worktree", "list"): ("worktrees", "path"),
+        ("pane", "list"): ("panes", "pane_id"),
+    }
     if operation in lists:
         field, key = lists[operation]
         entries = found.get(field)
-        if not isinstance(entries, list) or any(not isinstance(e, dict) or not isinstance(e.get(key), str)
-                                               or not e[key] for e in entries):
+        if not isinstance(entries, list) or any(
+            not isinstance(e, dict) or not isinstance(e.get(key), str) or not e[key] for e in entries
+        ):
             raise StartError(f"Unexpected Herdr {field}: {output}", "herdr_error")
     if operation == ("worktree", "list") and any(
-            e.get("open_workspace_id") is not None and not isinstance(e["open_workspace_id"], str)
-            for e in found["worktrees"]):
+        e.get("open_workspace_id") is not None and not isinstance(e["open_workspace_id"], str)
+        for e in found["worktrees"]
+    ):
         raise StartError(f"Unexpected Herdr workspace ID: {output}", "herdr_error")
     if operation == ("workspace", "get"):
         root = found.get("root_pane")
@@ -222,9 +227,18 @@ def codex_model_choices(config) -> tuple[str | None, list[str]]:
         except (OSError, ValueError):
             cache = {}
         found = cache.get("models") if isinstance(cache, dict) else None
-        models = [entry["slug"] for entry in found
-                  if isinstance(entry, dict) and entry.get("visibility") == "list"
-                  and isinstance(entry.get("slug"), str) and entry["slug"]] if isinstance(found, list) else []
+        models = (
+            [
+                entry["slug"]
+                for entry in found
+                if isinstance(entry, dict)
+                and entry.get("visibility") == "list"
+                and isinstance(entry.get("slug"), str)
+                and entry["slug"]
+            ]
+            if isinstance(found, list)
+            else []
+        )
     return default, list(models)
 
 
@@ -235,19 +249,35 @@ def agent_arguments(agent: str, message: str, model: str | None, thinking: str |
         return [*options, "--", message]
     if agent == "codex":
         options = (["--model", model] if model else []) + (
-            ["-c", f'model_reasoning_effort="{thinking}"'] if thinking else [])
+            ["-c", f'model_reasoning_effort="{thinking}"'] if thinking else []
+        )
         return [*options, message]
     # Claude takes its prompt first: options after it cannot swallow the prompt.
-    return [message, "--permission-mode", "auto", *(["--model", model] if model else []),
-            *(["--effort", thinking] if thinking else [])]
+    return [
+        message,
+        "--permission-mode",
+        "auto",
+        *(["--model", model] if model else []),
+        *(["--effort", thinking] if thinking else []),
+    ]
 
 
 def codex_auto_review_options() -> list[str]:
     """Codex in the workspace sandbox with network, and a reviewer model in place of approval prompts.
 
     For the work agent and the planner only: reviewers build on agent_arguments and pass `-a never`."""
-    return ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-a", "on-request",
-            "-c", 'approvals_reviewer="auto_review"', "-c", 'web_search="live"']
+    return [
+        "-s",
+        "workspace-write",
+        "-c",
+        "sandbox_workspace_write.network_access=true",
+        "-a",
+        "on-request",
+        "-c",
+        'approvals_reviewer="auto_review"',
+        "-c",
+        'web_search="live"',
+    ]
 
 
 def export_config(pane_id: str, config_file: Path | None) -> None:
@@ -260,8 +290,15 @@ def export_config(pane_id: str, config_file: Path | None) -> None:
     if config_file is None or Path(config_file) == default_config_path():
         return
     try:
-        command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "run", pane_id,
-                 f"export HERDBOARD_CONFIG={shlex.quote(str(config_file))}"])
+        command(
+            [
+                os.environ.get("HERDR_BIN_PATH") or "herdr",
+                "pane",
+                "run",
+                pane_id,
+                f"export HERDBOARD_CONFIG={shlex.quote(str(config_file))}",
+            ]
+        )
     except (OSError, subprocess.TimeoutExpired):
         pass
 
@@ -296,8 +333,9 @@ def open_details_pane(ref: str, host_pane: str, config, config_file: Path | None
         if any(entry.get("tab_id") == tab and entry.get("label") == label for entry in panes):
             return None
         focused = _focused_tab()
-        split = herdr("pane", "split", host_pane, "--direction", "down",
-                      "--ratio", str(config.details_pane_ratio), "--no-focus")
+        split = herdr(
+            "pane", "split", host_pane, "--direction", "down", "--ratio", str(config.details_pane_ratio), "--no-focus"
+        )
         pane = (split.get("pane") or {}).get("pane_id")
         if not isinstance(pane, str) or not pane:
             raise StartError(f"Unexpected Herdr split result: {split}", "herdr_error")
@@ -308,13 +346,21 @@ def open_details_pane(ref: str, host_pane: str, config, config_file: Path | None
         export_config(pane, config_file)
         # Herdr prints nothing for `pane run` when it works, so only the exit code counts.
         try:
-            result = command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "run", pane,
-                              f"{herdboard_command(config_file)} details {shlex.quote(ref)}"])
+            result = command(
+                [
+                    os.environ.get("HERDR_BIN_PATH") or "herdr",
+                    "pane",
+                    "run",
+                    pane,
+                    f"{herdboard_command(config_file)} details {shlex.quote(ref)}",
+                ]
+            )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise StartError(f"Herdr is not reachable: {error}", "herdr_unavailable") from error
         if result.returncode:
-            raise StartError(f"Herdr cannot run the details view: {(result.stderr or result.stdout).strip()}",
-                             "herdr_error")
+            raise StartError(
+                f"Herdr cannot run the details view: {(result.stderr or result.stdout).strip()}", "herdr_error"
+            )
         return pane
     except HerdboardError as error:
         if pane:
@@ -352,8 +398,19 @@ def report_card_token(target_id: str, token: str | None, kind: str = "pane", nam
     Best effort: the sidebar is display only."""
     change = ["--token", f"{name}={token}"] if token else ["--clear-token", name]
     try:
-        command([os.environ.get("HERDR_BIN_PATH") or "herdr", kind, "report-metadata", target_id,
-                 "--source", TOKEN_SOURCE, "--seq", str(time.time_ns()), *change])
+        command(
+            [
+                os.environ.get("HERDR_BIN_PATH") or "herdr",
+                kind,
+                "report-metadata",
+                target_id,
+                "--source",
+                TOKEN_SOURCE,
+                "--seq",
+                str(time.time_ns()),
+                *change,
+            ]
+        )
     except (OSError, subprocess.TimeoutExpired):
         pass
 
@@ -364,8 +421,11 @@ def update_card_token(card: CardView, removed: bool = False) -> None:
         records = _read(state_dir() / "starts.json")
     except HerdboardError:
         return
-    records = {key: record for key, record in records.items()
-               if isinstance(record, dict) and card.ref in (key, record.get("ref"))}
+    records = {
+        key: record
+        for key, record in records.items()
+        if isinstance(record, dict) and card.ref in (key, record.get("ref"))
+    }
     if not records:
         return
     try:
@@ -386,8 +446,10 @@ def _record_workspace(record, ref, workspaces):
     """The open workspace of a start record, or None. Herdr can give an old workspace ID to another
     workspace, so a worktree workspace must still hold the worktree, and a repoless one its card label."""
     if record.get("mode") == REPOLESS:
-        return next((w for w in workspaces if w.get("workspace_id") == record.get("workspace_id")
-                     and w.get("label") == ref), None)
+        return next(
+            (w for w in workspaces if w.get("workspace_id") == record.get("workspace_id") and w.get("label") == ref),
+            None,
+        )
     path = record.get("worktree_path")
     if not isinstance(path, str) or not path:
         return None
@@ -406,9 +468,9 @@ def _record_targets(record, ref, workspaces, agents):
     workspace_id = workspace["workspace_id"]
     here = [a for a in agents if a.get("workspace_id") == workspace_id and isinstance(a.get("pane_id"), str)]
     # Herdr forgets agent names over a restart, so the recorded pane is the second way to find the agent.
-    agent = (next((a for a in here if record.get("agent_name") and a.get("name") == record["agent_name"]), None)
-             or next((a for a in here if record.get("agent_name") and a["pane_id"] == record.get("pane_id")),
-                     None))
+    agent = next((a for a in here if record.get("agent_name") and a.get("name") == record["agent_name"]), None) or next(
+        (a for a in here if record.get("agent_name") and a["pane_id"] == record.get("pane_id")), None
+    )
     return workspace_id, agent["pane_id"] if agent else None
 
 
@@ -464,8 +526,7 @@ def go_to_workspace(ref):
         if not path or not workspace or not Path(path).exists():
             raise StartError(f"{ref} has no work folder; start the card first", "not_started")
         if herdr("workspace", "focus", workspace, tolerated=("workspace_not_found",)) is None:
-            raise StartError(f"Herdr has no open workspace for {ref}; start the card to open it",
-                             "workspace_closed")
+            raise StartError(f"Herdr has no open workspace for {ref}; start the card to open it", "workspace_closed")
         return {"ref": ref, "workspace_id": workspace}
     path = record.get("worktree_path")
     if not path or not record.get("checkout") or not Path(path).exists():
@@ -562,8 +623,11 @@ def card_agent_panes() -> set[str]:
         records = _read(state_dir() / "starts.json")
     except HerdboardError:
         return set()
-    return {record["pane_id"] for record in records.values()
-            if isinstance(record, dict) and record.get("agent_name") and isinstance(record.get("pane_id"), str)}
+    return {
+        record["pane_id"]
+        for record in records.values()
+        if isinstance(record, dict) and record.get("agent_name") and isinstance(record.get("pane_id"), str)
+    }
 
 
 def _read(path):
@@ -635,9 +699,10 @@ def _links_show(meta, issue) -> bool:
     """Whether a linked project of a board shows the Linear issue (with a label of the link, if any)."""
     project = (issue or {}).get("project") or {}
     labels = {label["id"] for label in (issue or {}).get("labels", [])}
-    return any(link.id == project.get("id") and
-               (not link.labels or any(label.id in labels for label in link.labels))
-               for link in meta.links)
+    return any(
+        link.id == project.get("id") and (not link.labels or any(label.id in labels for label in link.labels))
+        for link in meta.links
+    )
 
 
 def _remember(directory, expected=None):
@@ -658,9 +723,18 @@ def _remember(directory, expected=None):
 
 
 def _entries(entries):
-    return [e for e in entries if isinstance(e, dict)
-            and isinstance(e.get("path"), str) and e["path"]
-            and isinstance(e.get("last_seen"), (int, float))] if isinstance(entries, list) else []
+    return (
+        [
+            e
+            for e in entries
+            if isinstance(e, dict)
+            and isinstance(e.get("path"), str)
+            and e["path"]
+            and isinstance(e.get("last_seen"), (int, float))
+        ]
+        if isinstance(entries, list)
+        else []
+    )
 
 
 def register_checkout(directory):
@@ -730,8 +804,7 @@ def create_repository(path) -> RepoIdentity:
     if _git(path, "init", "-b", "main") is None:
         raise StartError(f"{path}: cannot create the Git repository", "new_repo_failed")
     if _git(path, "commit", "--allow-empty", "-m", "chore: initial commit") is None:
-        raise StartError(f"{path}: cannot make the first commit. Set git user.name and user.email",
-                         "new_repo_failed")
+        raise StartError(f"{path}: cannot make the first commit. Set git user.name and user.email", "new_repo_failed")
     identity = repo_identity(path)
     if identity is None:
         raise StartError(f"{path}: the new repository has no identity", "new_repo_failed")
@@ -783,9 +856,17 @@ def _reviewed(record) -> str | None:
 
 
 class Starter:
-    def __init__(self, store, directory, writer=None, ask_state=refuse,
-                 prompt_checkout=None, repository_view=True, config_file: Path | None = None,
-                 prompt_target=None):
+    def __init__(
+        self,
+        store,
+        directory,
+        writer=None,
+        ask_state=refuse,
+        prompt_checkout=None,
+        repository_view=True,
+        config_file: Path | None = None,
+        prompt_target=None,
+    ):
         self.store = store
         self.config = store.config
         self.directory = Path(directory)
@@ -804,8 +885,11 @@ class Starter:
 
     def _refuse_new_repo_family(self, card):
         if card.parent or self.store.children(card.ref):
-            raise StartError(f"{card.ref} has a parent or sub-cards; their cards must stay on one board. "
-                             "Run it without a repository with --no-repo", "new_repo_family")
+            raise StartError(
+                f"{card.ref} has a parent or sub-cards; their cards must stay on one board. "
+                "Run it without a repository with --no-repo",
+                "new_repo_family",
+            )
 
     def _new_repo_path(self, card, new_repo, issue):
         """Resolve and check the path of a new repository: it must be a todo on a board without one."""
@@ -829,8 +913,11 @@ class Starter:
         path = record.get("worktree_path")
         if record.get("mode") not in (None, REPO) or not path or not Path(path).exists():
             return
-        raise StartError(f"{card.ref} has a worktree at {path}. Finish the card with "
-                         f"`herdboard finish {card.ref}` first, then use {option}.", "usage")
+        raise StartError(
+            f"{card.ref} has a worktree at {path}. Finish the card with "
+            f"`herdboard finish {card.ref}` first, then use {option}.",
+            "usage",
+        )
 
     def _on_own_new_repo_board(self, card, record) -> bool:
         """True when the card already sits on the board of the repository that its start created."""
@@ -850,8 +937,7 @@ class Starter:
             raise StartError("--new-repo cannot be used with --no-repo or --repo", "usage")
         if no_repo or new_repo is not None:
             if checkout is not None:
-                raise StartError("--checkout works only with a repository that the card already has",
-                                 "usage")
+                raise StartError("--checkout works only with a repository that the card already has", "usage")
             if base:
                 raise StartError("--base works only with a repository that the card already has", "usage")
         if new_repo is not None:
@@ -936,8 +1022,11 @@ class Starter:
                 if identity and _canonical_identity(identity.identity) in {_canonical_identity(m) for m in matches}:
                     return identity.identity
         listing = f" Linked repositories: {', '.join(sorted(set(matches)))}." if matches else ""
-        raise StartError("Choose a repository with --repo BOARD_OR_PATH, run the card without one with "
-                         "--no-repo, or create one with --new-repo [PATH]." + listing, "repo_required")
+        raise StartError(
+            "Choose a repository with --repo BOARD_OR_PATH, run the card without one with "
+            "--no-repo, or create one with --new-repo [PATH]." + listing,
+            "repo_required",
+        )
 
     def _pin(self, identity, issue):
         """Pin a started Linear issue to the board of its repository.
@@ -948,8 +1037,14 @@ class Starter:
         board = None
         try:
             wanted = _canonical_identity(identity)
-            board = next((p for p in self.store.board_paths()
-                          if (repo := self.store.board_meta(p).repo) and _canonical_identity(repo) == wanted), None)
+            board = next(
+                (
+                    p
+                    for p in self.store.board_paths()
+                    if (repo := self.store.board_meta(p).repo) and _canonical_identity(repo) == wanted
+                ),
+                None,
+            )
             if board is None or _links_show(self.store.board_meta(board), issue):
                 return
             add_pin(self.store, board, issue)
@@ -989,8 +1084,9 @@ class Starter:
                 parent = self.store.show(card.parent)
                 if TEMP_REF.match(parent.ref):
                     parent = self.store.ensure_id(parent.ref)
-                self.prepare(parent, None, parent.ref, repo=repo, checkout=checkout, move_parent=False,
-                             check_column=check_column)
+                self.prepare(
+                    parent, None, parent.ref, repo=repo, checkout=checkout, move_parent=False, check_column=check_column
+                )
             found = find_record(card.parent)
         return found[1]["branch"]
 
@@ -1001,8 +1097,9 @@ class Starter:
             if not wanted:
                 raise StartError(f"{checkout} has no branch checked out; use --base BRANCH", "base_unknown")
         if wanted == branch or _git(checkout, "rev-parse", "--verify", "--quiet", f"refs/heads/{wanted}") is None:
-            raise StartError(f"No local branch {wanted!r} to start from; use --base with a local branch",
-                             "base_unknown")
+            raise StartError(
+                f"No local branch {wanted!r} to start from; use --base with a local branch", "base_unknown"
+            )
         return wanted
 
     def _workspace(self, checkout, branch, record, focus=True):
@@ -1016,7 +1113,9 @@ class Starter:
             for block in output.split("\n\n"):
                 lines = block.splitlines()
                 if f"branch refs/heads/{branch}" in lines and not any(line.startswith("prunable") for line in lines):
-                    candidate = next((line.removeprefix("worktree ") for line in lines if line.startswith("worktree ")), None)
+                    candidate = next(
+                        (line.removeprefix("worktree ") for line in lines if line.startswith("worktree ")), None
+                    )
                     if candidate and Path(candidate).exists():
                         path = candidate
                         break
@@ -1036,13 +1135,31 @@ class Starter:
                 if not root:
                     raise StartError(f"Workspace {workspace} has no root pane")
                 return {"workspace_id": workspace, "pane_id": root, "worktree_path": str(path)}
-            result = herdr("worktree", "open", "--cwd", str(checkout), "--path", str(path),
-                           "--focus" if focus else "--no-focus", "--trust-repository")
+            result = herdr(
+                "worktree",
+                "open",
+                "--cwd",
+                str(checkout),
+                "--path",
+                str(path),
+                "--focus" if focus else "--no-focus",
+                "--trust-repository",
+            )
         else:
             if _git(checkout, "worktree", "prune") is None:
                 raise StartError(f"{checkout}: cannot prune worktrees")
-            result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch,
-                           "--base", record["base"], "--focus" if focus else "--no-focus", "--trust-repository")
+            result = herdr(
+                "worktree",
+                "create",
+                "--cwd",
+                str(checkout),
+                "--branch",
+                branch,
+                "--base",
+                record["base"],
+                "--focus" if focus else "--no-focus",
+                "--trust-repository",
+            )
         try:
             workspace = result["workspace"]["workspace_id"]
             pane = result["root_pane"]["pane_id"]
@@ -1053,8 +1170,7 @@ class Starter:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": worktree}
 
-    def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False,
-                     note=None, log=()):
+    def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False, note=None, log=()):
         """Start an agent in the record's pane, with a brief file for the card."""
         name = "hb-" + card.ref.lower()
         # Herdr rejects line breaks in agent arguments, so the details
@@ -1065,17 +1181,25 @@ class Starter:
                 notes = self.store.notes_for(card)
             except HerdboardError:
                 notes = []
-        brief = write_brief(lock_key, brief_text(
-            card, notes=notes, repository=record.get("repository") or "",
-            worktree=record["worktree_path"], branch=record.get("branch") or "",
-            base=record.get("base") or "",
-            command=herdboard_command(self.config_file), note=note, log=log,
-            plan=attachments.plan_for_agent(self.store, card.ref),
-            attachments=attachments.listing(self.config, card.ref),
-            repoless=record.get("mode") == REPOLESS,
-            attachments_dir=str(attachments.folder(self.config, card.ref)),
-            may_merge_prs=bool(record.get("may_merge_prs")),
-        ))
+        brief = write_brief(
+            lock_key,
+            brief_text(
+                card,
+                notes=notes,
+                repository=record.get("repository") or "",
+                worktree=record["worktree_path"],
+                branch=record.get("branch") or "",
+                base=record.get("base") or "",
+                command=herdboard_command(self.config_file),
+                note=note,
+                log=log,
+                plan=attachments.plan_for_agent(self.store, card.ref),
+                attachments=attachments.listing(self.config, card.ref),
+                repoless=record.get("mode") == REPOLESS,
+                attachments_dir=str(attachments.folder(self.config, card.ref)),
+                may_merge_prs=bool(record.get("may_merge_prs")),
+            ),
+        )
         message = agent_message(card, brief)
         record["agent_name"] = name
         record["agent"] = agent
@@ -1088,8 +1212,18 @@ class Starter:
         if agent == "codex":
             args = [*codex_auto_review_options(), *args]
         export_config(record["pane_id"], self.config_file)
-        herdr("agent", "start", name, "--kind", agent, "--pane", record["pane_id"], "--", *args,
-              tolerated=("timeout", "agent_not_ready"))
+        herdr(
+            "agent",
+            "start",
+            name,
+            "--kind",
+            agent,
+            "--pane",
+            record["pane_id"],
+            "--",
+            *args,
+            tolerated=("timeout", "agent_not_ready"),
+        )
         record_pane_agent(record["pane_id"], agent)
         open_details_pane(card.ref, record["pane_id"], self.config, self.config_file)
 
@@ -1109,8 +1243,9 @@ class Starter:
                     if focus:
                         herdr("workspace", "focus", stored)
                     return {"workspace_id": stored, "pane_id": root, "worktree_path": str(folder)}
-        result = herdr("workspace", "create", "--cwd", str(folder), "--label", ref,
-                       "--focus" if focus else "--no-focus")
+        result = herdr(
+            "workspace", "create", "--cwd", str(folder), "--label", ref, "--focus" if focus else "--no-focus"
+        )
         try:
             workspace = result["workspace"]["workspace_id"]
             pane = result["root_pane"]["pane_id"]
@@ -1120,8 +1255,19 @@ class Starter:
             raise StartError(f"Unexpected Herdr workspace result: {result}", "herdr_error") from error
         return {"workspace_id": workspace, "pane_id": pane, "worktree_path": str(folder)}
 
-    def prepare(self, card, issue, key, repo=None, checkout=None, base=None, move_parent=True,
-                check_column=True, no_repo=False, new_repo=None):
+    def prepare(
+        self,
+        card,
+        issue,
+        key,
+        repo=None,
+        checkout=None,
+        base=None,
+        move_parent=True,
+        check_column=True,
+        no_repo=False,
+        new_repo=None,
+    ):
         """Set a card up for work: repository, pin, checkout, branch, base, worktree and upstream.
 
         It writes the card's `starts.json` record and takes the card's start lock. It moves no card
@@ -1137,8 +1283,7 @@ class Starter:
         with _lock(".start-" + safe_key(key) + ".lock"):
             mode, target = self._target(card, repo, no_repo, new_repo, issue, checkout, base)
             if mode == REPO:
-                return self._prepare(card, issue, key, repo, checkout, base, move_parent, check_column,
-                                     identity=target)
+                return self._prepare(card, issue, key, repo, checkout, base, move_parent, check_column, identity=target)
             return self._prepare_workspace(card, key, mode, target)
 
     def _prepare_workspace(self, card, key, mode, path=None, focus=False):
@@ -1244,8 +1389,9 @@ class Starter:
         except HerdboardError as error:
             error.steps_done = list(record.get("steps_done", []))
             raise
-        return self._prepare(self.store.show(card.ref), None, key, None, None, None, True, True,
-                             identity=identity.identity)
+        return self._prepare(
+            self.store.show(card.ref), None, key, None, None, None, True, True, identity=identity.identity
+        )
 
     def _forget_card_folder(self, ref, record):
         """Forget a planning session's folder and workspace in the start record.
@@ -1272,8 +1418,7 @@ class Starter:
         except OSError:
             pass
 
-    def _prepare(self, card, issue, key, repo, checkout, base, move_parent, check_column,
-                 identity=None):
+    def _prepare(self, card, issue, key, repo, checkout, base, move_parent, check_column, identity=None):
         state_path = state_dir() / "starts.json"
         record = {"steps_done": []}
         try:
@@ -1327,14 +1472,19 @@ class Starter:
                 if issue:
                     with self.writer.online() as client:
                         team = issue["team"]
-                        state = resolve_state(self.config, StateChoices(self.writer.source.account_dir()),
-                                              team, client.team_states(team["id"]), column, self.ask_state)
+                        state = resolve_state(
+                            self.config,
+                            StateChoices(self.writer.source.account_dir()),
+                            team,
+                            client.team_states(team["id"]),
+                            column,
+                            self.ask_state,
+                        )
                 elif not any(c.title.casefold() == column.casefold() for c in self.store.snapshot(card.path).columns):
                     raise StartError(f"Board {card.board} has no column {column!r}", "not_found")
             # A Linear sub-issue can belong to another repository, so only todos start from a parent.
             if not base and not record.get("base") and card.parent and not issue:
-                base = self._parent_branch(card, repo, checkout, move_parent=move_parent,
-                                           check_column=check_column)
+                base = self._parent_branch(card, repo, checkout, move_parent=move_parent, check_column=check_column)
             record["base"] = self._base(local, base or record.get("base"), branch)
             save("base")
             record.update(self._workspace(local, branch, record, focus=False))
@@ -1354,8 +1504,20 @@ class Starter:
             error.steps_done = list(record.get("steps_done", []))
             raise
 
-    def start(self, ref, agent=None, no_agent=False, repo=None, checkout=None, model=None, thinking=None,
-              base=None, no_repo=False, new_repo=None, may_merge_prs=False):
+    def start(
+        self,
+        ref,
+        agent=None,
+        no_agent=False,
+        repo=None,
+        checkout=None,
+        model=None,
+        thinking=None,
+        base=None,
+        no_repo=False,
+        new_repo=None,
+        may_merge_prs=False,
+    ):
         """Prepare the card, move it to the start column and start its agent.
 
         `may_merge_prs` (set by an automation) lets the agent merge other pull requests; the start
@@ -1401,12 +1563,14 @@ class Starter:
                 # The card is on the new board now, and its brief names that board.
                 card = self.store.show(card.ref)
             else:
-                record = self._prepare(card, issue, key, repo, checkout, base, move_parent=True,
-                                       check_column=True, identity=target)
+                record = self._prepare(
+                    card, issue, key, repo, checkout, base, move_parent=True, check_column=True, identity=target
+                )
             state_name = record.pop("_state_name", None)
             if may_merge_prs:
                 record["may_merge_prs"] = True
             try:
+
                 def persist():
                     with _lock(wait=2):
                         records = _read(state_path)
@@ -1426,15 +1590,34 @@ class Starter:
                         card = self.store.move(card.ref, column)
                 save("move")
                 if record.get("workspace_id"):
-                    report_card_token(record["workspace_id"], card_token(replace(card, column=column)),
-                                      "workspace")
+                    report_card_token(record["workspace_id"], card_token(replace(card, column=column)), "workspace")
                 if not no_agent:
                     if not agent_live(record):
-                        self.launch_agent(replace(card, column=column), record, agent, model, thinking,
-                                          lock_key, persist, linear=bool(issue))
+                        self.launch_agent(
+                            replace(card, column=column),
+                            record,
+                            agent,
+                            model,
+                            thinking,
+                            lock_key,
+                            persist,
+                            linear=bool(issue),
+                        )
                     save("agent")
                     report_card_token(record["pane_id"], card_token(replace(card, column=column)))
-                result = {k: record.get(k) for k in ("ref", "steps_done", "workspace_id", "pane_id", "worktree_path", "branch", "base", "agent_name")}
+                result = {
+                    k: record.get(k)
+                    for k in (
+                        "ref",
+                        "steps_done",
+                        "workspace_id",
+                        "pane_id",
+                        "worktree_path",
+                        "branch",
+                        "base",
+                        "agent_name",
+                    )
+                }
                 result["mode"] = record.get("mode") or REPO
                 record["steps_done"] = []
                 persist()

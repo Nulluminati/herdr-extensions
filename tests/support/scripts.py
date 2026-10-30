@@ -1,4 +1,5 @@
 """Load a plugin's bin script as a module."""
+
 import importlib.util
 
 from support.paths import PLUGINS

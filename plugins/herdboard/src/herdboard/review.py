@@ -62,8 +62,9 @@ class Reviewer:
         deadline = time.monotonic() + PANE_WAIT_SECONDS
         while herdr("agent", "focus", pane, tolerated=("agent_not_found", "pane_not_found")) is None:
             if time.monotonic() >= deadline:
-                raise ReviewError(f"No agent runs in {pane}, so Hunk comments would have no target",
-                                  "agent_unavailable")
+                raise ReviewError(
+                    f"No agent runs in {pane}, so Hunk comments would have no target", "agent_unavailable"
+                )
             time.sleep(0.2)
 
     def _panes(self, workspace):
@@ -77,8 +78,9 @@ class Reviewer:
             herdr("plugin", "action", "invoke", "review:branch", "--plugin", HUNK_PLUGIN)
         except StartError as error:
             if error.code in ("plugin_not_found", "plugin_action_not_found"):
-                raise ReviewError(f"Install the {HUNK_PLUGIN} Herdr plugin to review in Hunk",
-                                  "hunk_unavailable") from error
+                raise ReviewError(
+                    f"Install the {HUNK_PLUGIN} Herdr plugin to review in Hunk", "hunk_unavailable"
+                ) from error
             raise
         stored = record.get("review_pane")
         if stored in before:
@@ -89,8 +91,7 @@ class Reviewer:
             if opened:
                 return sorted(opened)[0]
             if time.monotonic() >= deadline:
-                raise ReviewError("hunkdiff opened no review pane; see `herdr plugin log list`",
-                                  "hunk_unavailable")
+                raise ReviewError("hunkdiff opened no review pane; see `herdr plugin log list`", "hunk_unavailable")
             time.sleep(0.2)
 
     def _started(self, ref):
@@ -101,8 +102,7 @@ class Reviewer:
             raise ReviewError(f"{ref} has no started work; run `herdboard start {ref}` first", "not_started")
         key, record = found
         if not Path(record["worktree_path"]).exists():
-            raise ReviewError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again",
-                              "not_started")
+            raise ReviewError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again", "not_started")
         return card, ref, key, record
 
     def _persister(self, key, record):
@@ -113,6 +113,7 @@ class Reviewer:
                 records = _read(state_path)
                 records[key] = record
                 _write(state_path, records)
+
         return persist
 
     def _ready_agent(self, card, ref, key, record, persist, focus=True):
@@ -136,21 +137,35 @@ class Reviewer:
         kind = record.get("agent") or self.config.start_agent
         model = self.config.start_model if kind == self.config.start_agent else None
         thinking = self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None
-        starter.launch_agent(card or fetch_linear_card(self.writer, self.config, ref), record, kind, model,
-                             thinking, safe_key(key), persist, linear=card is None, note=REVIEW_NOTE,
-                             log=activity.read(self.config, ref))
+        starter.launch_agent(
+            card or fetch_linear_card(self.writer, self.config, ref),
+            record,
+            kind,
+            model,
+            thinking,
+            safe_key(key),
+            persist,
+            linear=card is None,
+            note=REVIEW_NOTE,
+            log=activity.read(self.config, ref),
+        )
         activity.append(self.store, ref, "Agent restarted for review.", "herdboard")
         return True
 
     def review(self, ref):
         card, ref, key, record = self._started(ref)
         if record.get("mode") == NEW_REPO:
-            raise ReviewError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
-                              "Start the card, then review it.", "not_started")
+            raise ReviewError(
+                f"{ref} has no repository yet: `herdboard start {ref}` creates it. Start the card, then review it.",
+                "not_started",
+            )
         if record.get("mode") == REPOLESS:
-            raise ReviewError(f"{ref} has no repository, so Hunk has no branch to show. "
-                              f"Review its attachments with `herdboard review {ref} --agent`, "
-                              f"then run `herdboard finish {ref}`.", "no_repository")
+            raise ReviewError(
+                f"{ref} has no repository, so Hunk has no branch to show. "
+                f"Review its attachments with `herdboard review {ref} --agent`, "
+                f"then run `herdboard finish {ref}`.",
+                "no_repository",
+            )
         persist = self._persister(key, record)
         with _lock(".start-" + safe_key(key) + ".lock"):
             restarted = self._ready_agent(card, ref, key, record, persist)
@@ -158,5 +173,10 @@ class Reviewer:
             record["review_pane"] = self._open_hunk(record)
             persist()
         activity.append(self.store, ref, "Review opened.", "herdboard")
-        return {"ref": ref, "workspace_id": record["workspace_id"], "pane_id": record["pane_id"],
-                "review_pane": record["review_pane"], "agent_restarted": restarted}
+        return {
+            "ref": ref,
+            "workspace_id": record["workspace_id"],
+            "pane_id": record["pane_id"],
+            "review_pane": record["review_pane"],
+            "agent_restarted": restarted,
+        }

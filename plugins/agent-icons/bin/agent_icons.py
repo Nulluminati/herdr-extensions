@@ -98,8 +98,9 @@ def targets() -> list[tuple[str, str | None]]:
 
 def report(pane_id: str, glyph: str | None) -> None:
     change = ["--token", f"{TOKEN}={glyph}"] if glyph else ["--clear-token", TOKEN]
-    command([herdr_bin(), "pane", "report-metadata", pane_id,
-             "--source", SOURCE, "--seq", str(time.time_ns()), *change])
+    command(
+        [herdr_bin(), "pane", "report-metadata", pane_id, "--source", SOURCE, "--seq", str(time.time_ns()), *change]
+    )
 
 
 def failure(error: Exception) -> str:

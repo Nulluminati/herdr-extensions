@@ -15,8 +15,11 @@ class TypeLookTests(BoardTestCase):
             self.assertEqual(lines[0], f"Fix login  {card.ref}")
             self.assertTrue(lines[1].startswith("bug "), lines[1])
             self.assertNotIn("type/bug", widget.plain)
-            chips = [widget.rich_text.plain[span.start:span.end].strip() for span in widget.rich_text.spans
-                     if " on " in str(span.style)]
+            chips = [
+                widget.rich_text.plain[span.start : span.end].strip()
+                for span in widget.rich_text.spans
+                if " on " in str(span.style)
+            ]
             self.assertEqual(chips, ["auth"])
 
     async def test_a_card_without_a_type_shows_no_badge(self):

@@ -1,4 +1,5 @@
 """Doctor checks isolated stores, state files and the quiet Linear fixture server."""
+
 import contextlib
 import fcntl
 import io
@@ -30,9 +31,16 @@ class DoctorTests(unittest.TestCase):
         self.config = self.root / "config.toml"
         self.config.write_text(f'todos_dir = "{self.todos}"\n[linear]\nenabled = false\n')
         self.state = self.root / "state" / "herdboard"
-        env = patch.dict(os.environ, {"HOME": str(self.root), "HERDBOARD_CONFIG": str(self.config),
-                                     "XDG_STATE_HOME": str(self.root / "state"),
-                                     "LINEAR_API_KEY": "", "HERDR_BIN_PATH": str(self.root / "herdr")})
+        env = patch.dict(
+            os.environ,
+            {
+                "HOME": str(self.root),
+                "HERDBOARD_CONFIG": str(self.config),
+                "XDG_STATE_HOME": str(self.root / "state"),
+                "LINEAR_API_KEY": "",
+                "HERDR_BIN_PATH": str(self.root / "herdr"),
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
 
@@ -69,7 +77,11 @@ class DoctorTests(unittest.TestCase):
     @contextlib.contextmanager
     def server(self):
         with FakeLinear(fixtures()) as fake:
-            with patch.object(linear_source, "build_client", side_effect=lambda key: LinearClient(key, fake.endpoint, timeout=2, max_retries=0)):
+            with patch.object(
+                linear_source,
+                "build_client",
+                side_effect=lambda key: LinearClient(key, fake.endpoint, timeout=2, max_retries=0),
+            ):
                 yield fake
 
     def test_invalid_boards_reported_together(self):
@@ -112,8 +124,10 @@ class DoctorTests(unittest.TestCase):
 
     def test_missing_pinned_issue(self):
         self.enable_linear()
-        self.board(front="kanban-plugin: board\nlinear-issues:\n  - {id: i1, identifier: ENG-1}\n"
-                         "  - {id: gone, identifier: ENG-404}\n  - {id: i6, identifier: ENG-6}\n")
+        self.board(
+            front="kanban-plugin: board\nlinear-issues:\n  - {id: i1, identifier: ENG-1}\n"
+            "  - {id: gone, identifier: ENG-404}\n  - {id: i6, identifier: ENG-6}\n"
+        )
         with self.server() as fake:
             found = self.findings("linear_pin_missing")
             self.assertEqual([f["level"] for f in found], ["warning"])
@@ -187,7 +201,11 @@ class DoctorTests(unittest.TestCase):
         self.board("b", body="", front=self.links())
         with FakeLinear(fixtures()) as fake:
             endpoint = fake.endpoint
-        with patch.object(linear_source, "build_client", side_effect=lambda key: LinearClient(key, endpoint, timeout=0.1, max_retries=0)):
+        with patch.object(
+            linear_source,
+            "build_client",
+            side_effect=lambda key: LinearClient(key, endpoint, timeout=0.1, max_retries=0),
+        ):
             found = self.findings("linear_unreachable")
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["level"], "warning")
@@ -199,12 +217,17 @@ class DoctorTests(unittest.TestCase):
         with self.server() as fake:
             client = LinearClient("test-key", fake.endpoint, timeout=2, max_retries=0)
             viewer = client.viewer
+
             def viewer_then_timeout():
                 result = viewer()
                 fake.delay = 0.2
                 client.timeout = 0.05
                 return result
-            with patch.object(linear_source, "build_client", return_value=client), patch.object(client, "viewer", viewer_then_timeout):
+
+            with (
+                patch.object(linear_source, "build_client", return_value=client),
+                patch.object(client, "viewer", viewer_then_timeout),
+            ):
                 self.assertEqual(len(self.findings("linear_unreachable")), 1)
             self.assertEqual([r["operationName"] for r in fake.requests], ["Viewer", "Project"])
 
@@ -253,10 +276,15 @@ class DoctorTests(unittest.TestCase):
             repo = self.root / name
             repo.mkdir()
             subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
-                            f"https://github.com/acme/{origin}.git"], check=True, capture_output=True)
-        self.state_file("checkouts.json", {"github.com/acme/api": [
-            {"path": str(self.root / name), "last_seen": 1} for name in ("first", "second")]})
+            subprocess.run(
+                ["git", "-C", str(repo), "remote", "add", "origin", f"https://github.com/acme/{origin}.git"],
+                check=True,
+                capture_output=True,
+            )
+        self.state_file(
+            "checkouts.json",
+            {"github.com/acme/api": [{"path": str(self.root / name), "last_seen": 1} for name in ("first", "second")]},
+        )
         found = self.findings("checkout_stale")
         self.assertEqual(len(found), 1)
         self.assertIn(str(self.root / "second"), found[0]["message"])
@@ -267,13 +295,18 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual({f["path"] for f in found}, {str(p) for p in paths})
 
     def test_malformed_state_records(self):
-        self.state_file("starts.json", {"t123": {"worktree_path": 42},
-                                      "good": {"worktree_path": str(self.root / "gone")}})
-        self.state_file("checkouts.json", {"repo": [{}, {"path": str(self.root / "gone"), "last_seen": 1}],
-                                         "good": [{"path": str(self.root / "also-gone"), "last_seen": 1}]})
+        self.state_file(
+            "starts.json", {"t123": {"worktree_path": 42}, "good": {"worktree_path": str(self.root / "gone")}}
+        )
+        self.state_file(
+            "checkouts.json",
+            {
+                "repo": [{}, {"path": str(self.root / "gone"), "last_seen": 1}],
+                "good": [{"path": str(self.root / "also-gone"), "last_seen": 1}],
+            },
+        )
         store = str(self.todos.resolve())
-        self.state_file("org/user/promotions.json", {"bad": 42,
-                        f"{store}::good": {"store": store, "issues": []}})
+        self.state_file("org/user/promotions.json", {"bad": 42, f"{store}::good": {"store": store, "issues": []}})
         result = self.run_doctor(expect=1)
         codes = [f["code"] for f in result["findings"]]
         self.assertEqual(codes.count("state_invalid"), 3)
@@ -290,9 +323,16 @@ class DoctorTests(unittest.TestCase):
         real = shutil.which
         with patch("herdboard.doctor.shutil.which", side_effect=lambda name: None if name == "gh" else real(name)):
             found = self.findings("gh_missing")
-        self.assertEqual([(f["level"], f["message"]) for f in found],
-                         [("info", "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request"
-                                   " and pull request reviews need it.")])
+        self.assertEqual(
+            [(f["level"], f["message"]) for f in found],
+            [
+                (
+                    "info",
+                    "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request"
+                    " and pull request reviews need it.",
+                )
+            ],
+        )
 
     def test_missing_hunk_is_a_warning(self):
         real = shutil.which
@@ -303,17 +343,23 @@ class DoctorTests(unittest.TestCase):
 
     def test_hunk_without_the_review_extension_is_a_warning(self):
         listing = subprocess.CompletedProcess([], 0, "other-ext  v1.0.0  https://example.com\n", "")
-        with patch("herdboard.doctor.shutil.which", return_value="/usr/bin/hunk"), \
-                patch("herdboard.doctor.subprocess.run", return_value=listing) as run:
+        with (
+            patch("herdboard.doctor.shutil.which", return_value="/usr/bin/hunk"),
+            patch("herdboard.doctor.subprocess.run", return_value=listing) as run,
+        ):
             found = self.findings("hunk_gh_review_missing")
         self.assertEqual([f["level"] for f in found], ["warning"])
         self.assertIn("hunk extension install phl28/hunk-gh-review", found[0]["fix"])
         self.assertEqual(run.call_args.args[0], ["hunk", "extension", "list"])
 
     def test_hunk_with_the_review_extension_is_fine(self):
-        listing = subprocess.CompletedProcess([], 0, "hunk-gh-review  v0.1.0  https://github.com/phl28/hunk-gh-review\n", "")
-        with patch("herdboard.doctor.shutil.which", return_value="/usr/bin/hunk"), \
-                patch("herdboard.doctor.subprocess.run", return_value=listing):
+        listing = subprocess.CompletedProcess(
+            [], 0, "hunk-gh-review  v0.1.0  https://github.com/phl28/hunk-gh-review\n", ""
+        )
+        with (
+            patch("herdboard.doctor.shutil.which", return_value="/usr/bin/hunk"),
+            patch("herdboard.doctor.subprocess.run", return_value=listing),
+        ):
             self.assertEqual(self.findings("hunk_gh_review_missing"), [])
             self.assertEqual(self.findings("hunk_missing"), [])
 
@@ -343,7 +389,10 @@ class DoctorTests(unittest.TestCase):
         first = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n***\n## Archive\n- [x] Third ^t123\n")
         last = self.board("z", body="- [ ] Fourth ^t123\n")
         result = self.run_doctor("--fix-ids")
-        self.assertEqual([(f["path"], f["line"], f["old_id"]) for f in result["fixed"]], [(str(first), 6, "t123"), (str(first), 9, "t123"), (str(last), 5, "t123")])
+        self.assertEqual(
+            [(f["path"], f["line"], f["old_id"]) for f in result["fixed"]],
+            [(str(first), 6, "t123"), (str(first), 9, "t123"), (str(last), 5, "t123")],
+        )
         self.assertEqual(len({f["new_id"] for f in result["fixed"]}), 3)
         self.assertIn("First ^t123", first.read_text())
         self.assertEqual(self.findings("duplicate_id"), [])
@@ -373,8 +422,10 @@ class DoctorTests(unittest.TestCase):
         with (self.todos / ".herdboard.lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             original = Store.__init__
+
             def fast(store, config):
                 original(store, config, lock_timeout=0)
+
             with patch.object(Store, "__init__", fast):
                 result = self.run_doctor("--fix-ids", expect=2)
         self.assertEqual(result["error"]["code"], "conflict")
@@ -396,11 +447,13 @@ class DoctorTests(unittest.TestCase):
     def test_fix_rechecks_target_under_lock(self):
         path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n")
         original = Store._lock
+
         @contextlib.contextmanager
         def edit_before_lock(store):
             path.write_text(path.read_text().replace("Second", "Changed"))
             with original(store):
                 yield
+
         with patch.object(Store, "_lock", edit_before_lock):
             result = self.run_doctor("--fix-ids", expect=2)
         self.assertEqual(result["error"]["code"], "conflict")
@@ -409,11 +462,13 @@ class DoctorTests(unittest.TestCase):
     def test_fix_keeps_edits_to_other_cards(self):
         path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n- [ ] Other ^t456\n")
         original = Store._lock
+
         @contextlib.contextmanager
         def edit_before_lock(store):
             path.write_text(path.read_text().replace("Other", "Changed"))
             with original(store):
                 yield
+
         with patch.object(Store, "_lock", edit_before_lock):
             self.run_doctor("--fix-ids")
         self.assertIn("Changed ^t456", path.read_text())
@@ -457,10 +512,12 @@ class DoctorTests(unittest.TestCase):
         bad = self.board()
         good = self.board("z", body="- [ ] No ID\n")
         original = doctor.check_board
+
         def check(store, path, board):
             if path == bad:
                 raise ValueError("unexpected board failure")
             return original(store, path, board)
+
         with patch.object(doctor, "check_board", side_effect=check):
             result = self.run_doctor(expect=1)
         self.assertIn(str(bad), [f["path"] for f in result["findings"] if f["code"] == "board_invalid"])
@@ -478,8 +535,9 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("default", next(f["message"] for f in result["findings"] if f["code"] == "config_invalid"))
 
     def test_tolerated_start_records_are_warnings(self):
-        self.state_file("starts.json", {"bad": 42, "steps": {"steps_done": 42},
-                                      "good": {"worktree_path": str(self.root / "gone")}})
+        self.state_file(
+            "starts.json", {"bad": 42, "steps": {"steps_done": 42}, "good": {"worktree_path": str(self.root / "gone")}}
+        )
         found = self.findings("state_invalid")
         self.assertEqual(len(found), 2)
         self.assertTrue(all(f["level"] == "warning" for f in found))
@@ -487,6 +545,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_linear_service_error_stops_checks(self):
         from unittest.mock import Mock
+
         self.enable_linear()
         self.board(front=self.links(labels="    labels:\n      - id: l-api\n        name: API\n"))
         self.board("z", front=self.links(), body="")
@@ -505,10 +564,16 @@ class DoctorTests(unittest.TestCase):
                 self.assertEqual(client.labels.call_count, 0 if method == "project" else 1)
 
     def test_git_missing_keeps_checkout_path_checks(self):
-        self.state_file("checkouts.json", {"repo": [
-            {"path": str(self.root), "last_seen": 1},
-            {"path": str(self.root / "gone"), "last_seen": 1},
-            {"path": str(self.todos), "last_seen": 1}]})
+        self.state_file(
+            "checkouts.json",
+            {
+                "repo": [
+                    {"path": str(self.root), "last_seen": 1},
+                    {"path": str(self.root / "gone"), "last_seen": 1},
+                    {"path": str(self.todos), "last_seen": 1},
+                ]
+            },
+        )
         self.todos.mkdir()
         with patch.object(doctor, "repo_identity", side_effect=IdentityError("git is not installed")) as identity:
             result = self.run_doctor()
@@ -530,11 +595,13 @@ class DoctorTests(unittest.TestCase):
         path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n- [ ] Other ^t456\n")
         original = Store._lock
         expected = path.read_bytes().replace(b"Other ^t456", b"Other ^t123")
+
         @contextlib.contextmanager
         def edit_before_lock(store):
             path.write_bytes(expected)
             with original(store):
                 yield
+
         with patch.object(Store, "_lock", edit_before_lock):
             result = self.run_doctor("--fix-ids", expect=2)
         self.assertEqual(result["error"]["code"], "conflict")
@@ -546,11 +613,13 @@ class DoctorTests(unittest.TestCase):
         path = self.board("z", front="not-kanban: board\n")
         original = Store._lock
         expected = path.read_bytes().replace(b"Task", b"Changed")
+
         @contextlib.contextmanager
         def edit_before_lock(store):
             path.write_bytes(expected)
             with original(store):
                 yield
+
         with patch.object(Store, "_lock", edit_before_lock):
             result = self.run_doctor("--fix-ids", expect=1)
         self.assertEqual([f["path"] for f in result["fixed"]], [str(writable)])
@@ -562,10 +631,12 @@ class DoctorTests(unittest.TestCase):
         failed = self.board("b")
         before = failed.read_bytes()
         original = Store._write
+
         def write(store, path, board):
             if path == failed:
                 raise IoError("write failed")
             return original(store, path, board)
+
         with patch.object(Store, "_write", write):
             result = self.run_doctor("--fix-ids", expect=1)
         self.assertEqual([f["path"] for f in result["fixed"]], [str(first)])
@@ -573,9 +644,14 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(any(f["path"] == str(failed) and "write failed" in f["message"] for f in result["findings"]))
 
     def test_fix_preserves_all_other_bytes(self):
-        path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n  details\n- [ ] Other ^t456\n",
-                          front="kanban-plugin: board\ncustom: value\n")
-        path.write_text(path.read_text() + "**Complete**\n- [x] Finished ^t789\n\n%% kanban:settings\n```\n{\"custom\": true}\n```\n%%\n")
+        path = self.board(
+            body="- [ ] First ^t123\n- [ ] Second ^t123\n  details\n- [ ] Other ^t456\n",
+            front="kanban-plugin: board\ncustom: value\n",
+        )
+        path.write_text(
+            path.read_text()
+            + '**Complete**\n- [x] Finished ^t789\n\n%% kanban:settings\n```\n{"custom": true}\n```\n%%\n'
+        )
         before = path.read_bytes()
         result = self.run_doctor("--fix-ids")
         self.assertEqual(len(result["fixed"]), 1)

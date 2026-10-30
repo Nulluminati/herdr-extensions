@@ -63,8 +63,9 @@ class FrontmatterValueTests(unittest.TestCase):
 class WithLinkTests(unittest.TestCase):
     def test_a_new_project_goes_last(self):
         links = [ProjectLink("p1", "One")]
-        self.assertEqual(with_link(links, ProjectLink("p2", "Two")),
-                         [ProjectLink("p1", "One"), ProjectLink("p2", "Two")])
+        self.assertEqual(
+            with_link(links, ProjectLink("p2", "Two")), [ProjectLink("p1", "One"), ProjectLink("p2", "Two")]
+        )
 
     def test_a_linked_project_is_replaced_in_its_place(self):
         links = [ProjectLink("p1", "One"), ProjectLink("p2", "Two")]
@@ -88,8 +89,9 @@ class StoreMergeTests(BoardTestCase):
 
     def test_merge_and_links_change_in_one_write(self):
         self.store.update_links(self.repo_path, lambda links: [ProjectLink("p1", "One")])
-        self.store.update_config(self.repo_path, merge="pr",
-                                 change_links=lambda links: links + [ProjectLink("p2", "Two")])
+        self.store.update_config(
+            self.repo_path, merge="pr", change_links=lambda links: links + [ProjectLink("p2", "Two")]
+        )
         meta = self.store.board_meta(self.repo_path)
         self.assertEqual((meta.merge, [link.id for link in meta.links]), ("pr", ["p1", "p2"]))
 
@@ -109,8 +111,11 @@ class StoreMergeTests(BoardTestCase):
 
     def test_a_change_that_makes_the_frontmatter_invalid_is_not_written(self):
         text = self.repo_path.read_text()
-        with mock.patch.object(kanban_md, "set_frontmatter_value",
-                               side_effect=lambda text, key, value: text.replace("repo:", "bad: [\nrepo:")):
+        with mock.patch.object(
+            kanban_md,
+            "set_frontmatter_value",
+            side_effect=lambda text, key, value: text.replace("repo:", "bad: [\nrepo:"),
+        ):
             with self.assertRaisesRegex(FormatError, "invalid YAML"):
                 self.store.set_merge(self.repo_path, "pr")
         self.assertEqual(self.repo_path.read_text(), text)
@@ -126,8 +131,10 @@ class StoreMergeTests(BoardTestCase):
 def board_arguments(case, *args):
     """The keyword arguments that the `board` command gives the app."""
     seen = {}
-    with mock.patch.object(HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)), \
-            mock.patch.object(HerdboardApp, "run"):
+    with (
+        mock.patch.object(HerdboardApp, "__init__", lambda self, store, view, **kw: seen.update(kw)),
+        mock.patch.object(HerdboardApp, "run"),
+    ):
         case.run_cli("board", *args, directory=case.repo)
     return seen
 
@@ -140,8 +147,10 @@ class BoardCommandTests(CliTestCase):
     def test_the_board_shows_agent_logos_when_the_font_is_installed(self):
         self.init_repo_board()
         for installed in (True, False):
-            with self.subTest(installed=installed), \
-                    mock.patch("herdboard.board.agent_font_installed", return_value=installed):
+            with (
+                self.subTest(installed=installed),
+                mock.patch("herdboard.board.agent_font_installed", return_value=installed),
+            ):
                 self.assertEqual(board_arguments(self)["agent_logos"], installed)
 
     def test_prs_opens_the_board_on_the_pull_request_list(self):
@@ -154,8 +163,9 @@ class BoardCommandLinearTests(LinearCliCase):
     def test_the_board_looks_up_a_project_and_its_labels(self):
         self.board()
         resolve = board_arguments(self)["resolve_link"]
-        self.assertEqual(resolve("platform", ["repo:api"]),
-                         ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]))
+        self.assertEqual(
+            resolve("platform", ["repo:api"]), ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")])
+        )
         with self.assertRaisesRegex(HerdboardError, "No Linear project named 'Nope'"):
             resolve("Nope", [])
 

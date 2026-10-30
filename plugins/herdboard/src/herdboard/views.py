@@ -118,9 +118,7 @@ class Views:
         if self._resolved_project is not None:
             return self._resolved_project
         if self.source.offline:
-            raise HerdboardError(
-                f"{self.project!r} is not linked to a board: cannot find it offline"
-            )
+            raise HerdboardError(f"{self.project!r} is not linked to a board: cannot find it offline")
         if not ask_linear:
             return None
         found = self.source.client.find_projects(self.project)
@@ -148,9 +146,7 @@ class Views:
             def fetch() -> Fetched:
                 fetched = source.project_issues(link.id, label_ids)
                 for missing in fetched.data.get("missing_labels", []):
-                    errors.append(
-                        f"{where}: label {names.get(missing, missing)!r} not found or not accessible"
-                    )
+                    errors.append(f"{where}: label {names.get(missing, missing)!r} not found or not accessible")
                 return fetched
 
             jobs.append((where, fetch))

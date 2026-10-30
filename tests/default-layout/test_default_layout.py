@@ -15,6 +15,7 @@ from support.scripts import load_script
 EXAMPLE = ROOT / "plugins/default-layout/examples/layout.toml"
 default_layout = load_script("default-layout", "default_layout")
 
+
 def wrapped(program):
     return ["sh", "-c", program + "; exec ${SHELL:-/bin/sh}"]
 
@@ -46,8 +47,14 @@ class FakeHerdr:
         for tab_label, panes in tabs.items():
             tab_id = self.add_tab(workspace_id, tab_label)
             for pane in panes:
-                self.panes.append({"pane_id": self.next_id(f"{workspace_id}:p"),
-                                   "tab_id": tab_id, "workspace_id": workspace_id, **pane})
+                self.panes.append(
+                    {
+                        "pane_id": self.next_id(f"{workspace_id}:p"),
+                        "tab_id": tab_id,
+                        "workspace_id": workspace_id,
+                        **pane,
+                    }
+                )
         return workspace_id
 
     def add_tab(self, workspace_id, label):
@@ -62,9 +69,11 @@ class FakeHerdr:
         return [tab["label"] for tab in self.tabs if tab["workspace_id"] == workspace_id]
 
     def snapshot(self):
-        return {"workspaces": [dict(w) for w in self.workspaces],
-                "tabs": [dict(t) for t in self.tabs],
-                "panes": [dict(p) for p in self.panes]}
+        return {
+            "workspaces": [dict(w) for w in self.workspaces],
+            "tabs": [dict(t) for t in self.tabs],
+            "panes": [dict(p) for p in self.panes],
+        }
 
     def command(self, argv):
         argv = list(argv)
@@ -77,21 +86,33 @@ class FakeHerdr:
         if args[:2] == ["workspace", "create"]:
             label = args[args.index("--label") + 1]
             if label in self.failing_workspace_labels:
-                return subprocess.CompletedProcess(argv, 1, json.dumps(
-                    {"error": {"code": "invalid_cwd", "message": f"cannot create {label}"}}), "")
+                return subprocess.CompletedProcess(
+                    argv, 1, json.dumps({"error": {"code": "invalid_cwd", "message": f"cannot create {label}"}}), ""
+                )
             cwd = args[args.index("--cwd") + 1]
             workspace_id = self.add_workspace(label, {"shell": [{"cwd": cwd}]})
             tab_id = self.tab_ids(workspace_id)[0]
-            return self.ok({"type": "workspace_created",
-                            "workspace": {"workspace_id": workspace_id, "label": label},
-                            "tab": {"tab_id": tab_id, "workspace_id": workspace_id},
-                            "root_pane": {"pane_id": f"{workspace_id}:p0"}})
+            return self.ok(
+                {
+                    "type": "workspace_created",
+                    "workspace": {"workspace_id": workspace_id, "label": label},
+                    "tab": {"tab_id": tab_id, "workspace_id": workspace_id},
+                    "root_pane": {"pane_id": f"{workspace_id}:p0"},
+                }
+            )
         if args[:3] == ["pane", "process-info", "--pane"]:
             pane_id = args[3]
             name = "nvim" if pane_id in self.busy else "fish"
-            return self.ok({"type": "pane_process_info", "process_info": {
-                "shell_pid": 10, "foreground_process_group_id": 11 if pane_id in self.busy else 10,
-                "foreground_processes": [{"name": name, "pid": 10}]}})
+            return self.ok(
+                {
+                    "type": "pane_process_info",
+                    "process_info": {
+                        "shell_pid": 10,
+                        "foreground_process_group_id": 11 if pane_id in self.busy else 10,
+                        "foreground_processes": [{"name": name, "pid": 10}],
+                    },
+                }
+            )
         raise AssertionError(f"unexpected command {argv}")
 
     def ok(self, result):
@@ -135,18 +156,26 @@ class DefaultLayoutTestCase(unittest.TestCase):
         self.project_a.mkdir()
         self.project_b = self.dir / "beta"
         self.project_b.mkdir()
-        self.environment = patch.dict(os.environ, {
-            "HERDR_PLUGIN_CONFIG_DIR": str(self.config_dir),
-            "HERDR_PLUGIN_STATE_DIR": str(self.state_dir),
-            "HERDR_BIN_PATH": "herdr",
-        }, clear=False)
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "HERDR_PLUGIN_CONFIG_DIR": str(self.config_dir),
+                "HERDR_PLUGIN_STATE_DIR": str(self.state_dir),
+                "HERDR_BIN_PATH": "herdr",
+            },
+            clear=False,
+        )
         self.environment.start()
         self.addCleanup(self.environment.stop)
         for name in ("HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PLUGIN_CONTEXT_JSON"):
             os.environ.pop(name, None)
         self.herdr = FakeHerdr()
-        for target, fake in (("command", self.herdr.command), ("call", self.herdr.call),
-                             ("SETTLE_SECONDS", 0), ("SETTLE_POLL_SECONDS", 0)):
+        for target, fake in (
+            ("command", self.herdr.command),
+            ("call", self.herdr.call),
+            ("SETTLE_SECONDS", 0),
+            ("SETTLE_POLL_SECONDS", 0),
+        ):
             replacement = patch.object(default_layout, target, fake)
             replacement.start()
             self.addCleanup(replacement.stop)
@@ -202,15 +231,16 @@ class DefaultLayoutTestCase(unittest.TestCase):
 class SpecTests(DefaultLayoutTestCase):
     def problems(self, text):
         import tomllib
+
         return default_layout.validate(tomllib.loads(textwrap.dedent(text)))
 
     def test_example_file_loads_and_is_valid(self):
         import tomllib
+
         spec = tomllib.loads(EXAMPLE.read_text())
         self.assertEqual(default_layout.validate(spec), [])
         self.assertEqual([p["label"] for p in spec["projects"]], ["herdr-extensions"])
-        self.assertEqual([t["name"] for t in spec["projects"][0]["tabs"]],
-                         ["agents", "editor", "git", "shell"])
+        self.assertEqual([t["name"] for t in spec["projects"][0]["tabs"]], ["agents", "editor", "git", "shell"])
 
     def test_good_file_loads(self):
         self.two_projects()
@@ -232,8 +262,7 @@ class SpecTests(DefaultLayoutTestCase):
 
     def test_five_panes_is_an_error(self):
         panes = "[[projects.tabs.panes]]\n" * 5
-        problems = self.problems('[[projects]]\nlabel = "a"\npath = "/tmp"\n'
-                                 '[[projects.tabs]]\nname = "t"\n' + panes)
+        problems = self.problems('[[projects]]\nlabel = "a"\npath = "/tmp"\n[[projects.tabs]]\nname = "t"\n' + panes)
         self.assertEqual(problems, ["a/t: at most 4 panes, found 5"])
 
     def test_bad_split_and_bad_ratio_are_errors(self):
@@ -249,10 +278,13 @@ class SpecTests(DefaultLayoutTestCase):
             [[projects.tabs.panes]]
             ratio = 1.5
             """)
-        self.assertEqual(problems, [
-            'a/t: pane 2: split must be "down" or "right"',
-            "a/t: pane 3: ratio must be between 0 and 1",
-        ])
+        self.assertEqual(
+            problems,
+            [
+                'a/t: pane 2: split must be "down" or "right"',
+                "a/t: pane 3: ratio must be between 0 and 1",
+            ],
+        )
 
     def test_bad_agent_forms_are_errors(self):
         problems = self.problems("""
@@ -267,10 +299,13 @@ class SpecTests(DefaultLayoutTestCase):
             agent = "pi"
             command = "pi"
             """)
-        self.assertEqual(problems, [
-            "a/t: pane 1: agent must be a plain name such as claude or pi",
-            "a/t: pane 2: set either agent or command, not both",
-        ])
+        self.assertEqual(
+            problems,
+            [
+                "a/t: pane 1: agent must be a plain name such as claude or pi",
+                "a/t: pane 2: set either agent or command, not both",
+            ],
+        )
 
     def test_every_problem_is_reported_in_one_run(self):
         self.write_layout("""
@@ -282,11 +317,14 @@ class SpecTests(DefaultLayoutTestCase):
         self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
         lines = self.stderr.getvalue().splitlines()
         self.assertIn("default-layout: invalid layout file", lines[0])
-        self.assertEqual(lines[1:], [
-            "  project 1: label is required",
-            "  project 1: path is required",
-            "  project 1/tab 1: name is required",
-        ])
+        self.assertEqual(
+            lines[1:],
+            [
+                "  project 1: label is required",
+                "  project 1: path is required",
+                "  project 1/tab 1: name is required",
+            ],
+        )
         self.assertEqual(self.herdr.commands, [])
 
     def test_missing_file_apply_exits_zero_with_a_message(self):
@@ -302,8 +340,10 @@ class SpecTests(DefaultLayoutTestCase):
 
     def test_layout_path_falls_back_to_the_home_config_dir(self):
         os.environ.pop("HERDR_PLUGIN_CONFIG_DIR")
-        self.assertEqual(default_layout.layout_path(), Path.home() /
-                         ".config/herdr/plugins/config/nulluminati.default-layout/layout.toml")
+        self.assertEqual(
+            default_layout.layout_path(),
+            Path.home() / ".config/herdr/plugins/config/nulluminati.default-layout/layout.toml",
+        )
 
 
 class TreeTests(unittest.TestCase):
@@ -313,23 +353,45 @@ class TreeTests(unittest.TestCase):
 
     def test_two_panes_make_one_split_with_default_ratio(self):
         tree = default_layout.tab_tree({"name": "t", "panes": [{}, {"split": "right"}]}, "/p")
-        self.assertEqual(tree, {"type": "split", "direction": "right", "ratio": 0.5,
-                                "first": {"type": "pane", "cwd": "/p"},
-                                "second": {"type": "pane", "cwd": "/p"}})
+        self.assertEqual(
+            tree,
+            {
+                "type": "split",
+                "direction": "right",
+                "ratio": 0.5,
+                "first": {"type": "pane", "cwd": "/p"},
+                "second": {"type": "pane", "cwd": "/p"},
+            },
+        )
 
     def test_three_panes_nest_left_to_right(self):
-        tree = default_layout.tab_tree({"name": "t", "panes": [
-            {"label": "one"}, {"label": "two", "ratio": 0.3}, {"label": "three", "split": "right"},
-        ]}, "/p")
-        self.assertEqual(tree, {
-            "type": "split", "direction": "right", "ratio": 0.5,
-            "first": {
-                "type": "split", "direction": "down", "ratio": 0.3,
-                "first": {"type": "pane", "label": "one", "cwd": "/p"},
-                "second": {"type": "pane", "label": "two", "cwd": "/p"},
+        tree = default_layout.tab_tree(
+            {
+                "name": "t",
+                "panes": [
+                    {"label": "one"},
+                    {"label": "two", "ratio": 0.3},
+                    {"label": "three", "split": "right"},
+                ],
             },
-            "second": {"type": "pane", "label": "three", "cwd": "/p"},
-        })
+            "/p",
+        )
+        self.assertEqual(
+            tree,
+            {
+                "type": "split",
+                "direction": "right",
+                "ratio": 0.5,
+                "first": {
+                    "type": "split",
+                    "direction": "down",
+                    "ratio": 0.3,
+                    "first": {"type": "pane", "label": "one", "cwd": "/p"},
+                    "second": {"type": "pane", "label": "two", "cwd": "/p"},
+                },
+                "second": {"type": "pane", "label": "three", "cwd": "/p"},
+            },
+        )
 
     def test_command_and_agent_are_wrapped_in_a_shell_fallback(self):
         self.assertEqual(default_layout.pane_command({"command": "nvim"}), wrapped("nvim"))
@@ -351,21 +413,24 @@ class MatchTests(DefaultLayoutTestCase):
     def test_label_match_wins(self):
         by_dir = self.herdr.add_workspace("other", {"t": [{"cwd": str(self.project_a)}]})
         by_label = self.herdr.add_workspace("alpha", {"t": [{"cwd": "/nowhere"}]})
-        found = default_layout.match_project(self.project("alpha", self.project_a),
-                                             self.herdr.workspaces, self.herdr.snapshot())
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
         self.assertEqual(found["workspace_id"], by_label)
         self.assertNotEqual(by_dir, by_label)
 
     def test_directory_match_without_label(self):
         workspace_id = self.herdr.add_workspace("x", {"t": [{"cwd": "/nowhere"}, {"cwd": str(self.project_a)}]})
-        found = default_layout.match_project(self.project("alpha", self.project_a),
-                                             self.herdr.workspaces, self.herdr.snapshot())
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
         self.assertEqual(found["workspace_id"], workspace_id)
 
     def test_worktree_checkout_path_matches(self):
         workspace_id = self.herdr.add_workspace("x", {"t": [{"cwd": "/nowhere"}]}, worktree=str(self.project_a))
-        found = default_layout.match_project(self.project("alpha", self.project_a),
-                                             self.herdr.workspaces, self.herdr.snapshot())
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
         self.assertEqual(found["workspace_id"], workspace_id)
 
     def test_tilde_and_symlink_still_match(self):
@@ -373,14 +438,18 @@ class MatchTests(DefaultLayoutTestCase):
         link.symlink_to(self.project_a)
         workspace_id = self.herdr.add_workspace("x", {"t": [{"cwd": str(link)}]})
         with patch.dict(os.environ, {"HOME": str(self.dir)}):
-            found = default_layout.match_project(self.project("alpha", "~/alpha"),
-                                                 self.herdr.workspaces, self.herdr.snapshot())
+            found = default_layout.match_project(
+                self.project("alpha", "~/alpha"), self.herdr.workspaces, self.herdr.snapshot()
+            )
         self.assertEqual(found["workspace_id"], workspace_id)
 
     def test_no_match_returns_none(self):
         self.herdr.add_workspace("x", {"t": [{"cwd": "/nowhere"}]})
-        self.assertIsNone(default_layout.match_project(self.project("alpha", self.project_a),
-                                                       self.herdr.workspaces, self.herdr.snapshot()))
+        self.assertIsNone(
+            default_layout.match_project(
+                self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+            )
+        )
 
 
 class StartupTests(DefaultLayoutTestCase):
@@ -388,25 +457,63 @@ class StartupTests(DefaultLayoutTestCase):
         self.two_projects()
         self.fresh_home()
         self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
-        self.assertEqual(self.created(), [
-            ["herdr", "workspace", "create", "--cwd", str(self.project_a), "--label", "alpha", "--no-focus"],
-            ["herdr", "workspace", "create", "--cwd", str(self.project_b), "--label", "beta", "--no-focus"],
-        ])
+        self.assertEqual(
+            self.created(),
+            [
+                ["herdr", "workspace", "create", "--cwd", str(self.project_a), "--label", "alpha", "--no-focus"],
+                ["herdr", "workspace", "create", "--cwd", str(self.project_b), "--label", "beta", "--no-focus"],
+            ],
+        )
         alpha, beta = self.herdr.workspaces[1:]
-        self.assertEqual(self.herdr.requests, [
-            ("layout.apply", {"tab_id": f"{alpha['workspace_id']}:t5", "tab_label": "agents", "focus": False,
-                              "root": {"type": "split", "direction": "right", "ratio": 0.5,
-                                       "first": {"type": "pane", "cwd": str(self.project_a), "command": wrapped("pi")},
-                                       "second": {"type": "pane", "cwd": str(self.project_a)}}}),
-            ("tab.move", {"tab_id": f"{alpha['workspace_id']}:t7", "insert_index": 0}),
-            ("layout.apply", {"workspace_id": alpha["workspace_id"], "tab_label": "editor", "focus": False,
-                              "root": {"type": "pane", "cwd": str(self.project_a), "command": wrapped("nvim")}}),
-            ("layout.apply", {"workspace_id": alpha["workspace_id"], "tab_label": "shell", "focus": False,
-                              "root": {"type": "pane", "cwd": str(self.project_a)}}),
-            ("layout.apply", {"tab_id": f"{beta['workspace_id']}:t11", "tab_label": "editor", "focus": False,
-                              "root": {"type": "pane", "cwd": str(self.project_b), "command": wrapped("nvim")}}),
-            ("tab.move", {"tab_id": f"{beta['workspace_id']}:t13", "insert_index": 0}),
-        ])
+        self.assertEqual(
+            self.herdr.requests,
+            [
+                (
+                    "layout.apply",
+                    {
+                        "tab_id": f"{alpha['workspace_id']}:t5",
+                        "tab_label": "agents",
+                        "focus": False,
+                        "root": {
+                            "type": "split",
+                            "direction": "right",
+                            "ratio": 0.5,
+                            "first": {"type": "pane", "cwd": str(self.project_a), "command": wrapped("pi")},
+                            "second": {"type": "pane", "cwd": str(self.project_a)},
+                        },
+                    },
+                ),
+                ("tab.move", {"tab_id": f"{alpha['workspace_id']}:t7", "insert_index": 0}),
+                (
+                    "layout.apply",
+                    {
+                        "workspace_id": alpha["workspace_id"],
+                        "tab_label": "editor",
+                        "focus": False,
+                        "root": {"type": "pane", "cwd": str(self.project_a), "command": wrapped("nvim")},
+                    },
+                ),
+                (
+                    "layout.apply",
+                    {
+                        "workspace_id": alpha["workspace_id"],
+                        "tab_label": "shell",
+                        "focus": False,
+                        "root": {"type": "pane", "cwd": str(self.project_a)},
+                    },
+                ),
+                (
+                    "layout.apply",
+                    {
+                        "tab_id": f"{beta['workspace_id']}:t11",
+                        "tab_label": "editor",
+                        "focus": False,
+                        "root": {"type": "pane", "cwd": str(self.project_b), "command": wrapped("nvim")},
+                    },
+                ),
+                ("tab.move", {"tab_id": f"{beta['workspace_id']}:t13", "insert_index": 0}),
+            ],
+        )
         self.assertEqual(self.herdr.tab_labels(alpha["workspace_id"]), ["agents", "editor", "shell"])
         self.assertIn("default-layout: built alpha (3 tabs)", self.stdout.getvalue())
         self.assertIn("default-layout: built beta (1 tabs)", self.stdout.getvalue())
@@ -443,9 +550,14 @@ class StartupTests(DefaultLayoutTestCase):
 
     def test_open_project_on_a_fresh_pass_is_left_alone(self):
         self.two_projects()
-        self.herdr.add_workspace("alpha", {"agents": [{"cwd": str(self.project_a)}],
-                                           "editor": [{"cwd": str(self.project_a)}],
-                                           "shell": [{"cwd": str(self.project_a)}]})
+        self.herdr.add_workspace(
+            "alpha",
+            {
+                "agents": [{"cwd": str(self.project_a)}],
+                "editor": [{"cwd": str(self.project_a)}],
+                "shell": [{"cwd": str(self.project_a)}],
+            },
+        )
         spec = default_layout.load_layout()
         with contextlib.redirect_stdout(self.stdout):
             default_layout.build_missing(spec, self.herdr.workspaces, self.herdr.snapshot())
@@ -491,12 +603,15 @@ class RehydrateTests(DefaultLayoutTestCase):
     def restored(self):
         self.two_projects()
         cwd = str(self.project_a)
-        workspace_id = self.herdr.add_workspace("alpha", {
-            "mine": [{"cwd": cwd}],
-            "agents": [{"cwd": cwd}, {"cwd": cwd}],
-            "editor": [{"cwd": cwd}],
-            "shell": [{"cwd": cwd}],
-        })
+        workspace_id = self.herdr.add_workspace(
+            "alpha",
+            {
+                "mine": [{"cwd": cwd}],
+                "agents": [{"cwd": cwd}, {"cwd": cwd}],
+                "editor": [{"cwd": cwd}],
+                "shell": [{"cwd": cwd}],
+            },
+        )
         self.herdr.add_workspace("other", {"t": [{"cwd": "/x"}]})
         return workspace_id
 

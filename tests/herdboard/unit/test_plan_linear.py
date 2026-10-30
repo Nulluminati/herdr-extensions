@@ -1,4 +1,5 @@
 """Plan a Linear issue: the planner needs a Linear connection, and its brief has the issue description."""
+
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -14,15 +15,26 @@ class PlanLinearTests(WriteCliCase):
         super().setUp()
         self.board()
         from herdboard.linear_links import LabelLink, ProjectLink
+
         self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]))
-        git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
-            "commit", "--allow-empty", "-qm", "init")
+        git(
+            self.repo,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        )
         start.register_checkout(self.repo)
         self.fake_herdr = PlanHerdr(Path(self.tmp.name))
         self.enterContext(patch.object(start, "command", self.fake_herdr))
         self.workers = []
-        self.enterContext(patch.object(plan, "start_worker",
-                                       lambda arguments, log: self.workers.append((arguments, log))))
+        self.enterContext(
+            patch.object(plan, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+        )
 
     def brief(self):
         call = self.fake_herdr.find("agent", "start")[0]
@@ -57,6 +69,7 @@ class PlanLinearTests(WriteCliCase):
         # Two started states match "In progress" and no choice is stored. Planning moves no card,
         # so it must not fail on the column that a later start would need an answer for.
         from support import linear_data
+
         linear_data.add_state(self.fixtures, "ENG", "Coding", "started")
         result = self.run_json("plan", "ENG-1", directory=self.repo)
         self.assertEqual(result["ref"], "ENG-1")
@@ -65,6 +78,7 @@ class PlanLinearTests(WriteCliCase):
 
     def test_a_linear_issue_needs_a_linear_connection(self):
         import os
+
         del os.environ["LINEAR_API_KEY"]
         self.assertEqual(self.error("plan", "ENG-1")["code"], "linear_disabled")
         self.assertEqual(self.fake_herdr.find("tab", "create"), [])

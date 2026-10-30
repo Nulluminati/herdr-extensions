@@ -41,30 +41,54 @@ def plan_branch(automation_id: str) -> str:
     return f"auto/{automation_id}-plan"
 
 
-def brief_text(item: automations.Automation, *, worktree: Path, branch: str, base: str, repoless: bool,
-               plan: str | None, files: list[dict], log: list[dict], plan_file: Path, command: str) -> str:
-    lines = [f"# Plan automation: {item.title}", "",
-             f"Plan herdboard automation `{item.id}` with the user. You do not do the work. The automation runs "
-             f"unattended: at each due time (`{item.schedule}`), herdboard adds a new card to board "
-             f"`{item.board}` and starts an agent on it, with your plan in its brief. That agent does not see "
-             "this conversation, and no user is there to answer its questions.", ""]
+def brief_text(
+    item: automations.Automation,
+    *,
+    worktree: Path,
+    branch: str,
+    base: str,
+    repoless: bool,
+    plan: str | None,
+    files: list[dict],
+    log: list[dict],
+    plan_file: Path,
+    command: str,
+) -> str:
+    lines = [
+        f"# Plan automation: {item.title}",
+        "",
+        f"Plan herdboard automation `{item.id}` with the user. You do not do the work. The automation runs "
+        f"unattended: at each due time (`{item.schedule}`), herdboard adds a new card to board "
+        f"`{item.board}` and starts an agent on it, with your plan in its brief. That agent does not see "
+        "this conversation, and no user is there to answer its questions.",
+        "",
+    ]
     if repoless:
-        lines += [f"- Working folder: `{worktree}`. The automation has no repository. Ask the user what the "
-                  "plan needs. Do not commit anything."]
+        lines += [
+            f"- Working folder: `{worktree}`. The automation has no repository. Ask the user what the "
+            "plan needs. Do not commit anything."
+        ]
     else:
-        lines += [f"- Worktree: `{worktree}` on the temporary branch `{branch}` (from `{base}`). You may change "
-                  "code and run commands here to test ideas. Do not commit. herdboard removes this worktree and "
-                  "branch when planning ends, if they are clean. Revert every change you made before you end."]
-    lines += [f"- The plan: `{plan_file}`",
-              f"- Attachments: `{plan_file.parent}`. herdboard copies every file there to each spawned card.",
-              ""]
+        lines += [
+            f"- Worktree: `{worktree}` on the temporary branch `{branch}` (from `{base}`). You may change "
+            "code and run commands here to test ideas. Do not commit. herdboard removes this worktree and "
+            "branch when planning ends, if they are clean. Revert every change you made before you end."
+        ]
+    lines += [
+        f"- The plan: `{plan_file}`",
+        f"- Attachments: `{plan_file.parent}`. herdboard copies every file there to each spawned card.",
+        "",
+    ]
     lines += ["## Details", ""]
     body = item.body.splitlines()
     lines += body if any(line.strip() for line in body) else ["None. The title is the whole task."]
     lines.append("")
     if item.may_merge_prs:
-        lines += ["The automation allows its agent to merge pull requests whose checks pass and that need no "
-                  "code change, with `gh pr merge`.", ""]
+        lines += [
+            "The automation allows its agent to merge pull requests whose checks pass and that need no "
+            "code change, with `gh pr merge`.",
+            "",
+        ]
     if plan and plan.strip():
         lines += ["## The current plan", "", "A plan exists. Revise it with the user.", "", plan.strip("\n"), ""]
     others = [entry for entry in files if entry["name"] != attachments.PLAN_NAME]
@@ -123,18 +147,47 @@ class AutomationPlanner:
         for block in (_git(checkout, "worktree", "list", "--porcelain") or "").split("\n\n"):
             block_lines = block.splitlines()
             if f"branch refs/heads/{branch}" in block_lines:
-                existing = next((line.removeprefix("worktree ") for line in block_lines if line.startswith("worktree ")), None)
+                existing = next(
+                    (line.removeprefix("worktree ") for line in block_lines if line.startswith("worktree ")), None
+                )
         if existing:
             # A worktree kept from an earlier plan, because it had changes.
-            result = herdr("worktree", "open", "--cwd", str(checkout), "--path", existing, "--label", label,
-                           "--no-focus", "--trust-repository")
+            result = herdr(
+                "worktree",
+                "open",
+                "--cwd",
+                str(checkout),
+                "--path",
+                existing,
+                "--label",
+                label,
+                "--no-focus",
+                "--trust-repository",
+            )
         else:
-            result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch, "--base", base,
-                           "--label", label, "--no-focus", "--trust-repository")
+            result = herdr(
+                "worktree",
+                "create",
+                "--cwd",
+                str(checkout),
+                "--branch",
+                branch,
+                "--base",
+                base,
+                "--label",
+                label,
+                "--no-focus",
+                "--trust-repository",
+            )
         try:
-            return {"workspace_id": result["workspace"]["workspace_id"], "pane_id": result["root_pane"]["pane_id"],
-                    "worktree_path": result.get("worktree", {}).get("path") or existing,
-                    "checkout": str(checkout), "branch": branch, "base": base}
+            return {
+                "workspace_id": result["workspace"]["workspace_id"],
+                "pane_id": result["root_pane"]["pane_id"],
+                "worktree_path": result.get("worktree", {}).get("path") or existing,
+                "checkout": str(checkout),
+                "branch": branch,
+                "base": base,
+            }
         except (KeyError, TypeError, AttributeError) as error:
             raise StartError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
 
@@ -146,8 +199,11 @@ class AutomationPlanner:
             raise StartError(f"{folder}: cannot create the folder: {error}") from error
         result = herdr("workspace", "create", "--cwd", str(folder), "--label", label, "--no-focus")
         try:
-            return {"workspace_id": result["workspace"]["workspace_id"], "pane_id": result["root_pane"]["pane_id"],
-                    "worktree_path": str(folder)}
+            return {
+                "workspace_id": result["workspace"]["workspace_id"],
+                "pane_id": result["root_pane"]["pane_id"],
+                "worktree_path": str(folder),
+            }
         except (KeyError, TypeError, AttributeError) as error:
             raise StartError(f"Unexpected Herdr workspace result: {result}", "herdr_error") from error
 
@@ -179,19 +235,40 @@ class AutomationPlanner:
             worktree = Path(place["worktree_path"])
             pane = place["pane_id"]
             plan_file = attachments.plan_path(self.config, ref)
-            brief = write_brief(f"{ref}-plan", brief_text(
-                item, worktree=worktree, branch=place.get("branch", ""), base=place.get("base", ""),
-                repoless=repoless, plan=attachments.plan_for_agent(self.store, ref),
-                files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
-                plan_file=plan_file, command=herdboard_command(self.config_file)))
+            brief = write_brief(
+                f"{ref}-plan",
+                brief_text(
+                    item,
+                    worktree=worktree,
+                    branch=place.get("branch", ""),
+                    base=place.get("base", ""),
+                    repoless=repoless,
+                    plan=attachments.plan_for_agent(self.store, ref),
+                    files=attachments.listing(self.config, ref),
+                    log=activity.read(self.config, ref),
+                    plan_file=plan_file,
+                    command=herdboard_command(self.config_file),
+                ),
+            )
             plan_mtime = _mtime(plan_file)
-            prompt = _one_line(f"Plan herdboard automation {ref}: {item.title}. Read the brief at {brief} first; "
-                               "it has the automation and how to plan it with me.")
+            prompt = _one_line(
+                f"Plan herdboard automation {ref}: {item.title}. Read the brief at {brief} first; "
+                "it has the automation and how to plan it with me."
+            )
             export_config(pane, self.config_file)
             try:
-                herdr("agent", "start", f"hb-{ref}-plan", "--kind", kind, "--pane", pane, "--",
-                      *planner_arguments(kind, prompt, plan_file.parent, model, thinking),
-                      tolerated=("timeout", "agent_not_ready"))
+                herdr(
+                    "agent",
+                    "start",
+                    f"hb-{ref}-plan",
+                    "--kind",
+                    kind,
+                    "--pane",
+                    pane,
+                    "--",
+                    *planner_arguments(kind, prompt, plan_file.parent, model, thinking),
+                    tolerated=("timeout", "agent_not_ready"),
+                )
             except HerdboardError:
                 try:
                     _clean_up(self.store, ref, {**place, "repoless": repoless})
@@ -200,8 +277,16 @@ class AutomationPlanner:
                 raise
             with _lock(wait=2):
                 records = _read(_plans_path())
-                records[ref] = {"pane_id": pane, "kind": kind, "model": model, "started": time.time(),
-                                "plan_mtime": plan_mtime, "automation": True, "repoless": repoless, **place}
+                records[ref] = {
+                    "pane_id": pane,
+                    "kind": kind,
+                    "model": model,
+                    "started": time.time(),
+                    "plan_mtime": plan_mtime,
+                    "automation": True,
+                    "repoless": repoless,
+                    **place,
+                }
                 _write(_plans_path(), records)
         activity.append(self.store, ref, f"Planning started: {kind}{f' ({model})' if model else ''}.", "herdboard")
         config = ["--config", str(self.config_file)] if self.config_file else []
@@ -210,11 +295,23 @@ class AutomationPlanner:
             log.parent.mkdir(parents=True, exist_ok=True)
             start_worker([*config, "automation", "plan-wait", ref, "--pane", pane], log)
         except OSError as error:
-            activity.append(self.store, ref, f"The plan saves are not logged and the worktree stays: the worker "
-                            f"did not start: {error}", "herdboard")
-        return {"id": ref, "agent": kind, "model": model, "pane_id": pane, "plan": str(plan_file),
-                "workspace_id": place["workspace_id"], "worktree_path": str(worktree),
-                "branch": place.get("branch"), "base": place.get("base")}
+            activity.append(
+                self.store,
+                ref,
+                f"The plan saves are not logged and the worktree stays: the worker did not start: {error}",
+                "herdboard",
+            )
+        return {
+            "id": ref,
+            "agent": kind,
+            "model": model,
+            "pane_id": pane,
+            "plan": str(plan_file),
+            "workspace_id": place["workspace_id"],
+            "worktree_path": str(worktree),
+            "branch": place.get("branch"),
+            "base": place.get("base"),
+        }
 
 
 def _git_status(worktree: Path) -> str | None:
@@ -240,22 +337,29 @@ def _clean_up(store, ref: str, record: dict) -> None:
     if worktree.exists():
         status = _git_status(worktree)
         if status is None or status.strip():
-            activity.append(store, ref, f"Kept the planning worktree {worktree} and branch {branch}: it has "
-                            "changes. Remove them by hand.", "herdboard")
+            activity.append(
+                store,
+                ref,
+                f"Kept the planning worktree {worktree} and branch {branch}: it has changes. Remove them by hand.",
+                "herdboard",
+            )
             return
         if workspace:
             herdr("worktree", "remove", "--workspace", workspace, tolerated=("workspace_not_found",))
         if worktree.exists():
-            removed = subprocess.run(["git", "-C", checkout, "worktree", "remove", str(worktree)],
-                                     capture_output=True, text=True)
+            removed = subprocess.run(
+                ["git", "-C", checkout, "worktree", "remove", str(worktree)], capture_output=True, text=True
+            )
             if removed.returncode:
-                activity.append(store, ref, f"Kept the planning worktree {worktree}: {removed.stderr.strip()}",
-                                "herdboard")
+                activity.append(
+                    store, ref, f"Kept the planning worktree {worktree}: {removed.stderr.strip()}", "herdboard"
+                )
                 return
     deleted = subprocess.run(["git", "-C", checkout, "branch", "-d", branch], capture_output=True, text=True)
     if deleted.returncode:
-        activity.append(store, ref, f"Removed the planning worktree. Kept branch {branch}: "
-                        f"{deleted.stderr.strip()}", "herdboard")
+        activity.append(
+            store, ref, f"Removed the planning worktree. Kept branch {branch}: {deleted.stderr.strip()}", "herdboard"
+        )
         return
     activity.append(store, ref, "Removed the planning worktree and its branch.", "herdboard")
 

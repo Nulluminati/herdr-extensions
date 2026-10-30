@@ -70,8 +70,11 @@ def brief_text(
         lines += [note, ""]
     facts = []
     if linear:
-        facts += [f"Link: {card.url}" if card.url else "", f"State: {card.state}" if card.state else "",
-                  f"Team: {card.team}" if card.team else ""]
+        facts += [
+            f"Link: {card.url}" if card.url else "",
+            f"State: {card.state}" if card.state else "",
+            f"Team: {card.team}" if card.team else "",
+        ]
     if card.type:
         facts.append(f"Type: {card.type}")
     if card.tags:
@@ -125,17 +128,24 @@ def brief_text(
             lines += [content.rstrip("\n") if content is not None else "The note was not found.", ""]
 
     if plan and plan.strip():
-        lines += ["## Plan", "",
-                  "You and the user agreed on this plan before the work started. Follow it. Log each change to it.",
-                  "", plan.strip("\n"), ""]
+        lines += [
+            "## Plan",
+            "",
+            "You and the user agreed on this plan before the work started. Follow it. Log each change to it.",
+            "",
+            plan.strip("\n"),
+            "",
+        ]
     # The plan is in the brief already, so only the other attachments are listed.
     others = [entry for entry in attachments if entry["name"] != PLAN_NAME]
     if others:
         lines += ["## Attachments", "", "Read them when you need them.", ""]
         lines += [f"- `{entry['path']}`" for entry in others] + [""]
         if any(fnmatch(entry["name"], "mockup-*.png") for entry in others):
-            lines += ["Files named `mockup-*.png` are UI mockups that the user approved. "
-                      "Open them before you build the UI.", ""]
+            lines += [
+                "Files named `mockup-*.png` are UI mockups that the user approved. Open them before you build the UI.",
+                "",
+            ]
 
     if log:
         lines += ["## Activity log", ""]
@@ -175,7 +185,7 @@ def brief_text(
             "",
             f"- Write the result to the attachments folder: `{attachments_dir or worktree}`. "
             "Name each file clearly, for example `findings.md`.",
-            f"- Record what you did with `{command} --json log {ref} \"...\"`.",
+            f'- Record what you did with `{command} --json log {ref} "..."`.',
             f"- When the work is ready for the user to check, run `{command} --json move {ref} Review`",
             f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
             "Fix, and move the card back to Review.",
@@ -188,14 +198,23 @@ def brief_text(
         "## Finish the work",
         "",
         f"- Commit every change on the branch `{branch}`. Use conventional commit messages.",
-        *([f"- The card is a {card.type}: use `{commit_type(card.type)}` as the conventional commit type "
-           "of the main change."] if card.type else []),
+        *(
+            [
+                f"- The card is a {card.type}: use `{commit_type(card.type)}` as the conventional commit type "
+                "of the main change."
+            ]
+            if card.type
+            else []
+        ),
         f"- When the work is ready for the user to check, commit it, then run `{command} --json move {ref} Review`",
         f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
         "Fix, commit, and move the card back to Review.",
-        ("- Do not push or merge your branch, rebase it onto another branch, or remove the worktree. "
-         "herdboard does that." if may_merge_prs else
-         "- Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that."),
+        (
+            "- Do not push or merge your branch, rebase it onto another branch, or remove the worktree. "
+            "herdboard does that."
+            if may_merge_prs
+            else "- Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that."
+        ),
         "- Do not move the card to Done. The user does that after the review.",
         "",
     ]

@@ -72,8 +72,10 @@ class ReviewTestCase(unittest.TestCase):
         os.environ.pop("HERDR_PANE_ID", None)
         self.repo = self.root / "repo"
         self.repo.mkdir()
-        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com",
-                                      "commit", "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
         self.config = Config(todos_dir=self.root / "todos")
         self.store = Store(self.config)
@@ -96,4 +98,4 @@ class ReviewTestCase(unittest.TestCase):
         return json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
 
     def calls(self, *prefix):
-        return [c for c in self.fake.calls if c[:len(prefix)] == list(prefix)]
+        return [c for c in self.fake.calls if c[: len(prefix)] == list(prefix)]

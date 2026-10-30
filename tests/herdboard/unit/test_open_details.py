@@ -32,8 +32,10 @@ class OpenDetailsTests(unittest.TestCase):
     def test_opens_the_pane_for_this_herdr_pane(self):
         os.environ["HERDR_PANE_ID"] = "w1:p3"
         self.assertEqual(self.run_script(), 0)
-        self.assertEqual(self.calls, [["uv", "run", "--quiet", "--project", "/plugin", "herdboard", "details",
-                                       "--open", "--pane", "w1:p3"]])
+        self.assertEqual(
+            self.calls,
+            [["uv", "run", "--quiet", "--project", "/plugin", "herdboard", "details", "--open", "--pane", "w1:p3"]],
+        )
 
     def test_falls_back_to_the_focused_pane_of_the_context(self):
         os.environ["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"focused_pane_id": "w2:p1"})
@@ -44,8 +46,10 @@ class OpenDetailsTests(unittest.TestCase):
         self.code = 1
         with patch("sys.stderr"):
             self.assertEqual(self.run_script(), 1)
-        self.assertEqual(self.calls[1], ["herdr", "notification", "show", "herdboard: no details pane",
-                                         "--body", "herdboard: No card"])
+        self.assertEqual(
+            self.calls[1],
+            ["herdr", "notification", "show", "herdboard: no details pane", "--body", "herdboard: No card"],
+        )
 
 
 if __name__ == "__main__":

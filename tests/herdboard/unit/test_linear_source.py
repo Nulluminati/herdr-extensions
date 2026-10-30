@@ -31,6 +31,7 @@ class SourceTests(LinearEnvTestCase):
         import threading
 
         from herdboard.linear_writes import LinearWriter
+
         linear_data.with_workflow(self.fixtures)
         source = self.source()
         source.account()
@@ -174,8 +175,10 @@ class SourceTests(LinearEnvTestCase):
 
     def test_graphql_error_does_not_fall_back(self):
         self.source().my_issues()
-        self.fake.responses = [(200, {"data": {"viewer": linear_data.VIEWER}}, {}),
-                               (200, {"errors": [{"message": "Denied"}]}, {})]
+        self.fake.responses = [
+            (200, {"data": {"viewer": linear_data.VIEWER}}, {}),
+            (200, {"errors": [{"message": "Denied"}]}, {}),
+        ]
         with self.assertRaisesRegex(LinearError, "Denied"):
             self.source().my_issues()
 
@@ -269,8 +272,7 @@ class PinnedSourceTests(LinearEnvTestCase):
         fetched = self.source().pinned_issues(["i5", "i1", "i404"])
         self.assertEqual([i["identifier"] for i in fetched.data], ["ENG-1", "ENG-5"])
         self.assertFalse(fetched.stale)
-        self.assertEqual(self.requests("PinnedIssues")[0]["variables"]["filter"]["id"],
-                         {"in": ["i5", "i1", "i404"]})
+        self.assertEqual(self.requests("PinnedIssues")[0]["variables"]["filter"]["id"], {"in": ["i5", "i1", "i404"]})
         self.endpoint = DEAD
         offline = self.source(offline=True).pinned_issues(["i1", "i404", "i5"])
         self.assertTrue(offline.stale)
@@ -285,25 +287,42 @@ class PinnedSourceTests(LinearEnvTestCase):
         self.assertEqual(found.data["id"], "i5")
 
     def test_search_returns_open_issues_of_my_teams(self):
-        self.fixtures["issues"].append({**linear_data.make_issue(7), "identifier": "OPS-7",
-                                        "team": linear_data.OPS})
+        self.fixtures["issues"].append({**linear_data.make_issue(7), "identifier": "OPS-7", "team": linear_data.OPS})
         self.fixtures["my_team_ids"] = ["t-eng"]
         found = self.source().search("issue")
         self.assertEqual([i["identifier"] for i in found], ["ENG-1", "ENG-2", "ENG-3", "ENG-5"])
-        self.assertEqual(found[0], {"id": "i1", "identifier": "ENG-1", "title": "Issue 1",
-                                    "state": {"name": "Todo", "type": "unstarted"},
-                                    "team": {"key": "ENG"}, "project": {"name": "Platform"}})
-        self.assertEqual(self.requests("SearchIssues")[0]["variables"]["filter"]["team"],
-                         {"id": {"in": ["t-eng"]}})
+        self.assertEqual(
+            found[0],
+            {
+                "id": "i1",
+                "identifier": "ENG-1",
+                "title": "Issue 1",
+                "state": {"name": "Todo", "type": "unstarted"},
+                "team": {"key": "ENG"},
+                "project": {"name": "Platform"},
+            },
+        )
+        self.assertEqual(self.requests("SearchIssues")[0]["variables"]["filter"]["team"], {"id": {"in": ["t-eng"]}})
 
     def test_search_for_an_identifier_fetches_that_issue_from_any_team(self):
-        self.fixtures["issues"].append({**linear_data.make_issue(7), "identifier": "OPS-7",
-                                        "team": linear_data.OPS, "project": None})
+        self.fixtures["issues"].append(
+            {**linear_data.make_issue(7), "identifier": "OPS-7", "team": linear_data.OPS, "project": None}
+        )
         self.fixtures["my_team_ids"] = ["t-eng"]
         found = self.source().search(" ops-7 ")
-        self.assertEqual(found, [{"id": "i7", "identifier": "OPS-7", "title": "Issue 7",
-                                  "state": {"name": "Todo", "type": "unstarted"},
-                                  "team": {"key": "OPS"}, "project": None}])
+        self.assertEqual(
+            found,
+            [
+                {
+                    "id": "i7",
+                    "identifier": "OPS-7",
+                    "title": "Issue 7",
+                    "state": {"name": "Todo", "type": "unstarted"},
+                    "team": {"key": "OPS"},
+                    "project": None,
+                }
+            ],
+        )
         self.assertEqual(self.requests("SearchIssues"), [])
         self.assertEqual(self.source().search("ENG-404"), [])
 
@@ -331,10 +350,13 @@ class CardTests(unittest.TestCase):
         return issue
 
     def test_fields(self):
-        card = self.card(self.flat(linear_data.make_issue(2, state=("In Review", "started"),
-                                                          labels=("l-api", "l-bug"))))
-        self.assertEqual((card.ref, card.board, card.column, card.title, card.state, card.team),
-                         ("ENG-2", "Platform", "Review", "Issue 2", "In Review", "ENG"))
+        card = self.card(
+            self.flat(linear_data.make_issue(2, state=("In Review", "started"), labels=("l-api", "l-bug")))
+        )
+        self.assertEqual(
+            (card.ref, card.board, card.column, card.title, card.state, card.team),
+            ("ENG-2", "Platform", "Review", "Issue 2", "In Review", "ENG"),
+        )
         self.assertEqual((card.source, card.read_only, card.path, card.checked), ("linear", True, None, False))
         self.assertEqual((card.tags, card.type), (["repo:api"], "bug"))
         self.assertEqual(card.body, ["Line one", "Line two"])
@@ -349,14 +371,23 @@ class CardTests(unittest.TestCase):
         self.assertIsNone(self.card(self.flat(linear_data.make_issue(1))).parent)
 
     def test_without_project_description_or_due(self):
-        card = self.card(self.flat(linear_data.make_issue(6, project=None, description=None, due=None,
-                                                          state=("Shipped", "completed"))))
-        self.assertEqual((card.board, card.column, card.body, card.due, card.checked),
-                         ("Linear", "Done", [], None, True))
+        card = self.card(
+            self.flat(
+                linear_data.make_issue(6, project=None, description=None, due=None, state=("Shipped", "completed"))
+            )
+        )
+        self.assertEqual(
+            (card.board, card.column, card.body, card.due, card.checked), ("Linear", "Done", [], None, True)
+        )
 
     def test_columns_by_type_and_name_override(self):
-        types = {"triage": "Backlog", "backlog": "Backlog", "unstarted": "Todo", "started": "In progress",
-                 "completed": "Done"}
+        types = {
+            "triage": "Backlog",
+            "backlog": "Backlog",
+            "unstarted": "Todo",
+            "started": "In progress",
+            "completed": "Done",
+        }
         for kind, column in types.items():
             self.assertEqual(column_for(self.config, {"name": "X", "type": kind}), column)
         self.assertEqual(column_for(self.config, {"name": "In Review", "type": "started"}), "Review")
@@ -379,19 +410,26 @@ class CardTests(unittest.TestCase):
 
     def test_the_card_keeps_the_attachments(self):
         issue = self.flat(linear_data.make_issue(1))
-        issue["attachments"] = [linear_data.attachment(linear_data.PR_URL, "Fix login", "Open"),
-                                linear_data.attachment("https://example.com/spec")]
-        self.assertEqual(self.card(issue).linear_attachments, [
-            {"title": "Fix login", "subtitle": "Open", "url": linear_data.PR_URL},
-            {"title": "https://example.com/spec", "subtitle": None, "url": "https://example.com/spec"}])
+        issue["attachments"] = [
+            linear_data.attachment(linear_data.PR_URL, "Fix login", "Open"),
+            linear_data.attachment("https://example.com/spec"),
+        ]
+        self.assertEqual(
+            self.card(issue).linear_attachments,
+            [
+                {"title": "Fix login", "subtitle": "Open", "url": linear_data.PR_URL},
+                {"title": "https://example.com/spec", "subtitle": None, "url": "https://example.com/spec"},
+            ],
+        )
 
     def test_a_cached_attachment_url_without_a_title_shows_the_url(self):
         # Caches written before attachments had titles hold only their URLs.
         issue = self.flat(linear_data.make_issue(1))
         issue["attachments"] = [linear_data.PR_URL]
         card = self.card(issue, {"github.com/acme/api"})
-        self.assertEqual(card.linear_attachments,
-                         [{"title": linear_data.PR_URL, "subtitle": None, "url": linear_data.PR_URL}])
+        self.assertEqual(
+            card.linear_attachments, [{"title": linear_data.PR_URL, "subtitle": None, "url": linear_data.PR_URL}]
+        )
         self.assertTrue(card.pr)
 
     def test_pr_urls(self):

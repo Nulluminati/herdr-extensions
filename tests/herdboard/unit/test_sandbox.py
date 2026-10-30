@@ -1,4 +1,5 @@
 """Reviewer sandbox options: any shell command, writes in one folder, shell network to GitHub only."""
+
 import json
 import os
 import subprocess
@@ -73,8 +74,9 @@ class ClaudeTests(unittest.TestCase):
         self.assertTrue(settings["enabled"])
         self.assertTrue(settings["failIfUnavailable"])
         self.assertFalse(settings["allowUnsandboxedCommands"])
-        self.assertEqual(settings["network"]["allowedDomains"],
-                         ["github.com", "*.github.com", "*.githubusercontent.com"])
+        self.assertEqual(
+            settings["network"]["allowedDomains"], ["github.com", "*.github.com", "*.githubusercontent.com"]
+        )
         self.assertEqual(settings["filesystem"], {"allowWrite": [str(FOLDER)], "denyWrite": [str(REPO)]})
         self.assertNotIn("excludedCommands", settings)
 
@@ -93,8 +95,17 @@ class ClaudeTests(unittest.TestCase):
     def test_tools_allow_the_shell_web_skills_and_documentation(self):
         tools = sandbox.claude_reviewer_tools(None)
         self.assertEqual(tools[0], "--allowedTools")
-        for tool in ("Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Skill", "mcp__context7",
-                     "mcp__grep_app"):
+        for tool in (
+            "Read",
+            "Grep",
+            "Glob",
+            "Bash",
+            "WebFetch",
+            "WebSearch",
+            "Skill",
+            "mcp__context7",
+            "mcp__grep_app",
+        ):
             self.assertIn(tool, tools)
         self.assertFalse(any(tool.startswith(("Edit", "Write")) for tool in tools))
 
@@ -110,16 +121,26 @@ class PiTests(unittest.TestCase):
         self.assertEqual(args[:2], ["--approval-mode", "off"])
         policy = pi_policy(args)
         self.assertEqual(policy["filesystem"], {"allowWrite": [str(FOLDER)], "denyWrite": [str(REPO)]})
-        self.assertEqual(policy["network"]["allowedDomains"],
-                         ["github.com", "*.github.com", "*.githubusercontent.com"])
+        self.assertEqual(policy["network"]["allowedDomains"], ["github.com", "*.github.com", "*.githubusercontent.com"])
         self.assertNotIn("excludedCommands", policy)
 
     def test_tools_include_documentation_and_write_only_with_a_folder(self):
         args = sandbox.pi_reviewer_options(FOLDER, REPO, browser=False, hunk=False)
         tools = args[args.index("--tools") + 1].split(",")
-        for tool in ("read", "grep", "find", "ls", "bash", "write", "web_fetch", "web_search",
-                     "context7_resolve_library_id", "context7_get_library_docs",
-                     "context7_get_cached_doc_raw", "code_search"):
+        for tool in (
+            "read",
+            "grep",
+            "find",
+            "ls",
+            "bash",
+            "write",
+            "web_fetch",
+            "web_search",
+            "context7_resolve_library_id",
+            "context7_get_library_docs",
+            "context7_get_cached_doc_raw",
+            "code_search",
+        ):
             self.assertIn(tool, tools)
         args = sandbox.pi_reviewer_options(None, REPO, browser=False, hunk=False)
         self.assertNotIn("write", args[args.index("--tools") + 1].split(","))
@@ -144,8 +165,9 @@ class CodexTests(unittest.TestCase):
         filesystem = codex_value(args, "permissions.hb-review.filesystem")["permissions"]["hb-review"]["filesystem"]
         self.assertEqual(filesystem, {":root": "read", str(FOLDER): "write"})
         network = codex_value(args, "permissions.hb-review.network")["permissions"]["hb-review"]["network"]
-        self.assertEqual(network, {"enabled": True, "domains": {"**.github.com": "allow",
-                                                                "**.githubusercontent.com": "allow"}})
+        self.assertEqual(
+            network, {"enabled": True, "domains": {"**.github.com": "allow", "**.githubusercontent.com": "allow"}}
+        )
 
     def test_profile_without_a_folder_writes_nothing(self):
         args = sandbox.codex_reviewer_options("hb-pr-review", None, hunk=False)

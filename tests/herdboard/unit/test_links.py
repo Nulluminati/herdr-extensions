@@ -18,13 +18,26 @@ def board_text(front, newline="\n"):
 
 class ParseTests(unittest.TestCase):
     def test_reads_projects_and_labels(self):
-        lines = ["---", "kanban-plugin: board", "repo: github.com/acme/api", "linear-projects:",
-                 "  - id: p1", "    name: Platform", "    labels:",
-                 "      - {id: l1, name: 'repo:api'}", "  - id: p2", "    name: Mobile", "---"]
-        self.assertEqual(parse_links(lines), [
-            ProjectLink("p1", "Platform", [LabelLink("l1", "repo:api")]),
-            ProjectLink("p2", "Mobile"),
-        ])
+        lines = [
+            "---",
+            "kanban-plugin: board",
+            "repo: github.com/acme/api",
+            "linear-projects:",
+            "  - id: p1",
+            "    name: Platform",
+            "    labels:",
+            "      - {id: l1, name: 'repo:api'}",
+            "  - id: p2",
+            "    name: Mobile",
+            "---",
+        ]
+        self.assertEqual(
+            parse_links(lines),
+            [
+                ProjectLink("p1", "Platform", [LabelLink("l1", "repo:api")]),
+                ProjectLink("p2", "Mobile"),
+            ],
+        )
 
     def test_no_key_no_frontmatter_and_unclosed_give_no_links(self):
         self.assertEqual(parse_links(["---", "kanban-plugin: board", "---"]), [])
@@ -47,8 +60,7 @@ class ParseTests(unittest.TestCase):
 
 class ReplaceTests(unittest.TestCase):
     LINKS = [ProjectLink("p1", "Platform", [LabelLink("l1", "repo:api")])]
-    BLOCK = ["linear-projects:", "- id: p1", "  name: Platform", "  labels:", "  - id: l1",
-             "    name: repo:api"]
+    BLOCK = ["linear-projects:", "- id: p1", "  name: Platform", "  labels:", "  - id: l1", "    name: repo:api"]
 
     def test_adds_the_block_before_the_trailing_blank_line_and_keeps_other_bytes(self):
         front = ["repo: github.com/acme/api", "kanban-plugin: board", "owner: nate"]
@@ -60,32 +72,59 @@ class ReplaceTests(unittest.TestCase):
 
     def test_adds_before_the_closing_fence_without_a_blank_line(self):
         text = "---\nkanban-plugin: board\n---\n## Backlog\n"
-        self.assertEqual(replace_links(text, [ProjectLink("p1", "Platform")]),
-                         "---\nkanban-plugin: board\nlinear-projects:\n- id: p1\n  name: Platform\n"
-                         "---\n## Backlog\n")
+        self.assertEqual(
+            replace_links(text, [ProjectLink("p1", "Platform")]),
+            "---\nkanban-plugin: board\nlinear-projects:\n- id: p1\n  name: Platform\n---\n## Backlog\n",
+        )
 
     def test_other_lines_keep_order_comments_and_spelling(self):
-        front = ["# a comment", "owner:   'nate'   # who", "kanban-plugin: board", "",
-                 "tags: [a,   b]", "# trailing comment"]
+        front = [
+            "# a comment",
+            "owner:   'nate'   # who",
+            "kanban-plugin: board",
+            "",
+            "tags: [a,   b]",
+            "# trailing comment",
+        ]
         new = replace_links(board_text(front), self.LINKS)
         self.assertEqual(new, board_text(front + self.BLOCK))
 
     def test_replaces_only_its_own_block(self):
-        front = ["kanban-plugin: board", "linear-projects:", "- {id: x, name: X}",
-                 "  # inside", "", "- id: y", "  name: Y", "after: 1", "# comment", "last: 2"]
+        front = [
+            "kanban-plugin: board",
+            "linear-projects:",
+            "- {id: x, name: X}",
+            "  # inside",
+            "",
+            "- id: y",
+            "  name: Y",
+            "after: 1",
+            "# comment",
+            "last: 2",
+        ]
         new = replace_links(board_text(front), [ProjectLink("p1", "Platform")])
-        self.assertEqual(new, board_text(["kanban-plugin: board", "linear-projects:", "- id: p1",
-                                          "  name: Platform", "after: 1", "# comment", "last: 2"]))
+        self.assertEqual(
+            new,
+            board_text(
+                [
+                    "kanban-plugin: board",
+                    "linear-projects:",
+                    "- id: p1",
+                    "  name: Platform",
+                    "after: 1",
+                    "# comment",
+                    "last: 2",
+                ]
+            ),
+        )
 
     def test_block_at_the_end_keeps_the_blank_line_after_it(self):
         front = ["kanban-plugin: board", "linear-projects:", "  - id: x", "    name: X"]
         new = replace_links(board_text(front), [ProjectLink("p1", "Platform")])
-        self.assertEqual(new, board_text(["kanban-plugin: board", "linear-projects:", "- id: p1",
-                                          "  name: Platform"]))
+        self.assertEqual(new, board_text(["kanban-plugin: board", "linear-projects:", "- id: p1", "  name: Platform"]))
 
     def test_removes_the_block_and_only_the_block(self):
-        front = ["owner: nate", "kanban-plugin: board", "linear-projects:", "- id: x", "  name: X",
-                 "after: 1"]
+        front = ["owner: nate", "kanban-plugin: board", "linear-projects:", "- id: x", "  name: X", "after: 1"]
         removed = replace_links(board_text(front), [])
         self.assertEqual(removed, board_text(["owner: nate", "kanban-plugin: board", "after: 1"]))
         self.assertEqual(replace_links(removed, []), removed)
@@ -94,8 +133,12 @@ class ReplaceTests(unittest.TestCase):
         text = board_text(["kanban-plugin: board", "owner: nate"], "\r\n")
         new = replace_links(text, [ProjectLink("p1", "Platform")])
         self.assertNotRegex(new, r"(?<!\r)\n")
-        self.assertEqual(new, board_text(["kanban-plugin: board", "owner: nate", "linear-projects:",
-                                          "- id: p1", "  name: Platform"], "\r\n"))
+        self.assertEqual(
+            new,
+            board_text(
+                ["kanban-plugin: board", "owner: nate", "linear-projects:", "- id: p1", "  name: Platform"], "\r\n"
+            ),
+        )
         self.assertTrue(new.endswith(BODY.replace("\n", "\r\n")))
 
     def test_unicode_is_written_as_is(self):
@@ -107,9 +150,10 @@ class ReplaceTests(unittest.TestCase):
             replace_links(board_text(["a: [unclosed"]), [])
 
     def test_duplicate_top_level_keys_are_a_format_error(self):
-        for front in (["owner: a", "kanban-plugin: board", "owner: b"],
-                      ["kanban-plugin: board", "linear-projects:", "- id: x", "  name: X",
-                       "linear-projects: []"]):
+        for front in (
+            ["owner: a", "kanban-plugin: board", "owner: b"],
+            ["kanban-plugin: board", "linear-projects:", "- id: x", "  name: X", "linear-projects: []"],
+        ):
             with self.subTest(front=front), self.assertRaisesRegex(FormatError, "duplicate"):
                 replace_links(board_text(front), self.LINKS)
 
@@ -128,7 +172,7 @@ class StoreLinkTests(unittest.TestCase):
 
     def test_add_replace_remove_round_trip(self):
         before = self.path.read_text()
-        body = before[before.index("## Backlog"):]
+        body = before[before.index("## Backlog") :]
         self.store.update_links(self.path, lambda links: links + [ProjectLink("p1", "Platform")])
         self.store.update_links(self.path, lambda links: [ProjectLink("p1", "Renamed", [LabelLink("l1", "x")])])
         meta = self.store.board_meta(self.path)

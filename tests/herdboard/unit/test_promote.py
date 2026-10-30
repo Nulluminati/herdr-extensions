@@ -68,8 +68,7 @@ class PromoteCase(WriterCase):
     def records(self, todos=None):
         """The records of one todo store, by card ID."""
         prefix = f"{(todos or self.todos).resolve()}::"
-        return {key[len(prefix):]: record for key, record in self.all_records().items()
-                if key.startswith(prefix)}
+        return {key[len(prefix) :]: record for key, record in self.all_records().items() if key.startswith(prefix)}
 
     def unfinished(self):
         """Leave a record with the parent created and the first sub-issue unknown."""
@@ -100,8 +99,7 @@ class ConversionTests(PromoteCase):
     def test_parent_has_title_due_date_label_assignee_and_state(self):
         result = self.promote()
         parent = self.creates()[0]
-        self.assertEqual((result.issue["identifier"], result.issue["title"]),
-                         ("ENG-7", "Renovate the bathroom"))
+        self.assertEqual((result.issue["identifier"], result.issue["title"]), ("ENG-7", "Renovate the bathroom"))
         self.assertEqual(parent["title"], "Renovate the bathroom")
         self.assertEqual(parent["dueDate"], "2026-11-02")
         self.assertEqual(parent["labelIds"], ["l-home-eng"])
@@ -112,27 +110,30 @@ class ConversionTests(PromoteCase):
 
     def test_leftover_text_and_tags_without_a_label_go_into_the_description(self):
         self.promote()
-        self.assertEqual(self.creates()[0]["description"], "\n".join([
-            "Budget is tight, ask for two quotes",
-            "\t- [ ] Measure the ceiling",
-            "\tCeiling is uneven",
-            "- Not a checklist item",
-            "",
-            "#Unknown-tag",
-        ]))
+        self.assertEqual(
+            self.creates()[0]["description"],
+            "\n".join(
+                [
+                    "Budget is tight, ask for two quotes",
+                    "\t- [ ] Measure the ceiling",
+                    "\tCeiling is uneven",
+                    "- Not a checklist item",
+                    "",
+                    "#Unknown-tag",
+                ]
+            ),
+        )
 
     def test_sub_issues_follow_the_checklist_in_order(self):
         result = self.promote()
         parent, *children = self.creates()
-        self.assertEqual([c["title"] for c in children],
-                         ["Choose tiles", "Measure the room", "Book the plumber"])
+        self.assertEqual([c["title"] for c in children], ["Choose tiles", "Measure the room", "Book the plumber"])
         self.assertEqual({c["parentId"] for c in children}, {parent["id"]})
         self.assertEqual([c["assigneeId"] for c in children], ["u1"] * 3)
         self.assertEqual([i["identifier"] for i in result.sub_issues], ["ENG-8", "ENG-9", "ENG-10"])
         found = self.issues_titled("Measure the room")[0]
         self.assertEqual(found["parent"]["id"], parent["id"])
-        self.assertEqual(self.issue("ENG-7")["children"]["nodes"],
-                         [{"identifier": f"ENG-{n}"} for n in (8, 9, 10)])
+        self.assertEqual(self.issue("ENG-7")["children"]["nodes"], [{"identifier": f"ENG-{n}"} for n in (8, 9, 10)])
 
     def test_sub_issues_share_the_project_but_not_the_labels(self):
         project = {"id": "p-plat", "name": "Platform", "teams": [ENG]}
@@ -148,8 +149,10 @@ class ConversionTests(PromoteCase):
         self.write_board("## Todo\n\n- [ ] Just this ^t0aa\n")
         self.promote("t0aa")
         (inputs,) = self.creates()
-        self.assertEqual(inputs, {"id": inputs["id"], "teamId": "t-eng", "title": "Just this",
-                                  "stateId": "ws-ENG-Todo", "assigneeId": "u1"})
+        self.assertEqual(
+            inputs,
+            {"id": inputs["id"], "teamId": "t-eng", "title": "Just this", "stateId": "ws-ENG-Todo", "assigneeId": "u1"},
+        )
 
 
 class LabelTests(PromoteCase):
@@ -200,21 +203,31 @@ class DescriptionTests(PromoteCase):
         self.promoter(config).promote("t6n2", team="ENG")
         (inputs,) = self.creates()
         self.assertEqual(inputs["title"], "Read [[Tile notes]] and [[Missing note]]")
-        self.assertEqual(inputs["description"], "\n\n".join([
-            "Tile notes body\nSecond line", "See also [[Grout guide]]", "[[Missing note]]"]))
+        self.assertEqual(
+            inputs["description"],
+            "\n\n".join(["Tile notes body\nSecond line", "See also [[Grout guide]]", "[[Missing note]]"]),
+        )
 
     def test_several_notes_get_a_heading_each(self):
         (self.vault / "Missing note.md").write_text("Found now\n", encoding="utf-8")
         config = Config(todos_dir=self.todos, vault_root=self.vault)
         self.promoter(config).promote("t6n2", team="ENG")
-        self.assertEqual(self.creates()[0]["description"], "\n\n".join([
-            "## Tile notes\nTile notes body\nSecond line", "## Missing note\nFound now",
-            "See also [[Grout guide]]"]))
+        self.assertEqual(
+            self.creates()[0]["description"],
+            "\n\n".join(
+                [
+                    "## Tile notes\nTile notes body\nSecond line",
+                    "## Missing note\nFound now",
+                    "See also [[Grout guide]]",
+                ]
+            ),
+        )
 
     def test_without_a_vault_the_links_stay_text(self):
         self.promote("t6n2")
-        self.assertEqual(self.creates()[0]["description"],
-                         "See also [[Grout guide]]\n\n[[Tile notes]]\n[[Missing note]]")
+        self.assertEqual(
+            self.creates()[0]["description"], "See also [[Grout guide]]\n\n[[Tile notes]]\n[[Missing note]]"
+        )
 
     def test_note_outside_the_vault_is_not_read(self):
         outside = self.root / "outside.md"
@@ -231,8 +244,7 @@ class StateTests(PromoteCase):
         return [c["stateId"] for c in self.creates()]
 
     def test_state_follows_the_column_of_the_todo(self):
-        self.write_board("## Backlog\n\n- [ ] A ^t0aa\n\n## Todo\n\n- [ ] B ^t0bb\n\n"
-                         "## Review\n\n- [ ] C ^t0cc\n")
+        self.write_board("## Backlog\n\n- [ ] A ^t0aa\n\n## Todo\n\n- [ ] B ^t0bb\n\n## Review\n\n- [ ] C ^t0cc\n")
         for ref in ("t0aa", "t0bb", "t0cc"):
             self.promote(ref)
         self.assertEqual(self.state_ids(), ["ws-ENG-Backlog", "ws-ENG-Todo", "ws-ENG-In Review"])
@@ -249,12 +261,12 @@ class StateTests(PromoteCase):
 
     def test_checked_sub_issue_is_completed_and_the_others_share_the_parent_state(self):
         self.promote("t5r1")
-        self.assertEqual(self.state_ids(),
-                         ["ws-ENG-Backlog", "ws-ENG-Backlog", "ws-ENG-Done", "ws-ENG-Backlog"])
+        self.assertEqual(self.state_ids(), ["ws-ENG-Backlog", "ws-ENG-Backlog", "ws-ENG-Done", "ws-ENG-Backlog"])
 
     def test_open_sub_issue_of_a_completed_parent_starts_in_the_first_column(self):
-        self.write_board("## Backlog\n\n## Done\n\n**Complete**\n- [x] A ^t0aa\n"
-                         "\t- [ ] Open item\n\t- [x] Closed item\n")
+        self.write_board(
+            "## Backlog\n\n## Done\n\n**Complete**\n- [x] A ^t0aa\n\t- [ ] Open item\n\t- [x] Closed item\n"
+        )
         self.promote("t0aa")
         self.assertEqual(self.state_ids(), ["ws-ENG-Done", "ws-ENG-Backlog", "ws-ENG-Done"])
 
@@ -312,8 +324,7 @@ class CompletedStateTests(PromoteCase):
         folder = self.promoter(self.config).writer.source.account_dir()
         StateChoices(folder).set("t-eng", "Done", "ws-ENG-Doing")
         self.promote("t5r1")
-        self.assertEqual(self.state_ids(),
-                         ["ws-ENG-Backlog", "ws-ENG-Backlog", "ws-ENG-Done", "ws-ENG-Backlog"])
+        self.assertEqual(self.state_ids(), ["ws-ENG-Backlog", "ws-ENG-Backlog", "ws-ENG-Done", "ws-ENG-Backlog"])
 
 
 class PlanOptionTests(PromoteCase):
@@ -364,8 +375,7 @@ class RecordTests(PromoteCase):
 
         def spy(client, **kwargs):
             record = self.records()["t5r1"]
-            seen.append(([i["id"] for i in record["issues"]],
-                         [i["identifier"] for i in record["issues"]]))
+            seen.append(([i["id"] for i in record["issues"]], [i["identifier"] for i in record["issues"]]))
             return real(client, **kwargs)
 
         with mock.patch.object(LinearClient, "create_issue", autospec=True, side_effect=spy):
@@ -381,14 +391,14 @@ class RecordTests(PromoteCase):
         self.unfinished()
         other = self.root / "other"
         other.mkdir()
-        (other / "inbox.md").write_text(self.text().replace(
-            "Renovate the bathroom", "Completely different").replace(" → ENG-7", ""))
+        (other / "inbox.md").write_text(
+            self.text().replace("Renovate the bathroom", "Completely different").replace(" → ENG-7", "")
+        )
         config = Config(todos_dir=other)
         result = self.promoter(config).promote("t5r1", team="ENG")
         self.assertEqual(len(self.issues_titled("Completely different")), 1)
         self.assertEqual(len(self.issues_titled("Renovate the bathroom")), 1)
-        self.assertIn("→ " + result.issue["identifier"] + " ^t5r1",
-                      (other / "inbox.md").read_text())
+        self.assertIn("→ " + result.issue["identifier"] + " ^t5r1", (other / "inbox.md").read_text())
         self.assertNotIn("Completely different", self.text())
         self.assertIn("t5r1", self.records())
         self.assertEqual(self.records(other), {})
@@ -415,6 +425,7 @@ class RecordTests(PromoteCase):
 
     def test_a_second_promote_at_the_same_time_is_a_conflict(self):
         import fcntl
+
         promoter = self.promoter()
         folder = promoter.writer.source.account_dir()
         folder.mkdir(parents=True, exist_ok=True)
@@ -468,8 +479,7 @@ class UnknownResultTests(PromoteCase):
         result = self.promote()
         later = self.creates()[2:]
         # The parent exists, so only the three sub-issues are sent, each one once.
-        self.assertEqual([c["title"] for c in later],
-                         ["Choose tiles", "Measure the room", "Book the plumber"])
+        self.assertEqual([c["title"] for c in later], ["Choose tiles", "Measure the room", "Book the plumber"])
         self.assertEqual(later[0]["id"], first[1]["id"])
         self.assertNotIn(first[0]["id"], [c["id"] for c in later])
         self.assertEqual([i["identifier"] for i in result.sub_issues], ["ENG-8", "ENG-9", "ENG-10"])
@@ -483,8 +493,7 @@ class UnknownResultTests(PromoteCase):
         self.assertIn("promote t5r1", str(caught.exception))
         first = self.creates()
         self.assertEqual(len(first), 3)
-        self.assertEqual([i["identifier"] for i in self.records()["t5r1"]["issues"]],
-                         ["ENG-7", "ENG-8", None, None])
+        self.assertEqual([i["identifier"] for i in self.records()["t5r1"]["issues"]], ["ENG-7", "ENG-8", None, None])
 
         self.promote()
         later = self.creates()[3:]
@@ -492,8 +501,10 @@ class UnknownResultTests(PromoteCase):
         sent = [c["id"] for c in self.creates()]
         # Only the rejected create is sent twice. Linear never had that one.
         self.assertEqual(sorted(i for i in set(sent) if sent.count(i) > 1), [first[2]["id"]])
-        self.assertEqual([len(self.issues_titled(t)) for t in
-                          ("Renovate the bathroom", "Choose tiles", "Measure the room")], [1, 1, 1])
+        self.assertEqual(
+            [len(self.issues_titled(t)) for t in ("Renovate the bathroom", "Choose tiles", "Measure the room")],
+            [1, 1, 1],
+        )
 
     def test_rerun_looks_up_every_recorded_uuid(self):
         self.fake.mutation_failures = [None, None, "graphql_error"]
@@ -509,12 +520,12 @@ class UnknownResultTests(PromoteCase):
         self.fake.mutation_failures = [None, "http_500"]
         with self.assertRaises(LinearWriteUnknownError):
             self.promote()
-        self.inbox.write_text(self.text().replace("\t- [ ] Book the plumber",
-                                                  "\t- [ ] Book the plumber\n\t- [ ] Extra"))
+        self.inbox.write_text(
+            self.text().replace("\t- [ ] Book the plumber", "\t- [ ] Book the plumber\n\t- [ ] Extra")
+        )
         self.promote()
         titles = [i["title"] for i in self.fixtures["issues"][6:]]
-        self.assertEqual(titles, ["Renovate the bathroom", "Choose tiles", "Measure the room",
-                                  "Book the plumber"])
+        self.assertEqual(titles, ["Renovate the bathroom", "Choose tiles", "Measure the room", "Book the plumber"])
         self.assertIn("→ ENG-7 ^t5r1", self.text())
 
 
@@ -526,8 +537,7 @@ class TodoUpdateTests(PromoteCase):
         card = lines.index("- [x] Renovate the bathroom #home #Unknown-tag 📅 2026-11-02 → ENG-7 ^t5r1")
         self.assertGreater(card, done)
         # Its indented lines move with it, and other cards stay where they were.
-        self.assertEqual(lines[card + 1:card + 3],
-                         ["\tBudget is tight, ask for two quotes", "\t- [ ] Choose tiles"])
+        self.assertEqual(lines[card + 1 : card + 3], ["\tBudget is tight, ask for two quotes", "\t- [ ] Choose tiles"])
         self.assertIn("- [x] Paint the hallway #home ^t9d4", lines)
         self.assertEqual((result.todo.column, result.todo.checked), ("Done", True))
         self.assertNotIn("→ ENG-7", "\n".join(lines[:done]))
@@ -589,8 +599,7 @@ class ConflictTests(PromoteCase):
         self.assertIn("promote t5r1", str(caught.exception))
         self.assertEqual(len(self.requests("IssueCreate")), 4)
         record = self.records()["t5r1"]
-        self.assertEqual([i["identifier"] for i in record["issues"]],
-                         ["ENG-7", "ENG-8", "ENG-9", "ENG-10"])
+        self.assertEqual([i["identifier"] for i in record["issues"]], ["ENG-7", "ENG-8", "ENG-9", "ENG-10"])
         self.assertNotIn("→ ENG-7", self.text())
 
     def test_a_rerun_finishes_the_todo_without_creating_anything(self):
@@ -793,7 +802,8 @@ class SubCardTests(PromoteCase):
         self.assertNotIn("→", self.text())
         self.promote("tp00")
         titles = [c["title"] for c in self.creates()]
-        self.assertEqual(sorted(set(titles)), sorted(["Billing v2", "Checklist item", "Add invoice table",
-                                                      "Add tax field"]))
+        self.assertEqual(
+            sorted(set(titles)), sorted(["Billing v2", "Checklist item", "Add invoice table", "Add tax field"])
+        )
         self.assertEqual(len(self.issues_titled("Add invoice table")), 1)
         self.assertEqual(self.text().count("→ ENG-"), 3)

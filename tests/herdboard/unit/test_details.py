@@ -1,4 +1,5 @@
 """The card details pane: its data and its lines, without a terminal."""
+
 import json
 import os
 import subprocess
@@ -15,21 +16,43 @@ from support.herdboard_linear_cli import LinearCliCase
 
 
 def card(**fields):
-    values = dict(ref="t123", board="acme-api", path=None, column="In progress",
-                  title="Fix login timeout #bug #api", checked=False, due=None, tags=["api"],
-                  body=[], type="feature")
+    values = dict(
+        ref="t123",
+        board="acme-api",
+        path=None,
+        column="In progress",
+        title="Fix login timeout #bug #api",
+        checked=False,
+        due=None,
+        tags=["api"],
+        body=[],
+        type="feature",
+    )
     values.update(fields)
     return CardView(**values)
 
 
-RECORD = {"ref": "t123", "agent": "claude", "model": "opus", "thinking": "high",
-          "branch": "t123-fix-login-timeout", "base": "main",
-          "pr_url": "https://github.com/acme/api/pull/12", "pr_state": "open"}
+RECORD = {
+    "ref": "t123",
+    "agent": "claude",
+    "model": "opus",
+    "thinking": "high",
+    "branch": "t123-fix-login-timeout",
+    "base": "main",
+    "pr_url": "https://github.com/acme/api/pull/12",
+    "pr_state": "open",
+}
 
 
 def log(count):
-    return [{"time": f"2026-10-{index + 1:02d} 14:0{index % 10}", "author": "claude" if index % 2 else "herdboard",
-             "message": f"Entry {index + 1}\nsecond line"} for index in range(count)]
+    return [
+        {
+            "time": f"2026-10-{index + 1:02d} 14:0{index % 10}",
+            "author": "claude" if index % 2 else "herdboard",
+            "message": f"Entry {index + 1}\nsecond line",
+        }
+        for index in range(count)
+    ]
 
 
 def plain(lines):
@@ -38,9 +61,13 @@ def plain(lines):
 
 class DetailsLinesTests(unittest.TestCase):
     def test_a_started_card_with_everything(self):
-        data = {"ref": "t123", "card": card(body=["\t- [x] one", "\t- [ ] two", "\t- [x] three", "\tnotes"]),
-                "record": RECORD, "attachments": [{"name": "plan.md"}, {"name": "mockup-pane.png"}],
-                "log": log(8)}
+        data = {
+            "ref": "t123",
+            "card": card(body=["\t- [x] one", "\t- [ ] two", "\t- [x] three", "\tnotes"]),
+            "record": RECORD,
+            "attachments": [{"name": "plan.md"}, {"name": "mockup-pane.png"}],
+            "log": log(8),
+        }
         lines = plain(details.details_lines(data, 80, 20))
         self.assertEqual(lines[0], "t123 │ Fix login timeout  In progress " + " " * 35 + "feature")
         self.assertEqual(len(lines[0]), 80)
@@ -57,7 +84,9 @@ class DetailsLinesTests(unittest.TestCase):
         self.assertEqual(len(lines), 6)
         # No checklist and no attachments: the third line is left out.
         self.assertTrue(lines[2].startswith("── log"))
-        self.assertEqual([line.split()[-2] + " " + line.split()[-1] for line in lines[3:]], ["Entry 6", "Entry 7", "Entry 8"])
+        self.assertEqual(
+            [line.split()[-2] + " " + line.split()[-1] for line in lines[3:]], ["Entry 6", "Entry 7", "Entry 8"]
+        )
 
     def test_a_repoless_record_has_no_branch(self):
         record = {"ref": "t123", "agent": "pi", "model": None, "thinking": None, "mode": "repoless"}
@@ -81,8 +110,7 @@ class DetailsLinesTests(unittest.TestCase):
     def test_every_line_is_cut_to_the_width(self):
         long = card(title="A very long title that does not fit in a narrow details pane at all")
         entries = [{"time": "2026-10-29 14:02", "author": "herdboard", "message": "x" * 100}]
-        data = {"ref": "t123", "card": long, "record": RECORD, "attachments": [{"name": "plan.md"}],
-                "log": entries}
+        data = {"ref": "t123", "card": long, "record": RECORD, "attachments": [{"name": "plan.md"}], "log": entries}
         lines = plain(details.details_lines(data, 40, 10))
         self.assertTrue(all(len(line) <= 40 for line in lines), lines)
         self.assertTrue(lines[0].endswith("feature"))
@@ -91,8 +119,9 @@ class DetailsLinesTests(unittest.TestCase):
         self.assertTrue(lines[-1].endswith("…"))
 
     def test_a_linear_card_shows_its_state_as_the_column(self):
-        issue = card(ref="ENG-12", title="Speed up search", source="linear", state="In Review", column="Review",
-                     type=None)
+        issue = card(
+            ref="ENG-12", title="Speed up search", source="linear", state="In Review", column="Review", type=None
+        )
         data = {"ref": "ENG-12", "card": issue, "record": None, "attachments": [], "log": []}
         first = plain(details.details_lines(data, 60, 5))[0]
         self.assertEqual(first, "ENG-12 │ Speed up search  In Review ")
@@ -124,9 +153,15 @@ class DetailsDataTests(StoreCase, unittest.TestCase):
     def test_watched_paths(self):
         ref = self.card.ref
         paths = details.watched_paths(self.config, ref, self.card.path)
-        self.assertEqual(paths, [self.card.path, activity.log_path(self.config, ref),
-                                 self.config.todos_dir / ".herdboard" / "attachments" / ref,
-                                 self.root / "state" / "herdboard" / "starts.json"])
+        self.assertEqual(
+            paths,
+            [
+                self.card.path,
+                activity.log_path(self.config, ref),
+                self.config.todos_dir / ".herdboard" / "attachments" / ref,
+                self.root / "state" / "herdboard" / "starts.json",
+            ],
+        )
 
     def test_signature_changes_when_a_watched_file_changes(self):
         ref = self.card.ref
@@ -139,6 +174,7 @@ class DetailsDataTests(StoreCase, unittest.TestCase):
 class CachedLookupTests(unittest.TestCase):
     def test_asks_again_only_after_the_interval(self):
         from herdboard.details_view import CachedLookup
+
         now = [0.0]
         calls = []
         lookup = CachedLookup(lambda ref: calls.append(ref) or len(calls), seconds=60, clock=lambda: now[0])
@@ -151,19 +187,23 @@ class CachedLookupTests(unittest.TestCase):
     def test_a_failed_lookup_waits_for_the_interval_too(self):
         from herdboard.details_view import CachedLookup
         from herdboard.model import NotFoundError
+
         now = [0.0]
         calls = []
 
         def missing(ref):
             calls.append(ref)
             raise NotFoundError(f"No card {ref}")
+
         lookup = CachedLookup(missing, seconds=60, clock=lambda: now[0])
         for _ in range(3):
             with self.assertRaises(NotFoundError):
                 lookup("ENG-1")
         self.assertEqual(len(calls), 1)
-        self.assertTrue(lookup.at is not None and lookup.clock() - lookup.at < lookup.seconds,
-                        "the view's check finds the failed lookup not due")
+        self.assertTrue(
+            lookup.at is not None and lookup.clock() - lookup.at < lookup.seconds,
+            "the view's check finds the failed lookup not due",
+        )
         now[0] = 60
         with self.assertRaises(NotFoundError):
             lookup("ENG-1")
@@ -173,8 +213,10 @@ class CachedLookupTests(unittest.TestCase):
 class DetailsCliTests(CliTestCase):
     def test_details_runs_the_view_for_the_card_and_creates_no_board(self):
         ref = self.run_json("add", "Ship it", directory=self.plain)["card"]["ref"]
-        with mock.patch("herdboard.details_view.DetailsApp.run") as run, \
-                mock.patch("herdboard.details_view.DetailsApp.__init__", return_value=None) as made:
+        with (
+            mock.patch("herdboard.details_view.DetailsApp.run") as run,
+            mock.patch("herdboard.details_view.DetailsApp.__init__", return_value=None) as made,
+        ):
             self.run_cli("details", ref, directory=self.repo)
         run.assert_called_once_with()
         self.assertEqual(made.call_args.args[2], ref)
@@ -185,8 +227,11 @@ class DetailsLinearCliTests(LinearCliCase):
     def test_a_lookup_after_a_network_failure_asks_linear_again(self):
         from herdboard.linear import LinearClient, LinearNetworkError
         from herdboard.model import HerdboardError
-        with mock.patch("herdboard.details_view.DetailsApp.run"), \
-                mock.patch("herdboard.details_view.DetailsApp.__init__", return_value=None) as made:
+
+        with (
+            mock.patch("herdboard.details_view.DetailsApp.run"),
+            mock.patch("herdboard.details_view.DetailsApp.__init__", return_value=None) as made,
+        ):
             self.run_cli("details", "eng-3", directory=self.plain)
         linear_card = made.call_args.args[3]
         issue = LinearClient.issue
@@ -197,6 +242,7 @@ class DetailsLinearCliTests(LinearCliCase):
             if len(calls) == 1:
                 raise LinearNetworkError("down")
             return issue(client, identifier)
+
         with mock.patch.object(LinearClient, "issue", autospec=True, side_effect=down_once):
             with self.assertRaises(HerdboardError):
                 linear_card("ENG-3")
@@ -223,12 +269,19 @@ class PaneHerdr:
         if operation == "pane get":
             result = {"pane": {"pane_id": args[2], "tab_id": "w1:t1", "workspace_id": "w1"}}
         elif operation == "pane list":
-            result = {"panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1"},
-                                *({"pane_id": pane, "tab_id": "w1:t1", "label": label}
-                                  for pane, label in self.labels.items())]}
+            result = {
+                "panes": [
+                    {"pane_id": "w1:p1", "tab_id": "w1:t1"},
+                    *({"pane_id": pane, "tab_id": "w1:t1", "label": label} for pane, label in self.labels.items()),
+                ]
+            }
         elif operation == "tab list":
-            result = {"tabs": [{"tab_id": "w1:t1", "focused": self.focused == "w1:t1"},
-                               {"tab_id": "w2:t1", "focused": self.focused == "w2:t1"}]}
+            result = {
+                "tabs": [
+                    {"tab_id": "w1:t1", "focused": self.focused == "w1:t1"},
+                    {"tab_id": "w2:t1", "focused": self.focused == "w2:t1"},
+                ]
+            }
         elif operation == "pane split":
             result = {"pane": {"pane_id": "w1:p2", "tab_id": "w1:t1"}}
         elif operation == "pane run":
@@ -252,22 +305,26 @@ class OpenDetailsPaneTests(unittest.TestCase):
 
     def test_splits_swaps_renames_and_runs_the_view(self):
         self.assertEqual(start.open_details_pane("t123", "w1:p1", self.config), "w1:p2")
-        self.assertEqual(self.fake.calls, [
-            ["pane", "get", "w1:p1"],
-            ["pane", "list", "--workspace", "w1"],
-            ["tab", "list"],
-            ["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.25", "--no-focus"],
-            ["pane", "swap", "--source-pane", "w1:p1", "--target-pane", "w1:p2"],
-            ["pane", "rename", "w1:p2", "details - t123"],
-            ["pane", "run", "w1:p2", "herdboard details t123"],
-        ])
+        self.assertEqual(
+            self.fake.calls,
+            [
+                ["pane", "get", "w1:p1"],
+                ["pane", "list", "--workspace", "w1"],
+                ["tab", "list"],
+                ["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.25", "--no-focus"],
+                ["pane", "swap", "--source-pane", "w1:p1", "--target-pane", "w1:p2"],
+                ["pane", "rename", "w1:p2", "details - t123"],
+                ["pane", "run", "w1:p2", "herdboard details t123"],
+            ],
+        )
 
     def test_the_swap_gives_the_focus_back_to_the_users_tab(self):
         self.fake.focused = "w2:t1"
         self.config.details_pane_ratio = 0.4
         start.open_details_pane("t123", "w1:p1", self.config)
-        self.assertIn(["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.4", "--no-focus"],
-                      self.fake.calls)
+        self.assertIn(
+            ["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.4", "--no-focus"], self.fake.calls
+        )
         operations = self.fake.operations()
         self.assertEqual(operations[operations.index("pane swap") + 1], "tab focus")
         self.assertIn(["tab", "focus", "w2:t1"], self.fake.calls)
@@ -303,8 +360,12 @@ class OpenTargetTests(StoreCase, unittest.TestCase):
         path.write_text(json.dumps(records))
 
     def test_finds_the_started_card_of_the_workspace(self):
-        self.write_records({"t555": {"ref": "t555", "workspace_id": "w9", "pane_id": "w9:p1"},
-                            "issue-id": {"ref": "ENG-1", "workspace_id": "w1", "pane_id": "w1:p1"}})
+        self.write_records(
+            {
+                "t555": {"ref": "t555", "workspace_id": "w9", "pane_id": "w9:p1"},
+                "issue-id": {"ref": "ENG-1", "workspace_id": "w1", "pane_id": "w1:p1"},
+            }
+        )
         self.assertEqual(details.open_target(None, "w1:p3"), ("ENG-1", "w1:p1"))
 
     def test_a_planner_tab_wins_over_the_workspace_record(self):
@@ -329,17 +390,21 @@ class OpenTargetTests(StoreCase, unittest.TestCase):
 
 class DetailsOpenCliTests(CliTestCase):
     def test_open_without_a_ref_opens_the_pane_for_the_workspace_card(self):
-        with mock.patch("herdboard.details.open_target", return_value=("t123", "w1:p1")) as target, \
-                mock.patch("herdboard.start.open_details_pane", return_value="w1:p2") as opened:
+        with (
+            mock.patch("herdboard.details.open_target", return_value=("t123", "w1:p1")) as target,
+            mock.patch("herdboard.start.open_details_pane", return_value="w1:p2") as opened,
+        ):
             result = self.run_json("details", "--open", "--pane", "w1:p3", directory=self.repo)
         target.assert_called_once_with(None, "w1:p3")
         self.assertEqual(opened.call_args.args[:2], ("t123", "w1:p1"))
         self.assertEqual(result, {"ref": "t123", "host_pane_id": "w1:p1", "pane_id": "w1:p2"})
 
     def test_the_pane_defaults_to_this_herdr_pane(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w4:p2"}), \
-                mock.patch("herdboard.details.open_target", return_value=("t123", "w4:p2")) as target, \
-                mock.patch("herdboard.start.open_details_pane", return_value=None):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w4:p2"}),
+            mock.patch("herdboard.details.open_target", return_value=("t123", "w4:p2")) as target,
+            mock.patch("herdboard.start.open_details_pane", return_value=None),
+        ):
             self.run_json("details", "--open", directory=self.repo)
         target.assert_called_once_with(None, "w4:p2")
 

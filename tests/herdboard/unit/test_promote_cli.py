@@ -18,8 +18,9 @@ class PromoteCliCase(WriteCliCase):
         card = self.run_json("add", text, "--column", column, directory=self.repo)["card"]
         if body:
             marker = f"{text} ^{card['ref']}"
-            self.path.write_text(self.path.read_text().replace(
-                marker, marker + "".join(f"\n\t{line}" for line in body)))
+            self.path.write_text(
+                self.path.read_text().replace(marker, marker + "".join(f"\n\t{line}" for line in body))
+            )
         return card["ref"]
 
     def promote(self, *args, expect=0, directory=None):
@@ -34,8 +35,10 @@ class PromoteCommandTests(PromoteCliCase):
         ref = self.add_todo("Ship it #bug 📅 2026-12-01", "Todo", "- [ ] First", "- [x] Second")
         data = self.promote(ref, "--team", "ENG")
         card = data["card"]
-        self.assertEqual((card["ref"], card["title"], card["column"], card["source"], card["due"]),
-                         ("ENG-7", "Ship it", "Todo", "linear", "2026-12-01"))
+        self.assertEqual(
+            (card["ref"], card["title"], card["column"], card["source"], card["due"]),
+            ("ENG-7", "Ship it", "Todo", "linear", "2026-12-01"),
+        )
         self.assertEqual((card["tags"], card["type"]), ([], "bug"))
         self.assertEqual(data["sub_issues"], ["ENG-8", "ENG-9"])
         self.assertEqual((data["todo"]["ref"], data["todo"]["column"]), (ref, "Done"))
@@ -83,6 +86,7 @@ class TargetTests(PromoteCliCase):
     def other_repo(self):
         """A second repository whose board links Mobile."""
         import subprocess
+
         other = self.repo.parent / "web"
         other.mkdir()
         for args in (("init", "-q"), ("remote", "add", "origin", "https://github.com/acme/web.git")):
@@ -125,6 +129,7 @@ class TargetTests(PromoteCliCase):
 
     def test_a_linked_project_that_is_gone_is_an_error(self):
         from herdboard.linear_links import LabelLink, ProjectLink
+
         self.relink(ProjectLink("gone", "Old project", [LabelLink("l-api", "repo:api")]))
         ref = self.add_todo()
         error = self.promote(ref, "--team", "ENG", expect=1)["error"]

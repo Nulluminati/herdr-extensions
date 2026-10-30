@@ -75,8 +75,7 @@ class PlanError(HerdboardError):
         self.code = code
 
 
-def planner_arguments(kind: str, prompt: str, folder: Path, model: str | None,
-                      thinking: str | None) -> list[str]:
+def planner_arguments(kind: str, prompt: str, folder: Path, model: str | None, thinking: str | None) -> list[str]:
     """The planner's arguments after Herdr's `--`: it reads the repository, may try code in the worktree,
     and writes the attachments.
 
@@ -85,46 +84,83 @@ def planner_arguments(kind: str, prompt: str, folder: Path, model: str | None,
     if kind == "pi":
         return start_module.agent_arguments(kind, prompt, model, thinking)
     if kind == "codex":
-        return [*start_module.codex_auto_review_options(), "--add-dir", str(folder),
-                *start_module.agent_arguments(kind, prompt, model, thinking)]
+        return [
+            *start_module.codex_auto_review_options(),
+            "--add-dir",
+            str(folder),
+            *start_module.agent_arguments(kind, prompt, model, thinking),
+        ]
     return [*start_module.agent_arguments(kind, prompt, model, thinking), "--add-dir", str(folder)]
 
 
-def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, work_agent: bool,
-               notes: list[dict], plan: str | None, files: list[dict], log: list[dict], plan_file: Path,
-               command: str, repoless: bool = False, new_repo_path: Path | None = None) -> str:
+def brief_text(
+    card,
+    *,
+    worktree: Path,
+    branch: str,
+    base: str,
+    status: str,
+    work_agent: bool,
+    notes: list[dict],
+    plan: str | None,
+    files: list[dict],
+    log: list[dict],
+    plan_file: Path,
+    command: str,
+    repoless: bool = False,
+    new_repo_path: Path | None = None,
+) -> str:
     linear = card.source == "linear"
-    lines = [f"# Plan: {_title(card)}", "",
-             f"Plan {'Linear issue' if linear else 'herdboard card'} `{card.ref}` (board `{card.board}`, "
-             f"column `{card.column}`) with the user. You do not do the work. A later agent does the work "
-             "from your plan, and it does not see this conversation.", ""]
+    lines = [
+        f"# Plan: {_title(card)}",
+        "",
+        f"Plan {'Linear issue' if linear else 'herdboard card'} `{card.ref}` (board `{card.board}`, "
+        f"column `{card.column}`) with the user. You do not do the work. A later agent does the work "
+        "from your plan, and it does not see this conversation.",
+        "",
+    ]
     if repoless or new_repo_path is not None:
         if new_repo_path is not None:
-            lines += [f"- Working folder: `{worktree}`. There is no repository yet: `start` creates one at "
-                      f"`{new_repo_path}` after the plan is done, and the work happens there. Plan the "
-                      "first steps of the project.",
-                      "- Do not commit anything. This folder is not kept: only the plan attachment carries "
-                      "over to the new repository."]
+            lines += [
+                f"- Working folder: `{worktree}`. There is no repository yet: `start` creates one at "
+                f"`{new_repo_path}` after the plan is done, and the work happens there. Plan the "
+                "first steps of the project.",
+                "- Do not commit anything. This folder is not kept: only the plan attachment carries "
+                "over to the new repository.",
+            ]
         else:
-            lines += [f"- Working folder: `{worktree}`. This card has no repository and no code to read. "
-                      "Ask the user what the plan needs.",
-                      "- Do not commit anything. herdboard deletes the folder when the card is finished."]
+            lines += [
+                f"- Working folder: `{worktree}`. This card has no repository and no code to read. "
+                "Ask the user what the plan needs.",
+                "- Do not commit anything. herdboard deletes the folder when the card is finished.",
+            ]
     else:
-        lines += [f"- Worktree: `{worktree}` on branch `{branch}` (base `{base}`). You may change code and run "
-                  "commands here to test ideas. Do not commit. Before planning ends, revert every change you "
-                  "made, so the worktree is as it was when you started. Do not touch changes that were there "
-                  "before you."]
+        lines += [
+            f"- Worktree: `{worktree}` on branch `{branch}` (base `{base}`). You may change code and run "
+            "commands here to test ideas. Do not commit. Before planning ends, revert every change you "
+            "made, so the worktree is as it was when you started. Do not touch changes that were there "
+            "before you."
+        ]
     if work_agent:
-        lines += ["- A work agent works in this worktree too. It can change files while you plan. "
-                  "Revert only your own changes."]
+        lines += [
+            "- A work agent works in this worktree too. It can change files while you plan. "
+            "Revert only your own changes."
+        ]
     lines += [f"- The plan: `{plan_file}`", ""]
     if linear and card.url:
         lines += [f"- Link: {card.url}", ""]
     if status.strip():
-        lines += ["## Changes already in the worktree", "",
-                  "`git status --short` showed this before you started. These changes are not yours. "
-                  "Leave them alone, and do not revert them.", "",
-                  "```", status.rstrip("\n"), "```", ""]
+        lines += [
+            "## Changes already in the worktree",
+            "",
+            "`git status --short` showed this before you started. These changes are not yours. "
+            "Leave them alone, and do not revert them.",
+            "",
+            "```",
+            status.rstrip("\n"),
+            "```",
+            "",
+        ]
     body = list(card.body) if linear else [_unindent(line) for line in card.body]
     while body and not body[-1].strip():
         body.pop()
@@ -133,8 +169,12 @@ def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, wor
     lines.append("")
     for note in notes:
         content = note["content"]
-        lines += [f"## Linked note: {note['name']}", "",
-                  content.rstrip("\n") if content is not None else "The note was not found.", ""]
+        lines += [
+            f"## Linked note: {note['name']}",
+            "",
+            content.rstrip("\n") if content is not None else "The note was not found.",
+            "",
+        ]
     if plan and plan.strip():
         lines += ["## The current plan", "", "A plan exists. Revise it with the user.", "", plan.strip("\n"), ""]
     others = [entry for entry in files if entry["name"] != attachments.PLAN_NAME]
@@ -174,8 +214,11 @@ def brief_text(card, *, worktree: Path, branch: str, base: str, status: str, wor
         "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one.",
         "4. Write the plan when the main questions have answers. Write it again each time a decision changes.",
         "5. Tell the user when the plan is saved. herdboard records each save in the card's log.",
-        *([] if repoless or new_repo_path is not None else
-          ["6. Revert your code changes. Check with `git status` that the worktree is as it was."]),
+        *(
+            []
+            if repoless or new_repo_path is not None
+            else ["6. Revert your code changes. Check with `git status` that the worktree is as it was."]
+        ),
         "",
         f"Write the plan to `{plan_file}` and to no other file. Do not change the card title or details: "
         "they are the user's text.",
@@ -202,8 +245,16 @@ def _plans_path() -> Path:
 
 
 class Planner:
-    def __init__(self, store, directory, writer=None, prompt_checkout=None, repository_view=True,
-                 config_file: Path | None = None, prompt_target=None):
+    def __init__(
+        self,
+        store,
+        directory,
+        writer=None,
+        prompt_checkout=None,
+        repository_view=True,
+        config_file: Path | None = None,
+        prompt_target=None,
+    ):
         self.store = store
         self.config = store.config
         self.directory = Path(directory)
@@ -229,8 +280,18 @@ class Planner:
             card = self.store.ensure_id(card.ref)
         return card, None
 
-    def plan(self, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None,
-             no_repo=False, new_repo=None):
+    def plan(
+        self,
+        ref,
+        agent=None,
+        model=None,
+        thinking=None,
+        repo=None,
+        checkout=None,
+        base=None,
+        no_repo=False,
+        new_repo=None,
+    ):
         kind = agent or self.config.start_agent
         if kind not in AGENTS:
             raise PlanError("The planner must be claude, pi or codex", "usage")
@@ -249,9 +310,15 @@ class Planner:
         ref = card.ref
         # The record key matches `start`, so a later start finds the same worktree.
         key = issue["id"] if issue else ref
-        starter = Starter(self.store, self.directory, writer=self.writer, prompt_checkout=self.prompt_checkout,
-                          repository_view=self.repository_view, config_file=self.config_file,
-                          prompt_target=self.prompt_target)
+        starter = Starter(
+            self.store,
+            self.directory,
+            writer=self.writer,
+            prompt_checkout=self.prompt_checkout,
+            repository_view=self.repository_view,
+            config_file=self.config_file,
+            prompt_target=self.prompt_target,
+        )
         with _lock(".plan-" + safe_key(ref) + ".lock"):
             with _lock(wait=2):
                 running = _read(_plans_path()).get(ref)
@@ -259,9 +326,18 @@ class Planner:
             # counts, not the agent: Herdr can show no agent while Claude waits at its folder trust prompt.
             if _planner_pane(running) is not None:
                 raise PlanError(f"A planner for {ref} still runs in pane {running['pane_id']}", "plan_running")
-            record = starter.prepare(card, issue, key, repo=repo, checkout=checkout, base=base,
-                                     move_parent=False, check_column=False, no_repo=no_repo,
-                                     new_repo=new_repo)
+            record = starter.prepare(
+                card,
+                issue,
+                key,
+                repo=repo,
+                checkout=checkout,
+                base=base,
+                move_parent=False,
+                check_column=False,
+                no_repo=no_repo,
+                new_repo=new_repo,
+            )
             workspace = record["workspace_id"]
             worktree = Path(record["worktree_path"])
             no_repository = record.get("mode") in (start_module.REPOLESS, start_module.NEW_REPO)
@@ -280,27 +356,59 @@ class Planner:
                     work_agent = agent_live(record)
                 except HerdboardError:
                     work_agent = False
-            brief = write_brief(safe_key(ref) + "-plan", brief_text(
-                card, worktree=worktree, branch=record.get("branch") or "", base=record.get("base") or "",
-                status=status, work_agent=work_agent, notes=notes,
-                plan=attachments.plan_for_agent(self.store, ref),
-                files=attachments.listing(self.config, ref), log=activity.read(self.config, ref),
-                plan_file=plan_file, command=herdboard_command(self.config_file),
-                repoless=record.get("mode") == start_module.REPOLESS, new_repo_path=new_repo_path))
+            brief = write_brief(
+                safe_key(ref) + "-plan",
+                brief_text(
+                    card,
+                    worktree=worktree,
+                    branch=record.get("branch") or "",
+                    base=record.get("base") or "",
+                    status=status,
+                    work_agent=work_agent,
+                    notes=notes,
+                    plan=attachments.plan_for_agent(self.store, ref),
+                    files=attachments.listing(self.config, ref),
+                    log=activity.read(self.config, ref),
+                    plan_file=plan_file,
+                    command=herdboard_command(self.config_file),
+                    repoless=record.get("mode") == start_module.REPOLESS,
+                    new_repo_path=new_repo_path,
+                ),
+            )
             # Read before the launch: the agent can save the plan while `agent start` waits for it.
             plan_mtime = _mtime(plan_file)
-            prompt = _one_line(f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "
-                               "it has the card and how to plan it with me.")
-            created = herdr("tab", "create", "--workspace", workspace, "--cwd", str(worktree),
-                            "--label", f"plan {ref}", "--no-focus")
+            prompt = _one_line(
+                f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "
+                "it has the card and how to plan it with me."
+            )
+            created = herdr(
+                "tab",
+                "create",
+                "--workspace",
+                workspace,
+                "--cwd",
+                str(worktree),
+                "--label",
+                f"plan {ref}",
+                "--no-focus",
+            )
             pane = created["root_pane"]["pane_id"]
             tab = created["root_pane"].get("tab_id") or (created.get("tab") or {}).get("tab_id")
             export_config(pane, self.config_file)
             # A startup prompt (such as Claude's folder trust check) waits for the user: the worker watches it.
             try:
-                herdr("agent", "start", f"hb-{ref.lower()}-plan", "--kind", kind, "--pane", pane, "--",
-                      *planner_arguments(kind, prompt, plan_file.parent, model, thinking),
-                      tolerated=("timeout", "agent_not_ready"))
+                herdr(
+                    "agent",
+                    "start",
+                    f"hb-{ref.lower()}-plan",
+                    "--kind",
+                    kind,
+                    "--pane",
+                    pane,
+                    "--",
+                    *planner_arguments(kind, prompt, plan_file.parent, model, thinking),
+                    tolerated=("timeout", "agent_not_ready"),
+                )
                 activity.record_pane_agent(pane, kind)
             except HerdboardError:
                 # Only the plan pane closes: the worktree and its workspace stay for the work.
@@ -309,9 +417,16 @@ class Planner:
             start_module.open_details_pane(ref, pane, self.config, self.config_file)
             with _lock(wait=2):
                 records = _read(_plans_path())
-                records[ref] = {"pane_id": pane, "kind": kind, "model": model, "started": time.time(),
-                                "plan_mtime": plan_mtime, "workspace_id": workspace,
-                                "tab_id": tab, "worktree_path": str(worktree)}
+                records[ref] = {
+                    "pane_id": pane,
+                    "kind": kind,
+                    "model": model,
+                    "started": time.time(),
+                    "plan_mtime": plan_mtime,
+                    "workspace_id": workspace,
+                    "tab_id": tab,
+                    "worktree_path": str(worktree),
+                }
                 _write(_plans_path(), records)
         activity.append(self.store, ref, f"Planning started: {kind}{f' ({model})' if model else ''}.", "herdboard")
         config = ["--config", str(self.config_file)] if self.config_file else []
@@ -321,12 +436,22 @@ class Planner:
             start_worker([*config, "plan-wait", ref, "--pane", pane], log)
         except OSError as error:
             # The planner still works without the worker; only the log of its saves is missing.
-            activity.append(self.store, ref, f"The plan saves are not logged: the worker did not start: {error}",
-                            "herdboard")
-        return {"ref": ref, "agent": kind, "model": model, "pane_id": pane,
-                "checkout": record.get("checkout"), "plan": str(plan_file), "workspace_id": workspace,
-                "worktree_path": str(worktree), "branch": record.get("branch"), "base": record.get("base"),
-                "mode": record.get("mode") or start_module.REPO}
+            activity.append(
+                self.store, ref, f"The plan saves are not logged: the worker did not start: {error}", "herdboard"
+            )
+        return {
+            "ref": ref,
+            "agent": kind,
+            "model": model,
+            "pane_id": pane,
+            "checkout": record.get("checkout"),
+            "plan": str(plan_file),
+            "workspace_id": workspace,
+            "worktree_path": str(worktree),
+            "branch": record.get("branch"),
+            "base": record.get("base"),
+            "mode": record.get("mode") or start_module.REPO,
+        }
 
 
 def _pane_exists(pane: str) -> bool:
@@ -424,8 +549,12 @@ def wait(store, ref, pane: str) -> int:
         running = True
     if running:
         # The record stays, so the planner still blocks a second one for the card.
-        activity.append(store, ref, "The plan saves are no longer logged: the planner still runs after "
-                        f"{PLAN_TIMEOUT_SECONDS // 3600} hours.", "herdboard")
+        activity.append(
+            store,
+            ref,
+            f"The plan saves are no longer logged: the planner still runs after {PLAN_TIMEOUT_SECONDS // 3600} hours.",
+            "herdboard",
+        )
         return 0
     _forget(ref, pane)
     _close_details(ref, record)
@@ -462,11 +591,26 @@ def _send_plan(store, ref: str, plan_file: Path) -> None:
         if found is None or not agent_live(found[1]):
             return
         pane = found[1]["pane_id"]
-        start_module.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", pane,
-                              "--until", "idle", "--timeout", str(AGENT_WAIT_SECONDS * 1000)],
-                             timeout=AGENT_WAIT_SECONDS + 60)
-        herdr("agent", "prompt", pane, f"The plan for this card changed: {plan_file}. Read it. "
-              "Tell the user how your work differs from the plan. Wait for the user to decide what to change.")
+        start_module.command(
+            [
+                os.environ.get("HERDR_BIN_PATH") or "herdr",
+                "agent",
+                "wait",
+                pane,
+                "--until",
+                "idle",
+                "--timeout",
+                str(AGENT_WAIT_SECONDS * 1000),
+            ],
+            timeout=AGENT_WAIT_SECONDS + 60,
+        )
+        herdr(
+            "agent",
+            "prompt",
+            pane,
+            f"The plan for this card changed: {plan_file}. Read it. "
+            "Tell the user how your work differs from the plan. Wait for the user to decide what to change.",
+        )
     except (HerdboardError, OSError, subprocess.TimeoutExpired) as failure:
         print(f"herdboard: cannot send the plan to the card's agent: {failure}", file=sys.stderr)
         return

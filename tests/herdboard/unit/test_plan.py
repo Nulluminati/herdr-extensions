@@ -1,4 +1,5 @@
 """Plan a card with an agent: it reads the code, asks the user, and writes the plan as an attachment."""
+
 import contextlib
 import io
 import json
@@ -26,8 +27,10 @@ class PlanTestCase(unittest.TestCase):
         self.enterContext(patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}))
         self.repo = self.root / "repo"
         self.repo.mkdir()
-        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit",
-                                      "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
         self.config = Config(todos_dir=self.root / "todos")
         self.store = Store(self.config)
@@ -37,8 +40,9 @@ class PlanTestCase(unittest.TestCase):
         self.fake = PlanHerdr(self.root)
         self.enterContext(patch.object(start, "command", self.fake))
         self.workers = []
-        self.enterContext(patch.object(plan, "start_worker",
-                                       lambda arguments, log: self.workers.append((arguments, log))))
+        self.enterContext(
+            patch.object(plan, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+        )
         self.enterContext(patch.object(plan, "POLL_SECONDS", 0))
         start.register_checkout(self.repo)
         self.planner = plan.Planner(self.store, self.repo)
@@ -51,12 +55,17 @@ class PlanTestCase(unittest.TestCase):
         return json.loads((start.state_dir() / "starts.json").read_text())[self.card.ref]
 
     def checkout_branch(self):
-        return subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "--short", "HEAD"],
-                              check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(self.repo), "symbolic-ref", "--short", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
 
     def upstream(self, branch):
-        return subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--abbrev-ref", branch + "@{u}"],
-                              check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "--abbrev-ref", branch + "@{u}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
 
     def brief(self):
         call = self.planner_start()
@@ -71,8 +80,19 @@ class PlanTestCase(unittest.TestCase):
 class RequestTests(PlanTestCase):
     def test_codex_planner_arguments_and_record(self):
         args = plan.planner_arguments("codex", "task", Path("/plans"), "gpt-6.1", "ultra")
-        self.assertEqual(args, [*start.codex_auto_review_options(), "--add-dir", "/plans", "--model", "gpt-6.1",
-                                "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertEqual(
+            args,
+            [
+                *start.codex_auto_review_options(),
+                "--add-dir",
+                "/plans",
+                "--model",
+                "gpt-6.1",
+                "-c",
+                'model_reasoning_effort="ultra"',
+                "task",
+            ],
+        )
         self.assertIn("sandbox_workspace_write.network_access=true", args)
         self.assertIn('web_search="live"', args)
         self.planner.plan(self.card.ref, agent="codex", thinking="ultra")
@@ -97,18 +117,42 @@ class RequestTests(PlanTestCase):
         self.assertIn("--no-focus", creates[0])
         self.assertEqual(creates[0][creates[0].index("--base") + 1], self.checkout_branch())
         worktree = self.record()["worktree_path"]
-        self.assertEqual(self.fake.find("tab", "create"),
-                         [["tab", "create", "--workspace", "w9", "--cwd", worktree,
-                           "--label", f"plan {self.card.ref}", "--no-focus"]])
+        self.assertEqual(
+            self.fake.find("tab", "create"),
+            [
+                [
+                    "tab",
+                    "create",
+                    "--workspace",
+                    "w9",
+                    "--cwd",
+                    worktree,
+                    "--label",
+                    f"plan {self.card.ref}",
+                    "--no-focus",
+                ]
+            ],
+        )
         call = self.planner_start()
         self.assertEqual(call[2], f"hb-{self.card.ref}-plan")
         self.assertEqual(call[call.index("--kind") + 1], "claude")
         self.assertEqual(call[call.index("--pane") + 1], "w1:p7")
-        self.assertEqual(result, {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
-                                  "checkout": str(self.repo), "plan": str(self.plan_file),
-                                  "workspace_id": "w9", "worktree_path": worktree,
-                                  "branch": start.todo_branch(self.card), "base": self.checkout_branch(),
-                                  "mode": "repo"})
+        self.assertEqual(
+            result,
+            {
+                "ref": self.card.ref,
+                "agent": "claude",
+                "model": None,
+                "pane_id": "w1:p7",
+                "checkout": str(self.repo),
+                "plan": str(self.plan_file),
+                "workspace_id": "w9",
+                "worktree_path": worktree,
+                "branch": start.todo_branch(self.card),
+                "base": self.checkout_branch(),
+                "mode": "repo",
+            },
+        )
 
     def test_the_start_record_has_the_setup_and_no_agent(self):
         self.planner.plan(self.card.ref)
@@ -125,7 +169,7 @@ class RequestTests(PlanTestCase):
     def test_claude_plans_in_auto_mode_with_the_attachments_folder(self):
         self.planner.plan(self.card.ref, model="opus")
         call = self.planner_start()
-        args = call[call.index("--") + 1:]
+        args = call[call.index("--") + 1 :]
         self.assertIn("Plan herdboard card", args[0])
         folder = attachments.folder(self.config, self.card.ref)
         self.assertEqual(args[1:], ["--permission-mode", "auto", "--model", "opus", "--add-dir", str(folder)])
@@ -134,29 +178,38 @@ class RequestTests(PlanTestCase):
     def test_claude_gets_its_effort_after_its_prompt(self):
         self.planner.plan(self.card.ref, model="opus", thinking="high")
         call = self.planner_start()
-        args = call[call.index("--") + 1:]
+        args = call[call.index("--") + 1 :]
         self.assertEqual(args[1:7], ["--permission-mode", "auto", "--model", "opus", "--effort", "high"])
 
     def test_pi_gets_all_tools_as_the_work_agent(self):
         self.planner.plan(self.card.ref, agent="pi", model="zai/glm-5.3", thinking="high")
         call = self.planner_start()
-        args = call[call.index("--") + 1:]
+        args = call[call.index("--") + 1 :]
         self.assertNotIn("--tools", args)
-        self.assertEqual(args[:-2], ["--model", "zai/glm-5.3",
-                                     "--thinking", "high"])
+        self.assertEqual(args[:-2], ["--model", "zai/glm-5.3", "--thinking", "high"])
         self.assertEqual(args[-2], "--")
 
     def test_the_brief_has_the_card_where_to_write_and_how_to_plan(self):
         self.planner.plan(self.card.ref)
         text = self.brief()
         worktree = self.record()["worktree_path"]
-        for part in ("# Plan: Fix login timeout", "The session ends after 5 minutes.",
-                     f"Worktree: `{worktree}` on branch `{start.todo_branch(self.card)}` "
-                     f"(base `{self.checkout_branch()}`)",
-                     "You may change code and run commands here to test ideas", "Do not commit",
-                     "revert every change you made", str(self.plan_file), "Ask the user",
-                     "## Goal", "## Decisions", "## Steps", "## Testing", "## Open questions",
-                     "6. Revert your code changes", "git status"):
+        for part in (
+            "# Plan: Fix login timeout",
+            "The session ends after 5 minutes.",
+            f"Worktree: `{worktree}` on branch `{start.todo_branch(self.card)}` (base `{self.checkout_branch()}`)",
+            "You may change code and run commands here to test ideas",
+            "Do not commit",
+            "revert every change you made",
+            str(self.plan_file),
+            "Ask the user",
+            "## Goal",
+            "## Decisions",
+            "## Steps",
+            "## Testing",
+            "## Open questions",
+            "6. Revert your code changes",
+            "git status",
+        ):
             self.assertIn(part, text)
         self.assertNotIn("A plan exists", text)
         self.assertNotIn("## Changes already in the worktree", text)
@@ -168,23 +221,40 @@ class RequestTests(PlanTestCase):
         command = start.herdboard_command(None)
         ref = self.card.ref
         self.assertLess(text.index("## Mockups"), text.index("## How to plan"))
-        for part in ("Ask before you generate one", f'`{command} --json mockup {ref} "<prompt>"`',
-                     "timeout of 600000 milliseconds", f'`{command} --json mockup {ref} "<prompt 1>" "<prompt 2>"`',
-                     "four at most", "Option 1 of 2", "--image <that draft>",
-                     f"`{command} attach {ref} <draft> --name mockup-<slug>.png`",
-                     "Do not attach drafts the user did not choose"):
+        for part in (
+            "Ask before you generate one",
+            f'`{command} --json mockup {ref} "<prompt>"`',
+            "timeout of 600000 milliseconds",
+            f'`{command} --json mockup {ref} "<prompt 1>" "<prompt 2>"`',
+            "four at most",
+            "Option 1 of 2",
+            "--image <that draft>",
+            f"`{command} attach {ref} <draft> --name mockup-<slug>.png`",
+            "Do not attach drafts the user did not choose",
+        ):
             self.assertIn(part, text)
 
     def test_the_brief_warns_when_a_work_agent_runs_in_the_worktree(self):
         self.planner.plan(self.card.ref)
-        start._write(start.state_dir() / "starts.json",
-                     {self.card.ref: {"ref": self.card.ref, "pane_id": "w9:p1", "steps_done": [],
-                                      "agent_name": f"hb-{self.card.ref}"}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                self.card.ref: {
+                    "ref": self.card.ref,
+                    "pane_id": "w9:p1",
+                    "steps_done": [],
+                    "agent_name": f"hb-{self.card.ref}",
+                }
+            },
+        )
         self.fake.work_agents = {f"hb-{self.card.ref}", "w9:p1"}
         self.fake.panes = [False]  # the first plan tab is gone
         self.planner.plan(self.card.ref)
-        self.assertIn("- A work agent works in this worktree too. It can change files while you plan. "
-                      "Revert only your own changes.", self.brief())
+        self.assertIn(
+            "- A work agent works in this worktree too. It can change files while you plan. "
+            "Revert only your own changes.",
+            self.brief(),
+        )
 
     def test_the_brief_lists_changes_that_were_already_in_the_worktree(self):
         self.planner.plan(self.card.ref)
@@ -319,13 +389,17 @@ class RequestTests(PlanTestCase):
     def test_a_tab_without_a_root_pane_is_a_herdr_error(self):
         original = self.fake.__call__
         for result in ({"tab": {}}, {"root_pane": {}}, {"root_pane": []}):
+
             def shaped(argv, timeout=120, result=result):
                 if argv[1:3] == ["tab", "create"]:
                     return self.fake.reply(argv, result)
                 return original(argv, timeout)
 
-            with self.subTest(result=result), patch.object(start, "command", shaped), \
-                    self.assertRaises(start.StartError) as raised:
+            with (
+                self.subTest(result=result),
+                patch.object(start, "command", shaped),
+                self.assertRaises(start.StartError) as raised,
+            ):
                 self.planner.plan(self.card.ref)
             self.assertEqual(raised.exception.code, "herdr_error")
 
@@ -341,7 +415,7 @@ class RequestTests(PlanTestCase):
         self.config.thinking = {"zai/glm-5.3": "xhigh"}
         self.planner.plan(self.card.ref, agent="pi")
         args = self.planner_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         # The level belongs to the model that runs: the planner passes no model, so pi uses start_model.
         self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
         self.assertEqual(args[args.index("--model") + 1], "zai/glm-5.3")
@@ -352,7 +426,7 @@ class RequestTests(PlanTestCase):
         self.config.thinking = {"zai/glm-5.3": "xhigh", "openai/gpt-5": "minimal"}
         self.planner.plan(self.card.ref, agent="pi", model="openai/gpt-5")
         args = self.planner_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[args.index("--model") + 1], "openai/gpt-5")
         self.assertEqual(args[args.index("--thinking") + 1], "minimal")
 
@@ -363,7 +437,7 @@ class RequestTests(PlanTestCase):
         self.config.thinking = {"zai/glm-5.3": "xhigh"}
         self.planner.plan(self.card.ref, agent="pi")
         args = self.planner_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[args.index("--model") + 1], "openai/gpt-5")
         self.assertEqual(args[args.index("--thinking") + 1], "low")
 
@@ -399,9 +473,22 @@ class NoRepositoryPlanTests(PlanTestCase):
         self.assertEqual(result["worktree_path"], str(self.folder()))
         self.assertEqual(result["mode"], "repoless")
         self.assertIsNone(result["checkout"])
-        self.assertEqual(self.fake.find("tab", "create"),
-                         [["tab", "create", "--workspace", "x1", "--cwd", str(self.folder()),
-                           "--label", f"plan {self.inbox_card.ref}", "--no-focus"]])
+        self.assertEqual(
+            self.fake.find("tab", "create"),
+            [
+                [
+                    "tab",
+                    "create",
+                    "--workspace",
+                    "x1",
+                    "--cwd",
+                    str(self.folder()),
+                    "--label",
+                    f"plan {self.inbox_card.ref}",
+                    "--no-focus",
+                ]
+            ],
+        )
         self.assertFalse(self.fake.find("worktree", "create"))
         text = self.brief_for(self.inbox_card.ref)
         self.assertIn("Working folder", text)
@@ -476,8 +563,7 @@ class NoRepositoryPlanTests(PlanTestCase):
     def test_go_to_the_planned_new_repository_folder(self):
         self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
         self.fake.calls.clear()
-        self.assertEqual(start.go_to_workspace(self.inbox_card.ref),
-                         {"ref": self.inbox_card.ref, "workspace_id": "x1"})
+        self.assertEqual(start.go_to_workspace(self.inbox_card.ref), {"ref": self.inbox_card.ref, "workspace_id": "x1"})
         self.assertIn(["workspace", "focus", "x1"], self.fake.calls)
 
     def test_review_of_a_planned_new_repository_card_says_to_start_it(self):
@@ -527,8 +613,10 @@ class WaitTests(PlanTestCase):
 
     def test_the_planner_tab_gets_the_details_pane_and_loses_it_when_planning_ends(self):
         self.planner.plan(self.card.ref)
-        self.assertEqual(self.fake.find("pane", "split"),
-                         [["pane", "split", "w1:p7", "--direction", "down", "--ratio", "0.25", "--no-focus"]])
+        self.assertEqual(
+            self.fake.find("pane", "split"),
+            [["pane", "split", "w1:p7", "--direction", "down", "--ratio", "0.25", "--no-focus"]],
+        )
         self.assertEqual(self.fake.labels, {"w1:p8": f"details - {self.card.ref}"})
         self.assertEqual(json.loads((start.state_dir() / "plans.json").read_text())[self.card.ref]["tab_id"], "w1:t4")
         self.assertEqual(self.fake.find("pane", "close"), [])
@@ -589,16 +677,14 @@ class WaitTests(PlanTestCase):
         self.fake.on_poll = lambda: (next(polls, None) or (lambda: None))()
         self.fake.states = ["working", "error", "idle", None]
         self.wait()
-        self.assertEqual(self.log(), ["Planning started: claude.", f"Plan saved: {self.plan_file}",
-                                      "Planning ended."])
+        self.assertEqual(self.log(), ["Planning started: claude.", f"Plan saved: {self.plan_file}", "Planning ended."])
 
     def test_a_plan_written_while_the_planner_starts_is_logged(self):
         self.fake.on_start = self.write_plan
         self.planner.plan(self.card.ref)
         self.fake.states = ["idle", None]
         self.wait()
-        self.assertEqual(self.log(), ["Planning started: claude.", f"Plan saved: {self.plan_file}",
-                                      "Planning ended."])
+        self.assertEqual(self.log(), ["Planning started: claude.", f"Plan saved: {self.plan_file}", "Planning ended."])
 
     def test_a_planner_that_outlives_the_watch_still_blocks_a_second_one(self):
         self.planner.plan(self.card.ref)
@@ -620,9 +706,17 @@ class WaitTests(PlanTestCase):
         self.assertIn(self.card.ref, json.loads((start.state_dir() / "plans.json").read_text()))
 
     def start_work_agent(self):
-        start._write(start.state_dir() / "starts.json",
-                     {self.card.ref: {"ref": self.card.ref, "pane_id": "w9:p1", "steps_done": [],
-                                      "agent_name": f"hb-{self.card.ref}"}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                self.card.ref: {
+                    "ref": self.card.ref,
+                    "pane_id": "w9:p1",
+                    "steps_done": [],
+                    "agent_name": f"hb-{self.card.ref}",
+                }
+            },
+        )
         self.fake.work_agents = {"w9:p1", f"hb-{self.card.ref}"}
 
     def test_a_changed_plan_goes_to_the_card_agent_when_planning_ends(self):
@@ -664,29 +758,66 @@ class PlanCliTests(CliTestCase):
     def test_plan_passes_the_options(self):
         calls = []
 
-        def fake_plan(planner, ref, agent=None, model=None, thinking=None, repo=None, checkout=None, base=None,
-                      no_repo=False, new_repo=None):
-            calls.append((ref, agent, model, thinking, repo, checkout, base, planner.config_file,
-                          no_repo, new_repo))
-            return {"ref": ref, "agent": agent or "claude", "model": model, "pane_id": "w1:p7",
-                    "checkout": "/repo", "workspace_id": "w9", "worktree_path": "/repo/work",
-                    "branch": "t123-fix", "base": "main", "plan": "/todos/.herdboard/attachments/t123/plan.md"}
+        def fake_plan(
+            planner,
+            ref,
+            agent=None,
+            model=None,
+            thinking=None,
+            repo=None,
+            checkout=None,
+            base=None,
+            no_repo=False,
+            new_repo=None,
+        ):
+            calls.append((ref, agent, model, thinking, repo, checkout, base, planner.config_file, no_repo, new_repo))
+            return {
+                "ref": ref,
+                "agent": agent or "claude",
+                "model": model,
+                "pane_id": "w1:p7",
+                "checkout": "/repo",
+                "workspace_id": "w9",
+                "worktree_path": "/repo/work",
+                "branch": "t123-fix",
+                "base": "main",
+                "plan": "/todos/.herdboard/attachments/t123/plan.md",
+            }
 
         with patch.object(plan.Planner, "plan", fake_plan):
-            data = self.run_json("plan", "t123", "--agent", "pi", "--model", "zai/glm-5.3", "--thinking", "high",
-                                 "--repo", "api", directory=self.plain)
+            data = self.run_json(
+                "plan",
+                "t123",
+                "--agent",
+                "pi",
+                "--model",
+                "zai/glm-5.3",
+                "--thinking",
+                "high",
+                "--repo",
+                "api",
+                directory=self.plain,
+            )
             self.assertEqual(data["pane_id"], "w1:p7")
             out, _ = self.run_cli("plan", "t123", "--model", "opus", "--base", "feature-x", directory=self.plain)
             self.run_json("plan", "t123", "--no-repo", directory=self.plain)
             self.run_json("plan", "t123", "--new-repo", "/tmp/new", directory=self.plain)
-        self.assertEqual([c[:7] for c in calls], [("t123", "pi", "zai/glm-5.3", "high", "api", None, None),
-                                                  ("t123", None, "opus", None, None, None, "feature-x"),
-                                                  ("t123", None, None, None, None, None, None),
-                                                  ("t123", None, None, None, None, None, None)])
+        self.assertEqual(
+            [c[:7] for c in calls],
+            [
+                ("t123", "pi", "zai/glm-5.3", "high", "api", None, None),
+                ("t123", None, "opus", None, None, None, "feature-x"),
+                ("t123", None, None, None, None, None, None),
+                ("t123", None, None, None, None, None, None),
+            ],
+        )
         self.assertEqual([c[8:] for c in calls], [(False, None), (False, None), (True, None), (False, "/tmp/new")])
         self.assertIsNotNone(calls[0][7])
-        self.assertEqual(out, "t123: claude (opus) plans in pane w1:p7, in /repo/work.\n"
-                              "The plan: /todos/.herdboard/attachments/t123/plan.md\n")
+        self.assertEqual(
+            out,
+            "t123: claude (opus) plans in pane w1:p7, in /repo/work.\n"
+            "The plan: /todos/.herdboard/attachments/t123/plan.md\n",
+        )
 
     def test_the_board_gets_the_config_file_for_its_workers(self):
         with patch("herdboard.board.HerdboardApp") as app:

@@ -47,7 +47,7 @@ class SkillTests(unittest.TestCase):
         commands = skill_commands()
         self.assertIn(["--json", "log", "tep3", "Ready for review: 3 commits."], commands)
         text = SKILL.read_text(encoding="utf-8")
-        handed = text[text.index("## When a card was handed to you"):text.index("## Errors")]
+        handed = text[text.index("## When a card was handed to you") : text.index("## Errors")]
         self.assertIn("herdboard --json log", handed)
         self.assertNotIn("edit --body", handed)
         self.assertIn("`agent_edit_denied`", text)
@@ -66,18 +66,24 @@ class SkillTests(unittest.TestCase):
 
     def test_review_merge_and_finish_are_documented(self):
         commands = skill_commands()
-        for argv in (["--json", "review", "tep3"], ["--json", "merge", "tep3"], ["--json", "merge", "tep3", "--pr"],
-                     ["--json", "merge", "tep3", "--pr", "--rewrite"], ["--json", "finish", "tep3"],
-                     ["--json", "pr-sync", "tep3"], ["--json", "pr-sync", "tep3", "--fetch"]):
+        for argv in (
+            ["--json", "review", "tep3"],
+            ["--json", "merge", "tep3"],
+            ["--json", "merge", "tep3", "--pr"],
+            ["--json", "merge", "tep3", "--pr", "--rewrite"],
+            ["--json", "finish", "tep3"],
+            ["--json", "pr-sync", "tep3"],
+            ["--json", "pr-sync", "tep3", "--fetch"],
+        ):
             self.assertIn(argv, commands)
 
     def test_the_card_agent_may_sync_its_own_pull_request_description(self):
         text = SKILL.read_text(encoding="utf-8")
-        handed = text[text.index("## When a card was handed to you"):text.index("## Errors")]
+        handed = text[text.index("## When a card was handed to you") : text.index("## Errors")]
         self.assertIn("pr-sync <id>", handed)
         self.assertIn("pr-sync <id> --fetch", handed)
         start = text.index("Ask the user first")
-        guarded = text[start:text.index("```bash", start)]
+        guarded = text[start : text.index("```bash", start)]
         # The slice must hold the ask-first list, or `assertNotIn` below proves nothing.
         self.assertIn("`merge` and `finish`", guarded)
         self.assertNotIn("pr-sync", guarded)
@@ -99,17 +105,43 @@ class SkillTests(unittest.TestCase):
 
     def test_every_error_code_in_the_skill_exists(self):
         text = SKILL.read_text(encoding="utf-8")
-        table = text[text.index("| Code |"):]
-        named = set(re.findall(r"`([a-z_]+)`", "\n".join(
-            line.split("|")[1] for line in table.splitlines() if line.startswith("| `"))))
-        known = {cls.code for cls in (
-            NotFoundError, ConflictError, LinearWriteUnknownError, LinearOfflineError, LinearError,
-            LinearWriteRejectedError, LinearDisabledError, TeamRequiredError,
-            AlreadyPromotedError, NotATodoError, IoError)}
+        table = text[text.index("| Code |") :]
+        named = set(
+            re.findall(
+                r"`([a-z_]+)`", "\n".join(line.split("|")[1] for line in table.splitlines() if line.startswith("| `"))
+            )
+        )
+        known = {
+            cls.code
+            for cls in (
+                NotFoundError,
+                ConflictError,
+                LinearWriteUnknownError,
+                LinearOfflineError,
+                LinearError,
+                LinearWriteRejectedError,
+                LinearDisabledError,
+                TeamRequiredError,
+                AlreadyPromotedError,
+                NotATodoError,
+                IoError,
+            )
+        }
         known.add(cli.UsageError.code)
-        known |= {cli.ConfirmationRequired.code, cli.LinearDeleteError.code, cli.LinearEditError.code,
-                  cli.AgentEditDenied.code}
-        known |= {"ambiguous_state", "no_state", "checkout_unknown", "repo_required", "herdr_unavailable", "herdr_error"}
+        known |= {
+            cli.ConfirmationRequired.code,
+            cli.LinearDeleteError.code,
+            cli.LinearEditError.code,
+            cli.AgentEditDenied.code,
+        }
+        known |= {
+            "ambiguous_state",
+            "no_state",
+            "checkout_unknown",
+            "repo_required",
+            "herdr_unavailable",
+            "herdr_error",
+        }
         known |= {"base_unknown", "upstream_failed", "not_started", "hunk_unavailable", "agent_unavailable"}
         known |= {"worktree_dirty", "nothing_to_merge", "base_dirty", "rebase_conflict", "merge_failed", "not_merged"}
         known |= {"gh_unavailable", "push_failed", "pr_failed"}
@@ -119,10 +151,26 @@ class SkillTests(unittest.TestCase):
         known |= {"no_repository", "new_repo_family", "path_exists", "new_repo_failed"}
         known |= {ArchivedError.code, CardActiveError.code, cli.LinearArchiveError.code, "has_sub_cards"}
         known.add(UnknownTypeError.code)
-        known |= {"remote_unknown", "branch_exists", "agent_running", "workspace_closed", "worktree_missing",
-                  "unsent_notes", "gh_failed", "git_failed", "hunk_failed", "new_commits"}
-        known |= {"bad_schedule", "unknown_board", "unsupported_platform", "herdr_not_found", "herdboard_not_found",
-                  "timer_failed"}
+        known |= {
+            "remote_unknown",
+            "branch_exists",
+            "agent_running",
+            "workspace_closed",
+            "worktree_missing",
+            "unsent_notes",
+            "gh_failed",
+            "git_failed",
+            "hunk_failed",
+            "new_commits",
+        }
+        known |= {
+            "bad_schedule",
+            "unknown_board",
+            "unsupported_platform",
+            "herdr_not_found",
+            "herdboard_not_found",
+            "timer_failed",
+        }
         # Herdr's own error codes pass through `start` unchanged.
         known.add("worktree_create_failed")
         self.assertEqual(named - known, set())

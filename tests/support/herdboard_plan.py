@@ -54,20 +54,31 @@ class PlanHerdr:
                 # A real worktree, so `git status` and the upstream work in the tests.
                 cwd = args[args.index("--cwd") + 1]
                 base = args[args.index("--base") + 1] if "--base" in args else "HEAD"
-                subprocess.run(["git", "-C", cwd, "worktree", "add", "-qb", branch, str(path), base],
-                               check=True, capture_output=True)
-            result = {"workspace": {"workspace_id": workspace}, "root_pane": {"pane_id": workspace + ":p1"},
-                      "worktree": {"path": str(path)}}
+                subprocess.run(
+                    ["git", "-C", cwd, "worktree", "add", "-qb", branch, str(path), base],
+                    check=True,
+                    capture_output=True,
+                )
+            result = {
+                "workspace": {"workspace_id": workspace},
+                "root_pane": {"pane_id": workspace + ":p1"},
+                "worktree": {"path": str(path)},
+            }
             self.worktrees = [w for w in self.worktrees if w["path"] != str(path)]
             self.worktrees.append({"branch": branch, "path": str(path), "open_workspace_id": workspace})
             return self.reply(argv, result)
         if operation == "workspace get":
-            return self.reply(argv, {"workspace": {"workspace_id": args[2]},
-                                     "root_pane": {"pane_id": args[2] + ":p1"}})
+            return self.reply(argv, {"workspace": {"workspace_id": args[2]}, "root_pane": {"pane_id": args[2] + ":p1"}})
         if operation == "pane list":
-            return self.reply(argv, {"panes": [{"pane_id": args[3] + ":p1"},
-                                               *({"pane_id": pane, "tab_id": "w1:t4", "label": label}
-                                                 for pane, label in self.labels.items())]})
+            return self.reply(
+                argv,
+                {
+                    "panes": [
+                        {"pane_id": args[3] + ":p1"},
+                        *({"pane_id": pane, "tab_id": "w1:t4", "label": label} for pane, label in self.labels.items()),
+                    ]
+                },
+            )
         if operation == "pane split":
             return self.reply(argv, {"pane": {"pane_id": "w1:p8"}})
         if operation == "pane rename":
@@ -88,8 +99,7 @@ class PlanHerdr:
                 return self.reply(argv, error="pane_not_found")
             return self.reply(argv, {"pane": {"pane_id": args[2], "tab_id": "w1:t4", "workspace_id": "w1"}})
         if operation == "workspace create":
-            return self.reply(argv, {"workspace": {"workspace_id": "x1"},
-                                     "root_pane": {"pane_id": "x1:p1"}})
+            return self.reply(argv, {"workspace": {"workspace_id": "x1"}, "root_pane": {"pane_id": "x1:p1"}})
         if operation == "workspace close":
             return self.reply(argv, {"type": "ok"})
         if operation == "agent start" and self.on_start:
@@ -97,4 +107,4 @@ class PlanHerdr:
         return self.reply(argv, {"type": "ok"})
 
     def find(self, *prefix):
-        return [call for call in self.calls if call[:len(prefix)] == list(prefix)]
+        return [call for call in self.calls if call[: len(prefix)] == list(prefix)]

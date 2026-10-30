@@ -62,18 +62,24 @@ class AgentIconsTests(unittest.TestCase):
 
     def test_font_found_writes_vendor_logo(self):
         self.run_main()
-        self.assertEqual(self.reports(), {
-            "w1:p1": ["--token", "agent_icon="],
-            "w1:p2": ["--token", "agent_icon="],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p1": ["--token", "agent_icon="],
+                "w1:p2": ["--token", "agent_icon="],
+            },
+        )
 
     def test_font_missing_clears_every_token(self):
         self.font = "DejaVu Sans"
         self.run_main()
-        self.assertEqual(self.reports(), {
-            "w1:p1": ["--clear-token", "agent_icon"],
-            "w1:p2": ["--clear-token", "agent_icon"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p1": ["--clear-token", "agent_icon"],
+                "w1:p2": ["--clear-token", "agent_icon"],
+            },
+        )
 
     def test_fc_match_not_installed_counts_as_missing(self):
         self.font = None
@@ -89,13 +95,18 @@ class AgentIconsTests(unittest.TestCase):
     def test_unknown_or_missing_agent_clears_token(self):
         self.agents = [{"pane_id": "w1:p1", "agent": "zzz"}, {"pane_id": "w1:p2"}]
         self.run_main()
-        self.assertEqual(self.reports(), {
-            "w1:p1": ["--clear-token", "agent_icon"],
-            "w1:p2": ["--clear-token", "agent_icon"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p1": ["--clear-token", "agent_icon"],
+                "w1:p2": ["--clear-token", "agent_icon"],
+            },
+        )
 
     def test_event_reports_only_the_event_pane(self):
-        os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps({"event": "pane.agent_detected", "data": {"pane": {"pane_id": "w1:p1"}}})
+        os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps(
+            {"event": "pane.agent_detected", "data": {"pane": {"pane_id": "w1:p1"}}}
+        )
         self.run_main()
         self.assertEqual(self.reports(), {"w1:p1": ["--token", "agent_icon="]})
         self.assertFalse(any(argv[1:3] == ["agent", "list"] for argv in self.calls))

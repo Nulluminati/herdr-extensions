@@ -1,4 +1,5 @@
 """Linear start uses the server branch and the normal write path."""
+
 import json
 import subprocess
 from unittest.mock import patch
@@ -15,10 +16,20 @@ class StartLinearTests(WriteCliCase):
         super().setUp()
         self.board()
         from herdboard.linear_links import LabelLink, ProjectLink
+
         self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]))
         # A worktree starts from a commit, so the repository needs one.
-        git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
-            "commit", "--allow-empty", "-qm", "init")
+        git(
+            self.repo,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        )
         self.fake_herdr = FakeHerdr(self.repo.parent)
         self.enterContext(patch.object(start, "command", self.fake_herdr))
 
@@ -33,6 +44,7 @@ class StartLinearTests(WriteCliCase):
 
     def test_the_move_gets_the_state_that_prepare_resolved(self):
         from herdboard.linear_writes import LinearWriter
+
         with patch.object(LinearWriter, "move", return_value=None) as move:
             self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)
         self.assertEqual(move.call_args.kwargs.get("state_name"), "Doing")
@@ -40,8 +52,9 @@ class StartLinearTests(WriteCliCase):
     def test_a_sub_issue_starts_from_the_current_branch_without_its_parent(self):
         self.issue("ENG-1")["parent"] = {"id": "i2", "identifier": "ENG-2"}
         result = self.run_json("start", "ENG-1", "--no-agent", directory=self.repo)
-        head = subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "--short", "HEAD"],
-                              check=True, capture_output=True, text=True).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", str(self.repo), "symbolic-ref", "--short", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
         self.assertEqual(result["base"], head)
         self.assertIsNone(start.find_record("ENG-2"))
 
@@ -60,10 +73,11 @@ class StartLinearTests(WriteCliCase):
         from herdboard.linear_source import LinearSource
         from herdboard.linear_writes import LinearWriter
         from herdboard.store import Store
+
         config = load_config(self.config)
-        starter = start.Starter(Store(config), self.repo,
-                                writer=LinearWriter(config, LinearSource(config)),
-                                repository_view=False)
+        starter = start.Starter(
+            Store(config), self.repo, writer=LinearWriter(config, LinearSource(config)), repository_view=False
+        )
         with self.assertRaises(start.StartError) as raised:
             starter.start("ENG-1", no_agent=True)
         self.assertEqual(raised.exception.code, "repo_required")
@@ -83,6 +97,7 @@ class StartLinearTests(WriteCliCase):
 
     def test_wrong_project_or_label_requires_repository(self):
         from herdboard.linear_links import LabelLink, ProjectLink
+
         for issue in ("ENG-3", "ENG-5"):
             error = self.run_json("start", issue, "--no-agent", directory=self.repo, expect=1)["error"]
             self.assertEqual(error["code"], "repo_required")
@@ -95,6 +110,7 @@ class StartLinearTests(WriteCliCase):
         from herdboard.identity import RepoIdentity
         from herdboard.linear_links import ProjectLink
         from herdboard.store import Store
+
         store = Store(load_config(self.config))
         for name in ("web", "frontend"):
             path = store.init_board(RepoIdentity("github.com/acme/" + name, "github.com", ("acme", name)))
@@ -129,10 +145,10 @@ class StartLinearTests(WriteCliCase):
         other.mkdir()
         git(other, "init", "-q")
         git(other, "remote", "add", "origin", "https://github.com/acme/web.git")
-        git(other, "-c", "user.name=Test", "-c", "user.email=test@example.com",
-            "commit", "--allow-empty", "-qm", "init")
-        _, err = self.run_cli("--json", "start", "ENG-5", "--repo", str(other), "--no-agent",
-                              directory=self.plain)
+        git(
+            other, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"
+        )
+        _, err = self.run_cli("--json", "start", "ENG-5", "--repo", str(other), "--no-agent", directory=self.plain)
         self.assertEqual(err, "")
         self.assertEqual(self.pins(), [])
 
@@ -142,8 +158,7 @@ class StartLinearTests(WriteCliCase):
 
     def test_a_checkout_start_pins_to_a_mixed_case_github_board(self):
         self.mixed_case_board()
-        _, err = self.run_cli("--json", "start", "ENG-3", "--repo", str(self.repo), "--no-agent",
-                              directory=self.plain)
+        _, err = self.run_cli("--json", "start", "ENG-3", "--repo", str(self.repo), "--no-agent", directory=self.plain)
         self.assertEqual(err, "")
         self.assertEqual(self.pins(), ["ENG-3"])
 
@@ -156,15 +171,16 @@ class StartLinearTests(WriteCliCase):
     def test_a_pin_failure_warns_and_the_start_goes_on(self):
         board = self.store_for().projects_dir / "acme-api.md"
         board.write_text(board.read_text().replace("repo:", "linear-issues: nope\nrepo:", 1))
-        out, err = self.run_cli("--json", "start", "ENG-3", "--repo", "acme-api", "--no-agent",
-                                directory=self.plain)
+        out, err = self.run_cli("--json", "start", "ENG-3", "--repo", "acme-api", "--no-agent", directory=self.plain)
         self.assertEqual(json.loads(out)["branch"], "nate/eng-3")
         self.assertRegex(err, r"herdboard: warning: cannot pin ENG-3 to .*acme-api.md: .*linear-issues")
 
     def test_missing_state_precedes_worktree(self):
         self.config.write_text(self.config.read_text() + '\nstart_column = "Missing"\n')
         # Keep the override at the top level, outside existing TOML tables.
-        self.config.write_text('start_column = "Missing"\n' + self.config.read_text().replace('\nstart_column = "Missing"\n', '\n'))
+        self.config.write_text(
+            'start_column = "Missing"\n' + self.config.read_text().replace('\nstart_column = "Missing"\n', "\n")
+        )
         error = self.run_json("start", "ENG-1", "--no-agent", directory=self.repo, expect=1)["error"]
         self.assertEqual(error["code"], "no_state")
         self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake_herdr.calls))

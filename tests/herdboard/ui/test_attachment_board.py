@@ -1,4 +1,5 @@
 """The card detail lists the card's attachments, and opens one in a viewer or another application."""
+
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -101,8 +102,9 @@ class AttachmentDetailTests(BoardTestCase):
             await pilot.pause()
             self.assertIsInstance(app.screen, AttachmentChoiceScreen)
             options = app.screen.query_one(OptionList)
-            self.assertEqual([str(options.get_option_at_index(i).prompt) for i in range(options.option_count)],
-                             ["a.md", "b.md"])
+            self.assertEqual(
+                [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)], ["a.md", "b.md"]
+            )
             await pilot.press("down", "enter")
             await pilot.pause()
             self.assertIsInstance(app.screen, AttachmentScreen)
@@ -113,8 +115,7 @@ class AttachmentDetailTests(BoardTestCase):
         added = self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
         app = self.make_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "linux"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "linux"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 await pilot.press("o")
@@ -131,23 +132,23 @@ class AttachmentDetailTests(BoardTestCase):
         self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
         app = self.make_app()
         popen = fake_opener(4, b"xdg-open: no method available for opening 'shot.png'\n")
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "linux"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "linux"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 await pilot.press("o")
                 await settle(pilot)
                 messages = await wait_for_notice(pilot, "Cannot open")
-        self.assertIn("Cannot open shot.png with xdg-open: exit code 4: "
-                      "xdg-open: no method available for opening 'shot.png'", messages)
+        self.assertIn(
+            "Cannot open shot.png with xdg-open: exit code 4: xdg-open: no method available for opening 'shot.png'",
+            messages,
+        )
 
     async def test_macos_uses_open(self):
         card = self.store.add(self.repo_path, "Ship it", "Todo")
         added = self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
         app = self.make_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "darwin"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "darwin"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 await pilot.press("o")
@@ -158,8 +159,10 @@ class AttachmentDetailTests(BoardTestCase):
         card = self.store.add(self.repo_path, "Ship it", "Todo")
         self.attach(card.ref, "shot.png", b"\x89PNG\r\n\x1a\n\x00")
         app = self.make_app()
-        with mock.patch.object(board.subprocess, "Popen", side_effect=FileNotFoundError("xdg-open")), \
-                mock.patch.object(board.sys, "platform", "linux"):
+        with (
+            mock.patch.object(board.subprocess, "Popen", side_effect=FileNotFoundError("xdg-open")),
+            mock.patch.object(board.sys, "platform", "linux"),
+        ):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 await pilot.press("o")

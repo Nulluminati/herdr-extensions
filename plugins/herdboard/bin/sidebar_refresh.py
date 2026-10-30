@@ -15,8 +15,9 @@ def main() -> int:
     root = os.environ.get("HERDR_PLUGIN_ROOT") or str(Path(__file__).resolve().parents[1])
     argv = ["uv", "run", "--quiet", "--project", root, "herdboard", "sidebar-refresh"]
     try:
-        subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+        )
     except OSError as error:
         print(f"herdboard: cannot start the sidebar refresh: {error}", file=sys.stderr)
         return 1

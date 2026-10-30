@@ -28,8 +28,18 @@ def main() -> int:
         message = message or "herdboard details --open failed"
         print(message, file=sys.stderr)
         try:
-            subprocess.run([os.environ.get("HERDR_BIN_PATH", "herdr"), "notification", "show",
-                            "herdboard: no details pane", "--body", message], capture_output=True, text=True)
+            subprocess.run(
+                [
+                    os.environ.get("HERDR_BIN_PATH", "herdr"),
+                    "notification",
+                    "show",
+                    "herdboard: no details pane",
+                    "--body",
+                    message,
+                ],
+                capture_output=True,
+                text=True,
+            )
         except OSError:
             pass
     return code

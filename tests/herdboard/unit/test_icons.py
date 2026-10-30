@@ -19,8 +19,9 @@ PULL_REQUEST = "\uf407"
 
 
 def card(**kwargs):
-    fields = dict(ref="t123", board="api", path=None, column="Todo", title="Ship it",
-                  checked=False, due=None, tags=[], body=[])
+    fields = dict(
+        ref="t123", board="api", path=None, column="Todo", title="Ship it", checked=False, due=None, tags=[], body=[]
+    )
     fields.update(kwargs)
     return CardView(**fields)
 
@@ -44,10 +45,12 @@ class IconTextTests(unittest.TestCase):
 
     def test_dates_keep_labels_and_urgency_in_both_modes(self):
         today = date(2026, 10, 15)
-        for due, shown, color in (("2026-10-14", "Oct 14", "bold red"),
-                                  ("2026-10-17", "Oct 17", "yellow"),
-                                  ("2027-01-01", "Jan 1 2027", "dim"),
-                                  ("invalid", "invalid", "dim")):
+        for due, shown, color in (
+            ("2026-10-14", "Oct 14", "bold red"),
+            ("2026-10-17", "Oct 17", "yellow"),
+            ("2027-01-01", "Jan 1 2027", "dim"),
+            ("invalid", "invalid", "dim"),
+        ):
             for style in ("plain", "nerd"):
                 with self.subTest(due=due, style=style):
                     label = board.due_label(due, today, icon_style=style)
@@ -57,12 +60,17 @@ class IconTextTests(unittest.TestCase):
 
     def test_pull_requests_and_worktrees_use_shared_icons(self):
         for style in ("plain", "nerd"):
-            item = card(source="linear", pr=True, pr_state="merged", pr_writing=True,
-                        worktree_removed=True, worktree_left=True)
+            item = card(
+                source="linear", pr=True, pr_state="merged", pr_writing=True, worktree_removed=True, worktree_left=True
+            )
             text = board.card_text(item, False, icon_style=style).plain
-            for label, icon in (("PR", PULL_REQUEST), ("PR merged", PULL_REQUEST),
-                                ("PR: writing", PULL_REQUEST), ("worktree removed", BRANCH),
-                                ("worktree still exists", BRANCH)):
+            for label, icon in (
+                ("PR", PULL_REQUEST),
+                ("PR merged", PULL_REQUEST),
+                ("PR: writing", PULL_REQUEST),
+                ("worktree removed", BRANCH),
+                ("worktree still exists", BRANCH),
+            ):
                 expected = f"{icon} {label}" if style == "nerd" else label
                 self.assertIn(expected, text)
                 if style == "plain":
@@ -81,10 +89,8 @@ class IconTextTests(unittest.TestCase):
         base = "Board        api\nColumn       Todo\nID           t123\nType         bug"
         cases = (
             ({}, base),
-            ({"pr_state": "open", "worktree_left": True},
-             base + "\nPull request open\nWorktree     still exists"),
-            ({"pr_state": "merged", "worktree_removed": True},
-             base + "\nPull request merged\nWorktree     removed"),
+            ({"pr_state": "open", "worktree_left": True}, base + "\nPull request open\nWorktree     still exists"),
+            ({"pr_state": "merged", "worktree_removed": True}, base + "\nPull request merged\nWorktree     removed"),
             ({"pr_state": "open", "pr_writing": True}, base + "\nPull request writing"),
         )
         for status, expected in cases:
@@ -108,8 +114,13 @@ class IconTextTests(unittest.TestCase):
                         self.assertEqual(style.color.name if style.color else None, "red" if kind == "bug" else None)
 
     def test_rendering_does_not_change_data_or_filter_results(self):
-        item = card(title="Ship it #type/bug #api 📅 2026-11-01", type="bug", tags=["api"],
-                    due="2026-11-01", has_attachments=True)
+        item = card(
+            title="Ship it #type/bug #api 📅 2026-11-01",
+            type="bug",
+            tags=["api"],
+            due="2026-11-01",
+            has_attachments=True,
+        )
         before = asdict(item)
         for style in ("plain", "nerd"):
             widget = board.CardWidget(item, False, tag_style="block", icon_style=style)

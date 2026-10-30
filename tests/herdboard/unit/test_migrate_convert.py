@@ -26,12 +26,11 @@ class SlugTests(unittest.TestCase):
 class HeadingStyleTests(unittest.TestCase):
     def test_atx_headings(self):
         result = load("atx.md")
-        self.assertEqual([s.name for s in result.sections],
-                         ["Garden", "Kitchen Ideas", "Pantry & Misc."])
-        self.assertEqual([s.tag for s in result.sections],
-                         ["garden", "kitchen-ideas", "pantry-misc"])
-        self.assertEqual([i.title for i in result.sections[1].items],
-                         ["label the jars", "sharpen knives", "clean the oven"])
+        self.assertEqual([s.name for s in result.sections], ["Garden", "Kitchen Ideas", "Pantry & Misc."])
+        self.assertEqual([s.tag for s in result.sections], ["garden", "kitchen-ideas", "pantry-misc"])
+        self.assertEqual(
+            [i.title for i in result.sections[1].items], ["label the jars", "sharpen knives", "clean the oven"]
+        )
 
     def test_atx_closing_hashes_and_levels(self):
         result = convert("## Deep ##\n- a\n###### Six\n- b\n")
@@ -40,8 +39,7 @@ class HeadingStyleTests(unittest.TestCase):
     def test_setext_with_colon_and_underlines(self):
         result = load("setext-colon.md")
         self.assertEqual([s.name for s in result.sections], ["Garden Tasks", "Shed Cleanup"])
-        self.assertEqual([i.title for i in result.items],
-                         ["Mow the lawn", "Sort tools", "Oil the hinges"])
+        self.assertEqual([i.title for i in result.items], ["Mow the lawn", "Sort tools", "Oil the hinges"])
         self.assertEqual(result.non_list, [])
         for item in result.items:
             self.assertNotIn("=", item.title + "".join(item.body))
@@ -67,10 +65,16 @@ class BulletTests(unittest.TestCase):
         items = load("bullets.md").items
         self.assertEqual(
             [(i.title, i.checked) for i in items],
-            [("open box item", False), ("checked box item", True),
-             ("upper checked item", True), ("star item", False), ("plus item", False),
-             ("numbered item", False), ("paren numbered item", False),
-             ("plain item", False)],
+            [
+                ("open box item", False),
+                ("checked box item", True),
+                ("upper checked item", True),
+                ("star item", False),
+                ("plus item", False),
+                ("numbered item", False),
+                ("paren numbered item", False),
+                ("plain item", False),
+            ],
         )
         self.assertEqual(lines(items[0]), ["- [ ] open box item"])
         self.assertEqual(lines(items[1]), ["- [x] checked box item"])
@@ -79,8 +83,7 @@ class BulletTests(unittest.TestCase):
 
     def test_nested_items_keep_checkboxes(self):
         item = load("bullets.md").items[-1]
-        self.assertEqual(item.body, ["\t- [x] nested checked", "\t- nested star",
-                                     "\t- nested numbered"])
+        self.assertEqual(item.body, ["\t- [x] nested checked", "\t- nested star", "\t- nested numbered"])
 
     def test_tag_goes_after_title(self):
         item = load("atx.md").items[0]
@@ -95,8 +98,7 @@ class IndentTests(unittest.TestCase):
     def test_eight_space_unit(self):
         result = load("setext-colon.md")
         self.assertEqual(result.indent_unit, 8)
-        self.assertEqual(result.items[0].body,
-                         ["\t- front", "\t- back", "\t\t- corners"])
+        self.assertEqual(result.items[0].body, ["\t- front", "\t- back", "\t\t- corners"])
 
     def test_tab_only_has_no_space_unit(self):
         self.assertIsNone(load("colon-tabs.md").indent_unit)
@@ -131,8 +133,7 @@ class SectionTests(unittest.TestCase):
         result = load("indents.md")
         self.assertIsNone(result.sections[0].name)
         self.assertIsNone(result.sections[0].items[0].tag)
-        self.assertEqual(lines(result.sections[0].items[0]),
-                         ["- [ ] Loose first item", "\t- under it"])
+        self.assertEqual(lines(result.sections[0].items[0]), ["- [ ] Loose first item", "\t- under it"])
 
     def test_heading_with_unsluggable_name_gives_no_tag(self):
         result = convert("# ???\n- a\n")
@@ -156,15 +157,16 @@ class NonListTests(unittest.TestCase):
     def test_standalone_and_attached(self):
         items = {i.title: i for i in self.result.items}
         self.assertIn("Intro line before any list", items)
-        self.assertEqual(items["first item"].body,
-                         ["\tA note about the first item", "\tan indented note"])
+        self.assertEqual(items["first item"].body, ["\tA note about the first item", "\tan indented note"])
         self.assertIn("Standalone text in notes", items)
         self.assertEqual(
             [(n.text, n.action) for n in self.result.non_list],
-            [("Intro line before any list", "card"),
-             ("A note about the first item", "attached"),
-             ("an indented note", "attached"),
-             ("Standalone text in notes", "card")],
+            [
+                ("Intro line before any list", "card"),
+                ("A note about the first item", "attached"),
+                ("an indented note", "attached"),
+                ("Standalone text in notes", "card"),
+            ],
         )
 
     def test_colon_heading_wins_over_text(self):
@@ -179,8 +181,7 @@ class NonListTests(unittest.TestCase):
         self.assertEqual(self.result.non_list[-1].section, "Notes")
 
     def test_stray_rule_line_dropped(self):
-        self.assertNotIn("----", "".join(
-            line for item in self.result.items for line in item.card_lines()))
+        self.assertNotIn("----", "".join(line for item in self.result.items for line in item.card_lines()))
 
     def test_crlf_input(self):
         result = convert("# A\r\n- x\r\n\t- y\r\n")
@@ -192,10 +193,10 @@ class IndentAmbiguityTests(unittest.TestCase):
         result = convert("- root\n\t- tab sibling\n    - space sibling\n - stray\n")
         self.assertEqual(result.indent_unit, 4)
         self.assertEqual([i.title for i in result.items], ["root"])
-        self.assertEqual(result.items[0].body,
-                         ["\t- tab sibling", "\t- space sibling", "\t- stray"])
-        self.assertEqual([(n.number, n.text, n.action, n.parent) for n in result.non_list],
-                         [(4, "stray", "ambiguous", "root")])
+        self.assertEqual(result.items[0].body, ["\t- tab sibling", "\t- space sibling", "\t- stray"])
+        self.assertEqual(
+            [(n.number, n.text, n.action, n.parent) for n in result.non_list], [(4, "stray", "ambiguous", "root")]
+        )
 
     def test_mixed_prefix_expands_in_order_with_tab_stops(self):
         result = convert("- root\n    - a\n \t- b\n\t- c\n")
@@ -211,17 +212,17 @@ class IndentAmbiguityTests(unittest.TestCase):
         result = convert("- root\n\t- a\n \t- b\n")
         self.assertIsNone(result.indent_unit)
         self.assertEqual(result.items[0].body, ["\t- a", "\t- b"])
-        self.assertEqual([(n.number, n.action, n.parent) for n in result.non_list],
-                         [(3, "ambiguous", "root")])
+        self.assertEqual([(n.number, n.action, n.parent) for n in result.non_list], [(3, "ambiguous", "root")])
 
     def test_stray_space_in_a_tab_file_reports_its_parent(self):
         result = convert("T:\n- a\n\t- b\n- url\n - stray\n")
         self.assertIsNone(result.indent_unit)
         self.assertEqual([i.title for i in result.items], ["a", "url"])
         self.assertEqual(result.items[1].body, ["\t- stray"])
-        self.assertEqual([(n.number, n.text, n.action, n.section, n.parent)
-                          for n in result.non_list],
-                         [(5, "stray", "ambiguous", "T", "url")])
+        self.assertEqual(
+            [(n.number, n.text, n.action, n.section, n.parent) for n in result.non_list],
+            [(5, "stray", "ambiguous", "T", "url")],
+        )
 
     def test_stray_space_as_first_card_has_no_parent(self):
         result = convert("\t- x\n - y\n")
@@ -248,16 +249,16 @@ class HeadingIndentTests(unittest.TestCase):
         for prefix in ("", " ", "   "):
             result = convert(f"{prefix}## Testing\n- check configuration\n")
             self.assertEqual([s.name for s in result.sections], ["Testing"])
-            self.assertEqual([(i.title, i.tag) for i in result.items],
-                             [("check configuration", "testing")])
+            self.assertEqual([(i.title, i.tag) for i in result.items], [("check configuration", "testing")])
             self.assertEqual(result.non_list, [])
 
     def test_four_spaces_or_tab_are_text(self):
         for prefix in ("    ", "\t"):
             result = convert(f"{prefix}## Testing\n- check configuration\n")
             self.assertEqual([s.name for s in result.sections], [None])
-            self.assertEqual([(i.title, i.tag) for i in result.items],
-                             [("## Testing", None), ("check configuration", None)])
+            self.assertEqual(
+                [(i.title, i.tag) for i in result.items], [("## Testing", None), ("check configuration", None)]
+            )
             self.assertEqual([(n.number, n.action) for n in result.non_list], [(1, "card")])
 
     def test_underlined_heading_text_allows_three_spaces(self):
@@ -270,8 +271,7 @@ class HeadingIndentTests(unittest.TestCase):
         for prefix in ("    ", "\t"):
             result = convert(f"{prefix}Garden\n=====\n- water\n")
             self.assertEqual([s.name for s in result.sections], [None])
-            self.assertEqual([(i.title, i.tag) for i in result.items],
-                             [("Garden", None), ("water", None)])
+            self.assertEqual([(i.title, i.tag) for i in result.items], [("Garden", None), ("water", None)])
             self.assertEqual([(n.number, n.action) for n in result.non_list], [(1, "card")])
 
 
@@ -280,8 +280,9 @@ class FenceTests(unittest.TestCase):
         result = convert("- script task\n```sh\n# Explain shell command\n- command argument\n```\n- next\n")
         self.assertEqual([s.name for s in result.sections], [None])
         self.assertEqual([i.title for i in result.items], ["script task", "next"])
-        self.assertEqual(result.items[0].body,
-                         ["\t```sh", "\t# Explain shell command", "\t- command argument", "\t```"])
+        self.assertEqual(
+            result.items[0].body, ["\t```sh", "\t# Explain shell command", "\t- command argument", "\t```"]
+        )
         self.assertEqual(result.items[1].body, [])
 
     def test_fence_in_section_does_not_change_tags(self):
@@ -298,14 +299,12 @@ class FenceTests(unittest.TestCase):
     def test_closing_fence_needs_same_character_and_length(self):
         result = convert("- a\n~~~~\n~~~\n```\n- x\n~~~~~\n- b\n")
         self.assertEqual([i.title for i in result.items], ["a", "b"])
-        self.assertEqual(result.items[0].body,
-                         ["\t~~~~", "\t~~~", "\t```", "\t- x", "\t~~~~~"])
+        self.assertEqual(result.items[0].body, ["\t~~~~", "\t~~~", "\t```", "\t- x", "\t~~~~~"])
 
     def test_nested_item_fence_keeps_card_depth(self):
         result = convert("- a\n\t- b\n\t```\n\t# c\n\t  indented\n\t```\n")
         self.assertEqual([i.title for i in result.items], ["a"])
-        self.assertEqual(result.items[0].body,
-                         ["\t- b", "\t```", "\t# c", "\t  indented", "\t```"])
+        self.assertEqual(result.items[0].body, ["\t- b", "\t```", "\t# c", "\t  indented", "\t```"])
 
     def test_unclosed_fence_runs_to_the_end(self):
         result = convert("- a\n```\n- b\n# h\n")
@@ -331,9 +330,10 @@ class SourceIdTests(unittest.TestCase):
 
     def test_ids_outside_the_format_and_repeated_ids(self):
         result = convert("- a ^long-id-here\n- b ^tabc\n- c ^tabc\n- d ^tabc extra\n")
-        self.assertEqual([(i.title, i.dropped_id) for i in result.items],
-                         [("a", "long-id-here"), ("b", "tabc"), ("c", "tabc"),
-                          ("d ^tabc extra", None)])
+        self.assertEqual(
+            [(i.title, i.dropped_id) for i in result.items],
+            [("a", "long-id-here"), ("b", "tabc"), ("c", "tabc"), ("d ^tabc extra", None)],
+        )
 
     def test_text_line_card_drops_id(self):
         result = convert("plain text ^tabc\n")

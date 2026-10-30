@@ -21,8 +21,9 @@ class MoveCommandTests(WriteCliCase):
 
     def test_move_json_prints_the_issue_card(self):
         card = self.run_json("move", "eng-2", "Todo", directory=self.repo)["card"]
-        self.assertEqual((card["ref"], card["column"], card["source"], card["state"]),
-                         ("ENG-2", "Todo", "linear", "Todo"))
+        self.assertEqual(
+            (card["ref"], card["column"], card["source"], card["state"]), ("ENG-2", "Todo", "linear", "Todo")
+        )
         self.assertEqual((card["tags"], card["type"]), (["repo:api"], "bug"))
         self.assertEqual(card["title"], "Issue 2")
         self.assertEqual(card["url"], "https://linear.app/workspace/issue/ENG-2")
@@ -126,8 +127,11 @@ class AmbiguousStateTests(WriteCliCase):
 
     def test_without_a_terminal_the_error_lists_the_candidates(self):
         _, err = self.run_cli("move", "ENG-1", "In progress", directory=self.repo, expect=1)
-        self.assertRegex(err, r"^herdboard: Several states of team ENG match column 'In progress': "
-                              r"Doing, Coding")
+        self.assertRegex(
+            err,
+            r"^herdboard: Several states of team ENG match column 'In progress': "
+            r"Doing, Coding",
+        )
         self.assertEqual(self.requests("IssueUpdate"), [])
 
     def test_json_error_carries_the_candidates(self):
@@ -155,9 +159,12 @@ class AmbiguousStateTests(WriteCliCase):
 
     def run_on_terminal(self, answers, *args):
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(cli, "_interactive", return_value=True), \
-                mock.patch.object(sys, "stdin", io.StringIO(answers)):
+        with (
+            mock.patch.object(cli, "_interactive", return_value=True),
+            mock.patch.object(sys, "stdin", io.StringIO(answers)),
+        ):
             import contextlib
+
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = cli.main(["--config", str(self.config), "-C", str(self.repo), *args])
         return code, out.getvalue(), err.getvalue()
@@ -198,11 +205,20 @@ class AddLinearTests(WriteCliCase):
 
     def test_team_option_creates_an_issue_assigned_to_you(self):
         card = self.add("--team", "ENG", "New thing")["card"]
-        self.assertEqual((card["ref"], card["title"], card["column"], card["source"]),
-                         ("ENG-7", "New thing", "Backlog", "linear"))
+        self.assertEqual(
+            (card["ref"], card["title"], card["column"], card["source"]), ("ENG-7", "New thing", "Backlog", "linear")
+        )
         (inputs,) = self.inputs("IssueCreate")
-        self.assertEqual(inputs, {"id": inputs["id"], "teamId": "t-eng", "title": "New thing",
-                                  "stateId": "ws-ENG-Backlog", "assigneeId": "u1"})
+        self.assertEqual(
+            inputs,
+            {
+                "id": inputs["id"],
+                "teamId": "t-eng",
+                "title": "New thing",
+                "stateId": "ws-ENG-Backlog",
+                "assigneeId": "u1",
+            },
+        )
 
     def test_body_sets_the_description(self):
         self.add("--team", "ENG", "New thing", "--body", "Details\nSecond line")
@@ -213,6 +229,7 @@ class AddLinearTests(WriteCliCase):
         for reconciled in (False, True):
             for missing in (False, True):
                 with self.subTest(reconciled=reconciled, missing=missing):
+
                     def create(client, **kwargs):
                         issue = create_issue(client, **kwargs)
                         if reconciled:  # noqa: B023  called only in this iteration
@@ -220,11 +237,16 @@ class AddLinearTests(WriteCliCase):
                         return issue
 
                     before = len(self.requests("IssueCreate"))
-                    with mock.patch.object(LinearClient, "create_issue", autospec=True, side_effect=create), \
-                            mock.patch.object(LinearClient, "issue", return_value=None,
-                                              side_effect=None if missing else LinearNetworkError("down")):
-                        card = self.add("--team", "ENG", "New thing",
-                                        "--body", "Details\nSecond line")["card"]
+                    with (
+                        mock.patch.object(LinearClient, "create_issue", autospec=True, side_effect=create),
+                        mock.patch.object(
+                            LinearClient,
+                            "issue",
+                            return_value=None,
+                            side_effect=None if missing else LinearNetworkError("down"),
+                        ),
+                    ):
+                        card = self.add("--team", "ENG", "New thing", "--body", "Details\nSecond line")["card"]
                     self.assertEqual(card["body"], ["Details", "Second line"])
                     self.assertEqual(self.issue(card["ref"])["description"], "Details\nSecond line")
                     self.assertEqual(len(self.requests("IssueCreate")), before + 1)
@@ -235,16 +257,22 @@ class AddLinearTests(WriteCliCase):
         self.assertEqual(card["body"], [])
 
     def test_card_agent_can_create_a_linear_issue_with_body(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
-                mock.patch.object(cli, "card_agent_panes", return_value={"w1:p2"}):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}),
+            mock.patch.object(cli, "card_agent_panes", return_value={"w1:p2"}),
+        ):
             card = self.add("--team", "ENG", "New thing", "--body", "Details")["card"]
         self.assertEqual(card["body"], ["Details"])
         self.assertEqual(self.inputs("IssueCreate")[0]["description"], "Details")
 
     def test_invalid_option_combinations_precede_body_file_reads(self):
-        combinations = (("--team", "ENG"), ("--project", "Platform"),
-                        ("--label", "x"), ("--state", "x"),
-                        ("--linear", "--board", "inbox"))
+        combinations = (
+            ("--team", "ENG"),
+            ("--project", "Platform"),
+            ("--label", "x"),
+            ("--state", "x"),
+            ("--linear", "--board", "inbox"),
+        )
         for options in combinations:
             with self.subTest(options=options):
                 error = self.error("add", "x", *options, "--body-file", "missing.txt")
@@ -260,16 +288,17 @@ class AddLinearTests(WriteCliCase):
         self.assertEqual(self.inputs("IssueCreate")[0]["description"], "Details é\nSecond line\n")
 
     def test_body_validation_creates_no_issue(self):
-        for options, code in ((("--body-file", "missing.txt"), "not_found"),
-                              (("--body", "", "--body-file", "missing.txt"), "usage")):
+        for options, code in (
+            (("--body-file", "missing.txt"), "not_found"),
+            (("--body", "", "--body-file", "missing.txt"), "usage"),
+        ):
             with self.subTest(options=options):
                 error = self.add("--team", "ENG", "New thing", *options, expect=1)["error"]
                 self.assertEqual(error["code"], code)
                 self.assertEqual(self.requests("IssueCreate"), [])
 
     def test_text_output(self):
-        out, _ = self.run_cli("add", "--linear", "--team", "OPS", "--column", "Todo", "Fix it",
-                              directory=self.plain)
+        out, _ = self.run_cli("add", "--linear", "--team", "OPS", "--column", "Todo", "Fix it", directory=self.plain)
         self.assertEqual(out, "OPS-7 → Todo (Linear)\n")
 
     def test_without_team_project_or_single_team_the_error_lists_team_keys(self):
@@ -344,8 +373,7 @@ class AddLinearTests(WriteCliCase):
         self.linked("Platform", "--label", "repo:api")
         card = self.add("From the repo", directory=self.repo)["card"]
         (inputs,) = self.inputs("IssueCreate")
-        self.assertEqual((inputs["projectId"], inputs["labelIds"], inputs["teamId"]),
-                         ("p-plat", ["l-api"], "t-eng"))
+        self.assertEqual((inputs["projectId"], inputs["labelIds"], inputs["teamId"]), ("p-plat", ["l-api"], "t-eng"))
         data = self.listing()
         self.assertIn(card["ref"], self.refs(data))
 
@@ -400,6 +428,7 @@ class AddLinearTests(WriteCliCase):
 
     def test_json_create_warns_when_invalidation_timestamp_write_fails(self):
         from herdboard import linear_source
+
         real = linear_source._write_json
 
         def fail_timestamp(path, data):
@@ -408,8 +437,7 @@ class AddLinearTests(WriteCliCase):
             return real(path, data)
 
         with mock.patch.object(linear_source, "_write_json", side_effect=fail_timestamp):
-            out, err = self.run_cli("--json", "add", "--linear", "--team", "ENG", "x",
-                                    directory=self.repo)
+            out, err = self.run_cli("--json", "add", "--linear", "--team", "ENG", "x", directory=self.repo)
         self.assertEqual(json.loads(out)["card"]["title"], "x")
         self.assertIn("warning", err)
         self.assertIn("cache", err)

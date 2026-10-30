@@ -26,8 +26,15 @@ def frontmatter(text):
 
 class ParsePinTests(unittest.TestCase):
     def test_reads_pins(self):
-        lines = ["---", "kanban-plugin: board", "linear-issues:", "  - id: u1", "    identifier: ENG-1",
-                 "  - {id: u2, identifier: OPS-7}", "---"]
+        lines = [
+            "---",
+            "kanban-plugin: board",
+            "linear-issues:",
+            "  - id: u1",
+            "    identifier: ENG-1",
+            "  - {id: u2, identifier: OPS-7}",
+            "---",
+        ]
         self.assertEqual(parse_pins(lines), PINS)
 
     def test_no_key_gives_no_pins(self):
@@ -93,7 +100,6 @@ class StoreCase(unittest.TestCase):
 
 
 class StorePinTests(StoreCase):
-
     def test_add_and_remove_round_trip(self):
         before = self.path.read_text()
         self.assertEqual(self.store.update_pins(self.path, lambda pins: pins + PINS), PINS)
@@ -103,8 +109,9 @@ class StorePinTests(StoreCase):
 
     def test_update_config_writes_links_and_pins_together(self):
         self.store.update_pins(self.path, lambda pins: PINS)
-        self.store.update_config(self.path, change_links=lambda links: [ProjectLink("p1", "Platform")],
-                                 change_pins=lambda pins: pins[1:])
+        self.store.update_config(
+            self.path, change_links=lambda links: [ProjectLink("p1", "Platform")], change_pins=lambda pins: pins[1:]
+        )
         meta = self.store.board_meta(self.path)
         self.assertEqual(meta.links, [ProjectLink("p1", "Platform")])
         self.assertEqual(meta.pins, PINS[1:])

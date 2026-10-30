@@ -177,12 +177,12 @@ def set_frontmatter_value(text: str, key: str, value: str | None) -> str:
     found = matches[0] if matches else None
     if found is not None:
         # Blank and comment lines under the key are not part of its value.
-        after = [line for line in lines[found + 1:end] if line.strip() and not line.lstrip().startswith("#")]
+        after = [line for line in lines[found + 1 : end] if line.strip() and not line.lstrip().startswith("#")]
         if after and after[0][:1] in (" ", "\t", "-"):
             raise FormatError(f"{key!r} has a nested value in frontmatter; it must be one value")
     new = [] if value is None else [f"{key}: {value}"]
     if found is not None:
-        lines[found:found + 1] = new
+        lines[found : found + 1] = new
     else:
         position = end
         while position > 1 and not lines[position - 1].strip():

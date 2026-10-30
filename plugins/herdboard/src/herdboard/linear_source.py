@@ -153,8 +153,7 @@ class LinearSource:
     def require_active(self) -> None:
         if not self.active:
             raise LinearDisabledError(
-                f"Linear is off: set {self.settings.key_source} and do not set "
-                "linear.enabled = false"
+                f"Linear is off: set {self.settings.key_source} and do not set linear.enabled = false"
             )
 
     @property
@@ -256,9 +255,7 @@ class LinearSource:
         """
         query = f"project-{project_id}"
         if label_ids is not None:
-            query += "-labels-" + hashlib.sha256(
-                "\0".join(sorted(label_ids)).encode("utf-8")
-            ).hexdigest()[:12]
+            query += "-labels-" + hashlib.sha256("\0".join(sorted(label_ids)).encode("utf-8")).hexdigest()[:12]
 
         def load(client: LinearClient) -> dict:
             project = client.project(project_id)
@@ -295,10 +292,16 @@ class LinearSource:
             if found is None:
                 return []
             project = found.get("project")
-            return [{"id": found["id"], "identifier": found["identifier"], "title": found["title"],
-                     "state": {"name": found["state"]["name"], "type": found["state"]["type"]},
-                     "team": {"key": found["team"]["key"]},
-                     "project": {"name": project["name"]} if project else None}]
+            return [
+                {
+                    "id": found["id"],
+                    "identifier": found["identifier"],
+                    "title": found["title"],
+                    "state": {"name": found["state"]["name"], "type": found["state"]["type"]},
+                    "team": {"key": found["team"]["key"]},
+                    "project": {"name": project["name"]} if project else None,
+                }
+            ]
         team_ids = [team["id"] for team in self.client.my_teams()]
         return self.client.search_issues(term, team_ids)
 

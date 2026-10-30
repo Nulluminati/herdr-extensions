@@ -1,4 +1,5 @@
 """Read-only store diagnostics, with an explicit locked duplicate-ID repair."""
+
 from __future__ import annotations
 
 import os
@@ -22,8 +23,14 @@ LEVELS = ("error", "warning", "info")
 
 
 def finding(level, code, message, path=None, line=None, fix=None):
-    return {"level": level, "code": code, "path": str(path) if path is not None else None,
-            "line": line, "message": message, "fix": fix}
+    return {
+        "level": level,
+        "code": code,
+        "path": str(path) if path is not None else None,
+        "line": line,
+        "message": message,
+        "fix": fix,
+    }
 
 
 @dataclass
@@ -66,27 +73,41 @@ def read_boards(store):
 def check_board(store, path, board):
     findings = []
     if len(board.frontmatter) < 2 or board.frontmatter_value("kanban-plugin") != "board":
-        findings.append(finding("error", "board_invalid",
-                                "Frontmatter must be closed and contain kanban-plugin: board. The board is read only.",
-                                path, 1))
+        findings.append(
+            finding(
+                "error",
+                "board_invalid",
+                "Frontmatter must be closed and contain kanban-plugin: board. The board is read only.",
+                path,
+                1,
+            )
+        )
     try:
         parse_links(board.frontmatter)
     except FormatError as error:
-        line = next((i for i, text in enumerate(board.frontmatter, 1)
-                     if text.startswith("linear-projects:")), 1)
+        line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-projects:")), 1)
         if linear_links._yaml() is None:
-            findings.append(finding("warning", "pyyaml_missing",
-                                    "PyYAML is not installed; Linear links cannot be checked.", path, line))
+            findings.append(
+                finding(
+                    "warning", "pyyaml_missing", "PyYAML is not installed; Linear links cannot be checked.", path, line
+                )
+            )
         else:
             findings.append(finding("error", "linear_links_invalid", str(error), path, line))
     try:
         parse_pins(board.frontmatter)
     except FormatError as error:
-        line = next((i for i, text in enumerate(board.frontmatter, 1)
-                     if text.startswith("linear-issues:")), 1)
+        line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-issues:")), 1)
         if linear_links._yaml() is None:
-            findings.append(finding("warning", "pyyaml_missing",
-                                    "PyYAML is not installed; pinned Linear issues cannot be checked.", path, line))
+            findings.append(
+                finding(
+                    "warning",
+                    "pyyaml_missing",
+                    "PyYAML is not installed; pinned Linear issues cannot be checked.",
+                    path,
+                    line,
+                )
+            )
         else:
             findings.append(finding("error", "linear_pins_invalid", str(error), path, line))
     try:
@@ -95,9 +116,15 @@ def check_board(store, path, board):
         findings.append(finding("warning", "done_column_missing", str(error), path))
     for place in locations(path, board):
         if place.card.block_id is None:
-            findings.append(finding("info", "card_id_missing",
-                                    "Card has no ID. The next write assigns IDs to column cards; archive cards keep their IDs.",
-                                    path, place.line))
+            findings.append(
+                finding(
+                    "info",
+                    "card_id_missing",
+                    "Card has no ID. The next write assigns IDs to column cards; archive cards keep their IDs.",
+                    path,
+                    place.line,
+                )
+            )
     return findings
 
 
@@ -115,10 +142,17 @@ def duplicates(boards):
 
 
 def check_duplicate_ids(boards):
-    return [finding("error", "duplicate_id",
-                    f"ID {place.card.block_id} duplicates {first.path}:{first.line}.",
-                    place.path, place.line, "herdboard doctor --fix-ids")
-            for first, place in duplicates(boards)]
+    return [
+        finding(
+            "error",
+            "duplicate_id",
+            f"ID {place.card.block_id} duplicates {first.path}:{first.line}.",
+            place.path,
+            place.line,
+            "herdboard doctor --fix-ids",
+        )
+        for first, place in duplicates(boards)
+    ]
 
 
 def check_parents(boards):
@@ -132,11 +166,18 @@ def check_parents(boards):
                 continue
             ref = card.block_id or card.title
             if parent not in parents:
-                findings.append(finding("warning", "parent_missing",
-                                        f"{ref} links to parent {parent}, which is not on this board.", path))
+                findings.append(
+                    finding(
+                        "warning",
+                        "parent_missing",
+                        f"{ref} links to parent {parent}, which is not on this board.",
+                        path,
+                    )
+                )
             elif parents[parent]:
-                findings.append(finding("warning", "parent_nested",
-                                        f"{ref} has parent {parent}, which is a sub-card itself.", path))
+                findings.append(
+                    finding("warning", "parent_nested", f"{ref} has parent {parent}, which is a sub-card itself.", path)
+                )
     return findings
 
 
@@ -148,10 +189,10 @@ def check_duplicate_repos(boards):
             continue
         key = _canonical_identity(repo)
         if key in first:
-            line = next((i for i, text in enumerate(board.frontmatter, 1)
-                         if text.startswith("repo:")), None)
-            findings.append(finding("error", "duplicate_repo",
-                                    f"Repository {repo} is also claimed by {first[key]}.", path, line))
+            line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("repo:")), None)
+            findings.append(
+                finding("error", "duplicate_repo", f"Repository {repo} is also claimed by {first[key]}.", path, line)
+            )
         else:
             first[key] = path
     return findings
@@ -159,6 +200,7 @@ def check_duplicate_repos(boards):
 
 def fix_ids(store, before):
     """Repair writable duplicates, preserving source lines and checking under the lock."""
+
     def writable_duplicates(boards):
         places = []
         for _, place in duplicates(boards):
@@ -176,8 +218,10 @@ def fix_ids(store, before):
     with store._lock():
         boards, _ = read_boards(store)
         current_duplicates = writable_duplicates(boards)
+
         def key(place):
             return place.path, place.number, place.card.block_id
+
         if {key(place) for place in current_duplicates} != {key(place) for place in planned}:
             raise ConflictError("Duplicate cards changed on disk; retry")
         # Verify each duplicate card's lines and column, while keeping other edits.
@@ -187,15 +231,15 @@ def fix_ids(store, before):
             current = next((p for p in places if p.number == old.number), None)
             if current is None or current.card.lines != old.card.lines or current.column.title != old.column.title:
                 raise ConflictError(f"{old.path}: card changed on disk; retry")
-        taken = {p.card.block_id for path, board in boards.items()
-                 for p in locations(path, board) if p.card.block_id}
+        taken = {p.card.block_id for path, board in boards.items() for p in locations(path, board) if p.card.block_id}
         changed = {}
         for place in current_duplicates:
             old_id = place.card.block_id
             new_id = store._new_id(taken)
             place.card.lines[0] = BLOCK_ID.sub(lambda match: f" ^{new_id}", place.card.first_line)  # noqa: B023  used in this iteration
-            changed.setdefault(place.path, []).append({"old_id": old_id, "new_id": new_id,
-                                                       "path": str(place.path), "line": place.line})
+            changed.setdefault(place.path, []).append(
+                {"old_id": old_id, "new_id": new_id, "path": str(place.path), "line": place.line}
+            )
         for path in sorted(changed):
             board = boards[path]
             try:
@@ -229,8 +273,7 @@ def check_linear(config, boards, offline):
                 links = parse_links(board.frontmatter)
             except FormatError:
                 continue
-            line = next((i for i, text in enumerate(board.frontmatter, 1)
-                         if text.startswith("linear-projects:")), None)
+            line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-projects:")), None)
             for link in links:
                 try:
                     project = client.project(link.id)
@@ -241,8 +284,15 @@ def check_linear(config, boards, offline):
                     return findings
                 else:
                     if project is None:
-                        findings.append(finding("warning", "linear_project_missing",
-                                                f"Linear project {link.name!r} ({link.id}) is missing or inaccessible.", path, line))
+                        findings.append(
+                            finding(
+                                "warning",
+                                "linear_project_missing",
+                                f"Linear project {link.name!r} ({link.id}) is missing or inaccessible.",
+                                path,
+                                line,
+                            )
+                        )
                 if not link.labels:
                     continue
                 try:
@@ -254,16 +304,22 @@ def check_linear(config, boards, offline):
                     return findings
                 for label in link.labels:
                     if label.id not in found:
-                        findings.append(finding("warning", "linear_label_missing",
-                                                f"Linear label {label.name!r} ({label.id}) is missing or inaccessible.", path, line))
+                        findings.append(
+                            finding(
+                                "warning",
+                                "linear_label_missing",
+                                f"Linear label {label.name!r} ({label.id}) is missing or inaccessible.",
+                                path,
+                                line,
+                            )
+                        )
             try:
                 pins = parse_pins(board.frontmatter)
             except FormatError:
                 continue
             if not pins:
                 continue
-            line = next((i for i, text in enumerate(board.frontmatter, 1)
-                         if text.startswith("linear-issues:")), None)
+            line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-issues:")), None)
             try:
                 # Every state: a done pin still exists, and only a missing one is a finding.
                 found = {issue["id"] for issue in client.issues_by_ids([pin.id for pin in pins], done_days=None)}
@@ -274,9 +330,15 @@ def check_linear(config, boards, offline):
                 return findings
             for pin in pins:
                 if pin.id not in found:
-                    findings.append(finding("warning", "linear_pin_missing",
-                                            f"Pinned Linear issue {pin.identifier} ({pin.id}) is missing or inaccessible.",
-                                            path, line))
+                    findings.append(
+                        finding(
+                            "warning",
+                            "linear_pin_missing",
+                            f"Pinned Linear issue {pin.identifier} ({pin.id}) is missing or inaccessible.",
+                            path,
+                            line,
+                        )
+                    )
     except LinearNetworkError as error:
         findings.append(finding("warning", "linear_unreachable", str(error)))
     except LinearAuthError as error:
@@ -301,7 +363,9 @@ def check_starts(path):
                 if "steps_done" in record and not isinstance(record["steps_done"], list):
                     findings.append(finding("warning", "state_invalid", f"invalid steps for {ref}", path))
                 if worktree and not Path(worktree).exists():
-                    findings.append(finding("info", "worktree_missing", f"Start {ref} points to missing worktree {worktree}.", path))
+                    findings.append(
+                        finding("info", "worktree_missing", f"Start {ref} points to missing worktree {worktree}.", path)
+                    )
             except (HerdboardError, ValueError, OSError) as error:
                 findings.append(finding("error", "state_invalid", str(error), path))
     except (HerdboardError, ValueError, OSError) as error:
@@ -336,9 +400,15 @@ def check_work_folders(config, starts_path):
     for folder in sorted(folders):
         if folder.name in recorded:
             continue
-        findings.append(finding("warning", "work_folder_unused",
-                                f"Card folder {folder} has no start record.", folder,
-                                fix=f"Delete the folder: rm -r {folder}"))
+        findings.append(
+            finding(
+                "warning",
+                "work_folder_unused",
+                f"Card folder {folder} has no start record.",
+                folder,
+                fix=f"Delete the folder: rm -r {folder}",
+            )
+        )
     return findings
 
 
@@ -363,12 +433,24 @@ def check_checkouts(path):
                         if str(error) != "git is not installed":
                             raise
                         git_missing = True
-                        findings.append(finding("info", "git_missing",
-                                                "git is not installed; checkout identities cannot be checked.", path))
+                        findings.append(
+                            finding(
+                                "info",
+                                "git_missing",
+                                "git is not installed; checkout identities cannot be checked.",
+                                path,
+                            )
+                        )
                         continue
                     if identity is None or _canonical_identity(identity.identity) != _canonical_identity(repo):
-                        findings.append(finding("info", "checkout_stale",
-                                                f"Checkout {checkout} is missing or no longer repository {repo}.", path))
+                        findings.append(
+                            finding(
+                                "info",
+                                "checkout_stale",
+                                f"Checkout {checkout} is missing or no longer repository {repo}.",
+                                path,
+                            )
+                        )
                 except (HerdboardError, ValueError, OSError) as error:
                     findings.append(finding("error", "state_invalid", str(error), path))
     except (HerdboardError, ValueError, OSError) as error:
@@ -386,14 +468,25 @@ def check_promotions(path, store):
                 if not isinstance(record, dict) or not separator or not ref or record.get("store") != owner:
                     raise ValueError(f"invalid promotion record {key}")
                 issues = record.get("issues")
-                if not isinstance(issues, list) or any(not isinstance(issue, dict) or
-                        not isinstance(issue.get("id"), str) or not isinstance(issue.get("input"), dict) or
-                        not isinstance(issue.get("identifier"), (str, type(None))) for issue in issues):
+                if not isinstance(issues, list) or any(
+                    not isinstance(issue, dict)
+                    or not isinstance(issue.get("id"), str)
+                    or not isinstance(issue.get("input"), dict)
+                    or not isinstance(issue.get("identifier"), (str, type(None)))
+                    for issue in issues
+                ):
                     raise ValueError(f"invalid promotion issues for {ref}")
                 # Even confirmed issues need the final local todo update before removal.
                 if owner == store:
-                    findings.append(finding("warning", "promotion_unfinished", f"Promotion {ref} is unfinished.",
-                                            path, fix=f"herdboard promote {ref}"))
+                    findings.append(
+                        finding(
+                            "warning",
+                            "promotion_unfinished",
+                            f"Promotion {ref} is unfinished.",
+                            path,
+                            fix=f"herdboard promote {ref}",
+                        )
+                    )
             except (HerdboardError, ValueError, OSError) as error:
                 findings.append(finding("error", "state_invalid", str(error), path))
     except (HerdboardError, ValueError, OSError) as error:
@@ -415,9 +508,15 @@ def check_automations(store):
     seen = set()
     for item in items:
         if item.id in seen or not automations.AUTOMATION_ID.match(item.id):
-            findings.append(finding("error", "automation_duplicate_id",
-                                    f"Automation ID {item.id!r} is used twice or is not `a` and 3 letters or digits.",
-                                    path, fix="Give each automation its own ID, such as a7k2."))
+            findings.append(
+                finding(
+                    "error",
+                    "automation_duplicate_id",
+                    f"Automation ID {item.id!r} is used twice or is not `a` and 3 letters or digits.",
+                    path,
+                    fix="Give each automation its own ID, such as a7k2.",
+                )
+            )
         seen.add(item.id)
         try:
             automations.parse_schedule(item.schedule)
@@ -427,20 +526,32 @@ def check_automations(store):
             try:
                 store.resolve_board(item.board)
             except HerdboardError:
-                findings.append(finding("error", "automation_board_missing",
-                                        f"{item.id}: no board named {item.board!r}; its runs fail.", path,
-                                        fix=f"herdboard automation edit {item.id} --board BOARD"))
+                findings.append(
+                    finding(
+                        "error",
+                        "automation_board_missing",
+                        f"{item.id}: no board named {item.board!r}; its runs fail.",
+                        path,
+                        fix=f"herdboard automation edit {item.id} --board BOARD",
+                    )
+                )
     if any(item.enabled for item in items):
         try:
             status = automations.timer("status")
         except HerdboardError as error:
-            findings.append(finding("warning", "automation_timer_inactive",
-                                    f"Automations do not run on their own: {error}"))
+            findings.append(
+                finding("warning", "automation_timer_inactive", f"Automations do not run on their own: {error}")
+            )
         else:
             if not status["active"]:
-                findings.append(finding("warning", "automation_timer_inactive",
-                                        f"Automations do not run on their own: the {status['backend']} timer is "
-                                        f"{status['state']}.", fix="herdboard automation timer install"))
+                findings.append(
+                    finding(
+                        "warning",
+                        "automation_timer_inactive",
+                        f"Automations do not run on their own: the {status['backend']} timer is {status['state']}.",
+                        fix="herdboard automation timer install",
+                    )
+                )
     return findings
 
 
@@ -453,24 +564,40 @@ def check_herdr():
 
 def check_gh():
     if shutil.which("gh") is None:
-        return [finding("info", "gh_missing",
-                        "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request and pull request reviews need it.")]
+        return [
+            finding(
+                "info",
+                "gh_missing",
+                "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request and pull request reviews need it.",
+            )
+        ]
     return []
 
 
 def check_hunk():
     """Pull request reviews show the PR in Hunk, and the user submits with its `hunk-gh-review` extension."""
     if shutil.which("hunk") is None:
-        return [finding("warning", "hunk_missing",
-                        "No `hunk` found. Only pull request reviews need it; the board works without it.")]
+        return [
+            finding(
+                "warning",
+                "hunk_missing",
+                "No `hunk` found. Only pull request reviews need it; the board works without it.",
+            )
+        ]
     try:
         result = subprocess.run(["hunk", "extension", "list"], capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired) as error:
         return [finding("warning", "hunk_check_failed", f"`hunk extension list` failed: {error}")]
     if result.returncode or not any(line.split()[:1] == ["hunk-gh-review"] for line in result.stdout.splitlines()):
-        return [finding("warning", "hunk_gh_review_missing",
-                        "The Hunk extension `hunk-gh-review` is not installed, so S in Hunk cannot submit "
-                        "a pull request review.", fix="hunk extension install phl28/hunk-gh-review")]
+        return [
+            finding(
+                "warning",
+                "hunk_gh_review_missing",
+                "The Hunk extension `hunk-gh-review` is not installed, so S in Hunk cannot submit "
+                "a pull request review.",
+                fix="hunk extension install phl28/hunk-gh-review",
+            )
+        ]
     return []
 
 
@@ -480,8 +607,14 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
     try:
         config = load_config(path)
     except HerdboardError as error:
-        findings.append(finding("error", "config_invalid",
-                                f"{error}. Using the default config for board and Linear checks.", config_path(path)))
+        findings.append(
+            finding(
+                "error",
+                "config_invalid",
+                f"{error}. Using the default config for board and Linear checks.",
+                config_path(path),
+            )
+        )
         config = Config()
     if config is not None:
         store = Store(config)

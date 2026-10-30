@@ -104,8 +104,10 @@ class ConfigScreenTests(BoardTestCase):
             screen = await self.open_config(pilot)
             screen.query_one("#config-icon-style").value = "nerd"
             screen.query_one("#config-tag-style").value = "block"
-            with mock.patch("herdboard.board.save_global_config", side_effect=save), \
-                    mock.patch.object(type(self.config), "__setattr__", assign):
+            with (
+                mock.patch("herdboard.board.save_global_config", side_effect=save),
+                mock.patch.object(type(self.config), "__setattr__", assign),
+            ):
                 await pilot.press("ctrl+s")
                 await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
@@ -533,8 +535,16 @@ class ConfigScreenTests(BoardTestCase):
             tabs = [str(tab.label) for tab in screen.query(Tab)]
             self.assertEqual(tabs, ["Global (all boards)", "Current board"])
             global_tab, board_tab = screen.query_one("#config-global"), screen.query_one("#config-board")
-            for key in ("theme", "agent", "model", "thinking", "default-merge", "icon-style", "tag-style",
-                        "card-style"):
+            for key in (
+                "theme",
+                "agent",
+                "model",
+                "thinking",
+                "default-merge",
+                "icon-style",
+                "tag-style",
+                "card-style",
+            ):
                 self.assertTrue(global_tab.query(f"#config-{key}"), key)
             self.assertTrue(board_tab.query("#config-merge"))
             self.assertFalse(global_tab.query("#config-merge"))
@@ -565,9 +575,13 @@ class ConfigScreenTests(BoardTestCase):
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
-            for tab, fields in (("config-global", ("theme", "agent", "model", "default-merge", "icon-style",
-                                                  "tag-style", "card-style")),
-                                ("config-board", ("merge", "links", "project", "labels"))):
+            for tab, fields in (
+                (
+                    "config-global",
+                    ("theme", "agent", "model", "default-merge", "icon-style", "tag-style", "card-style"),
+                ),
+                ("config-board", ("merge", "links", "project", "labels")),
+            ):
                 screen.query_one(TabbedContent).active = tab
                 for name in fields:
                     with self.subTest(field=name):
@@ -640,6 +654,7 @@ class ConfigScreenTests(BoardTestCase):
 
     async def test_claude_models_and_its_thinking_level(self):
         from herdboard.config import CLAUDE_THINKING_LEVELS
+
         self.config.start_model = "sonnet"
         self.config.start_thinking = "high"
         app = self.make_app()
@@ -677,6 +692,7 @@ class ConfigScreenTests(BoardTestCase):
 
     async def test_codex_settings_offer_its_models_and_thinking(self):
         from herdboard.config import CODEX_THINKING_LEVELS, PI_THINKING_LEVELS
+
         app = self.make_app()
         with mock.patch("herdboard.board.codex_model_choices", return_value=("gpt-6.1, high", ["gpt-6.1"])):
             async with app.run_test(size=(80, 24)) as pilot:
@@ -740,8 +756,9 @@ class ConfigScreenTests(BoardTestCase):
                         screen.query_one("#config-default-merge").value = "pr"
                         await pilot.press("ctrl+s")
                         await settle(pilot)
-                self.assertEqual(app.config_file.read_text(),
-                                 'start_agent = "pi"\nstart_model = "old/model"\nmerge = "pr"\n')
+                self.assertEqual(
+                    app.config_file.read_text(), 'start_agent = "pi"\nstart_model = "old/model"\nmerge = "pr"\n'
+                )
                 self.config.merge = "local"
 
     async def test_an_agent_change_resets_the_model_and_keeps_the_thinking_level(self):
@@ -807,8 +824,7 @@ class ConfigScreenTests(BoardTestCase):
         self.assertIsNone(load_config(app.config_file).start_thinking)
         # Start, plan, review and merge read the store's config when they run.
         config = Starter(app.store, self.root).config
-        self.assertEqual((config.start_agent, config.start_model, config.start_thinking),
-                         ("pi", "zai/glm-5.3", None))
+        self.assertEqual((config.start_agent, config.start_model, config.start_thinking), ("pi", "zai/glm-5.3", None))
         self.assertEqual(config.thinking, {"zai/glm-5.3": "low"})
 
     async def test_the_thinking_field_follows_the_selected_pi_model(self):
@@ -875,8 +891,9 @@ class ConfigScreenTests(BoardTestCase):
                 await pilot.press("ctrl+s")
                 await settle(pilot)
         # No [thinking] row, no rewrite of start_thinking, and the untouched file is not replaced.
-        self.assertEqual(app.config_file.read_text(),
-                         'start_agent = "pi"\nstart_model = "zai/glm-5.3"\nstart_thinking = "high"\n')
+        self.assertEqual(
+            app.config_file.read_text(), 'start_agent = "pi"\nstart_model = "zai/glm-5.3"\nstart_thinking = "high"\n'
+        )
         self.assertEqual(app.config_file.stat().st_mtime_ns, before)
 
     async def test_an_unchanged_agent_default_field_writes_nothing(self):

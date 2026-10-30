@@ -26,9 +26,12 @@ class MigrateCliTestCase(CliTestCase):
     def migrate(self, *args, tty=False, answer="", expect=0, directory=None):
         argv = ["--config", str(self.config), "-C", str(directory or self.repo), *args]
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-                mock.patch.object(cli, "_interactive", return_value=tty), \
-                mock.patch.object(sys, "stdin", io.StringIO(answer)):
+        with (
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+            mock.patch.object(cli, "_interactive", return_value=tty),
+            mock.patch.object(sys, "stdin", io.StringIO(answer)),
+        ):
             code = cli.main(argv)
         self.assertEqual(code, expect, f"stdout={out.getvalue()!r} stderr={err.getvalue()!r}")
         return out.getvalue(), err.getvalue()
@@ -46,7 +49,9 @@ class PreviewTests(MigrateCliTestCase):
         self.assertIn("## Backlog (6)\n", out)
         self.assertNotIn("## Done", out)
         self.assertIn("  - [ ] water the ferns #garden\n", out)
-        self.assertIn("  - [ ] label the jars #kitchen-ideas\n    - glass ones\n      - small sizes\n    - tin ones\n", out)
+        self.assertIn(
+            "  - [ ] label the jars #kitchen-ideas\n    - glass ones\n      - small sizes\n    - tin ones\n", out
+        )
         self.assertNotIn("^t", out)
 
     def test_checked_cards_appear_under_done(self):
@@ -76,11 +81,19 @@ class PreviewTests(MigrateCliTestCase):
         column = data["preview"]["columns"][0]
         self.assertEqual(column["column"], "Backlog")
         first = column["cards"][1]
-        self.assertEqual(first, {"title": "first item", "tag": None, "checked": False,
-                                 "body": ["\tA note about the first item", "\tan indented note"]})
-        self.assertEqual(data["preview"]["non_list"][1],
-                         {"line": 3, "text": "A note about the first item",
-                          "action": "attached", "section": None})
+        self.assertEqual(
+            first,
+            {
+                "title": "first item",
+                "tag": None,
+                "checked": False,
+                "body": ["\tA note about the first item", "\tan indented note"],
+            },
+        )
+        self.assertEqual(
+            data["preview"]["non_list"][1],
+            {"line": 3, "text": "A note about the first item", "action": "attached", "section": None},
+        )
 
     def test_json_never_prompts_even_on_a_terminal(self):
         data = self.migrate_json("migrate", str(self.todo), tty=True, answer="y\n")
@@ -144,8 +157,11 @@ class WriteTests(MigrateCliTestCase):
         self.run_cli("add", "keep me", "--column", "Todo", directory=self.repo)
         before = self.board.read_text()
         self.migrate("migrate", str(self.todo), "--yes")
-        kept = [line for line in self.board.read_text().split("\n")
-                if not any(t in line for t in ("item", "Intro", "note", "indented"))]
+        kept = [
+            line
+            for line in self.board.read_text().split("\n")
+            if not any(t in line for t in ("item", "Intro", "note", "indented"))
+        ]
         self.assertEqual("\n".join(kept), before)
 
 
@@ -211,8 +227,7 @@ class ErrorTests(MigrateCliTestCase):
 
     def test_checked_item_on_board_without_done_column(self):
         self.init_repo_board()
-        self.board.write_text(self.board.read_text().replace("## Done", "## Finished")
-                              .replace("**Complete**\n", ""))
+        self.board.write_text(self.board.read_text().replace("## Done", "## Finished").replace("**Complete**\n", ""))
         before = self.board.read_text()
         self.todo.write_text("- [x] a\n")
         data = self.migrate_json("migrate", str(self.todo), "--yes", expect=1)
@@ -246,16 +261,20 @@ class ReviewFixTests(MigrateCliTestCase):
         self.todo.write_text("- [x] first\n- second\n")
         data = self.migrate_json("migrate", str(self.todo))
         column = data["preview"]["columns"]
-        self.assertEqual([(c["column"], [x["title"] for x in c["cards"]]) for c in column],
-                         [("Done", ["first", "second"])])
+        self.assertEqual(
+            [(c["column"], [x["title"] for x in c["cards"]]) for c in column], [("Done", ["first", "second"])]
+        )
         self.migrate("migrate", str(self.todo), "--yes")
         written = kanban_md.parse(self.board.read_text()).column("Done").cards
         self.assertEqual([c.title for c in written], ["first", "second"])
 
     def put_board(self, *column):
-        text = ("---\n\nkanban-plugin: board\nrepo: github.com/acme/api\n\n---\n\n"
-                f"## {column[0]}\n\n" + "".join(f"{line}\n" for line in column[1:])
-                + "\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"board\"}\n```\n%%\n")
+        text = (
+            "---\n\nkanban-plugin: board\nrepo: github.com/acme/api\n\n---\n\n"
+            f"## {column[0]}\n\n"
+            + "".join(f"{line}\n" for line in column[1:])
+            + '\n\n%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%\n'
+        )
         self.board.parent.mkdir(parents=True, exist_ok=True)
         self.board.write_text(text)
 
@@ -264,9 +283,10 @@ class ReviewFixTests(MigrateCliTestCase):
         data = self.migrate_json("migrate", str(self.todo))
         preview = data["preview"]
         self.assertEqual(preview["dropped_ids"], [{"card": "root", "id": "tabc"}])
-        self.assertEqual(preview["non_list"],
-                         [{"line": 3, "text": "stray", "action": "ambiguous",
-                           "section": None, "parent": "root"}])
+        self.assertEqual(
+            preview["non_list"],
+            [{"line": 3, "text": "stray", "action": "ambiguous", "section": None, "parent": "root"}],
+        )
         out, _ = self.migrate("migrate", str(self.todo))
         self.assertIn("line 3: ambiguous: stray (under: root)", out)
         self.assertIn("Dropped source IDs (1)", out)

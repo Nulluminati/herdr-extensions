@@ -69,6 +69,7 @@ def notify(body: str) -> None:
 
 # Directories, config, state and log
 
+
 def state_directory() -> Path:
     explicit = os.environ.get("HERDR_PLUGIN_STATE_DIR")
     if explicit:
@@ -126,8 +127,11 @@ def load_state(state_dir: Path) -> dict:
         state = json.loads((state_dir / "tabs.json").read_text())
     except (OSError, ValueError):
         return empty_state()
-    if not isinstance(state, dict) or not isinstance(state.get("tabs"), dict) \
-            or not isinstance(state.get("reset"), list):
+    if (
+        not isinstance(state, dict)
+        or not isinstance(state.get("tabs"), dict)
+        or not isinstance(state.get("reset"), list)
+    ):
         return empty_state()
     return state
 
@@ -149,6 +153,7 @@ def save_state(state_dir: Path, state: dict) -> None:
 
 
 # Naming (no Herdr calls)
+
 
 def columns(character: str) -> int:
     return 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
@@ -253,14 +258,17 @@ def planning(tab: dict, state: dict, workspaces: dict[str, str]) -> bool:
 
 # Herdr passes
 
+
 def snapshot() -> tuple[list[dict], dict[str, list[dict]], dict[str, str]]:
     """The tabs, the panes of each tab and the label of each workspace."""
     tabs = herdr("tab", "list").get("tabs", [])
     panes: dict[str, list[dict]] = {}
     for pane in herdr("pane", "list").get("panes", []):
         panes.setdefault(pane["tab_id"], []).append(pane)
-    workspaces = {workspace["workspace_id"]: workspace.get("label") or ""
-                  for workspace in herdr("workspace", "list").get("workspaces", [])}
+    workspaces = {
+        workspace["workspace_id"]: workspace.get("label") or ""
+        for workspace in herdr("workspace", "list").get("workspaces", [])
+    }
     return tabs, panes, workspaces
 
 
@@ -283,8 +291,12 @@ def choose_title(panes: list[dict], config: dict, prefix: str = "") -> dict | No
         # Only a pane with no agent context costs a process-info call.
         found = 4, "program", program_name(pane["pane_id"]) or ""
     number, name, text = found
-    return {"pane": pane["pane_id"], "number": number, "name": name,
-            "title": clean(prefix + text if text else "", config["max_length"])}
+    return {
+        "pane": pane["pane_id"],
+        "number": number,
+        "name": name,
+        "title": clean(prefix + text if text else "", config["max_length"]),
+    }
 
 
 def reconcile(state: dict, config: dict) -> bool:
@@ -332,6 +344,7 @@ def tick(state_dir: Path, config: dict) -> None:
 
 
 # Poller
+
 
 def server_gone(error: TitleError) -> bool:
     return any(code in str(error) for code in SERVER_GONE)
@@ -394,7 +407,9 @@ def start(state_dir: Path) -> None:
     with (state_dir / "auto-title.log").open("a") as output:
         subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), "run"],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=output,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=output,
             start_new_session=True,
         )
 
@@ -412,6 +427,7 @@ def stop(state_dir: Path) -> None:
 
 
 # Actions
+
 
 def focused_tab_id() -> str:
     context = json.loads(os.environ.get("HERDR_PLUGIN_CONTEXT_JSON") or "{}")

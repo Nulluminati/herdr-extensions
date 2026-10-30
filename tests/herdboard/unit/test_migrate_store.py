@@ -36,19 +36,15 @@ class ImportTests(StoreTestCase):
         titles = [c.title for c in board.columns]
         self.assertEqual(titles, ["Backlog", "Todo", "In progress", "Review", "Done"])
         backlog, done = board.column("Backlog"), board.column("Done")
-        self.assertEqual([c.title for c in backlog.cards],
-                         ["water ferns #garden", "oil hinges #shed"])
+        self.assertEqual([c.title for c in backlog.cards], ["water ferns #garden", "oil hinges #shed"])
         self.assertEqual(backlog.cards[0].body, ["\t- weekly"])
-        self.assertEqual([(c.title, c.checked) for c in done.cards],
-                         [("prune roses #garden", True)])
+        self.assertEqual([(c.title, c.checked) for c in done.cards], [("prune roses #garden", True)])
         self.assertTrue(done.has_marker(["Complete"]))
 
     def test_new_board_matches_init_board_apart_from_cards(self):
         init = self.store.init_board(RepoIdentity("github.com/acme/web", "github.com", ("acme", "web")))
         filled = self.store.import_cards(items(), identity=IDENTITY)
-        stripped = "\n".join(
-            line for line in filled.read_text().split("\n")
-            if not line.startswith(("- [", "\t- ")))
+        stripped = "\n".join(line for line in filled.read_text().split("\n") if not line.startswith(("- [", "\t- ")))
         expected = init.read_text().replace("acme/web", "acme/api")
         self.assertEqual(re.sub(r"\n{3,}", "\n\n", stripped), re.sub(r"\n{3,}", "\n\n", expected))
 
@@ -76,11 +72,16 @@ class ImportTests(StoreTestCase):
         path = self.put("acme-api", old)
         self.store.import_cards(items(), identity=IDENTITY)
         expected = repo_board(
-            col("Backlog", "- [ ] first ^taaa", "\tbody", "- [ ] water ferns #garden ^tXXX",
-                "\t- weekly", "- [ ] oil hinges #shed ^tXXX"),
+            col(
+                "Backlog",
+                "- [ ] first ^taaa",
+                "\tbody",
+                "- [ ] water ferns #garden ^tXXX",
+                "\t- weekly",
+                "- [ ] oil hinges #shed ^tXXX",
+            ),
             col("Todo", "- [ ] second ^tbbb"),
-            col("Done", "**Complete**", "- [x] finished ^tccc",
-                "- [x] prune roses #garden ^tXXX"),
+            col("Done", "**Complete**", "- [x] finished ^tccc", "- [x] prune roses #garden ^tXXX"),
             archive="***\n\n## Archive\n\n- [x] old ^tddd\n\n",
         )
         self.assertEqual(blank_ids(path.read_text()), expected)
@@ -88,11 +89,14 @@ class ImportTests(StoreTestCase):
         self.assertEqual(len(set(new_ids)), 7)
 
     def test_open_items_go_to_the_first_non_triage_column(self):
-        path = self.put("acme-api", repo_board(
-            col("Triage"),
-            col("Backlog", "- [ ] first ^taaa"),
-            col("Done", "**Complete**"),
-        ))
+        path = self.put(
+            "acme-api",
+            repo_board(
+                col("Triage"),
+                col("Backlog", "- [ ] first ^taaa"),
+                col("Done", "**Complete**"),
+            ),
+        )
         self.store.import_cards(items("- [ ] fresh\n- [x] finished\n"), identity=IDENTITY)
         board = kanban_md.parse(path.read_text())
         self.assertEqual([c.title for c in board.column("Triage").cards], [])
@@ -249,8 +253,14 @@ class TargetTests(StoreTestCase):
         self.assertEqual((target.open_column, target.done_column), ("Backlog", "Done"))
 
     def test_existing_repository_board_uses_its_columns(self):
-        path = self.put("acme-api", HEAD.replace("\n---\n\n", "repo: github.com/acme/api\n\n---\n\n")
-                        + col("Ideas") + col("Shipped", "**Complete**") + "\n\n" + SETTINGS)
+        path = self.put(
+            "acme-api",
+            HEAD.replace("\n---\n\n", "repo: github.com/acme/api\n\n---\n\n")
+            + col("Ideas")
+            + col("Shipped", "**Complete**")
+            + "\n\n"
+            + SETTINGS,
+        )
         target = self.store.import_target(IDENTITY)
         self.assertEqual(target.path, path)
         self.assertTrue(target.exists)
@@ -259,8 +269,7 @@ class TargetTests(StoreTestCase):
     def test_named_board(self):
         path = self.put("homelab", BASIC)
         target = self.store.import_target(None, "homelab")
-        self.assertEqual((target.path, target.open_column, target.done_column),
-                         (path, "Todo", "Done"))
+        self.assertEqual((target.path, target.open_column, target.done_column), (path, "Todo", "Done"))
         with self.assertRaises(NotFoundError):
             self.store.import_target(None, "nope")
 

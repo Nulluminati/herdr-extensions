@@ -1,4 +1,5 @@
 """Sub-cards: a todo that points to a parent todo on the same board with `[[#^id]]`."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,8 +29,20 @@ class ParentLinkTests(unittest.TestCase):
 
 
 def linear_card(ref, title, parent=None, checked=False):
-    return CardView(ref=ref, board="Platform", path=None, column="Todo", title=title, checked=checked,
-                    due=None, tags=[], body=[], source="linear", read_only=True, parent=parent)
+    return CardView(
+        ref=ref,
+        board="Platform",
+        path=None,
+        column="Todo",
+        title=title,
+        checked=checked,
+        due=None,
+        tags=[],
+        body=[],
+        source="linear",
+        read_only=True,
+        parent=parent,
+    )
 
 
 class LinearFamilyTests(unittest.TestCase):
@@ -73,8 +86,9 @@ class StoreParentTests(StoreTestCase):
         child = self.store.add(self.inbox, "Add invoice table", parent=self.parent.ref)
         self.assertEqual(child.parent, self.parent.ref)
         self.assertEqual(child.title, f"Add invoice table [[#^{self.parent.ref}]]")
-        self.assertIn(f"- [ ] Add invoice table [[#^{self.parent.ref}]] ^{child.ref}",
-                      self.inbox.read_text(encoding="utf-8"))
+        self.assertIn(
+            f"- [ ] Add invoice table [[#^{self.parent.ref}]] ^{child.ref}", self.inbox.read_text(encoding="utf-8")
+        )
         self.assertIsNone(self.parent.parent)
 
     def test_the_parent_must_be_on_the_same_board(self):
@@ -213,7 +227,9 @@ class DoctorParentTests(CliTestCase):
         (self.todos / "inbox.md").write_text(
             "---\nkanban-plugin: board\n---\n\n## Todo\n\n"
             "- [ ] Parent ^t100\n- [ ] Child [[#^t100]] ^t101\n- [ ] Grandchild [[#^t101]] ^t102\n"
-            "- [ ] Orphan [[#^t999]] ^t103\n", encoding="utf-8")
+            "- [ ] Orphan [[#^t999]] ^t103\n",
+            encoding="utf-8",
+        )
         result = self.run_json("doctor", "--offline", directory=self.plain)
         found = {(f["code"], f["level"]) for f in result["findings"] if f["code"].startswith("parent_")}
         self.assertEqual(found, {("parent_missing", "warning"), ("parent_nested", "warning")})

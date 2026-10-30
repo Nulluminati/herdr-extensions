@@ -1,5 +1,6 @@
 """The tab bar at the top, with the Board, Pull requests, Notes and Automations tabs, and the keys of the current
 tab at the bottom."""
+
 import asyncio
 import os
 import tempfile
@@ -121,6 +122,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
         import threading
 
         from textual.widgets import LoadingIndicator
+
         release = threading.Event()
 
         def slow(text, after):
@@ -142,6 +144,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_same_data_keeps_the_table_and_its_selection(self):
         from herdboard.pr_reviews import PullRequest
+
         prs = [PullRequest(n, f"PR {n}", "u", "octo", False, "a" * 40, "b", False, False) for n in range(9, 0, -1)]
         self.service.page.return_value = ("acme/api", Page(prs, 9, None))
         app = self.app()
@@ -177,6 +180,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
         from importlib.metadata import PackageNotFoundError
 
         from herdboard import board
+
         with patch("importlib.metadata.version", side_effect=PackageNotFoundError("herdboard")):
             self.assertEqual(board.herdboard_version(), "")
             self.assertEqual(HeaderBar("acme-api", "repo").plain, "herdboard │ acme-api │ repo")
@@ -200,11 +204,13 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotEqual(active.styles.border_top[1], other.styles.border_top[1], theme)
                     self.assertTrue(active.query_one(".tab-label").visual_style.bold, theme)
                     for tab in tabs:
-                        self.assertEqual(app.screen.query_one(f"#tab-{tab}").region.size, sizes[tab],
-                                         (theme, active_tab, tab))
+                        self.assertEqual(
+                            app.screen.query_one(f"#tab-{tab}").region.size, sizes[tab], (theme, active_tab, tab)
+                        )
 
     async def test_the_pull_request_tab_shows_the_open_count_after_a_read(self):
         from herdboard.pr_reviews import PullRequest
+
         prs = [PullRequest(n, f"PR {n}", "u", "octo", False, "a" * 40, "b", False, False) for n in (2, 1)]
         self.service.page.return_value = ("acme/api", Page(prs, 7, None))
         app = self.app()
@@ -234,8 +240,9 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.click(f"#tab-{tab}")
                 await self.settle(app, pilot)
                 self.assertEqual(self.bar(app).active, tab)
-                self.assertEqual(self.bar(app).tab_labels(),
-                                 ["▦ Board", "⑂ Pull requests 7", "✎ Notes", "↻ Automations"], tab)
+                self.assertEqual(
+                    self.bar(app).tab_labels(), ["▦ Board", "⑂ Pull requests 7", "✎ Notes", "↻ Automations"], tab
+                )
 
     async def test_a_later_read_changes_the_count_on_every_tab(self):
         self.service.page.return_value = ("acme/api", Page([], 7, None))
@@ -259,8 +266,10 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.settle(app, pilot)
-            self.assertEqual(self.bar(app).tab_labels(), ["\uf0db Board", "\uf407 Pull requests", "\uf249 Notes",
-                                                           "\uf017 Automations"])
+            self.assertEqual(
+                self.bar(app).tab_labels(),
+                ["\uf0db Board", "\uf407 Pull requests", "\uf249 Notes", "\uf017 Automations"],
+            )
 
     async def test_a_key_and_its_description_stay_on_one_line(self):
         for width in (50, 90, 160):
@@ -290,10 +299,13 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_label_does_not_move_when_a_tab_is_selected(self):
         # The G stands on the bar outside the tabs, so no tab text holds its place and no tab resizes.
-        for tab, label in (("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes"),
-                           ("automations", "Automations")):
-            texts = {TabBar(active)._tab_text(tab, label).plain
-                     for active in ("board", "prs", "notes", "automations")}
+        for tab, label in (
+            ("board", "Board"),
+            ("prs", "Pull requests"),
+            ("notes", "Notes"),
+            ("automations", "Automations"),
+        ):
+            texts = {TabBar(active)._tab_text(tab, label).plain for active in ("board", "prs", "notes", "automations")}
             self.assertEqual(len(texts), 1, tab)
             self.assertNotIn("G", texts.pop())
 
@@ -307,8 +319,11 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
                 label = box.query_one(".tab-label")
                 self.assertEqual(label.styles.content_align_horizontal, "center", box.id)
                 # The box padding and the centering put the same cells at the left of the text.
-                self.assertEqual(label.region.x - box.region.x - box.styles.padding.left,
-                                 box.region.right - label.region.right - box.styles.padding.right, box.id)
+                self.assertEqual(
+                    label.region.x - box.region.x - box.styles.padding.left,
+                    box.region.right - label.region.right - box.styles.padding.right,
+                    box.id,
+                )
 
     async def test_no_tab_hides_its_label(self):
         # Every tab is as wide as the widest label plus its own padding and border, so no label is cut.
@@ -361,9 +376,12 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_pull_request_rows_fill_the_width_and_cut_long_titles(self):
         from herdboard.board import PullRequestRow
         from herdboard.pr_reviews import PullRequest
+
         for count in (3, 40):
-            prs = [PullRequest(n, f"PR {n} " + "long title " * 20, "u", "octo", False, "a" * 40, "b", False, False)
-                   for n in range(count, 0, -1)]
+            prs = [
+                PullRequest(n, f"PR {n} " + "long title " * 20, "u", "octo", False, "a" * 40, "b", False, False)
+                for n in range(count, 0, -1)
+            ]
             self.service.page.return_value = ("acme/api", Page(prs, count, None))
             for width in (80, 160):
                 app = self.app()
@@ -388,9 +406,9 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             label = next(text for text in self.keys(app).key_labels() if "Add" in text.plain)
             self.assertEqual(label.plain, "\xa0a\xa0\xa0Add")
-            caps = [label.plain[span.start:span.end] for span in label.spans if span.style.reverse]
+            caps = [label.plain[span.start : span.end] for span in label.spans if span.style.reverse]
             self.assertEqual(caps, ["\xa0a\xa0"])
-            plain = [span for span in label.spans if label.plain[span.start:span.end].endswith("Add")]
+            plain = [span for span in label.spans if label.plain[span.start : span.end].endswith("Add")]
             self.assertFalse(any(span.style.reverse for span in plain))
 
     async def test_a_click_on_a_keycap_presses_its_key(self):

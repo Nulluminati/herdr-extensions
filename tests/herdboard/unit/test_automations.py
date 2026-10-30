@@ -1,4 +1,5 @@
 """Automations: schedules, storage, spawned cards, runs and the tick, with fake Herdr."""
+
 import json
 import os
 import plistlib
@@ -65,15 +66,17 @@ class ScheduleTests(LocalTime):
         schedule = parse_schedule("every week on monday, thursday at 10:00")
         self.assertEqual(schedule.next_after(local(2026, 10, 23, 8, 0)), local(2026, 10, 26, 10, 0))
         self.assertEqual(schedule.next_after(local(2026, 10, 26, 11, 0)), local(2026, 10, 29, 10, 0))
-        self.assertEqual(parse_schedule("every week on mon and thu").next_after(local(2026, 10, 27, 0, 0)),
-                         local(2026, 10, 29, 9, 0))
+        self.assertEqual(
+            parse_schedule("every week on mon and thu").next_after(local(2026, 10, 27, 0, 0)), local(2026, 10, 29, 9, 0)
+        )
 
     def test_every_month_on_a_day_uses_the_last_day_of_a_short_month(self):
         schedule = parse_schedule("every month on the 31st")
         self.assertEqual(schedule.next_after(local(2026, 10, 31, 10, 0)), local(2026, 11, 30, 9, 0))
         self.assertEqual(schedule.next_after(local(2027, 2, 1, 0, 0)), local(2027, 2, 28, 9, 0))
-        self.assertEqual(parse_schedule("every month on the 1st").next_after(local(2026, 10, 23, 0, 0)),
-                         local(2026, 11, 1, 9, 0))
+        self.assertEqual(
+            parse_schedule("every month on the 1st").next_after(local(2026, 10, 23, 0, 0)), local(2026, 11, 1, 9, 0)
+        )
 
     def test_every_n_days_counts_from_the_anchor(self):
         schedule = parse_schedule("every 3 days", anchor=date(2026, 10, 20))
@@ -102,8 +105,14 @@ class ScheduleTests(LocalTime):
         self.assertEqual(after - before, timedelta(hours=23))
 
     def test_other_text_is_refused_with_the_accepted_forms(self):
-        for text in ("daily", "every day at 25:00", "every month on the 32nd", "every week on funday",
-                     "every 0 days", ""):
+        for text in (
+            "daily",
+            "every day at 25:00",
+            "every month on the 32nd",
+            "every week on funday",
+            "every 0 days",
+            "",
+        ):
             with self.subTest(text=text), self.assertRaises(HerdboardError) as raised:
                 parse_schedule(text)
             self.assertEqual(raised.exception.code, "bad_schedule")
@@ -151,12 +160,19 @@ class AutomationTestCase(LocalTime):
 
 class StorageTests(AutomationTestCase):
     def test_add_writes_toml_and_reads_it_back(self):
-        added = self.add(body="Line one\nLine \"two\"\twith tab", tags=["security", "deps"], type="chore",
-                         may_merge_prs=True, agent="pi", model="zai/glm-5.3", thinking="high")
+        added = self.add(
+            body='Line one\nLine "two"\twith tab',
+            tags=["security", "deps"],
+            type="chore",
+            may_merge_prs=True,
+            agent="pi",
+            model="zai/glm-5.3",
+            thinking="high",
+        )
         self.assertRegex(added.id, r"^a[0-9a-z]{3}$")
         data = tomllib.loads(automations.definitions_path(self.config).read_text(encoding="utf-8"))
         entry = data["automation"][0]
-        self.assertEqual(entry["body"], "Line one\nLine \"two\"\twith tab")
+        self.assertEqual(entry["body"], 'Line one\nLine "two"\twith tab')
         self.assertEqual(entry["tags"], ["security", "deps"])
         self.assertIs(entry["may_merge_prs"], True)
         self.assertEqual(automations.load(self.config), [added])
@@ -320,8 +336,10 @@ class RepositoryRunTests(AutomationTestCase):
     def test_a_repository_automation_starts_in_a_worktree(self):
         repo = self.root / "repo"
         repo.mkdir()
-        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit",
-                                      "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         board = self.store.init_board(repo_identity(repo))
         start.register_checkout(repo)
@@ -420,10 +438,13 @@ class TickTests(AutomationTestCase):
     def test_a_broken_automation_does_not_stop_the_others(self):
         path = automations.definitions_path(self.config)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('[[automation]]\nid = "a001"\ntitle = "Broken"\nschedule = "every 2000 days"\n'
-                        'created = "2026-10-20T08:00:00+02:00"\n'
-                        '[[automation]]\nid = "a002"\ntitle = "Good"\nschedule = "every day"\n'
-                        'created = "2026-10-20T08:00:00+02:00"\n', encoding="utf-8")
+        path.write_text(
+            '[[automation]]\nid = "a001"\ntitle = "Broken"\nschedule = "every 2000 days"\n'
+            'created = "2026-10-20T08:00:00+02:00"\n'
+            '[[automation]]\nid = "a002"\ntitle = "Good"\nschedule = "every day"\n'
+            'created = "2026-10-20T08:00:00+02:00"\n',
+            encoding="utf-8",
+        )
         result = automations.tick(self.store, now=local(2026, 10, 23, 9, 1))
         self.assertEqual([run["id"] for run in result["runs"]], ["a002"])
         self.assertEqual([error["id"] for error in result["errors"]], ["a001"])
@@ -496,8 +517,16 @@ class TickTests(AutomationTestCase):
 
 class BriefMergeTests(unittest.TestCase):
     def brief(self, **options):
-        return brief_text(todo(), notes=[], repository="github.com/acme/api", worktree="/w", branch="b",
-                          base="main", command="herdboard", **options)
+        return brief_text(
+            todo(),
+            notes=[],
+            repository="github.com/acme/api",
+            worktree="/w",
+            branch="b",
+            base="main",
+            command="herdboard",
+            **options,
+        )
 
     def test_without_merge_the_brief_is_unchanged(self):
         self.assertEqual(self.brief(may_merge_prs=False), self.brief())
@@ -518,21 +547,53 @@ class CliTests(CliTestCase):
         self.enterContext(patch.object(start, "command", self.fake))
 
     def test_plan_takes_codex(self):
-        added = self.run_json("automation", "add", "--title", "Check alerts", "--schedule", "every day",
-                              "--agent", "codex", "--thinking", "ultra")["automation"]
+        added = self.run_json(
+            "automation",
+            "add",
+            "--title",
+            "Check alerts",
+            "--schedule",
+            "every day",
+            "--agent",
+            "codex",
+            "--thinking",
+            "ultra",
+        )["automation"]
         self.assertEqual((added["agent"], added["thinking"]), ("codex", "ultra"))
-        with patch("herdboard.automation_plan.AutomationPlanner.plan",
-                   return_value={"id": added["id"], "agent": "codex", "model": None, "pane_id": "w1:p1",
-                                 "plan": "x", "workspace_id": "w1", "worktree_path": "/w", "branch": None,
-                                 "base": None}) as plan:
+        with patch(
+            "herdboard.automation_plan.AutomationPlanner.plan",
+            return_value={
+                "id": added["id"],
+                "agent": "codex",
+                "model": None,
+                "pane_id": "w1:p1",
+                "plan": "x",
+                "workspace_id": "w1",
+                "worktree_path": "/w",
+                "branch": None,
+                "base": None,
+            },
+        ) as plan:
             self.run_json("automation", "plan", added["id"], "--agent", "codex", "--thinking", "ultra")
         self.assertEqual(plan.call_args.kwargs["agent"], "codex")
         self.assertEqual(plan.call_args.kwargs["thinking"], "ultra")
 
     def test_add_list_edit_pause_resume_remove(self):
-        added = self.run_json("automation", "add", "--title", "Check alerts", "--body", "Look\nclosely",
-                              "--tag", "security", "--type", "chore", "--schedule", "every weekday at 07:30",
-                              "--may-merge-prs")["automation"]
+        added = self.run_json(
+            "automation",
+            "add",
+            "--title",
+            "Check alerts",
+            "--body",
+            "Look\nclosely",
+            "--tag",
+            "security",
+            "--type",
+            "chore",
+            "--schedule",
+            "every weekday at 07:30",
+            "--may-merge-prs",
+        )["automation"]
         self.assertEqual(added["board"], "inbox")
         self.assertEqual(added["body"], "Look\nclosely")
         self.assertIs(added["may_merge_prs"], True)
@@ -540,8 +601,9 @@ class CliTests(CliTestCase):
         self.assertEqual([a["id"] for a in listed], [added["id"]])
         self.assertIsNotNone(listed[0]["next_due"])
         self.assertIsNone(listed[0]["last_run"])
-        edited = self.run_json("automation", "edit", added["id"], "--title", "Check all alerts", "--type", "",
-                               "--no-merge-prs")["automation"]
+        edited = self.run_json(
+            "automation", "edit", added["id"], "--title", "Check all alerts", "--type", "", "--no-merge-prs"
+        )["automation"]
         self.assertEqual(edited["title"], "Check all alerts")
         self.assertIsNone(edited["type"])
         self.assertIs(edited["may_merge_prs"], False)
@@ -562,8 +624,9 @@ class CliTests(CliTestCase):
     def test_error_codes_for_bad_schedule_and_unknown_board(self):
         error = self.run_json("automation", "add", "--title", "x", "--schedule", "now and then", expect=1)["error"]
         self.assertEqual(error["code"], "bad_schedule")
-        error = self.run_json("automation", "add", "--title", "x", "--schedule", "every day", "--board", "nope",
-                              expect=1)["error"]
+        error = self.run_json(
+            "automation", "add", "--title", "x", "--schedule", "every day", "--board", "nope", expect=1
+        )["error"]
         self.assertEqual(error["code"], "unknown_board")
         error = self.run_json("automation", "edit", "a000", "--title", "x", expect=1)["error"]
         self.assertEqual(error["code"], "not_found")
@@ -571,8 +634,9 @@ class CliTests(CliTestCase):
     def test_body_file(self):
         body = Path(self.tmp.name) / "body.md"
         body.write_text("From a file\n", encoding="utf-8")
-        added = self.run_json("automation", "add", "--title", "x", "--schedule", "every day",
-                              "--body-file", str(body))["automation"]
+        added = self.run_json("automation", "add", "--title", "x", "--schedule", "every day", "--body-file", str(body))[
+            "automation"
+        ]
         self.assertEqual(added["body"], "From a file\n")
 
     def test_run_now_spawns_and_starts(self):
@@ -634,9 +698,15 @@ class TimerTests(unittest.TestCase):
             tool = self.bin / name
             tool.write_text("#!/bin/sh\n")
             tool.chmod(0o755)
-        env = patch.dict(os.environ, {"HOME": str(self.root / "home"), "XDG_CONFIG_HOME": str(self.root / "config"),
-                                      "XDG_STATE_HOME": str(self.root / "state"),
-                                      "PATH": f"{self.bin}:/usr/bin:/bin"})
+        env = patch.dict(
+            os.environ,
+            {
+                "HOME": str(self.root / "home"),
+                "XDG_CONFIG_HOME": str(self.root / "config"),
+                "XDG_STATE_HOME": str(self.root / "state"),
+                "PATH": f"{self.bin}:/usr/bin:/bin",
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop("HERDR_BIN_PATH", None)
@@ -646,8 +716,11 @@ class TimerTests(unittest.TestCase):
         runner.start()
         self.addCleanup(runner.stop)
         # The installed `herdboard`, outside this Python's environment.
-        found = patch.object(start, "herdboard_command", lambda config_file=None: "herdboard"
-                             + (f" --config {config_file}" if config_file else ""))
+        found = patch.object(
+            start,
+            "herdboard_command",
+            lambda config_file=None: "herdboard" + (f" --config {config_file}" if config_file else ""),
+        )
         found.start()
         self.addCleanup(found.stop)
 
@@ -780,8 +853,10 @@ class PlanAutomationTests(LocalTime):
         self.enterContext(patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}))
         self.repo = self.root / "repo"
         self.repo.mkdir()
-        for args in (["init", "-q", "-b", "main"], ["-c", "user.name=Test", "-c", "user.email=test@example.com",
-                                                     "commit", "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q", "-b", "main"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
         self.config = Config(todos_dir=self.root / "todos")
         self.store = Store(self.config)
@@ -791,14 +866,20 @@ class PlanAutomationTests(LocalTime):
         self.fake = PlanHerdr(self.root)
         self.enterContext(patch.object(start, "command", self.fake))
         self.workers = []
-        self.enterContext(patch.object(automation_plan, "start_worker",
-                                       lambda arguments, log: self.workers.append((arguments, log))))
+        self.enterContext(
+            patch.object(automation_plan, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+        )
         self.enterContext(patch.object(plan, "POLL_SECONDS", 0))
         self.planner = automation_plan.AutomationPlanner(self.store)
 
     def add(self, board):
-        return automations.add(self.store, title="Merge safe Dependabot PRs", schedule="every weekday at 07:30",
-                               board=board, body="Check the open security alerts.")
+        return automations.add(
+            self.store,
+            title="Merge safe Dependabot PRs",
+            schedule="every weekday at 07:30",
+            board=board,
+            body="Check the open security alerts.",
+        )
 
     def brief(self):
         call = self.fake.find("agent", "start")[0]
@@ -820,8 +901,14 @@ class PlanAutomationTests(LocalTime):
         self.assertEqual(records[added.id]["pane_id"], result["pane_id"])
         self.assertEqual(self.workers[0][0][-4:], ["plan-wait", added.id, "--pane", result["pane_id"]])
         brief = self.brief()
-        for part in (added.id, "every weekday at 07:30", self.board.stem, "Check the open security alerts.",
-                     "unattended", str(attachments.plan_path(self.config, added.id))):
+        for part in (
+            added.id,
+            "every weekday at 07:30",
+            self.board.stem,
+            "Check the open security alerts.",
+            "unattended",
+            str(attachments.plan_path(self.config, added.id)),
+        ):
             self.assertIn(part, brief)
         self.assertIn("Planning started", self.log(added.id)[0])
 
@@ -849,13 +936,14 @@ class PlanAutomationTests(LocalTime):
 
     def test_the_automation_planner_gets_the_card_planner_arguments(self):
         from herdboard import plan
+
         for kind in ("claude", "pi", "codex"):
             with self.subTest(kind=kind):
                 added = self.add("inbox")
                 self.fake.calls.clear()
                 self.planner.plan(added.id, agent=kind)
                 call = self.fake.find("agent", "start")[0]
-                args = call[call.index("--") + 1:]
+                args = call[call.index("--") + 1 :]
                 prompt = next(arg for arg in args if arg.startswith("Plan herdboard automation"))
                 folder = attachments.plan_path(self.config, added.id).parent
                 model = args[args.index("--model") + 1] if "--model" in args else None
@@ -878,8 +966,9 @@ class PlanAutomationTests(LocalTime):
         self.fake.on_poll = lambda: plan_file.write_text("# Plan\n")
         self.assertEqual(self.automation_plan.wait(self.store, added.id, result["pane_id"]), 0)
         self.assertFalse(worktree.exists())
-        branches = subprocess.run(["git", "-C", str(self.repo), "branch", "--list", f"auto/{added.id}-plan"],
-                                  capture_output=True, text=True).stdout
+        branches = subprocess.run(
+            ["git", "-C", str(self.repo), "branch", "--list", f"auto/{added.id}-plan"], capture_output=True, text=True
+        ).stdout
         self.assertEqual(branches.strip(), "")
         log = self.log(added.id)
         self.assertTrue(any(m.startswith("Plan saved") for m in log))
@@ -933,8 +1022,15 @@ class DoctorTests(unittest.TestCase):
         self.todos = self.root / "todos"
         self.config_file = self.root / "config.toml"
         self.config_file.write_text(f'todos_dir = "{self.todos}"\n[linear]\nenabled = false\n')
-        env = patch.dict(os.environ, {"HOME": str(self.root), "XDG_STATE_HOME": str(self.root / "state"),
-                                      "XDG_CONFIG_HOME": str(self.root / "config"), "LINEAR_API_KEY": ""})
+        env = patch.dict(
+            os.environ,
+            {
+                "HOME": str(self.root),
+                "XDG_STATE_HOME": str(self.root / "state"),
+                "XDG_CONFIG_HOME": str(self.root / "config"),
+                "LINEAR_API_KEY": "",
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
         self.system = FakeSystem()
@@ -944,8 +1040,11 @@ class DoctorTests(unittest.TestCase):
         self.store.ensure_inbox()
 
     def codes(self):
-        return [f["code"] for f in self.doctor.diagnose(self.config_file, offline=True)["findings"]
-                if f["code"].startswith("automation")]
+        return [
+            f["code"]
+            for f in self.doctor.diagnose(self.config_file, offline=True)["findings"]
+            if f["code"].startswith("automation")
+        ]
 
     def write(self, text):
         path = automations.definitions_path(self.store.config)
@@ -970,10 +1069,13 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(self.codes(), ["automations_invalid"])
 
     def test_bad_schedule_missing_board_and_duplicate_ids(self):
-        self.write('[[automation]]\nid = "a001"\ntitle = "x"\nschedule = "sometimes"\nboard = "inbox"\n'
-                   '[[automation]]\nid = "a001"\ntitle = "y"\nschedule = "every day"\nboard = "gone"\n')
-        self.assertEqual(sorted(self.codes()), ["automation_board_missing", "automation_duplicate_id",
-                                                "automation_schedule_invalid"])
+        self.write(
+            '[[automation]]\nid = "a001"\ntitle = "x"\nschedule = "sometimes"\nboard = "inbox"\n'
+            '[[automation]]\nid = "a001"\ntitle = "y"\nschedule = "every day"\nboard = "gone"\n'
+        )
+        self.assertEqual(
+            sorted(self.codes()), ["automation_board_missing", "automation_duplicate_id", "automation_schedule_invalid"]
+        )
 
 
 if __name__ == "__main__":

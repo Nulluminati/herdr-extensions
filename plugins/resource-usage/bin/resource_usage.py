@@ -92,6 +92,7 @@ def failure(error: Exception) -> str:
 
 # Process sampling
 
+
 @dataclass(frozen=True)
 class Process:
     pid: int
@@ -104,11 +105,10 @@ class Process:
     age_seconds: float | None = None
 
 
-def parse_linux_stat(pid: int, text: str, clock_ticks: int, page_size: int,
-                     uptime: float | None = None) -> Process:
+def parse_linux_stat(pid: int, text: str, clock_ticks: int, page_size: int, uptime: float | None = None) -> Process:
     # The command name is in parentheses and can hold spaces and parentheses itself,
     # so the fields start after the last closing parenthesis. fields[0] is field 3 in proc(5).
-    fields = text[text.rindex(")") + 2:].split()
+    fields = text[text.rindex(")") + 2 :].split()
     utime, stime, start = int(fields[11]), int(fields[12]), int(fields[19])
     return Process(
         pid=pid,
@@ -121,8 +121,9 @@ def parse_linux_stat(pid: int, text: str, clock_ticks: int, page_size: int,
     )
 
 
-def collect_linux_processes(proc_dir: Path = Path("/proc"), clock_ticks: int | None = None,
-                            page_size: int | None = None) -> dict[int, Process]:
+def collect_linux_processes(
+    proc_dir: Path = Path("/proc"), clock_ticks: int | None = None, page_size: int | None = None
+) -> dict[int, Process]:
     clock_ticks = clock_ticks or os.sysconf("SC_CLK_TCK")
     page_size = page_size or os.sysconf("SC_PAGE_SIZE")
     try:
@@ -190,6 +191,7 @@ def collect_processes() -> dict[int, Process]:
 
 # Process sets
 
+
 def descendants(roots, processes: dict[int, Process]) -> set[int]:
     children: dict[int, list[int]] = {}
     for process in processes.values():
@@ -205,8 +207,9 @@ def descendants(roots, processes: dict[int, Process]) -> set[int]:
     return found
 
 
-def workspace_process_sets(workspaces: list[dict], panes: list[dict], roots: dict[str, int],
-                           processes: dict[int, Process]) -> dict[str, set[int] | None]:
+def workspace_process_sets(
+    workspaces: list[dict], panes: list[dict], roots: dict[str, int], processes: dict[int, Process]
+) -> dict[str, set[int] | None]:
     # None means no pane of the workspace has a live shell we know: the usage is unknown, not zero.
     pane_roots: dict[str, list[int]] = {}
     for pane in panes:
@@ -247,7 +250,9 @@ def family_parents(workspaces: list[dict], lookup) -> dict[str, str]:
             if not result:
                 continue
             repo_key = (result.get("source") or {}).get("repo_key")
-            entries = [entry for entry in result.get("worktrees") or [] if entry.get("open_workspace_id") == workspace_id]
+            entries = [
+                entry for entry in result.get("worktrees") or [] if entry.get("open_workspace_id") == workspace_id
+            ]
             if not repo_key or not entries:
                 continue
             linked = bool(entries[0].get("is_linked_worktree"))
@@ -285,14 +290,16 @@ def family_process_sets(sets: dict[str, set[int] | None], parents: dict[str, str
 
 # Usage
 
+
 @dataclass(frozen=True)
 class Usage:
     cpu_percent: float | None
     rss_bytes: int
 
 
-def measure_usage(pids: set[int], processes: dict[int, Process], previous: dict | None,
-                  elapsed: float, cpu_count: int | None) -> Usage:
+def measure_usage(
+    pids: set[int], processes: dict[int, Process], previous: dict | None, elapsed: float, cpu_count: int | None
+) -> Usage:
     """Processor use over the last interval on a whole-machine scale, and resident memory now.
 
     `previous` maps (pid, start) to cumulative processor seconds at the last sample;
@@ -332,6 +339,7 @@ def format_usage(usage: Usage | None, total: bool = False, icon_style: str = "pl
 
 # Config
 
+
 def load_icon_style() -> tuple[str, str | None]:
     """The `icon_style` from the plugin's config.toml, and an error to log when the file is bad.
 
@@ -354,6 +362,7 @@ def load_icon_style() -> tuple[str, str | None]:
 
 
 # Herdr
+
 
 def collect_workspaces() -> tuple[list[dict], list[dict]]:
     snapshot = herdr_json("api", "snapshot").get("result", {}).get("snapshot") or {}
@@ -380,13 +389,39 @@ def worktree_list(workspace_id: str) -> dict | None:
 
 def report_usage(workspace_id: str, text: str) -> None:
     # The sequence is a timestamp, so it keeps rising after a worker restart.
-    command([herdr_bin(), "workspace", "report-metadata", workspace_id, "--source", SOURCE,
-             "--token", f"{TOKEN}={text}", "--seq", str(time.time_ns()), "--ttl-ms", str(TTL_MS)])
+    command(
+        [
+            herdr_bin(),
+            "workspace",
+            "report-metadata",
+            workspace_id,
+            "--source",
+            SOURCE,
+            "--token",
+            f"{TOKEN}={text}",
+            "--seq",
+            str(time.time_ns()),
+            "--ttl-ms",
+            str(TTL_MS),
+        ]
+    )
 
 
 def clear_usage(workspace_id: str) -> None:
-    command([herdr_bin(), "workspace", "report-metadata", workspace_id, "--source", SOURCE,
-             "--clear-token", TOKEN, "--seq", str(time.time_ns())])
+    command(
+        [
+            herdr_bin(),
+            "workspace",
+            "report-metadata",
+            workspace_id,
+            "--source",
+            SOURCE,
+            "--clear-token",
+            TOKEN,
+            "--seq",
+            str(time.time_ns()),
+        ]
+    )
 
 
 def clear_closed(workspace_id: str) -> None:
@@ -406,8 +441,9 @@ class Collector:
     """One collection cycle per call. Keeps what the next cycle needs: pane shells,
     worktree relationships and the last processor counters."""
 
-    def __init__(self, collect=collect_processes, clock=time.monotonic, cpu_count=os.cpu_count,
-                 icon_style=load_icon_style):
+    def __init__(
+        self, collect=collect_processes, clock=time.monotonic, cpu_count=os.cpu_count, icon_style=load_icon_style
+    ):
         self.collect = collect
         self.clock = clock
         self.cpu_count = cpu_count
@@ -444,8 +480,10 @@ class Collector:
         return {pane_id: pid for pane_id, (pid, _start) in current.items()}, incomplete
 
     def refresh_parents(self, workspaces: list[dict]) -> None:
-        topology = sorted((workspace["workspace_id"], json.dumps(workspace.get("worktree"), sort_keys=True))
-                          for workspace in workspaces)
+        topology = sorted(
+            (workspace["workspace_id"], json.dumps(workspace.get("worktree"), sort_keys=True))
+            for workspace in workspaces
+        )
         retry = self.relationship_retry_at is not None and self.clock() >= self.relationship_retry_at
         if topology == self.topology and not retry:
             return
@@ -483,8 +521,10 @@ class Collector:
                 log(f"cannot read processes: {self.process_error}")
             self.previous = None
             families = {parent for parent in self.parents.values()}
-            return {workspace["workspace_id"]: format_usage(None, workspace["workspace_id"] in families, style)
-                    for workspace in workspaces}
+            return {
+                workspace["workspace_id"]: format_usage(None, workspace["workspace_id"] in families, style)
+                for workspace in workspaces
+            }
         self.process_error = None
         now = self.clock()
         roots, incomplete = self.refresh_roots(panes, processes)
@@ -510,6 +550,7 @@ class Collector:
 
 
 # Worker
+
 
 def state_dir() -> Path:
     return Path(os.environ["HERDR_PLUGIN_STATE_DIR"])
@@ -559,9 +600,14 @@ def spawn_worker() -> None:
         log.write_text("")
     with open(log, "a") as stderr:
         # A new session detaches the worker from the hook that started it.
-        subprocess.Popen([sys.executable, str(SCRIPT), "--run"], cwd=SCRIPT.parent.parent,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr,
-                         start_new_session=True)
+        subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--run"],
+            cwd=SCRIPT.parent.parent,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr,
+            start_new_session=True,
+        )
 
 
 def ensure_running() -> bool:

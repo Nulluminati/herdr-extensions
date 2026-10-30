@@ -60,9 +60,10 @@ class CliBoardTests(unittest.TestCase):
             config = root / "config.toml"
             config.write_text(f'todos_dir = "{root / "todos"}"\n')
             seen = []
-            with mock.patch.object(
-                HerdboardApp, "__init__", lambda self, store, view, **kw: seen.append(view)
-            ), mock.patch.object(HerdboardApp, "run"):
+            with (
+                mock.patch.object(HerdboardApp, "__init__", lambda self, store, view, **kw: seen.append(view)),
+                mock.patch.object(HerdboardApp, "run"),
+            ):
                 cli.main(["--config", str(config), "-C", str(root), "board"])
             self.assertEqual(seen, ["inbox"])
 
@@ -115,5 +116,3 @@ class TerminalModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

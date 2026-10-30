@@ -13,8 +13,9 @@ from support.herdboard_cli import CliTestCase
 class AutoInitTests(CliTestCase):
     def setUp(self):
         super().setUp()
-        self.enterContext(mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock,
-                                     return_value=False))
+        self.enterContext(
+            mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=False)
+        )
 
     def board(self):
         return Store(load_config(self.config)).board_for_repo(repo_identity(self.repo))
@@ -32,10 +33,12 @@ class AutoInitTests(CliTestCase):
 
     def test_interactive_setup_saves_merge_and_project(self):
         link = ProjectLink("p1", "API")
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True), \
-                mock.patch("builtins.input", side_effect=["pr", "API", "bug, repo:api"]), \
-                mock.patch("herdboard.cli._project_link", return_value=link) as resolve:
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True),
+            mock.patch("builtins.input", side_effect=["pr", "API", "bug, repo:api"]),
+            mock.patch("herdboard.cli._project_link", return_value=link) as resolve,
+        ):
             self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertEqual(resolve.call_args.args[1:], ("API", ["bug", "repo:api"]))
         meta = Store(load_config(self.config)).board_meta(self.board())
@@ -45,24 +48,30 @@ class AutoInitTests(CliTestCase):
     def test_existing_board_does_not_prompt_or_change(self):
         path = Path(self.init_repo_board())
         before = path.read_bytes()
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")),
+        ):
             self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertEqual(path.read_bytes(), before)
 
     def test_invalid_merge_repeats_question(self):
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=["bad", "local", ""]):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=["bad", "local", ""]),
+        ):
             _, err = self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertIn("Choose local or pr", err)
         self.assertEqual(Store(load_config(self.config)).board_meta(self.board()).merge, "local")
 
     def test_failed_lookup_repeats_project_question_and_keeps_merge_choice(self):
         link = ProjectLink("p1", "API")
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True), \
-                mock.patch("builtins.input", side_effect=["pr", "AP", "bug", "API", "bug"]), \
-                mock.patch("herdboard.cli._project_link", side_effect=[HerdboardError("Lookup failed"), link]):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True),
+            mock.patch("builtins.input", side_effect=["pr", "AP", "bug", "API", "bug"]),
+            mock.patch("herdboard.cli._project_link", side_effect=[HerdboardError("Lookup failed"), link]),
+        ):
             _, err = self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertIn("Lookup failed", err)
         self.assertEqual(err.count("Merge method"), 1)
@@ -71,50 +80,66 @@ class AutoInitTests(CliTestCase):
         self.assertEqual((meta.merge, meta.links), ("pr", [link]))
 
     def test_failed_lookup_can_skip_link_without_restarting_setup(self):
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True), \
-                mock.patch("builtins.input", side_effect=["pr", "API", "bad-label", ""]), \
-                mock.patch("herdboard.cli._project_link", side_effect=HerdboardError("Unknown label")):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True),
+            mock.patch("builtins.input", side_effect=["pr", "API", "bad-label", ""]),
+            mock.patch("herdboard.cli._project_link", side_effect=HerdboardError("Unknown label")),
+        ):
             _, err = self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertIn("Unknown label", err)
         self.assertEqual(Store(load_config(self.config)).board_meta(self.board()).merge, "pr")
 
     def test_failed_lookup_can_cancel_without_a_partial_board(self):
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True), \
-                mock.patch("builtins.input", side_effect=["pr", "API", "", KeyboardInterrupt]), \
-                mock.patch("herdboard.cli._project_link", side_effect=HerdboardError("Lookup failed")):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True),
+            mock.patch("builtins.input", side_effect=["pr", "API", "", KeyboardInterrupt]),
+            mock.patch("herdboard.cli._project_link", side_effect=HerdboardError("Lookup failed")),
+        ):
             _, err = self.run_cli("list", directory=self.repo, expect=1)
         self.assertIn("cancelled", err)
         self.assertIsNone(self.board())
 
     def test_disabled_linear_skips_project_question(self):
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=["local"]) as answers:
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=["local"]) as answers,
+        ):
             _, err = self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertEqual(answers.call_count, 1)
         self.assertNotIn("Linear project", err)
 
     def test_offline_setup_skips_project_question(self):
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True), \
-                mock.patch("builtins.input", side_effect=["local"]) as answers:
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("herdboard.cli.LinearSource.active", new_callable=mock.PropertyMock, return_value=True),
+            mock.patch("builtins.input", side_effect=["local"]) as answers,
+        ):
             _, err = self.run_cli("list", "--offline", directory=self.repo)
         self.assertEqual(answers.call_count, 1)
         self.assertNotIn("Linear project", err)
 
     def test_terminal_utility_commands_create_board_without_questions(self):
-        for command, arguments in (("show", ["tabc"]), ("search", ["text"]), ("prs", []),
-                                   ("mockup-view", ["/tmp/image.png"]), ("automation", ["list"]),
-                                   ("review-wait", ["tabc", "--folder", "/tmp/review"]),
-                                   ("pr-wait", ["tabc", "--folder", "/tmp/review"]),
-                                   ("plan-wait", ["tabc", "--pane", "w1:p7"]),
-                                   ("pr-review-wait", ["acme/api#7"])):
-            with self.subTest(command=command), \
-                    mock.patch("herdboard.cli._interactive", return_value=True), \
-                    mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")), \
-                    mock.patch.dict(cli.COMMANDS, {command: lambda ctx: {"exit_code": 0}}), \
-                    mock.patch.object(cli, "_render"), mock.patch.object(cli, "_update_sidebar"):
+        for command, arguments in (
+            ("show", ["tabc"]),
+            ("search", ["text"]),
+            ("prs", []),
+            ("mockup-view", ["/tmp/image.png"]),
+            ("automation", ["list"]),
+            ("review-wait", ["tabc", "--folder", "/tmp/review"]),
+            ("pr-wait", ["tabc", "--folder", "/tmp/review"]),
+            ("plan-wait", ["tabc", "--pane", "w1:p7"]),
+            ("pr-review-wait", ["acme/api#7"]),
+        ):
+            with (
+                self.subTest(command=command),
+                mock.patch("herdboard.cli._interactive", return_value=True),
+                mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")),
+                mock.patch.dict(cli.COMMANDS, {command: lambda ctx: {"exit_code": 0}}),
+                mock.patch.object(cli, "_render"),
+                mock.patch.object(cli, "_update_sidebar"),
+            ):
                 self.run_cli(command, *arguments, directory=self.repo)
                 self.assertIsNotNone(self.board())
                 self.board().unlink()
@@ -129,8 +154,10 @@ class AutoInitTests(CliTestCase):
         self.assertFalse((self.todos / "inbox.md").exists())
 
     def test_eof_cancels_setup_without_board(self):
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=EOFError):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=EOFError),
+        ):
             _, err = self.run_cli("list", directory=self.repo, expect=1)
         self.assertIn("cancel", err.lower())
         self.assertIsNone(self.board())
@@ -139,11 +166,12 @@ class AutoInitTests(CliTestCase):
         from herdboard.board import HerdboardApp
 
         seen = {}
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=["pr", ""]), \
-                mock.patch.object(HerdboardApp, "__init__",
-                                  lambda app, store, view, **kw: seen.update(view=view, **kw)), \
-                mock.patch.object(HerdboardApp, "run"):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=["pr", ""]),
+            mock.patch.object(HerdboardApp, "__init__", lambda app, store, view, **kw: seen.update(view=view, **kw)),
+            mock.patch.object(HerdboardApp, "run"),
+        ):
             self.run_cli("board", directory=self.repo)
         self.assertEqual(seen["view"], "repo")
         self.assertEqual(seen["repo_board"], self.board())
@@ -151,8 +179,10 @@ class AutoInitTests(CliTestCase):
 
     def test_json_keeps_global_merge_default(self):
         self.config.write_text(self.config.read_text() + 'merge = "pr"\n')
-        with mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")):
+        with (
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")),
+        ):
             self.run_json("list", directory=self.repo)
         store = Store(load_config(self.config))
         self.assertIsNone(store.board_meta(self.board()).merge)
@@ -176,9 +206,11 @@ class AutoInitTests(CliTestCase):
             original(store, identity, merge="pr")
             return original(store, identity, **kwargs)
 
-        with mock.patch.object(Store, "init_board", race), \
-                mock.patch("herdboard.cli._interactive", return_value=True), \
-                mock.patch("builtins.input", side_effect=["local", ""]):
+        with (
+            mock.patch.object(Store, "init_board", race),
+            mock.patch("herdboard.cli._interactive", return_value=True),
+            mock.patch("builtins.input", side_effect=["local", ""]),
+        ):
             _, err = self.run_cli("list", "--source", "todo", directory=self.repo)
         self.assertIn("answers were not applied", err)
         self.assertEqual(Store(load_config(self.config)).board_meta(self.board()).merge, "pr")

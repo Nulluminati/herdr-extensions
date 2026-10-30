@@ -52,9 +52,7 @@ class BoardsTest(StoreTestCase):
         identity = RepoIdentity("github.com/acme/api", "github.com", ("acme", "api"))
         path = self.store.init_board(identity)
         self.assertEqual(path, self.todos / "projects/acme-api.md")
-        expected = kanban_md.new_board(
-            self.config.columns, "Done", [("repo", "github.com/acme/api")]
-        )
+        expected = kanban_md.new_board(self.config.columns, "Done", [("repo", "github.com/acme/api")])
         self.assertEqual(path.read_text(), expected)
         self.assertEqual(self.store.board_for_repo(identity), path)
         with self.assertRaises(HerdboardError):
@@ -70,9 +68,7 @@ class BoardsTest(StoreTestCase):
         self.config.columns = ["A", "B"]
         identity = RepoIdentity("/x/api", None, ("api",))
         path = Store(self.config).init_board(identity)
-        self.assertEqual(
-            path.read_text(), kanban_md.new_board(["A", "B"], None, [("repo", "/x/api")])
-        )
+        self.assertEqual(path.read_text(), kanban_md.new_board(["A", "B"], None, [("repo", "/x/api")]))
 
 
 class ReadTest(StoreTestCase):
@@ -156,7 +152,6 @@ class IdsTest(StoreTestCase):
         with mock.patch("herdboard.store.secrets.choice", lambda alphabet: next(draws)):
             self.assertEqual(self.store._new_id({"taaa"}), "tbbb")
 
-
     def test_an_id_with_a_log_or_attachments_is_not_reused(self):
         # A deleted card keeps its log and attachments; a new card must not get them.
         (self.todos / ".herdboard/log").mkdir(parents=True)
@@ -165,6 +160,7 @@ class IdsTest(StoreTestCase):
         draws = iter("aaabbbccc")
         with mock.patch("herdboard.store.secrets.choice", lambda alphabet: next(draws)):
             self.assertEqual(self.store._new_id(set()), "tccc")
+
 
 SHIPPED = board_text(
     col("Todo", "- [ ] a ^taaa", "- [ ] b ^tbbb"),
@@ -280,7 +276,7 @@ class AddMoveDoneTest(StoreTestCase):
         self.put("p", board_text(col("Todo", "- [ ] a", "- [ ] b")))
         target = self.put("q", board_text(col("Todo", "- [ ] c", "- [ ] d")))
         # The source takes t001 and t002. The target is then offered t001 again.
-        chars = iter("001" "001" "002" "001" "003" "004")
+        chars = iter("001001002001003004")
         with mock.patch("herdboard.store.secrets.choice", side_effect=lambda alphabet: next(chars)):
             self.store.move_to_board("p:1", target)
         ids = [c.ref for c in self.store.list_cards()]
@@ -323,7 +319,9 @@ class AddMoveDoneTest(StoreTestCase):
         self.assertIn("**Complete**\n- [x] two ^t002\n- [x] one ^t001", path.read_text())
 
     def test_toggle_item_checks_and_clears_a_checklist_line(self):
-        path = self.put("p", board_text(col("Todo", "- [ ] ship ^t001", "\t- [ ] write notes", "\tplain", "\t\t- [x] nested")))
+        path = self.put(
+            "p", board_text(col("Todo", "- [ ] ship ^t001", "\t- [ ] write notes", "\tplain", "\t\t- [x] nested"))
+        )
         card = self.store.toggle_item("t001", 0)
         self.assertEqual(card.body[0], "\t- [x] write notes")
         self.assertIn("\t- [x] write notes\n", path.read_text())
@@ -416,9 +414,9 @@ class AddMoveDoneTest(StoreTestCase):
         self.assertFalse(self.store.move("taaa", "Done").checked)
 
     def test_configured_marker_adds_to_english(self):
-        self.put("p", board_text(
-            col("Todo", "- [ ] a ^taaa"), col("Fini", "**Terminé**"), col("Shipped", "**Complete**")
-        ))
+        self.put(
+            "p", board_text(col("Todo", "- [ ] a ^taaa"), col("Fini", "**Terminé**"), col("Shipped", "**Complete**"))
+        )
         store = Store(Config(todos_dir=self.todos, complete_markers=["Terminé"]))
         self.assertTrue(store.move("taaa", "Fini").checked)
         self.assertTrue(store.move("taaa", "Shipped").checked)
@@ -487,10 +485,14 @@ class DuplicateRefTest(StoreTestCase):
         self.assertIn("b.md", message)
 
     def test_active_card_duplicated_in_archive_blocks_commands(self):
-        path = self.put("p", board_text(
-            col("Todo", "- [ ] x ^tdup"), col("Done"),
-            archive="***\n\n## Archive\n\n- [x] old ^tdup\n\n",
-        ))
+        path = self.put(
+            "p",
+            board_text(
+                col("Todo", "- [ ] x ^tdup"),
+                col("Done"),
+                archive="***\n\n## Archive\n\n- [x] old ^tdup\n\n",
+            ),
+        )
         before = path.read_text()
         for call in (
             lambda: self.store.done("tdup"),
@@ -583,12 +585,11 @@ class LockTest(StoreTestCase):
             return real_serialize(board)
 
         store = Store(self.config, lock_timeout=5)
-        with mock.patch("herdboard.store.secrets.choice", same_sequence_per_thread), mock.patch(
-            "herdboard.store.kanban_md.serialize", slow_serialize
+        with (
+            mock.patch("herdboard.store.secrets.choice", same_sequence_per_thread),
+            mock.patch("herdboard.store.kanban_md.serialize", slow_serialize),
         ):
-            errors = self.run_threads(
-                [lambda p=path: store.add(p, "x") for path in paths]
-            )
+            errors = self.run_threads([lambda p=path: store.add(p, "x") for path in paths])
         self.assertEqual(errors, [])
         refs = [c.ref for c in store.list_cards()]
         self.assertEqual(len(refs), 2)
@@ -603,9 +604,7 @@ class LockTest(StoreTestCase):
 
         store = Store(self.config, lock_timeout=5)
         with mock.patch.object(Store, "_new_board_text", slow_text):
-            errors = self.run_threads(
-                [lambda: store.add(store.ensure_inbox(), "x") for _ in range(4)]
-            )
+            errors = self.run_threads([lambda: store.add(store.ensure_inbox(), "x") for _ in range(4)])
         self.assertEqual(errors, [])
         self.assertEqual(len(store.list_cards()), 4)
         self.assertEqual(len({c.ref for c in store.list_cards()}), 4)
@@ -729,18 +728,14 @@ class WriteTest(StoreTestCase):
         ref = self.store.list_cards()[0].ref
         self.store.move(ref, "Doing")
         after = path.read_text()
-        self.assertEqual(
-            sorted(after.splitlines()), sorted(before.splitlines())
-        )
+        self.assertEqual(sorted(after.splitlines()), sorted(before.splitlines()))
 
     def test_mode_preserved_and_no_temp_files(self):
         path = self.put("p", BASIC, mode=0o640)
         self.store.done("tabc")
         self.assertEqual(path.stat().st_mode & 0o777, 0o640)
         self.assertEqual([p.name for p in path.parent.iterdir()], ["p.md"])
-        self.assertEqual(
-            sorted(p.name for p in self.todos.iterdir()), [".herdboard.lock", "projects"]
-        )
+        self.assertEqual(sorted(p.name for p in self.todos.iterdir()), [".herdboard.lock", "projects"])
 
     def test_one_store_wide_lock_file(self):
         self.put("p", BASIC)
@@ -818,9 +813,12 @@ class WriteTest(StoreTestCase):
 
 class TriageColumnTests(StoreTestCase):
     def test_add_to_triage_inserts_the_column_first(self):
-        path = self.put("p", BASIC.replace("- [ ] one", "- [ ] one ^taaa").replace(
-            "- [ ] two #tag 📅 2026-01-02", "- [ ] two #tag 📅 2026-01-02 ^tbbb").replace(
-            "- [x] four", "- [x] four ^tccc"))
+        path = self.put(
+            "p",
+            BASIC.replace("- [ ] one", "- [ ] one ^taaa")
+            .replace("- [ ] two #tag 📅 2026-01-02", "- [ ] two #tag 📅 2026-01-02 ^tbbb")
+            .replace("- [x] four", "- [x] four ^tccc"),
+        )
         before = path.read_text()
         view = self.store.add(path, "report the crash", column="Triage")
         self.assertEqual((view.column, view.title), ("Triage", "report the crash"))
@@ -836,9 +834,12 @@ class TriageColumnTests(StoreTestCase):
 
         Compared with the same card added to a column that `new_board` wrote.
         """
-        path = self.put("p", BASIC.replace("- [ ] one", "- [ ] one ^taaa").replace(
-            "- [ ] two #tag 📅 2026-01-02", "- [ ] two #tag 📅 2026-01-02 ^tbbb").replace(
-            "- [x] four", "- [x] four ^tccc"))
+        path = self.put(
+            "p",
+            BASIC.replace("- [ ] one", "- [ ] one ^taaa")
+            .replace("- [ ] two #tag 📅 2026-01-02", "- [ ] two #tag 📅 2026-01-02 ^tbbb")
+            .replace("- [x] four", "- [x] four ^tccc"),
+        )
         view = self.store.add(path, "report the crash", column="Triage")
         made = path.read_text().split("## Triage", 1)[1].split("## Todo", 1)[0]
         board = kanban_md.parse(kanban_md.new_board(["Triage", "Backlog"], None))
@@ -884,8 +885,7 @@ class TriageColumnTests(StoreTestCase):
         target = self.put("q", board_text(col("Backlog"), col("Done", "**Complete**")))
         moved = self.store.move_to_board("tabc", target)
         self.assertEqual((moved.board, moved.column), ("q", "Triage"))
-        self.assertEqual([c.title for c in kanban_md.parse(target.read_text()).columns],
-                         ["Triage", "Backlog", "Done"])
+        self.assertEqual([c.title for c in kanban_md.parse(target.read_text()).columns], ["Triage", "Backlog", "Done"])
 
     def test_move_to_another_board_from_backlog_skips_triage(self):
         self.put("p", board_text(col("Backlog", "- [ ] sent ^tabc"), col("Todo")))

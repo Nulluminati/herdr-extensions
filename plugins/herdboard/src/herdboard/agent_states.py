@@ -19,9 +19,13 @@ def pane_statuses() -> dict[str, str]:
         return {}
     if not isinstance(agents, list):
         return {}
-    return {agent["pane_id"]: agent["agent_status"] for agent in agents
-            if isinstance(agent, dict) and isinstance(agent.get("pane_id"), str)
-            and isinstance(agent.get("agent_status"), str)}
+    return {
+        agent["pane_id"]: agent["agent_status"]
+        for agent in agents
+        if isinstance(agent, dict)
+        and isinstance(agent.get("pane_id"), str)
+        and isinstance(agent.get("agent_status"), str)
+    }
 
 
 def _records(path) -> dict:
@@ -46,10 +50,15 @@ def mark(cards) -> None:
         record = starts.get(card.ref)
         if not isinstance(record, dict):
             record = next((r for r in starts.values() if isinstance(r, dict) and r.get("ref") == card.ref), {})
-        panes[card.ref] = (_pane(record) if card.worktree else None, _pane(plans.get(card.ref)),
-                           _pane(record.get("agent_review")), _pane(record.get("pr_write")))
+        panes[card.ref] = (
+            _pane(record) if card.worktree else None,
+            _pane(plans.get(card.ref)),
+            _pane(record.get("agent_review")),
+            _pane(record.get("pr_write")),
+        )
     # A board without agent panes does not ask Herdr.
     statuses = pane_statuses() if any(any(found) for found in panes.values()) else {}
     for card in cards:
         card.agent_status, card.planning_status, card.review_status, card.pr_write_status = (
-            statuses.get(pane) for pane in panes[card.ref])
+            statuses.get(pane) for pane in panes[card.ref]
+        )

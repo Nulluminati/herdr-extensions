@@ -1,4 +1,5 @@
 """Start work with an isolated store and fake Herdr."""
+
 import json
 import os
 import subprocess
@@ -28,7 +29,10 @@ class StartTests(unittest.TestCase):
         self.addCleanup(self.env.stop)
         self.repo = self.root / "repo"
         self.repo.mkdir()
-        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
         self.config = Config(todos_dir=self.root / "todos")
         self.store = Store(self.config)
@@ -132,8 +136,9 @@ class StartTests(unittest.TestCase):
         self.assertFalse(any(c[:2] == ["workspace", "focus"] for c in self.fake.calls))
 
     def git(self, *args):
-        return subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True,
-                              text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
 
     def upstream(self, branch):
         return self.git("rev-parse", "--abbrev-ref", branch + "@{u}")
@@ -219,12 +224,26 @@ class StartTests(unittest.TestCase):
         branch = start.todo_branch(self.card)
         base = self.git("symbolic-ref", "--short", "HEAD")
         path = self.root / "work"
-        subprocess.run(["git", "-C", str(self.repo), "worktree", "add", "-qb", branch, str(path), base],
-                       check=True, capture_output=True)
-        start._write(start.state_dir() / "starts.json", {self.card.ref: {
-            "ref": self.card.ref, "repository": repo_identity(self.repo).identity, "checkout": str(self.repo),
-            "branch": branch, "base": base, "workspace_id": "w9", "worktree_path": str(path),
-            "steps_done": ["repository", "checkout", "branch", "base", "worktree", "upstream"]}})
+        subprocess.run(
+            ["git", "-C", str(self.repo), "worktree", "add", "-qb", branch, str(path), base],
+            check=True,
+            capture_output=True,
+        )
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                self.card.ref: {
+                    "ref": self.card.ref,
+                    "repository": repo_identity(self.repo).identity,
+                    "checkout": str(self.repo),
+                    "branch": branch,
+                    "base": base,
+                    "workspace_id": "w9",
+                    "worktree_path": str(path),
+                    "steps_done": ["repository", "checkout", "branch", "base", "worktree", "upstream"],
+                }
+            },
+        )
         self.fake.worktrees = [{"branch": branch, "path": str(path), "open_workspace_id": "w9"}]
         self.fake.calls.clear()
         result = self.starter.start(self.card.ref)
@@ -237,7 +256,9 @@ class StartTests(unittest.TestCase):
     def test_existing_git_worktree_opens(self):
         path = self.root / "existing"
         branch = start.todo_branch(self.card)
-        subprocess.run(["git", "-C", str(self.repo), "worktree", "add", "-qb", branch, str(path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "worktree", "add", "-qb", branch, str(path)], check=True, capture_output=True
+        )
         result = self.starter.start(self.card.ref, no_agent=True)
         self.assertEqual(result["worktree_path"], str(path))
         self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
@@ -302,13 +323,15 @@ class StartTests(unittest.TestCase):
         self.starter.start(self.card.ref, no_agent=True)
         path = start.state_dir() / "starts.json"
         records = json.loads(path.read_text())
-        records[self.card.ref].update(worktree_path=str(self.repo),
-                                      agent_reviewed={"head": head, "findings": "findings.md"})
+        records[self.card.ref].update(
+            worktree_path=str(self.repo), agent_reviewed={"head": head, "findings": "findings.md"}
+        )
         path.write_text(json.dumps(records))
 
     def head(self):
-        return subprocess.run(["git", "-C", str(self.repo), "rev-parse", "HEAD"], check=True,
-                              capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
 
     def test_a_saved_review_of_the_branch_head_marks_the_card_reviewed(self):
         self.reviewed_record(self.head())
@@ -318,8 +341,23 @@ class StartTests(unittest.TestCase):
 
     def test_commits_after_the_review_mark_new_commits(self):
         self.reviewed_record(self.head())
-        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
-                        "commit", "--allow-empty", "-qm", "more"], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "more",
+            ],
+            check=True,
+            capture_output=True,
+        )
         card = self.store.show(self.card.ref)
         start.mark_removed([card])
         self.assertEqual(card.reviewed, "new commits")
@@ -349,6 +387,7 @@ class StartTests(unittest.TestCase):
 
     def test_resume_after_move_failure(self):
         from herdboard.model import ConflictError
+
         with patch.object(self.store, "move", side_effect=ConflictError("changed")):
             with self.assertRaises(ConflictError) as raised:
                 self.starter.start(self.card.ref)
@@ -393,12 +432,17 @@ class StartTests(unittest.TestCase):
         for path in (self.repo, other):
             if path == other:
                 subprocess.run(["git", "-C", str(path), "init", "-q"], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(path), "remote", "add", "origin", "https://github.com/acme/api"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(path), "remote", "add", "origin", "https://github.com/acme/api"],
+                check=True,
+                capture_output=True,
+            )
         start.register_checkout(self.repo)
         start.register_checkout(other)
         hosted = repo_identity(self.repo).identity
         self.assertEqual(self.starter._checkout(hosted, None), other)
         import shutil
+
         shutil.rmtree(other)
         self.assertEqual(self.starter._checkout(hosted, None), self.repo)
 
@@ -411,7 +455,16 @@ class StartTests(unittest.TestCase):
 
     def test_unreachable_server_is_herdr_unavailable(self):
         for code in ("server_unavailable", "server_not_running"):
-            with self.subTest(code=code), patch.object(start, "command", return_value=subprocess.CompletedProcess([], 1, "", json.dumps({"error": {"code": code, "message": "Server is unreachable"}}))):
+            with (
+                self.subTest(code=code),
+                patch.object(
+                    start,
+                    "command",
+                    return_value=subprocess.CompletedProcess(
+                        [], 1, "", json.dumps({"error": {"code": code, "message": "Server is unreachable"}})
+                    ),
+                ),
+            ):
                 with self.assertRaises(start.StartError) as raised:
                     self.starter.start(self.card.ref)
                 self.assertEqual(raised.exception.code, "herdr_unavailable")
@@ -420,6 +473,7 @@ class StartTests(unittest.TestCase):
         import fcntl
 
         from herdboard.model import ConflictError
+
         with (start.state_dir() / (".start-" + self.card.ref + ".lock")).open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             with self.assertRaises(ConflictError):
@@ -465,16 +519,19 @@ class StartTests(unittest.TestCase):
         for code in ("timeout", "agent_not_ready"):
             with self.subTest(code=code):
                 card = self.store.add(self.board, code)
+
                 def runner(argv, timeout=120):
                     if argv[1:3] == ["agent", "start"]:
                         return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": code}}))  # noqa: B023  called only in this iteration
                     return normal(argv, timeout)
+
                 with patch.object(start, "command", runner):
                     result = self.starter.start(card.ref)
                 self.assertIn("agent", result["steps_done"])
 
     def test_registration_skips_held_lock_and_corrupt_registry(self):
         import fcntl
+
         with (start.state_dir() / ".starts.lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             start.register_checkout(self.repo)
@@ -483,7 +540,10 @@ class StartTests(unittest.TestCase):
 
     def test_malformed_registry_entries_are_ignored(self):
         identity = repo_identity(self.repo).identity
-        start._write(start.state_dir() / "checkouts.json", {identity: [{}, {"path": 7}, {"path": str(self.repo), "last_seen": 1}]})
+        start._write(
+            start.state_dir() / "checkouts.json",
+            {identity: [{}, {"path": 7}, {"path": str(self.repo), "last_seen": 1}]},
+        )
         self.assertEqual(self.starter._checkout(identity, None), self.repo)
         start.register_checkout(self.repo)
 
@@ -491,6 +551,7 @@ class StartTests(unittest.TestCase):
         other = self.store.add(self.board, "Other task")
         normal = self.fake
         checked = False
+
         def runner(argv, timeout=120):
             nonlocal checked
             if argv[1:3] == ["worktree", "create"] and not checked:
@@ -500,6 +561,7 @@ class StartTests(unittest.TestCase):
                 second = self.starter.start(other.ref, no_agent=True)
                 self.assertEqual(second["workspace_id"], "w9")
             return normal(argv, timeout)
+
         with patch.object(start, "command", runner):
             result = self.starter.start(self.card.ref, no_agent=True)
         self.assertEqual(result["workspace_id"], "w10")
@@ -510,7 +572,11 @@ class StartTests(unittest.TestCase):
         subprocess.run(["git", "clone", "-q", str(self.repo), str(other)], check=True, capture_output=True)
         for path in (self.repo, other):
             subprocess.run(["git", "-C", str(path), "remote", "remove", "origin"], capture_output=True)
-            subprocess.run(["git", "-C", str(path), "remote", "add", "origin", "https://github.com/acme/api"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(path), "remote", "add", "origin", "https://github.com/acme/api"],
+                check=True,
+                capture_output=True,
+            )
         self.board.write_text(self.board.read_text().replace(str(self.repo), "github.com/acme/api"))
         start.register_checkout(self.repo)
         self.fake.fail = "worktree create"
@@ -528,8 +594,13 @@ class StartTests(unittest.TestCase):
 
     def test_prunable_git_worktree_creates_after_prune(self):
         import shutil
+
         path = self.root / "dead"
-        subprocess.run(["git", "-C", str(self.repo), "worktree", "add", "-qb", start.todo_branch(self.card), str(path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "worktree", "add", "-qb", start.todo_branch(self.card), str(path)],
+            check=True,
+            capture_output=True,
+        )
         shutil.rmtree(path)
         self.starter.start(self.card.ref, no_agent=True)
         self.assertTrue(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
@@ -567,7 +638,7 @@ class StartTests(unittest.TestCase):
             self.starter.start(self.card.ref)
 
     def test_the_agent_gets_one_line_and_a_brief_file(self):
-        body = ['$(touch x) `touch y` single\' double" \x7f', "a" * 5000]
+        body = ["$(touch x) `touch y` single' double\" \x7f", "a" * 5000]
         self.store.move(self.card.ref, "In progress")
         card = self.store.show(self.card.ref)
         card.body = ["\t" + line for line in body]
@@ -575,8 +646,9 @@ class StartTests(unittest.TestCase):
         with patch.object(self.store, "show", return_value=card):
             self.starter.start(self.card.ref, agent="pi")
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
-        self.assertEqual(call[:-1], ["agent", "start", "hb-" + self.card.ref,
-                                    "--kind", "pi", "--pane", "w9:p1", "--", "--"])
+        self.assertEqual(
+            call[:-1], ["agent", "start", "hb-" + self.card.ref, "--kind", "pi", "--pane", "w9:p1", "--", "--"]
+        )
         message = call[-1]
         brief = start.state_dir() / "briefs" / f"{self.card.ref}.md"
         self.assertIn(f"Start work on herdboard card {self.card.ref}: Fix $(touch z) the build.", message)
@@ -590,6 +662,7 @@ class StartTests(unittest.TestCase):
 
     def test_the_brief_has_the_plan_and_the_attachments(self):
         from herdboard import attachments
+
         source = self.root / "spec.md"
         source.write_text("1. Raise the timeout.\n")
         attachments.add(self.store, self.card.ref, source, name="plan.md")
@@ -602,14 +675,19 @@ class StartTests(unittest.TestCase):
 
     def test_a_plan_that_cannot_be_read_does_not_stop_the_start(self):
         from herdboard import activity, attachments
+
         plan = attachments.plan_path(self.config, self.card.ref)
         plan.parent.mkdir(parents=True)
         plan.write_bytes(b"\xff\xfe")
         self.starter.start(self.card.ref)
         text = (start.state_dir() / "briefs" / f"{self.card.ref}.md").read_text()
         self.assertNotIn("## Plan", text)
-        self.assertTrue(any(entry["message"].startswith("The agent does not get the plan")
-                            for entry in activity.read(self.config, self.card.ref)))
+        self.assertTrue(
+            any(
+                entry["message"].startswith("The agent does not get the plan")
+                for entry in activity.read(self.config, self.card.ref)
+            )
+        )
 
     def starter_branch(self):
         return start._read(start.state_dir() / "starts.json")[self.card.ref]["branch"]
@@ -631,8 +709,9 @@ class StartTests(unittest.TestCase):
             self.assertEqual(start.herdboard_command(None), "herdboard")
             # An agent that Herdr starts may not have HERDBOARD_CONFIG, so the command names that file.
             with patch.dict(os.environ, {"HERDBOARD_CONFIG": str(custom)}):
-                self.assertEqual(start.herdboard_command(config_path()),
-                                 f"herdboard --config {start.shlex.quote(str(custom))}")
+                self.assertEqual(
+                    start.herdboard_command(config_path()), f"herdboard --config {start.shlex.quote(str(custom))}"
+                )
 
     def test_the_brief_uses_the_starter_config_file(self):
         custom = self.root / "custom.toml"
@@ -669,7 +748,7 @@ class StartTests(unittest.TestCase):
 
     def agent_args(self):
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
-        return call[call.index("--pane") + 3:]
+        return call[call.index("--pane") + 3 :]
 
     def test_codex_start_recovers_a_lost_name_only_when_its_pane_matches(self):
         arguments = ("agent", "start", "review", "--kind", "codex", "--pane", "w9:p2", "--", "task")
@@ -688,17 +767,19 @@ class StartTests(unittest.TestCase):
 
     def test_codex_arguments_put_the_prompt_last(self):
         self.assertEqual(start.agent_arguments("codex", "task", None, None), ["task"])
-        self.assertEqual(start.agent_arguments("codex", "task", "gpt-6.1", None),
-                         ["--model", "gpt-6.1", "task"])
-        self.assertEqual(start.agent_arguments("codex", "task", None, "high"),
-                         ["-c", 'model_reasoning_effort="high"', "task"])
-        self.assertEqual(start.agent_arguments("codex", "task", "gpt-6.1", "ultra"),
-                         ["--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertEqual(start.agent_arguments("codex", "task", "gpt-6.1", None), ["--model", "gpt-6.1", "task"])
+        self.assertEqual(
+            start.agent_arguments("codex", "task", None, "high"), ["-c", 'model_reasoning_effort="high"', "task"]
+        )
+        self.assertEqual(
+            start.agent_arguments("codex", "task", "gpt-6.1", "ultra"),
+            ["--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"],
+        )
 
     def test_codex_start_accepts_its_own_thinking_levels(self):
         self.starter.start(self.card.ref, agent="codex", thinking="ultra")
         args = self.agent_args()
-        self.assertEqual(args[len(start.codex_auto_review_options()):][:2], ["-c", 'model_reasoning_effort="ultra"'])
+        self.assertEqual(args[len(start.codex_auto_review_options()) :][:2], ["-c", 'model_reasoning_effort="ultra"'])
 
     def test_explicit_thinking_must_match_the_agent(self):
         for agent, level in (("codex", "off"), ("pi", "ultra")):
@@ -712,9 +793,21 @@ class StartTests(unittest.TestCase):
         self.assertEqual(len(self.agent_args()), len(start.codex_auto_review_options()) + 1)
 
     def test_codex_work_agent_uses_auto_review_with_network_and_live_search(self):
-        self.assertEqual(start.codex_auto_review_options(),
-                         ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true",
-                          "-a", "on-request", "-c", 'approvals_reviewer="auto_review"', "-c", 'web_search="live"'])
+        self.assertEqual(
+            start.codex_auto_review_options(),
+            [
+                "-s",
+                "workspace-write",
+                "-c",
+                "sandbox_workspace_write.network_access=true",
+                "-a",
+                "on-request",
+                "-c",
+                'approvals_reviewer="auto_review"',
+                "-c",
+                'web_search="live"',
+            ],
+        )
         self.starter.start(self.card.ref, agent="codex")
         args = self.agent_args()
         self.assertEqual(args[:-1], start.codex_auto_review_options())
@@ -732,8 +825,7 @@ class StartTests(unittest.TestCase):
         for name in ("config.toml", "models_cache.json"):
             (folder / name).write_bytes((fixtures / name).read_bytes())
         with patch.dict(os.environ, {"HOME": str(home)}):
-            self.assertEqual(start.codex_model_choices(self.config),
-                             ("gpt-6.1, high", ["gpt-6.1", "gpt-6.1-mini"]))
+            self.assertEqual(start.codex_model_choices(self.config), ("gpt-6.1, high", ["gpt-6.1", "gpt-6.1-mini"]))
             self.config.codex_models = ["custom-model"]
             self.assertEqual(start.codex_model_choices(self.config), ("gpt-6.1, high", ["custom-model"]))
 
@@ -761,8 +853,10 @@ class StartTests(unittest.TestCase):
         self.assertEqual(args[1:], ["--permission-mode", "auto", "--model", "opus"])
 
     def test_claude_gets_its_effort_after_its_prompt(self):
-        self.assertEqual(start.agent_arguments("claude", "task", None, "high"),
-                         ["task", "--permission-mode", "auto", "--effort", "high"])
+        self.assertEqual(
+            start.agent_arguments("claude", "task", None, "high"),
+            ["task", "--permission-mode", "auto", "--effort", "high"],
+        )
         self.starter.start(self.card.ref, agent="claude", model="opus", thinking="max")
         args = self.agent_args()
         self.assertTrue(args[0].startswith("Start work on herdboard card"))
@@ -797,11 +891,13 @@ class StartTests(unittest.TestCase):
         self.assertIsNone(start.thinking_level(self.config, None))
 
     def test_configured_models_are_scoped_to_their_agent(self):
-        cases = (("codex", "claude", "opus", None, None),
-                 ("pi", "claude", "opus", None, None),
-                 ("claude", "pi", "zai/glm-5.3", None, None),
-                 ("codex", "codex", "gpt-6.1-sol", None, "gpt-6.1-sol"),
-                 ("codex", "claude", "opus", "gpt-6.1-sol", "gpt-6.1-sol"))
+        cases = (
+            ("codex", "claude", "opus", None, None),
+            ("pi", "claude", "opus", None, None),
+            ("claude", "pi", "zai/glm-5.3", None, None),
+            ("codex", "codex", "gpt-6.1-sol", None, "gpt-6.1-sol"),
+            ("codex", "claude", "opus", "gpt-6.1-sol", "gpt-6.1-sol"),
+        )
         for agent, configured, default, explicit, expected in cases:
             with self.subTest(agent=agent, configured=configured, explicit=explicit):
                 self.config.start_agent = configured
@@ -841,9 +937,15 @@ class StartTests(unittest.TestCase):
     def test_the_remembered_level_of_the_agents_own_default_model(self):
         home = Path(self.root) / "home"
         (home / ".pi/agent").mkdir(parents=True)
-        (home / ".pi/agent/settings.json").write_text(json.dumps({
-            "defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol", "defaultThinkingLevel": "medium",
-        }))
+        (home / ".pi/agent/settings.json").write_text(
+            json.dumps(
+                {
+                    "defaultProvider": "openai-codex",
+                    "defaultModel": "gpt-6.1-sol",
+                    "defaultThinkingLevel": "medium",
+                }
+            )
+        )
         self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "xhigh"}
         with patch.dict(os.environ, {"HOME": str(home)}):
             self.starter.start(self.card.ref, agent="pi")
@@ -862,10 +964,16 @@ class StartTests(unittest.TestCase):
     def test_pi_model_choices_come_from_pi_settings(self):
         home = Path(self.root) / "home"
         (home / ".pi/agent").mkdir(parents=True)
-        (home / ".pi/agent/settings.json").write_text(json.dumps({
-            "enabledModels": ["zai/glm-5.3", "openai-codex/gpt-6.1-sol"],
-            "defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol", "defaultThinkingLevel": "high",
-        }))
+        (home / ".pi/agent/settings.json").write_text(
+            json.dumps(
+                {
+                    "enabledModels": ["zai/glm-5.3", "openai-codex/gpt-6.1-sol"],
+                    "defaultProvider": "openai-codex",
+                    "defaultModel": "gpt-6.1-sol",
+                    "defaultThinkingLevel": "high",
+                }
+            )
+        )
         with patch.dict(os.environ, {"HOME": str(home)}):
             default, models = start.pi_model_choices(self.store.config)
         self.assertEqual(default, "openai-codex/gpt-6.1-sol, high")
@@ -881,7 +989,7 @@ class StartTests(unittest.TestCase):
     def test_claude_gets_the_message_as_its_prompt(self):
         self.starter.start(self.card.ref, agent="claude")
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
-        args = call[call.index("--") + 1:]
+        args = call[call.index("--") + 1 :]
         self.assertTrue(args[0].startswith(f"Start work on herdboard card {self.card.ref}:"))
         self.assertEqual(args[1:], ["--permission-mode", "auto"])
 
@@ -969,14 +1077,16 @@ class StartTests(unittest.TestCase):
         normal = self.fake
         for target in ("w9:p2", "hb-" + self.card.ref):
             with self.subTest(target=target):
+
                 def runner(argv, timeout=120):
                     if argv[1:3] == ["workspace", "get"]:
                         return subprocess.CompletedProcess(argv, 0, '{"result":{"root_pane":{"pane_id":"w9:p2"}}}', "")
                     if argv[1:3] == ["agent", "get"]:
                         if argv[3] == target:  # noqa: B023  called only in this iteration
                             return subprocess.CompletedProcess(argv, 0, '{"result":{"agent":{"pane_id":"w9:p2"}}}', "")
-                        return subprocess.CompletedProcess(argv, 1, '', '{"error":{"code":"agent_not_found"}}')
+                        return subprocess.CompletedProcess(argv, 1, "", '{"error":{"code":"agent_not_found"}}')
                     return normal(argv, timeout)
+
                 with patch.object(start, "command", runner):
                     result = self.starter.start(self.card.ref)
                 self.assertEqual(result["pane_id"], "w9:p2")
@@ -988,15 +1098,19 @@ class StartTests(unittest.TestCase):
 
     def test_bad_nested_herdr_shapes_are_command_errors(self):
         normal = self.fake
-        cases = ((["worktree", "create"], {"workspace": [], "root_pane": {}}),
-                 (["worktree", "list"], {"worktrees": [{}]}),
-                 (["worktree", "list"], {"worktrees": [{"path": str(self.repo), "open_workspace_id": {}}]}))
+        cases = (
+            (["worktree", "create"], {"workspace": [], "root_pane": {}}),
+            (["worktree", "list"], {"worktrees": [{}]}),
+            (["worktree", "list"], {"worktrees": [{"path": str(self.repo), "open_workspace_id": {}}]}),
+        )
         for operation, value in cases:
             with self.subTest(operation=operation):
+
                 def runner(argv, timeout=120):
                     if argv[1:3] == operation:  # noqa: B023  called only in this iteration
                         return subprocess.CompletedProcess(argv, 0, json.dumps({"result": value}), "")  # noqa: B023  called only in this iteration
                     return normal(argv, timeout)
+
                 with patch.object(start, "command", runner):
                     with self.assertRaises(start.HerdboardError) as raised:
                         self.starter.start(self.card.ref)
@@ -1005,19 +1119,26 @@ class StartTests(unittest.TestCase):
     def test_root_pane_fallback_uses_first_available_pane(self):
         self.starter.start(self.card.ref, no_agent=True)
         normal = self.fake
+
         def runner(argv, timeout=120):
             if argv[1:3] == ["workspace", "get"]:
                 return subprocess.CompletedProcess(argv, 0, '{"result":{}}', "")
             if argv[1:3] == ["pane", "list"]:
-                return subprocess.CompletedProcess(argv, 0, '{"result":{"panes":[{"pane_id":"w9:p2"},{"pane_id":"w9:p3"}]}}', "")
+                return subprocess.CompletedProcess(
+                    argv, 0, '{"result":{"panes":[{"pane_id":"w9:p2"},{"pane_id":"w9:p3"}]}}', ""
+                )
             return normal(argv, timeout)
+
         with patch.object(start, "command", runner):
             result = self.starter.start(self.card.ref, no_agent=True)
         self.assertEqual(result["pane_id"], "w9:p2")
 
     def test_herdr_non_json_failure_and_bad_shapes(self):
         for output, status in (("syntax error", 2), ("[]", 0), ('{"result":[]}', 0), ('{"result":{}}', 0)):
-            with self.subTest(output=output), patch.object(start, "command", return_value=subprocess.CompletedProcess([], status, output, "")):
+            with (
+                self.subTest(output=output),
+                patch.object(start, "command", return_value=subprocess.CompletedProcess([], status, output, "")),
+            ):
                 with self.assertRaises(start.HerdboardError) as raised:
                     self.starter.start(self.card.ref)
                 self.assertEqual(raised.exception.code, "herdr_error")
@@ -1031,7 +1152,22 @@ class StartTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(bare), "worktree", "add", "-q", str(work)], check=True, capture_output=True)
         self.assertEqual(start._main_checkout(work), work)
         sub = self.repo / "sub"
-        subprocess.run(["git", "-C", str(self.repo), "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(bare), str(sub)], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                str(bare),
+                str(sub),
+            ],
+            check=True,
+            capture_output=True,
+        )
         self.assertEqual(start._main_checkout(sub), sub)
 
     def test_resolved_worktree_paths_reuse_workspace(self):
@@ -1128,9 +1264,12 @@ class NoRepositoryStartTests(unittest.TestCase):
         self.assertEqual(result["mode"], "repoless")
 
     def test_checkout_and_base_need_an_existing_repository(self):
-        for options in ({"no_repo": True, "base": "main"}, {"no_repo": True, "checkout": self.root},
-                        {"new_repo": self.root / "n1", "base": "main"},
-                        {"new_repo": self.root / "n2", "checkout": self.root}):
+        for options in (
+            {"no_repo": True, "base": "main"},
+            {"no_repo": True, "checkout": self.root},
+            {"new_repo": self.root / "n1", "base": "main"},
+            {"new_repo": self.root / "n2", "checkout": self.root},
+        ):
             with self.subTest(options=options), self.assertRaises(start.StartError) as raised:
                 self.starter.start(self.card.ref, **options)
             self.assertEqual(raised.exception.code, "usage")
@@ -1138,8 +1277,10 @@ class NoRepositoryStartTests(unittest.TestCase):
         self.assertFalse((self.root / "n2").exists())
 
     def test_conflicting_flags_are_usage(self):
-        for options in ({"new_repo": self.root / "new", "no_repo": True},
-                        {"new_repo": self.root / "new", "repo": "board"}):
+        for options in (
+            {"new_repo": self.root / "new", "no_repo": True},
+            {"new_repo": self.root / "new", "repo": "board"},
+        ):
             with self.subTest(options=options), self.assertRaises(start.StartError) as raised:
                 self.starter.start(self.card.ref, **options)
             self.assertEqual(raised.exception.code, "usage")
@@ -1203,8 +1344,9 @@ class NewRepositoryStartTests(unittest.TestCase):
         self.starter = start.Starter(self.store, self.root)
 
     def git(self, directory, *args):
-        return subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True,
-                              text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(directory), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
 
     def test_a_new_repository_is_created_and_the_card_moves_to_its_board(self):
         path = self.root / "corvid-tracker"
@@ -1293,6 +1435,7 @@ class NewRepositoryStartTests(unittest.TestCase):
 
     def test_a_registration_failure_after_the_first_commit_resumes(self):
         from herdboard.model import ConflictError
+
         path = self.root / "resume-register"
         real = start._remember
         failed = []
@@ -1313,8 +1456,7 @@ class NewRepositoryStartTests(unittest.TestCase):
 
     def test_a_move_that_is_not_saved_resumes_on_the_new_board(self):
         path = self.root / "resume-board"
-        with patch.object(start.Starter, "_forget_card_folder",
-                          side_effect=start.StartError("stopped", "io")):
+        with patch.object(start.Starter, "_forget_card_folder", side_effect=start.StartError("stopped", "io")):
             with self.assertRaises(start.StartError):
                 self.starter.start(self.card.ref, new_repo=path)
         self.assertEqual(self.store.show(self.card.ref).board, "resume-board")
@@ -1334,15 +1476,17 @@ class NewRepositoryStartTests(unittest.TestCase):
     def test_planning_a_new_repository_for_a_card_with_sub_cards_is_refused(self):
         self.store.add(self.inbox, "Child task", parent=self.card.ref)
         with self.assertRaises(start.StartError) as raised:
-            self.starter.prepare(self.card, None, self.card.ref, new_repo=self.root / "new",
-                                 move_parent=False, check_column=False)
+            self.starter.prepare(
+                self.card, None, self.card.ref, new_repo=self.root / "new", move_parent=False, check_column=False
+            )
         self.assertEqual(raised.exception.code, "new_repo_family")
         self.assertFalse((self.root / "new").exists())
 
     def test_planning_first_records_the_path(self):
         path = self.root / "planned"
-        prepared = self.starter.prepare(self.card, None, self.card.ref, new_repo=path, move_parent=False,
-                                       check_column=False)
+        prepared = self.starter.prepare(
+            self.card, None, self.card.ref, new_repo=path, move_parent=False, check_column=False
+        )
         self.assertEqual(prepared["mode"], "new_repo")
         self.assertEqual(prepared["new_repo_path"], str(path))
         self.assertTrue(start.work_folder(self.config, self.card.ref).is_dir())
@@ -1362,25 +1506,52 @@ class SidebarRefreshTests(unittest.TestCase):
         self.enterContext(patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}))
         self.calls = []
         self.workspaces = [
-            {"workspace_id": "w7K", "label": "feat-tgz1-redesign",
-             "worktree": {"checkout_path": "/wt/feat-tgz1-redesign"}},
+            {
+                "workspace_id": "w7K",
+                "label": "feat-tgz1-redesign",
+                "worktree": {"checkout_path": "/wt/feat-tgz1-redesign"},
+            },
             # Herdr gave an old record's workspace ID to another workspace.
-            {"workspace_id": "w30", "label": "top-level · ~/Projects/dotfiles",
-             "worktree": {"checkout_path": "/home/me/Projects/dotfiles"}},
+            {
+                "workspace_id": "w30",
+                "label": "top-level · ~/Projects/dotfiles",
+                "worktree": {"checkout_path": "/home/me/Projects/dotfiles"},
+            },
             {"workspace_id": "x1", "label": "t660"},
         ]
-        self.agents = [{"name": "hb-tgz1", "pane_id": "w7K:p1", "workspace_id": "w7K"},
-                       {"name": "hb-tgpz", "pane_id": "w30:p1", "workspace_id": "w30"}]
+        self.agents = [
+            {"name": "hb-tgz1", "pane_id": "w7K:p1", "workspace_id": "w7K"},
+            {"name": "hb-tgpz", "pane_id": "w30:p1", "workspace_id": "w30"},
+        ]
         self.unreachable = False
         self.enterContext(patch.object(start, "command", self.fake))
         self.records = {
-            "tgz1": {"ref": "tgz1", "mode": "repo", "workspace_id": "w7K", "pane_id": "w7K:p1",
-                     "agent_name": "hb-tgz1", "worktree_path": "/wt/feat-tgz1-redesign",
-                     "checkout": "/home/me/Projects/herdr-extensions"},
-            "tgpz": {"ref": "tgpz", "workspace_id": "w30", "pane_id": "w30:p1", "agent_name": "hb-tgpz",
-                     "worktree_path": "/wt/fix-tgpz-gone", "checkout": "/home/me/Projects/herdr-extensions"},
-            "t660": {"ref": "t660", "mode": "repoless", "workspace_id": "x1", "pane_id": "x1:p1",
-                     "agent_name": None, "worktree_path": "/todos/.herdboard/work/t660", "checkout": None},
+            "tgz1": {
+                "ref": "tgz1",
+                "mode": "repo",
+                "workspace_id": "w7K",
+                "pane_id": "w7K:p1",
+                "agent_name": "hb-tgz1",
+                "worktree_path": "/wt/feat-tgz1-redesign",
+                "checkout": "/home/me/Projects/herdr-extensions",
+            },
+            "tgpz": {
+                "ref": "tgpz",
+                "workspace_id": "w30",
+                "pane_id": "w30:p1",
+                "agent_name": "hb-tgpz",
+                "worktree_path": "/wt/fix-tgpz-gone",
+                "checkout": "/home/me/Projects/herdr-extensions",
+            },
+            "t660": {
+                "ref": "t660",
+                "mode": "repoless",
+                "workspace_id": "x1",
+                "pane_id": "x1:p1",
+                "agent_name": None,
+                "worktree_path": "/todos/.herdboard/work/t660",
+                "checkout": None,
+            },
         }
         path = self.root / "state/herdboard/starts.json"
         path.parent.mkdir(parents=True)
@@ -1401,8 +1572,17 @@ class SidebarRefreshTests(unittest.TestCase):
     def card_for(self, ref):
         if ref == "gone":
             return None
-        return start.CardView(ref=ref, board="b", path=Path("/b.md"), column="In progress",
-                              title=f"Card {ref}", checked=False, due=None, tags=[], body=[])
+        return start.CardView(
+            ref=ref,
+            board="b",
+            path=Path("/b.md"),
+            column="In progress",
+            title=f"Card {ref}",
+            checked=False,
+            due=None,
+            tags=[],
+            body=[],
+        )
 
     def reports(self):
         found = {}
@@ -1414,11 +1594,14 @@ class SidebarRefreshTests(unittest.TestCase):
 
     def test_reports_the_repository_and_card_on_the_workspace_and_the_card_on_the_agent(self):
         start.sidebar_refresh(self.card_for)
-        self.assertEqual(self.reports(), {
-            ("workspace", "w7K"): ["herdboard_repo=herdr-extensions", "herdboard_card=▶ Card tgz1 · In progress"],
-            ("pane", "w7K:p1"): ["herdboard_card=▶ Card tgz1 · In progress"],
-            ("workspace", "x1"): ["herdboard_card=▶ Card t660 · In progress"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                ("workspace", "w7K"): ["herdboard_repo=herdr-extensions", "herdboard_card=▶ Card tgz1 · In progress"],
+                ("pane", "w7K:p1"): ["herdboard_card=▶ Card tgz1 · In progress"],
+                ("workspace", "x1"): ["herdboard_card=▶ Card t660 · In progress"],
+            },
+        )
 
     def test_a_workspace_id_that_now_holds_another_folder_gets_nothing(self):
         start.sidebar_refresh(self.card_for)
@@ -1451,6 +1634,7 @@ class SidebarRefreshTests(unittest.TestCase):
             if ref == "tgz1":
                 raise start.HerdboardError("broken board")
             return self.card_for(ref)
+
         start.sidebar_refresh(card_for)
         self.assertIn(("workspace", "x1"), self.reports())
 
@@ -1461,10 +1645,13 @@ class SidebarRefreshTests(unittest.TestCase):
 
     def test_a_card_change_reaches_the_workspace_and_agent_that_hold_the_card(self):
         start.update_card_token(self.card_for("tgz1"))
-        self.assertEqual(self.reports(), {
-            ("workspace", "w7K"): ["herdboard_card=▶ Card tgz1 · In progress"],
-            ("pane", "w7K:p1"): ["herdboard_card=▶ Card tgz1 · In progress"],
-        })
+        self.assertEqual(
+            self.reports(),
+            {
+                ("workspace", "w7K"): ["herdboard_card=▶ Card tgz1 · In progress"],
+                ("pane", "w7K:p1"): ["herdboard_card=▶ Card tgz1 · In progress"],
+            },
+        )
 
     def test_a_card_change_leaves_a_reused_workspace_id_alone(self):
         start.update_card_token(self.card_for("tgpz"))
@@ -1475,9 +1662,17 @@ class SidebarRefreshTests(unittest.TestCase):
 class StartCliTests(CliTestCase):
     """`start` and `plan` pass the new flags, and print a repoless start without a branch."""
 
-    STARTED = {"ref": "t123", "workspace_id": "x1", "pane_id": "x1:p1",
-               "worktree_path": "/todos/.herdboard/work/t123", "branch": None, "base": None,
-               "agent_name": None, "steps_done": [], "mode": "repoless"}
+    STARTED = {
+        "ref": "t123",
+        "workspace_id": "x1",
+        "pane_id": "x1:p1",
+        "worktree_path": "/todos/.herdboard/work/t123",
+        "branch": None,
+        "base": None,
+        "agent_name": None,
+        "steps_done": [],
+        "mode": "repoless",
+    }
 
     def test_sidebar_refresh_looks_up_todos_and_prints_nothing(self):
         card = self.run_json("add", "Refresh me", directory=self.plain)["card"]
@@ -1494,9 +1689,12 @@ class StartCliTests(CliTestCase):
             starter.return_value.start.return_value = self.STARTED
             out, _ = self.run_cli("start", "t123", "--no-repo", directory=self.plain)
         self.assertTrue(starter.return_value.start.call_args.kwargs["no_repo"])
-        self.assertEqual(out, "t123: no repository, in /todos/.herdboard/work/t123\n"
-                              "Workspace: x1; pane: x1:p1; agent: none\n"
-                              "Steps done: \n")
+        self.assertEqual(
+            out,
+            "t123: no repository, in /todos/.herdboard/work/t123\n"
+            "Workspace: x1; pane: x1:p1; agent: none\n"
+            "Steps done: \n",
+        )
 
     def test_start_new_repo_passes_the_path(self):
         with patch("herdboard.cli.Starter") as starter:
@@ -1507,10 +1705,19 @@ class StartCliTests(CliTestCase):
             self.assertIs(starter.return_value.start.call_args.kwargs["new_repo"], True)
 
     def test_plan_passes_the_new_flags(self):
-        planned = {"ref": "t123", "agent": "claude", "model": None, "pane_id": "x1:p2",
-                   "checkout": None, "plan": "/p/plan.md", "workspace_id": "x1",
-                   "worktree_path": "/todos/.herdboard/work/t123", "branch": None, "base": None,
-                   "mode": "repoless"}
+        planned = {
+            "ref": "t123",
+            "agent": "claude",
+            "model": None,
+            "pane_id": "x1:p2",
+            "checkout": None,
+            "plan": "/p/plan.md",
+            "workspace_id": "x1",
+            "worktree_path": "/todos/.herdboard/work/t123",
+            "branch": None,
+            "base": None,
+            "mode": "repoless",
+        }
         with patch("herdboard.cli.Planner") as planner:
             planner.return_value.plan.return_value = planned
             self.run_json("plan", "t123", "--no-repo", directory=self.plain)

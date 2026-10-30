@@ -1,4 +1,5 @@
 """The Notes tab: the scratchpad of the shown board, or the global note, next to the board."""
+
 import asyncio
 import os
 import shutil
@@ -45,8 +46,14 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
 
     def app(self, view="repo"):
         paths = {"repo": [self.repo], "inbox": [self.inbox], "all": [self.inbox, self.repo]}
-        app = HerdboardApp(self.store, view, lambda name: paths[name], repo_board=self.repo,
-                           reload_interval=60, pr_service=self.service)
+        app = HerdboardApp(
+            self.store,
+            view,
+            lambda name: paths[name],
+            repo_board=self.repo,
+            reload_interval=60,
+            pr_service=self.service,
+        )
         app.animation_level = "none"
         app.notify = lambda message, **kwargs: self.notices.append(message)
         return app
@@ -75,13 +82,15 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("G")
             await self.settle(app, pilot)
             self.assertIsInstance(app.screen, PullRequestsScreen)
-            self.assertEqual(app.screen.query_one(TabBar).tab_labels(),
-                             ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"])
+            self.assertEqual(
+                app.screen.query_one(TabBar).tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"]
+            )
             await pilot.press("G")
             await self.settle(app, pilot)
             self.assertIsInstance(app.screen, NotesScreen)
-            self.assertEqual(app.screen.query_one(TabBar).tab_labels(),
-                             ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"])
+            self.assertEqual(
+                app.screen.query_one(TabBar).tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"]
+            )
             await pilot.press("G")
             await self.settle(app, pilot)
             self.assertIsInstance(app.screen, AutomationsScreen)
@@ -128,6 +137,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_preview_keeps_each_blank_line(self):
         from textual.widgets._markdown import MarkdownBlock
+
         self.note("acme-api").parent.mkdir(parents=True)
         self.note("acme-api").write_text("\n# Head\n\n- one\n- two\n\n\nend\n")
         app = self.app()
@@ -145,6 +155,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_preview_keeps_lists_across_blank_lines(self):
         from textual.widgets._markdown import MarkdownBullet, MarkdownList
+
         self.note("acme-api").parent.mkdir(parents=True)
         self.note("acme-api").write_text("1. a\n\n1. b\n\n   more\n")
         app = self.app()

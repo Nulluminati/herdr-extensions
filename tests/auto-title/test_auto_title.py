@@ -24,8 +24,7 @@ def fixture(name):
 
 
 def agent_pane(pane_id, agent="claude", label=None, tokens=None, focused=False, tab_id="w1:t1"):
-    pane = {"agent": agent, "focused": focused, "pane_id": pane_id, "tab_id": tab_id,
-            "tokens": tokens or {}}
+    pane = {"agent": agent, "focused": focused, "pane_id": pane_id, "tab_id": tab_id, "tokens": tokens or {}}
     if label is not None:
         pane["label"] = label
     return pane
@@ -74,8 +73,9 @@ class CardTitleTests(unittest.TestCase):
 
 class SourceOrderTests(unittest.TestCase):
     def test_session_name_beats_label_card_and_program(self):
-        pane = agent_pane("w1:p1", label="label", tokens={
-            "claude_session_name": "session", "herdboard_card": "▶ card · Review"})
+        pane = agent_pane(
+            "w1:p1", label="label", tokens={"claude_session_name": "session", "herdboard_card": "▶ card · Review"}
+        )
         self.assertEqual(auto_title.pane_title(pane, "claude"), "session")
         self.assertEqual(auto_title.context_title(pane), (1, "claude_session_name", "session"))
 
@@ -110,8 +110,7 @@ class SourceOrderTests(unittest.TestCase):
 
 class SourcePaneTests(unittest.TestCase):
     def test_main_agent_beats_a_review_split(self):
-        main = agent_pane("w1:p1", tokens={
-            "claude_session_name": "main", "herdboard_card": "▶ card · Review"})
+        main = agent_pane("w1:p1", tokens={"claude_session_name": "main", "herdboard_card": "▶ card · Review"})
         review = agent_pane("w1:p2", agent="pi", tokens={"pi_session_name": "review"}, focused=True)
         self.assertIs(auto_title.source_pane([main, review]), main)
         self.assertIs(auto_title.source_pane([review, main]), main)
@@ -227,11 +226,14 @@ class HerdrTestCase(unittest.TestCase):
         self.config_dir = Path(self.temporary.name) / "config"
         self.state_dir.mkdir()
         self.config_dir.mkdir()
-        self.environment = patch.dict(os.environ, {
-            "HERDR_BIN_PATH": "herdr",
-            "HERDR_PLUGIN_STATE_DIR": str(self.state_dir),
-            "HERDR_PLUGIN_CONFIG_DIR": str(self.config_dir),
-        })
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "HERDR_BIN_PATH": "herdr",
+                "HERDR_PLUGIN_STATE_DIR": str(self.state_dir),
+                "HERDR_PLUGIN_CONFIG_DIR": str(self.config_dir),
+            },
+        )
         self.environment.start()
         self.addCleanup(self.environment.stop)
         os.environ.pop("HERDR_PLUGIN_CONTEXT_JSON", None)
@@ -245,11 +247,14 @@ class ReconcileTests(HerdrTestCase):
     def test_names_owned_tabs_and_leaves_manual_labels(self):
         state = {"tabs": {}, "reset": []}
         self.assertTrue(auto_title.reconcile(state, CONFIG))
-        self.assertEqual(self.herdr.renames(), [
-            ["w1:t1", "Herdboard tveq auto tab titles"],
-            ["w1:t2", "nvim"],
-            ["w1:t3", "Planning: Codex support plan"],
-        ])
+        self.assertEqual(
+            self.herdr.renames(),
+            [
+                ["w1:t1", "Herdboard tveq auto tab titles"],
+                ["w1:t2", "nvim"],
+                ["w1:t3", "Planning: Codex support plan"],
+            ],
+        )
         self.assertEqual(state["tabs"]["w1:t2"], {"written": "nvim"})
         self.assertEqual(self.herdr.tab("w1:t4")["label"], "board")
 
@@ -315,8 +320,9 @@ class ReconcileTests(HerdrTestCase):
     def test_tab_in_a_planner_workspace_gets_the_prefix(self):
         self.herdr.workspaces["result"]["workspaces"].append({"label": "plan tauto", "workspace_id": "w2"})
         self.herdr.tabs["result"]["tabs"].append({"label": "1", "tab_id": "w2:t1", "workspace_id": "w2"})
-        self.herdr.panes["result"]["panes"].append(agent_pane(
-            "w2:p1", tab_id="w2:t1", tokens={"claude_session_name": "Weekly cleanup"}))
+        self.herdr.panes["result"]["panes"].append(
+            agent_pane("w2:p1", tab_id="w2:t1", tokens={"claude_session_name": "Weekly cleanup"})
+        )
         state = {"tabs": {}, "reset": []}
         auto_title.reconcile(state, CONFIG)
         self.assertEqual(self.herdr.tab("w2:t1")["label"], "Planning: Weekly cleanup")
@@ -389,13 +395,15 @@ class ConfigTests(HerdrTestCase):
 
     def test_reads_the_keys(self):
         (self.config_dir / "config.toml").write_text("max_length = 24\npoll_seconds = 1\n")
-        self.assertEqual(auto_title.load_config(self.config_dir, self.state_dir),
-                         {"max_length": 24, "poll_seconds": 1.0})
+        self.assertEqual(
+            auto_title.load_config(self.config_dir, self.state_dir), {"max_length": 24, "poll_seconds": 1.0}
+        )
 
     def test_bad_value_logs_and_uses_the_default(self):
         (self.config_dir / "config.toml").write_text('max_length = "long"\npoll_seconds = 3\n')
-        self.assertEqual(auto_title.load_config(self.config_dir, self.state_dir),
-                         {"max_length": 40, "poll_seconds": 3.0})
+        self.assertEqual(
+            auto_title.load_config(self.config_dir, self.state_dir), {"max_length": 40, "poll_seconds": 3.0}
+        )
         self.assertIn("max_length", (self.state_dir / "auto-title.log").read_text())
 
     def test_bad_file_logs_and_uses_the_defaults(self):
@@ -429,8 +437,10 @@ class PollerTests(HerdrTestCase):
         def sleep(seconds):
             clock[0] += seconds
 
-        with patch.object(auto_title.time, "sleep", sleep), \
-                patch.object(auto_title.time, "monotonic", lambda: clock[0]):
+        with (
+            patch.object(auto_title.time, "sleep", sleep),
+            patch.object(auto_title.time, "monotonic", lambda: clock[0]),
+        ):
             self.assertEqual(auto_title.run(self.state_dir, CONFIG), 0)
         self.assertGreaterEqual(clock[0], 130.0)
         self.assertLess(clock[0], 140.0)

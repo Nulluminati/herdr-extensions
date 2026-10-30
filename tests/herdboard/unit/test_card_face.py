@@ -13,8 +13,9 @@ from herdboard.store import CardView
 
 
 def card(**kwargs):
-    fields = dict(ref="t123", board="api", path=None, column="Todo", title="Ship it",
-                  checked=False, due=None, tags=[], body=[])
+    fields = dict(
+        ref="t123", board="api", path=None, column="Todo", title="Ship it", checked=False, due=None, tags=[], body=[]
+    )
     fields.update(kwargs)
     return CardView(**fields)
 
@@ -29,15 +30,21 @@ def first_row(widget: board.CardWidget, width: int = 40) -> list[tuple[str, str]
     """The first row as (text, style) pairs, so a test can read which color each part has."""
     console = Console(width=width, color_system=None, file=StringIO())
     row = next(iter(widget.content.renderables))
-    return [(segment.text, str(segment.style)) for line in console.render_lines(row, console.options)
-            for segment in line]
+    return [
+        (segment.text, str(segment.style)) for line in console.render_lines(row, console.options) for segment in line
+    ]
 
 
 class CardFaceTests(unittest.TestCase):
     def test_the_state_icon_shows_not_started_started_and_done(self):
-        cases = ((card(), False, "○"), (card(worktree=True), False, "●"), (card(agent_review="pi"), False, "●"),
-                 (card(pr_writing=True), False, "●"), (card(planning="claude"), False, "●"),
-                 (card(worktree=True), True, "✓"))
+        cases = (
+            (card(), False, "○"),
+            (card(worktree=True), False, "●"),
+            (card(agent_review="pi"), False, "●"),
+            (card(pr_writing=True), False, "●"),
+            (card(planning="claude"), False, "●"),
+            (card(worktree=True), True, "✓"),
+        )
         for item, done, icon in cases:
             with self.subTest(item=item, done=done):
                 text = board.card_text(item, False, done=done)
@@ -48,14 +55,13 @@ class CardFaceTests(unittest.TestCase):
                 self.assertTrue(widget.plain.startswith("Ship it"), widget.plain)
 
     def test_done_icons_are_green_and_started_icons_yellow(self):
-        for item, done, style in ((card(), False, ""), (card(worktree=True), False, "yellow"),
-                                  (card(), True, "green")):
+        for item, done, style in ((card(), False, ""), (card(worktree=True), False, "yellow"), (card(), True, "green")):
             with self.subTest(done=done, style=style):
                 self.assertEqual(str(board.card_face(item, False, done=done).icon.style), style)
 
     def test_done_cards_strike_their_title_and_description(self):
         text = board.card_text(card(body=["Initial release"]), False, done=True)
-        struck = [text.plain[span.start:span.end] for span in text.spans if "strike" in str(span.style)]
+        struck = [text.plain[span.start : span.end] for span in text.spans if "strike" in str(span.style)]
         self.assertEqual(struck, ["Ship it", "Initial release"])
         self.assertTrue(board.CardWidget(card(), False, done=True).has_class("done"))
 
@@ -88,8 +94,9 @@ class CardFaceTests(unittest.TestCase):
         self.assertTrue(footer.rstrip().endswith("Due Nov 1"), footer)
 
     def test_the_status_row_shows_only_when_there_is_status(self):
-        self.assertEqual(board.CardWidget(card(tags=["api"], title="Ship it #api"), False).plain,
-                         "Ship it  t123\n api ")
+        self.assertEqual(
+            board.CardWidget(card(tags=["api"], title="Ship it #api"), False).plain, "Ship it  t123\n api "
+        )
         widget = board.CardWidget(card(pr_state="open", parent_title="Billing"), False)
         self.assertEqual(widget.plain.splitlines()[-1], "PR open · ↳ Billing")
 
@@ -102,8 +109,7 @@ class CardFaceTests(unittest.TestCase):
         self.assertEqual([line.rstrip() for line in lines], ["○               t123", "Ship it"])
         item = card(title="Improve Auto tab titles", ref="tveq", has_attachments=True)
         lines = rendered(board.CardWidget(item, False), width=20)
-        self.assertEqual([line.rstrip() for line in lines],
-                         ["○         files tveq", "Improve Auto tab", "titles"])
+        self.assertEqual([line.rstrip() for line in lines], ["○         files tveq", "Improve Auto tab", "titles"])
         self.assertEqual(rendered(board.CardWidget(card(ref="api:3"), False), width=20)[0].rstrip(), "○")
 
     def test_cards_have_no_menu_marker(self):
@@ -163,10 +169,12 @@ class AgentLogoTests(unittest.TestCase):
         item = card(agent_review="pi", planning="claude")
         self.assertIn("agent review: pi · planning: claude", board.CardWidget(item, False).plain)
         logos = board.CardWidget(item, False, agent_logos=True).plain
-        self.assertIn(f"agent review: {board.AGENT_LOGOS['pi']} pi · planning: {board.AGENT_LOGOS['claude']} claude",
-                      logos)
-        self.assertIn("agent review: other", board.CardWidget(card(agent_review="other"), False,
-                                                              agent_logos=True).plain)
+        self.assertIn(
+            f"agent review: {board.AGENT_LOGOS['pi']} pi · planning: {board.AGENT_LOGOS['claude']} claude", logos
+        )
+        self.assertIn(
+            "agent review: other", board.CardWidget(card(agent_review="other"), False, agent_logos=True).plain
+        )
 
     def test_the_started_agent_logo_follows_the_state_icon(self):
         item = card(worktree=True, agent="claude")
@@ -179,8 +187,11 @@ class AgentLogoTests(unittest.TestCase):
 
     def test_the_logos_need_the_herdr_agent_icons_font(self):
         def fc_match(output):
-            return patch("herdboard.board.subprocess.run",
-                         return_value=subprocess.CompletedProcess([], 0, stdout=output, stderr=""))
+            return patch(
+                "herdboard.board.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=output, stderr=""),
+            )
+
         board.agent_font_installed.cache_clear()
         self.addCleanup(board.agent_font_installed.cache_clear)
         with fc_match("Herdr Agent Icons Max\n") as run:
@@ -194,10 +205,20 @@ class AgentLogoTests(unittest.TestCase):
             self.assertFalse(board.agent_font_installed())
 
 
-HERDR_GLYPHS = (("working", "◐", "yellow"), ("blocked", "×", "red"), ("done", "✓", "cyan"),
-                ("idle", "○", "green"), ("unknown", "·", "dim"))
-PHASES = {"planning": ("✎", "\uf040"), "planned": ("▤", "\uf0f6"), "reviewing": ("⌕", "\uf002"),
-          "reviewed": ("✔", "\uf058"), "new commits": ("↑", "\uf062")}
+HERDR_GLYPHS = (
+    ("working", "◐", "yellow"),
+    ("blocked", "×", "red"),
+    ("done", "✓", "cyan"),
+    ("idle", "○", "green"),
+    ("unknown", "·", "dim"),
+)
+PHASES = {
+    "planning": ("✎", "\uf040"),
+    "planned": ("▤", "\uf0f6"),
+    "reviewing": ("⌕", "\uf002"),
+    "reviewed": ("✔", "\uf058"),
+    "new commits": ("↑", "\uf062"),
+}
 
 
 def status_row(item, done=False, **options):
@@ -238,12 +259,15 @@ class AgentGlyphTests(unittest.TestCase):
             with self.subTest(style=style):
                 icon = {key: glyphs[index] for key, glyphs in PHASES.items()}
                 options = dict(icon_style=style)
-                self.assertEqual(mark_row(card(planning="claude", planning_status="working"), **options),
-                                 f"{icon['planning']} ◐ claude")
+                self.assertEqual(
+                    mark_row(card(planning="claude", planning_status="working"), **options),
+                    f"{icon['planning']} ◐ claude",
+                )
                 self.assertEqual(mark_row(card(planning="claude"), **options), f"{icon['planning']} claude")
                 self.assertEqual(mark_row(card(planned=True), **options), icon["planned"])
-                self.assertEqual(mark_row(card(agent_review="pi", review_status="blocked"), **options),
-                                 f"{icon['reviewing']} × pi")
+                self.assertEqual(
+                    mark_row(card(agent_review="pi", review_status="blocked"), **options), f"{icon['reviewing']} × pi"
+                )
                 self.assertEqual(mark_row(card(reviewed="reviewed"), **options), icon["reviewed"])
                 self.assertEqual(mark_row(card(reviewed="new commits"), **options), icon["new commits"])
 
@@ -262,11 +286,14 @@ class AgentGlyphTests(unittest.TestCase):
                 self.assertIn(("◐", "bold dim yellow"), segments)
 
     def test_the_phase_markers_follow_the_state_icon_and_leave_the_status_row(self):
-        item = card(planning="claude", planning_status="working", reviewed="reviewed", pr_state="open",
-                    parent_title="Billing")
+        item = card(
+            planning="claude", planning_status="working", reviewed="reviewed", pr_state="open", parent_title="Billing"
+        )
         lines = rendered(board.CardWidget(item, False), width=40)
-        self.assertEqual([line.rstrip() for line in lines],
-                         ["●  ✔ · ✎ ◐ claude".ljust(36) + "t123", "Ship it", "PR open · ↳ Billing"])
+        self.assertEqual(
+            [line.rstrip() for line in lines],
+            ["●  ✔ · ✎ ◐ claude".ljust(36) + "t123", "Ship it", "PR open · ↳ Billing"],
+        )
         face = board.card_face(item, False)
         self.assertEqual(face.icon.plain, "●")
         self.assertEqual(face.status.plain, "PR open · ↳ Billing")
@@ -292,20 +319,23 @@ class AgentGlyphTests(unittest.TestCase):
 
     def test_compact_cards_show_the_phase_markers_after_the_title(self):
         item = card(planned=True, reviewed="reviewed")
-        self.assertEqual(rendered(board.CardWidget(item, False, card_style="compact"), width=40),
-                         ["○ Ship it  ✔ · ▤                    t123"])
+        self.assertEqual(
+            rendered(board.CardWidget(item, False, card_style="compact"), width=40),
+            ["○ Ship it  ✔ · ▤                    t123"],
+        )
         self.assertEqual(board.CardWidget(item, False, card_style="compact").plain, "Ship it  t123\nreviewed · planned")
 
     def test_the_agent_logo_replaces_the_agent_name_in_a_phase(self):
         item = card(planning="claude", planning_status="idle", agent_review="pi", review_status="working")
-        self.assertEqual(mark_row(item, agent_logos=True),
-                         f"⌕ ◐ {board.AGENT_LOGOS['pi']} · ✎ ○ {board.AGENT_LOGOS['claude']}")
+        self.assertEqual(
+            mark_row(item, agent_logos=True), f"⌕ ◐ {board.AGENT_LOGOS['pi']} · ✎ ○ {board.AGENT_LOGOS['claude']}"
+        )
         self.assertEqual(mark_row(card(agent_review="other"), agent_logos=True), "⌕ other")
 
     def test_each_agent_glyph_takes_its_herdr_color(self):
         face = board.card_face(card(planning="claude", planning_status="blocked"), False)
         mark = face.marks[0]
-        glyph = next(span for span in mark.spans if mark.plain[span.start:span.end] == "×")
+        glyph = next(span for span in mark.spans if mark.plain[span.start : span.end] == "×")
         self.assertEqual(str(glyph.style), "red")
 
     def test_the_pr_writer_glyph_follows_pr_writing(self):
@@ -317,18 +347,27 @@ class AgentGlyphTests(unittest.TestCase):
         self.assertNotIn("▤", mark_row(card(planned=True), done=True))
 
     def test_the_plain_text_has_words_and_no_glyphs(self):
-        item = card(worktree=True, agent_status="working", planned=True, agent_review="pi", review_status="blocked",
-                    pr_writing=True, pr_write_status="done")
+        item = card(
+            worktree=True,
+            agent_status="working",
+            planned=True,
+            agent_review="pi",
+            review_status="blocked",
+            pr_writing=True,
+            pr_write_status="done",
+        )
         plain = board.CardWidget(item, False).plain
         self.assertTrue(plain.startswith("Ship it"), plain)
         self.assertEqual(plain.splitlines()[-1], "agent review: pi · PR: writing · planned")
-        self.assertEqual(board.CardWidget(card(reviewed="new commits"), False).plain.splitlines()[-1],
-                         "new commits since review")
+        self.assertEqual(
+            board.CardWidget(card(reviewed="new commits"), False).plain.splitlines()[-1], "new commits since review"
+        )
         for glyph in ("◐", "×", "✓", "▤", "⌕", "↑"):
             self.assertNotIn(glyph, plain)
-        self.assertEqual(board.CardWidget(card(planning="claude", planning_status="working"), False).plain,
-                         "Ship it  t123\nplanning: claude")
-
+        self.assertEqual(
+            board.CardWidget(card(planning="claude", planning_status="working"), False).plain,
+            "Ship it  t123\nplanning: claude",
+        )
 
     def test_an_automation_card_shows_the_automation_mark(self):
         item = card(title="Automation: Ship it")
@@ -342,8 +381,16 @@ class AgentGlyphTests(unittest.TestCase):
         self.assertEqual(plain.splitlines()[-1], "automation")
 
     def test_the_detail_screen_names_each_state_in_words(self):
-        item = card(worktree=True, agent="claude", agent_status="working", planning="pi", planning_status="idle",
-                    agent_review="pi", review_status="blocked", planned=True)
+        item = card(
+            worktree=True,
+            agent="claude",
+            agent_status="working",
+            planning="pi",
+            planning_status="idle",
+            agent_review="pi",
+            review_status="blocked",
+            planned=True,
+        )
         meta = board.DetailScreen(item, None)._meta().plain.splitlines()
         self.assertIn("Agent        ◐ claude: working", meta)
         self.assertIn("Planner      ✎ ○ pi: idle", meta)

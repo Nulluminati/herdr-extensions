@@ -21,8 +21,9 @@ class GitHerdr(PaneHerdr):
             entry = next((w for w in self.worktrees if w["open_workspace_id"] == workspace), None)
             if entry is None:
                 return self.reply(argv, error="workspace_not_found")
-            removed = subprocess.run(["git", "-C", entry["path"], "worktree", "remove", entry["path"]],
-                                     capture_output=True)
+            removed = subprocess.run(
+                ["git", "-C", entry["path"], "worktree", "remove", entry["path"]], capture_output=True
+            )
             if removed.returncode:
                 return self.reply(argv, error="dirty_worktree_requires_force")
             self.worktrees.remove(entry)
@@ -49,8 +50,9 @@ class MergeTestCase(ReviewTestCase):
         self.merger = merge.Merger(self.store, self.repo)
 
     def git(self, directory, *args):
-        return subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True,
-                              text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(directory), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
 
     def commit(self, directory, name, text, message):
         (Path(directory) / name).write_text(text)
@@ -68,8 +70,13 @@ class MergeTestCase(ReviewTestCase):
         return self.git(self.repo, "symbolic-ref", "--short", "HEAD")
 
     def branch_exists(self, branch):
-        return subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--verify", "--quiet",
-                               f"refs/heads/{branch}"], capture_output=True).returncode == 0
+        return (
+            subprocess.run(
+                ["git", "-C", str(self.repo), "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
 
     def records(self):
         path = start.state_dir() / "starts.json"
@@ -126,8 +133,9 @@ class PullRequestTestCase(MergeTestCase):
         self.gh = FakeGh()
         self.enterContext(patch.object(merge, "_gh", self.gh))
         self.workers = []
-        self.enterContext(patch.object(pr_write, "start_worker",
-                                       lambda arguments, log: self.workers.append((arguments, log))))
+        self.enterContext(
+            patch.object(pr_write, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+        )
 
     def remote_branches(self):
         return self.git(self.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads")

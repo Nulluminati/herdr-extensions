@@ -126,9 +126,7 @@ def _block_range(body: list[str], key: str) -> tuple[int, int] | None:
     if start is None:
         return None
     end = start + 1
-    while end < len(body) and (
-        not body[end].strip() or body[end][0] in " \t" or body[end].startswith("-")
-    ):
+    while end < len(body) and (not body[end].strip() or body[end][0] in " \t" or body[end].startswith("-")):
         end += 1
     while end > start + 1 and not body[end - 1].strip():
         end -= 1

@@ -1,4 +1,5 @@
 """The Automations tab: G goes there after the Notes tab, the list of automations, and its keys."""
+
 import asyncio
 import os
 import tempfile
@@ -77,8 +78,9 @@ class TabTests(AutomationsBoardTestCase):
                 await pilot.press("G")
                 await self.settle(app, pilot)
                 kinds = [type(screen) for screen in app.screen_stack]
-                self.assertLessEqual(sum(kind in kinds for kind in (PullRequestsScreen, NotesScreen,
-                                                                     AutomationsScreen)), 1, kinds)
+                self.assertLessEqual(
+                    sum(kind in kinds for kind in (PullRequestsScreen, NotesScreen, AutomationsScreen)), 1, kinds
+                )
                 self.assertLessEqual(len(app.screen_stack), 2)
             self.assertEqual(seen, ["board", "prs", "notes", "automations", "board"])
 
@@ -100,8 +102,9 @@ class TabTests(AutomationsBoardTestCase):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             await self.open_tab(app, pilot)
-            self.assertEqual(app.screen.query_one(TabBar).tab_labels(),
-                             ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"])
+            self.assertEqual(
+                app.screen.query_one(TabBar).tab_labels(), ["▦ Board", "⑂ Pull requests 0", "✎ Notes", "↻ Automations"]
+            )
 
     async def test_the_board_keys_do_not_work_on_the_tab(self):
         app = self.app()
@@ -169,8 +172,9 @@ class ListTests(AutomationsBoardTestCase):
     async def test_n_runs_after_confirm(self):
         added = self.add()
         app = self.app()
-        with patch.object(board.automations, "run",
-                          return_value={"id": added.id, "card": "t123", "result": "started", "skipped": 0}) as run:
+        with patch.object(
+            board.automations, "run", return_value={"id": added.id, "card": "t123", "result": "started", "skipped": 0}
+        ) as run:
             async with app.run_test(size=(160, 30)) as pilot:
                 await self.open_tab(app, pilot)
                 await pilot.press("n")
@@ -206,8 +210,17 @@ class ListTests(AutomationsBoardTestCase):
     async def test_P_plans_with_the_chosen_agent(self):
         added = self.add()
         app = self.app()
-        planned = {"id": added.id, "agent": "claude", "model": "opus", "pane_id": "w1:p1", "plan": "x",
-                   "workspace_id": "w1", "worktree_path": "/w", "branch": None, "base": None}
+        planned = {
+            "id": added.id,
+            "agent": "claude",
+            "model": "opus",
+            "pane_id": "w1:p1",
+            "plan": "x",
+            "workspace_id": "w1",
+            "worktree_path": "/w",
+            "branch": None,
+            "base": None,
+        }
         with patch("herdboard.automation_plan.AutomationPlanner.plan", return_value=planned) as plan:
             async with app.run_test(size=(160, 30)) as pilot:
                 await self.open_tab(app, pilot)
@@ -222,10 +235,21 @@ class ListTests(AutomationsBoardTestCase):
     async def test_P_plans_with_codex_and_its_thinking_level(self):
         added = self.add()
         app = self.app()
-        planned = {"id": added.id, "agent": "codex", "model": "gpt-6.1", "pane_id": "w1:p1", "plan": "x",
-                   "workspace_id": "w1", "worktree_path": "/w", "branch": None, "base": None}
-        with patch("herdboard.automation_plan.AutomationPlanner.plan", return_value=planned) as plan, \
-                patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])):
+        planned = {
+            "id": added.id,
+            "agent": "codex",
+            "model": "gpt-6.1",
+            "pane_id": "w1:p1",
+            "plan": "x",
+            "workspace_id": "w1",
+            "worktree_path": "/w",
+            "branch": None,
+            "base": None,
+        }
+        with (
+            patch("herdboard.automation_plan.AutomationPlanner.plan", return_value=planned) as plan,
+            patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])),
+        ):
             async with app.run_test(size=(160, 30)) as pilot:
                 await self.open_tab(app, pilot)
                 await pilot.press("P")
@@ -245,8 +269,9 @@ class FormTests(AutomationsBoardTestCase):
         app = self.app()
         async with app.run_test(size=(160, 40)) as pilot:
             await self.settle(app, pilot)
-            form = AutomationFormScreen("Add an automation", ["inbox", name], self.store.config.types,
-                                        Mock(), self.store.config)
+            form = AutomationFormScreen(
+                "Add an automation", ["inbox", name], self.store.config.types, Mock(), self.store.config
+            )
             app.push_screen(form)
             await pilot.pause()
             select = form.query_one("#automation-board", Select)
@@ -274,8 +299,9 @@ class FormTests(AutomationsBoardTestCase):
             self.assertGreater(dialog.max_scroll_y, 0)
             form.query_one("#automation-body", TextArea).focus()
             await pilot.pause()
-            self.assertTrue(dialog.scrollable_content_region.contains_region(
-                form.query_one("#automation-body", TextArea).region))
+            self.assertTrue(
+                dialog.scrollable_content_region.contains_region(form.query_one("#automation-body", TextArea).region)
+            )
             hint = list(form.query(".dim"))[-1]
             hint.scroll_visible(animate=False, immediate=True)
             await pilot.pause()
@@ -302,8 +328,10 @@ class FormTests(AutomationsBoardTestCase):
             await self.settle(app, pilot)
             self.assertIs(app.screen, screen)
             saved = automations.load(self.store.config)
-            self.assertEqual([(a.title, a.schedule, a.body, a.board) for a in saved],
-                             [("Say hello", "every day at 10:00", "Write hello.txt", "inbox")])
+            self.assertEqual(
+                [(a.title, a.schedule, a.body, a.board) for a in saved],
+                [("Say hello", "every day at 10:00", "Write hello.txt", "inbox")],
+            )
             self.assertEqual(screen.rows()[0][2], "Say hello")
 
     async def test_the_form_offers_codex_and_its_thinking_levels(self):
@@ -335,17 +363,22 @@ class FormTests(AutomationsBoardTestCase):
 
     async def test_the_model_and_thinking_options_follow_the_agent(self):
         from herdboard.config import CLAUDE_THINKING_LEVELS, CODEX_THINKING_LEVELS, PI_THINKING_LEVELS
+
         app = self.app()
-        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])), \
-                patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])):
+        with (
+            patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])),
+            patch("herdboard.board.codex_model_choices", return_value=(None, ["gpt-6.1"])),
+        ):
             async with app.run_test(size=(160, 40)) as pilot:
                 form = await self.open_form(app, pilot)
                 # "default" is the configured start agent, Claude.
                 self.assertEqual(self.options(form, "model"), ["default", "opus", "sonnet", "haiku"])
                 self.assertEqual(self.options(form, "thinking"), ["default", *CLAUDE_THINKING_LEVELS])
-                for agent, models, levels in (("pi", ["zai/glm-5.3"], PI_THINKING_LEVELS),
-                                              ("codex", ["gpt-6.1"], CODEX_THINKING_LEVELS),
-                                              ("claude", ["opus", "sonnet", "haiku"], CLAUDE_THINKING_LEVELS)):
+                for agent, models, levels in (
+                    ("pi", ["zai/glm-5.3"], PI_THINKING_LEVELS),
+                    ("codex", ["gpt-6.1"], CODEX_THINKING_LEVELS),
+                    ("claude", ["opus", "sonnet", "haiku"], CLAUDE_THINKING_LEVELS),
+                ):
                     with self.subTest(agent=agent):
                         form.query_one("#automation-agent", Select).value = agent
                         await pilot.pause()

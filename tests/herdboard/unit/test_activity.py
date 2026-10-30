@@ -1,4 +1,5 @@
 """The activity log: one Markdown file per card, appended by agents, herdboard and the user."""
+
 import json
 import os
 import subprocess
@@ -30,11 +31,9 @@ class LogFileTests(unittest.TestCase):
 
     def test_append_writes_one_line_in_a_hidden_folder(self):
         entry = activity.append(self.store, "t3m9", "Ready for review: 3 commits.", "pi", now=NOON)
-        self.assertEqual(entry, {"time": "2026-10-12 12:00", "author": "pi",
-                                 "message": "Ready for review: 3 commits."})
+        self.assertEqual(entry, {"time": "2026-10-12 12:00", "author": "pi", "message": "Ready for review: 3 commits."})
         path = self.todos / ".herdboard" / "log" / "t3m9.md"
-        self.assertEqual(path.read_text(encoding="utf-8"),
-                         "- 2026-10-12 12:00 · pi · Ready for review: 3 commits.\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), "- 2026-10-12 12:00 · pi · Ready for review: 3 commits.\n")
 
     def test_entries_come_back_oldest_first(self):
         activity.append(self.store, "t3m9", "First.", "claude", now=NOON)
@@ -54,10 +53,10 @@ class LogFileTests(unittest.TestCase):
     def test_several_lines_become_indented_lines_of_one_entry(self):
         activity.append(self.store, "t3m9", "Blocked.\nThe API key is missing.\r\n", "pi", now=NOON)
         path = self.todos / ".herdboard" / "log" / "t3m9.md"
-        self.assertEqual(path.read_text(encoding="utf-8"),
-                         "- 2026-10-12 12:00 · pi · Blocked.\n\tThe API key is missing.\n")
-        self.assertEqual(activity.read(self.store.config, "t3m9")[0]["message"],
-                         "Blocked.\nThe API key is missing.")
+        self.assertEqual(
+            path.read_text(encoding="utf-8"), "- 2026-10-12 12:00 · pi · Blocked.\n\tThe API key is missing.\n"
+        )
+        self.assertEqual(activity.read(self.store.config, "t3m9")[0]["message"], "Blocked.\nThe API key is missing.")
 
     def test_a_card_without_a_log_has_no_entries(self):
         self.assertEqual(activity.read(self.store.config, "t3m9"), [])
@@ -94,32 +93,42 @@ class AuthorTests(unittest.TestCase):
             self.assertEqual(activity.author(), "user")
 
     def test_an_agent_pane_names_the_agent_kind(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
-                mock.patch.object(activity, "agent_kind", return_value="pi") as kind:
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}),
+            mock.patch.object(activity, "agent_kind", return_value="pi") as kind,
+        ):
             self.assertEqual(activity.author(), "pi")
         kind.assert_called_once_with("w1:p2")
 
     def test_a_pane_without_an_agent_is_the_user(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
-                mock.patch.object(activity, "agent_kind", return_value=None):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}),
+            mock.patch.object(activity, "agent_kind", return_value=None),
+        ):
             self.assertEqual(activity.author(), "user")
 
     def test_a_pane_herdboard_cannot_reach_falls_back_to_the_started_agent(self):
         # Codex's sandbox denies the Herdr socket, so `herdr agent get` fails from its tools.
         activity.record_pane_agent("w1:p2", "codex")
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}), \
-                mock.patch.object(activity, "agent_kind", return_value=None):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}),
+            mock.patch.object(activity, "agent_kind", return_value=None),
+        ):
             self.assertEqual(activity.author(), "codex")
 
     def test_a_pane_without_a_started_agent_stays_the_user(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}), \
-                mock.patch.object(activity, "agent_kind", return_value=None):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}),
+            mock.patch.object(activity, "agent_kind", return_value=None),
+        ):
             self.assertEqual(activity.author(), "user")
 
     def test_a_recorded_pane_that_herdr_reports_wins(self):
         activity.record_pane_agent("w1:p2", "codex")
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}), \
-                mock.patch.object(activity, "agent_kind", return_value="pi"):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2", "XDG_STATE_HOME": str(self.state)}),
+            mock.patch.object(activity, "agent_kind", return_value="pi"),
+        ):
             self.assertEqual(activity.author(), "pi")
 
     def test_record_pane_agent_updates_a_pane_and_keeps_other_panes(self):
@@ -189,8 +198,9 @@ class LogCliTests(CliTestCase):
 
     def test_log_of_a_temporary_reference_gives_the_card_an_id(self):
         (self.todos).mkdir(parents=True, exist_ok=True)
-        (self.todos / "inbox.md").write_text("---\nkanban-plugin: board\n---\n\n## Todo\n\n- [ ] No ID yet\n",
-                                             encoding="utf-8")
+        (self.todos / "inbox.md").write_text(
+            "---\nkanban-plugin: board\n---\n\n## Todo\n\n- [ ] No ID yet\n", encoding="utf-8"
+        )
         data = self.run_json("log", "inbox:1", "Hi.", directory=self.plain)
         self.assertRegex(data["ref"], r"^t[0-9a-z]{3}$")
         self.assertIn("^" + data["ref"], (self.todos / "inbox.md").read_text(encoding="utf-8"))
@@ -232,10 +242,15 @@ class EditGuardTests(CliTestCase):
         self.ref = self.run_json("add", "Fix the login timeout", directory=self.plain)["card"]["ref"]
         state = Path(self.tmp.name) / "state" / "herdboard"
         state.mkdir(parents=True)
-        (state / "starts.json").write_text(json.dumps({
-            self.ref: {"ref": self.ref, "steps_done": [], "pane_id": "w1:p2", "agent_name": "hb-x"},
-            "other": {"ref": "tnone", "steps_done": [], "pane_id": "w1:p9"},
-        }), encoding="utf-8")
+        (state / "starts.json").write_text(
+            json.dumps(
+                {
+                    self.ref: {"ref": self.ref, "steps_done": [], "pane_id": "w1:p2", "agent_name": "hb-x"},
+                    "other": {"ref": "tnone", "steps_done": [], "pane_id": "w1:p9"},
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def test_a_card_agent_cannot_edit_card_text(self):
         for option in (["--title", "New"], ["--body", "x"]):
@@ -245,8 +260,10 @@ class EditGuardTests(CliTestCase):
                 self.assertIn("herdboard log", data["error"]["message"])
 
     def test_a_card_agent_can_still_log_and_move(self):
-        with mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}), \
-                mock.patch.object(activity, "author", return_value="pi"):
+        with (
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p2"}),
+            mock.patch.object(activity, "author", return_value="pi"),
+        ):
             self.run_json("log", self.ref, "Ready.", directory=self.plain)
             self.run_json("move", self.ref, "Review", directory=self.plain)
 

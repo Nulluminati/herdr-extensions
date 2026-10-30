@@ -1,4 +1,5 @@
 """The card detail shows a link to the card's pull request, and opens it in the browser."""
+
 import json
 import unittest
 from unittest import mock
@@ -56,8 +57,7 @@ class PullRequestLinkTests(BoardTestCase):
         self.with_pr(card.ref)
         app = self.make_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "linux"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "linux"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 await pilot.press("o")
@@ -84,8 +84,7 @@ class PullRequestLinkTests(BoardTestCase):
         self.with_pr(card.ref)
         app = self.make_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "darwin"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "darwin"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_detail(pilot)
                 app.screen.action_open_pr()

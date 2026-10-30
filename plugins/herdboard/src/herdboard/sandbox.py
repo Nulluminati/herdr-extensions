@@ -18,8 +18,19 @@ GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
 CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
 HUNK_DEFAULT_PORT = 47657
 # Tools outside pi's sandbox that only read remote documentation and search results.
-PI_READ_TOOLS = ("read", "grep", "find", "ls", "bash", "web_fetch", "web_search", "context7_resolve_library_id",
-                 "context7_get_library_docs", "context7_get_cached_doc_raw", "code_search")
+PI_READ_TOOLS = (
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "web_fetch",
+    "web_search",
+    "context7_resolve_library_id",
+    "context7_get_library_docs",
+    "context7_get_cached_doc_raw",
+    "code_search",
+)
 
 
 def hunk_port() -> int:
@@ -35,8 +46,11 @@ def shared_git_folder(path: Path) -> list[Path]:
 
     Commits and branch changes write there, so the sandbox denies it with the worktree."""
     try:
-        result = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                capture_output=True, text=True)
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+        )
     except OSError:
         return []
     if result.returncode or not result.stdout.strip():
@@ -62,16 +76,26 @@ def claude_reviewer_options(writable: Path | None, read_only: Path, browser: boo
     # Claude's sandbox sends 127.0.0.1 past its proxy, so Hunk runs outside the sandbox instead.
     excluded = ["terminal-browser *"] * browser + ["hunk session *"] * hunk
     policy = _policy(writable, read_only, list(GITHUB_DOMAINS), excluded)
-    settings = {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
-                            **policy}}
+    settings = {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, **policy}}
     return ["--permission-mode", "dontAsk", "--settings", json.dumps(settings)]
 
 
 def claude_reviewer_tools(writable: Path | None) -> list[str]:
     """The `--allowedTools` list. It takes every value after it, so the caller puts it last."""
     edits = [f"Edit(/{writable}/**)", f"Write(/{writable}/**)"] if writable else []
-    return ["--allowedTools", "Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Skill",
-            "mcp__context7", "mcp__grep_app", *edits]
+    return [
+        "--allowedTools",
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+        "Skill",
+        "mcp__context7",
+        "mcp__grep_app",
+        *edits,
+    ]
 
 
 def pi_reviewer_options(writable: Path | None, read_only: Path, browser: bool, hunk: bool) -> list[str]:
@@ -86,10 +110,20 @@ def codex_reviewer_options(name: str, writable: Path | None, hunk: bool) -> list
     """A permissions profile `name` and `-a never`. terminal-browser runs outside it by a Codex rule."""
     filesystem = '":root"="read"'
     if writable:
-        filesystem += f",{json.dumps(str(writable), ensure_ascii=False)}=\"write\""
+        filesystem += f',{json.dumps(str(writable), ensure_ascii=False)}="write"'
     domains = list(CODEX_GITHUB_DOMAINS) + [f"127.0.0.1:{hunk_port()}"] * hunk
     allowed = ",".join(f'{json.dumps(domain)}="allow"' for domain in domains)
-    return ["-a", "never", "-c", "features.network_proxy=true", "-c", 'web_search="live"',
-            "-c", f'default_permissions="{name}"',
-            "-c", f"permissions.{name}.filesystem={{{filesystem}}}",
-            "-c", f"permissions.{name}.network={{enabled=true,domains={{{allowed}}}}}"]
+    return [
+        "-a",
+        "never",
+        "-c",
+        "features.network_proxy=true",
+        "-c",
+        'web_search="live"',
+        "-c",
+        f'default_permissions="{name}"',
+        "-c",
+        f"permissions.{name}.filesystem={{{filesystem}}}",
+        "-c",
+        f"permissions.{name}.network={{enabled=true,domains={{{allowed}}}}}",
+    ]

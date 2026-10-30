@@ -12,9 +12,7 @@ from .model import BLOCK_ID
 ATX_HEADING = re.compile(r"^ {0,3}#{1,6}\s+(?P<name>.*?)\s*$")
 FENCE_OPEN = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 UNDERLINE = re.compile(r"^(?:=+|-{2,})\s*$")
-LIST_ITEM = re.compile(
-    r"^(?P<indent>[ \t]*)(?:[-*+]|\d+[.)])[ \t]+(?:\[(?P<box>[ xX])\][ \t]+)?(?P<text>\S.*?)\s*$"
-)
+LIST_ITEM = re.compile(r"^(?P<indent>[ \t]*)(?:[-*+]|\d+[.)])[ \t]+(?:\[(?P<box>[ xX])\][ \t]+)?(?P<text>\S.*?)\s*$")
 EMPTY_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])(?:[ \t]+\[[ xX]\])?\s*$")
 SLUG_BREAK = re.compile(r"[\W_]+")
 
@@ -173,9 +171,7 @@ class _Converter:
             self.titles.pop()
         parent = self.titles[-1] if self.stack and self.card is not None else None
         if ambiguous:
-            self.non_list.append(
-                NonListLine(number, match.group("text"), "ambiguous", self.section.name, parent)
-            )
+            self.non_list.append(NonListLine(number, match.group("text"), "ambiguous", self.section.name, parent))
         if not self.stack or self.card is None:
             self.stack = [raw]
             self.titles = [self.add_card(match.group("text"), checked).title]
@@ -212,7 +208,7 @@ class _Converter:
         char, length, indent, tabs = self.fence
         if re.match(rf"^[ \t]*{re.escape(char)}{{{length},}}[ \t]*$", line):
             self.fence = None
-        text = (line[len(indent):] if line.startswith(indent) else line.lstrip()).rstrip()
+        text = (line[len(indent) :] if line.startswith(indent) else line.lstrip()).rstrip()
         self.card.body.append("\t" * tabs + text)
         if text:
             self.non_list.append(NonListLine(number, text, "attached", self.section.name))

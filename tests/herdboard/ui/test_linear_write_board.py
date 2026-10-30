@@ -23,8 +23,7 @@ class WriteKeyTests(LinearWriteBoardCase):
             await settle(pilot)
             self.assertEqual(self.issue("ENG-1")["state"]["name"], "Doing")
             self.assertEqual(len(self.requests("IssueUpdate")), 1)
-            self.assertEqual(self.requests("IssueUpdate")[0]["variables"]["input"],
-                             {"stateId": "ws-ENG-Doing"})
+            self.assertEqual(self.requests("IssueUpdate")[0]["variables"]["input"], {"stateId": "ws-ENG-Doing"})
             self.assertGreater(len(self.requests("ProjectIssues")), fetches)
             self.assertEqual(self.column_of(app, "ENG-1"), "In progress")
             self.assertEqual(app.current_card().ref, "ENG-1")
@@ -153,8 +152,9 @@ class AmbiguousStateTests(LinearWriteBoardCase):
             self.assertIn("ENG", dialog.query_one("#state-prompt").plain)
             self.assertIn("In progress", dialog.query_one("#state-prompt").plain)
             options = dialog.query_one(OptionList)
-            self.assertEqual([options.get_option_at_index(i).prompt for i in range(options.option_count)],
-                             ["Doing", "Coding"])
+            self.assertEqual(
+                [options.get_option_at_index(i).prompt for i in range(options.option_count)], ["Doing", "Coding"]
+            )
             self.assertEqual(self.requests("IssueUpdate"), [])
             options.highlighted = 1
             await pilot.press("enter")

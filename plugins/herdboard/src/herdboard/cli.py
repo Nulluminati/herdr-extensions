@@ -47,12 +47,14 @@ def _add_global_options(parser: argparse.ArgumentParser, suppress: bool) -> None
     default = argparse.SUPPRESS if suppress else None
     parser.add_argument("--config", type=Path, default=default, help="config file")
     parser.add_argument(
-        "-C", dest="directory", type=Path, default=default, metavar="DIR",
+        "-C",
+        dest="directory",
+        type=Path,
+        default=default,
+        metavar="DIR",
         help="act as if run in DIR",
     )
-    parser.add_argument(
-        "--json", action="store_true", default=default, help="machine output on stdout"
-    )
+    parser.add_argument("--json", action="store_true", default=default, help="machine output on stdout")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,8 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def write_options(sub: argparse.ArgumentParser) -> None:
         sub.add_argument("--state", help="Linear workflow state, when several match the column")
-        sub.add_argument("--offline", action="store_true",
-                         help="Linear writes need a connection: this makes them fail")
+        sub.add_argument("--offline", action="store_true", help="Linear writes need a connection: this makes them fail")
 
     sub = command("add", "add a card, or with --linear a Linear issue assigned to you")
     sub.add_argument("text")
@@ -94,8 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--linear", action="store_true", help="create a Linear issue")
     sub.add_argument("--team", help="Linear team key (with --linear)")
     sub.add_argument("--project", help="Linear project name (with --linear)")
-    sub.add_argument("--label", action="append", default=[],
-                     help="Linear label name or TEAM/label (with --linear)")
+    sub.add_argument("--label", action="append", default=[], help="Linear label name or TEAM/label (with --linear)")
     write_options(sub)
 
     sub = command("show", "show one card")
@@ -111,7 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     order.add_argument("--up", action="store_true", help="swap the todo with the card above it")
     order.add_argument("--down", action="store_true", help="swap the todo with the card below it")
     sub.add_argument(
-        "--position", choices=["top", "bottom"],
+        "--position",
+        choices=["top", "bottom"],
         help="place the card at the top or bottom of the column (todos default to the bottom; "
         "a Linear issue keeps Linear's order unless you ask)",
     )
@@ -146,8 +147,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("mockup", "generate UI mockup drafts with Codex and show them; attach the approved one")
     sub.add_argument("ref")
     sub.add_argument("prompt", nargs="+", help=f"one prompt per option, {mockup.MAX_OPTIONS} at most")
-    sub.add_argument("--image", action="append", type=Path, default=[], metavar="FILE",
-                     help="an image to revise or follow, for every option")
+    sub.add_argument(
+        "--image",
+        action="append",
+        type=Path,
+        default=[],
+        metavar="FILE",
+        help="an image to revise or follow, for every option",
+    )
     sub.add_argument("--quality", choices=mockup.QUALITIES, default="medium")
     sub.add_argument("--no-show", action="store_true", help="only generate the drafts")
 
@@ -160,8 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("details", "show a card's compact status: the view of the details pane")
     sub.add_argument("ref", nargs="?")
-    sub.add_argument("--open", action="store_true",
-                     help="open the details pane in Herdr; without a card, for the card of the pane's workspace")
+    sub.add_argument(
+        "--open",
+        action="store_true",
+        help="open the details pane in Herdr; without a card, for the card of the pane's workspace",
+    )
     sub.add_argument("--pane", help="with --open: the Herdr pane to start from; default: this pane")
 
     sub = command("delete", "remove a todo and its indented lines")
@@ -190,23 +200,40 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--model", help="the agent's model, such as openai-codex/gpt-6.1-sol or opus")
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the agent's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
-    sub.add_argument("--no-repo", action="store_true",
-                     help="run the card in its own folder, without a repository; write the result as attachments")
-    sub.add_argument("--new-repo", nargs="?", const=True, default=None, metavar="PATH",
-                     help="create a local repository at PATH (default: projects_dir/<title>) and start the card there")
+    sub.add_argument(
+        "--no-repo",
+        action="store_true",
+        help="run the card in its own folder, without a repository; write the result as attachments",
+    )
+    sub.add_argument(
+        "--new-repo",
+        nargs="?",
+        const=True,
+        default=None,
+        metavar="PATH",
+        help="create a local repository at PATH (default: projects_dir/<title>) and start the card there",
+    )
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
-    sub = command("plan", "plan a card with an agent in a tab in the card's worktree; the plan becomes the card's plan.md attachment")
+    sub = command(
+        "plan",
+        "plan a card with an agent in a tab in the card's worktree; the plan becomes the card's plan.md attachment",
+    )
     sub.add_argument("ref")
     sub.add_argument("--agent", choices=AGENTS)
     sub.add_argument("--model", help="the planner's model, such as opus or zai/glm-5.3")
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the agent's thinking level")
     sub.add_argument("--repo", help="repository board name or checkout path")
-    sub.add_argument("--no-repo", action="store_true",
-                     help="plan the card in its own folder, without a repository")
-    sub.add_argument("--new-repo", nargs="?", const=True, default=None, metavar="PATH",
-                     help="plan the card in its own folder; `start` later creates the repository at PATH")
+    sub.add_argument("--no-repo", action="store_true", help="plan the card in its own folder, without a repository")
+    sub.add_argument(
+        "--new-repo",
+        nargs="?",
+        const=True,
+        default=None,
+        metavar="PATH",
+        help="plan the card in its own folder; `start` later creates the repository at PATH",
+    )
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
 
@@ -214,22 +241,37 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     sub.add_argument("--pane", required=True, help="the planner's pane")
 
-    sub = command("sidebar-refresh", "report the Herdr sidebar tokens of the started cards again "
-                  "(run at Herdr startup)")
+    sub = command(
+        "sidebar-refresh", "report the Herdr sidebar tokens of the started cards again (run at Herdr startup)"
+    )
     # Linear cards come from the cache, so a startup without a connection does not wait for Linear.
     sub.set_defaults(offline=True)
 
     sub = command("review", "review a started card's work: in Hunk next to its agent, by another agent, or both")
     sub.add_argument("ref")
     kind = sub.add_mutually_exclusive_group()
-    kind.add_argument("--human", dest="kind", action="store_const", const="human",
-                      help="open the work in Hunk next to the card's agent (the default)")
-    kind.add_argument("--agent", dest="kind", action="store_const", const="agent",
-                      help="have another agent review the work; the card's agent gets the findings")
-    kind.add_argument("--both", dest="kind", action="store_const", const="both",
-                      help="an agent review first, then Hunk")
-    sub.add_argument("--reviewer", choices=AGENTS,
-                     help="the reviewing agent; default rotation: claude to pi, pi to codex, codex to claude")
+    kind.add_argument(
+        "--human",
+        dest="kind",
+        action="store_const",
+        const="human",
+        help="open the work in Hunk next to the card's agent (the default)",
+    )
+    kind.add_argument(
+        "--agent",
+        dest="kind",
+        action="store_const",
+        const="agent",
+        help="have another agent review the work; the card's agent gets the findings",
+    )
+    kind.add_argument(
+        "--both", dest="kind", action="store_const", const="both", help="an agent review first, then Hunk"
+    )
+    sub.add_argument(
+        "--reviewer",
+        choices=AGENTS,
+        help="the reviewing agent; default rotation: claude to pi, pi to codex, codex to claude",
+    )
     sub.add_argument("--model", help="the reviewer's model, such as sonnet or zai/glm-5.3")
     sub.add_argument("--thinking", choices=THINKING_LEVELS, help="the reviewer's thinking level")
 
@@ -240,28 +282,45 @@ def build_parser() -> argparse.ArgumentParser:
     sub = command("merge", "merge a started card's branch into its base, then finish the card")
     sub.add_argument("ref")
     mode = sub.add_mutually_exclusive_group()
-    mode.add_argument("--local", dest="mode", action="store_const", const="local",
-                      help="rebase onto the base and fast-forward it")
-    mode.add_argument("--pr", dest="mode", action="store_const", const="pr",
-                      help="have an agent write the description, then open a draft GitHub pull request")
-    sub.add_argument("--rewrite", action="store_true",
-                     help="have an agent rewrite the description of the open pull request, not only push")
+    mode.add_argument(
+        "--local", dest="mode", action="store_const", const="local", help="rebase onto the base and fast-forward it"
+    )
+    mode.add_argument(
+        "--pr",
+        dest="mode",
+        action="store_const",
+        const="pr",
+        help="have an agent write the description, then open a draft GitHub pull request",
+    )
+    sub.add_argument(
+        "--rewrite",
+        action="store_true",
+        help="have an agent rewrite the description of the open pull request, not only push",
+    )
     sub.add_argument("--force", action="store_true", help="merge a parent card whose sub-cards are not done")
 
     sub = command("pr-wait", "wait for a pull request description and open the PR (run by merge --pr)")
     sub.add_argument("ref")
     sub.add_argument("--folder", type=Path, required=True)
 
-    sub = command("pr-sync", "send the card's pr.md to its open pull request: push the branch, then replace "
-                              "the title and description")
+    sub = command(
+        "pr-sync",
+        "send the card's pr.md to its open pull request: push the branch, then replace the title and description",
+    )
     sub.add_argument("ref")
-    sub.add_argument("--fetch", action="store_true",
-                     help="write the pull request's GitHub title and description to a new pr.md, and change nothing")
+    sub.add_argument(
+        "--fetch",
+        action="store_true",
+        help="write the pull request's GitHub title and description to a new pr.md, and change nothing",
+    )
 
     sub = command("finish", "remove a merged card's worktree and branch, and move the card to Done")
     sub.add_argument("ref")
-    sub.add_argument("--force", action="store_true",
-                     help="finish an unmerged card; its branch is kept, and uncommitted work still stops it")
+    sub.add_argument(
+        "--force",
+        action="store_true",
+        help="finish an unmerged card; its branch is kept, and uncommitted work still stops it",
+    )
 
     sub = command("prs", "list the open GitHub pull requests of this repository, with review markers")
     sub.add_argument("--search", default="", help="GitHub search words and qualifiers, such as author:octo")
@@ -284,8 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = command("pr-review-finish", "close a pull request review: its workspace, worktree and branch")
     sub.add_argument("number", type=int)
-    sub.add_argument("--force", action="store_true",
-                     help="also with notes of yours that are not submitted, or changes in the worktree")
+    sub.add_argument(
+        "--force",
+        action="store_true",
+        help="also with notes of yours that are not submitted, or changes in the worktree",
+    )
 
     sub = command("automation", "manage automations: a schedule that spawns a card and starts an agent on it")
     actions = sub.add_subparsers(dest="action", required=True, parser_class=_Parser)
@@ -301,20 +363,39 @@ def build_parser() -> argparse.ArgumentParser:
         found.add_argument("--body", help="the spawned card's details, one per line")
         found.add_argument("--body-file", type=Path, help="read the details from a file")
         found.add_argument("--type", help=f"the card's type, such as chore (the `types` setting){clear}")
-        found.add_argument("--tag", action="append", default=None,
-                           help="a tag of the card; repeat for more" + ("" if adding else "; replaces the tags"))
-        found.add_argument("--board", help="the board of the spawned cards: inbox or a project name"
-                           + (" (default: inbox)" if adding else ""))
-        found.add_argument("--schedule", required=adding,
-                           help="such as `every weekday at 07:30`, `every week on monday`, `every month on the 1st`")
+        found.add_argument(
+            "--tag",
+            action="append",
+            default=None,
+            help="a tag of the card; repeat for more" + ("" if adding else "; replaces the tags"),
+        )
+        found.add_argument(
+            "--board",
+            help="the board of the spawned cards: inbox or a project name" + (" (default: inbox)" if adding else ""),
+        )
+        found.add_argument(
+            "--schedule",
+            required=adding,
+            help="such as `every weekday at 07:30`, `every week on monday`, `every month on the 1st`",
+        )
         found.add_argument("--agent", help=f"claude, pi or codex; default: start_agent{clear}")
         found.add_argument("--model", help=f"the agent's model; default: start_model{clear}")
         found.add_argument("--thinking", help=f"the agent's thinking level; default: start_thinking{clear}")
         merge = found.add_mutually_exclusive_group()
-        merge.add_argument("--may-merge-prs", dest="may_merge_prs", action="store_const", const=True,
-                           help="let the agent merge pull requests whose checks pass and that need no change")
-        merge.add_argument("--no-merge-prs", dest="may_merge_prs", action="store_const", const=False,
-                           help="the agent merges no pull request (the default)")
+        merge.add_argument(
+            "--may-merge-prs",
+            dest="may_merge_prs",
+            action="store_const",
+            const=True,
+            help="let the agent merge pull requests whose checks pass and that need no change",
+        )
+        merge.add_argument(
+            "--no-merge-prs",
+            dest="may_merge_prs",
+            action="store_const",
+            const=False,
+            help="the agent merges no pull request (the default)",
+        )
 
     action("list", "list the automations with their next and last runs")
     automation_fields(action("add", "add an automation"), adding=True)
@@ -324,9 +405,11 @@ def build_parser() -> argparse.ArgumentParser:
     found = action("remove", "remove an automation; its spawned cards stay")
     found.add_argument("id")
     found.add_argument("--yes", action="store_true", help="remove without asking")
-    for name, help in (("pause", "stop the scheduled runs of an automation"),
-                       ("resume", "run an automation again from its next due time"),
-                       ("run", "spawn and start one card now, outside the schedule")):
+    for name, help in (
+        ("pause", "stop the scheduled runs of an automation"),
+        ("resume", "run an automation again from its next due time"),
+        ("run", "spawn and start one card now, outside the schedule"),
+    ):
         action(name, help).add_argument("id")
     found = action("plan", "plan an automation with an agent; the plan goes into each spawned card's brief")
     found.add_argument("id")
@@ -375,7 +458,14 @@ def _card_dict(card: CardView) -> dict:
     # The list order already carries the sort order, and JSON consumers keep their schema.
     del data["sort_order"]
     # Board-only status; preserve the CLI card schema.
-    del data["worktree_removed"], data["worktree_left"], data["pr_state"], data["parent_title"], data["sub_cards"], data["agent_review"]
+    del (
+        data["worktree_removed"],
+        data["worktree_left"],
+        data["pr_state"],
+        data["parent_title"],
+        data["sub_cards"],
+        data["agent_review"],
+    )
     del data["pr_writing"], data["planning"], data["has_attachments"], data["issue_id"], data["worktree"], data["agent"]
     del data["planned"], data["reviewed"], data["agent_status"], data["planning_status"], data["review_status"]
     del data["pr_write_status"], data["repoless"], data["linear_attachments"], data["pr_url"]
@@ -459,8 +549,9 @@ def _attachments_text(files: list[dict]) -> list[str]:
     return ["--- attachments ---", *(entry["path"] for entry in files)] if files else []
 
 
-def _show_text(card: CardView, notes: list[dict] | None = None, log: list[dict] | None = None,
-               files: list[dict] | None = None) -> str:
+def _show_text(
+    card: CardView, notes: list[dict] | None = None, log: list[dict] | None = None, files: list[dict] | None = None
+) -> str:
     if card.source == "linear":
         return "\n".join([_show_linear_text(card), *_attachments_text(files or []), *_log_text(log or [])])
     lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
@@ -619,10 +710,15 @@ def _cmd_add(ctx: _Context) -> dict:
         if LINEAR_REF.match(args.parent):
             raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")
         parent = store.show(args.parent)
-        path = store.ensure_inbox() if args.board == "inbox" else (
-            store.resolve_board(args.board) if args.board else parent.path)
-        return {"card": store.add(path, args.text, args.column, args.position,
-                                  body=lines, parent=parent.ref), "hint": None}
+        path = (
+            store.ensure_inbox()
+            if args.board == "inbox"
+            else (store.resolve_board(args.board) if args.board else parent.path)
+        )
+        return {
+            "card": store.add(path, args.text, args.column, args.position, body=lines, parent=parent.ref),
+            "hint": None,
+        }
     if args.board == "inbox":
         path = store.ensure_inbox()
     elif args.board:
@@ -671,11 +767,19 @@ def _cmd_show(ctx: _Context) -> dict:
     if LINEAR_REF.match(ref):
         ctx.views.source.require_active()
         card, result = _find_linear_card(ctx, ref)
-        return {"card": card, "linear": result, "log": _card_log(ctx, card),
-                "attachments": _card_attachments(ctx, card)}
+        return {
+            "card": card,
+            "linear": result,
+            "log": _card_log(ctx, card),
+            "attachments": _card_attachments(ctx, card),
+        }
     card = ctx.store.show(ref, archived=True)
-    return {"card": card, "notes": ctx.store.notes_for(card), "log": _card_log(ctx, card),
-            "attachments": _card_attachments(ctx, card)}
+    return {
+        "card": card,
+        "notes": ctx.store.notes_for(card),
+        "log": _card_log(ctx, card),
+        "attachments": _card_attachments(ctx, card),
+    }
 
 
 def _cmd_log(ctx: _Context) -> dict:
@@ -713,13 +817,26 @@ def _cmd_mockup(ctx: _Context) -> dict:
     ref = args.ref.upper() if LINEAR_REF.match(args.ref) else ctx.store.ensure_id(args.ref).ref
     images = [image if image.is_absolute() else ctx.directory / image for image in args.image]
     drafts, errors = mockup.generate_all(ctx.config, ref, args.prompt, images, args.quality)
-    made = [{"option": number, "prompt": prompt, "path": str(draft)}
-            for number, (prompt, draft) in enumerate(zip(args.prompt, drafts, strict=False), 1) if draft is not None]
-    failed = [{"option": number, "prompt": prompt, "error": error}
-              for number, (prompt, error) in enumerate(zip(args.prompt, errors, strict=False), 1) if error is not None]
-    shown = None if args.no_show else mockup.show([entry["path"] for entry in made], config_path(args.config),
-                                                  numbers=[entry["option"] for entry in made],
-                                                  total=len(args.prompt))
+    made = [
+        {"option": number, "prompt": prompt, "path": str(draft)}
+        for number, (prompt, draft) in enumerate(zip(args.prompt, drafts, strict=False), 1)
+        if draft is not None
+    ]
+    failed = [
+        {"option": number, "prompt": prompt, "error": error}
+        for number, (prompt, error) in enumerate(zip(args.prompt, errors, strict=False), 1)
+        if error is not None
+    ]
+    shown = (
+        None
+        if args.no_show
+        else mockup.show(
+            [entry["path"] for entry in made],
+            config_path(args.config),
+            numbers=[entry["option"] for entry in made],
+            total=len(args.prompt),
+        )
+    )
     for entry in made:
         activity.append(ctx.store, ref, f"Mockup draft {entry['option']}: {entry['path']}", activity.author())
     return {"ref": ref, "drafts": made, "failed": failed, "shown": shown}
@@ -735,6 +852,7 @@ def _cmd_details(ctx: _Context) -> dict:
     ref = args.ref
     if args.open:
         from . import details, start
+
         ref, host = details.open_target(ref, args.pane or os.environ.get("HERDR_PANE_ID"))
         pane = start.open_details_pane(ref, host, ctx.config, config_path(args.config))
         return {"ref": ref, "host_pane_id": host, "pane_id": pane}
@@ -748,10 +866,12 @@ def _cmd_details(ctx: _Context) -> dict:
         raise HerdboardError(f"The details pane needs Textual: {error}") from error
     linear_card = None
     if LINEAR_REF.match(ref) and ctx.views.source.active:
+
         def linear_card(found: str) -> CardView:
             # Each lookup asks Linear again, also after an earlier network failure.
             ctx.views.source.begin_refresh()
             return _find_linear_card(ctx, found)[0]
+
     DetailsApp(ctx.store, ctx.config, ref.upper() if LINEAR_REF.match(ref) else ref, linear_card).run()
     return {"exit_code": 0}
 
@@ -811,8 +931,14 @@ def _cmd_edit(ctx: _Context) -> dict:
     if args.body_file is not None:
         path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file
         body = _read_todo_file(path)
-    if (args.title is None and body is None and args.parent is None and not args.no_parent
-            and args.type is None and not args.no_type):
+    if (
+        args.title is None
+        and body is None
+        and args.parent is None
+        and not args.no_parent
+        and args.type is None
+        and not args.no_type
+    ):
         raise UsageError(
             "Nothing to change: give --title, --body, --body-file, --parent, --no-parent, --type or --no-type"
         )
@@ -890,8 +1016,7 @@ def _cmd_archive(ctx: _Context) -> dict:
             path = ctx.repo_board()
             if path is None and ctx.identity is not None:
                 # A bulk archive of the inbox needs a clear request.
-                raise UsageError(f"{INIT_MESSAGE} "
-                                 "Use --board inbox to archive the inbox's done column.")
+                raise UsageError(f"{INIT_MESSAGE} Use --board inbox to archive the inbox's done column.")
             path = path or store.ensure_inbox()
         archived, skipped = store.archive_done(path, blocked=start_module.archive_blocker)
         for card in archived:
@@ -937,8 +1062,7 @@ def _prompt_target(store):
 
     def ask(card):
         try:
-            boards = sorted((path for path in store.board_paths() if store.board_meta(path).repo),
-                            key=store.board_name)
+            boards = sorted((path for path in store.board_paths() if store.board_meta(path).repo), key=store.board_name)
         except HerdboardError:
             boards = []
         print(f"Where does {card.ref} run?", file=sys.stderr)
@@ -976,27 +1100,50 @@ def _cmd_start(ctx: _Context) -> dict:
     args = ctx.args
     interactive = not args.json and _interactive()
     starter = Starter(
-        ctx.store, ctx.directory,
+        ctx.store,
+        ctx.directory,
         writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
         ask_state=ctx.ask(),
         prompt_checkout=_prompt_checkout if interactive else None,
         prompt_target=_prompt_target(ctx.store) if interactive else None,
         config_file=config_path(args.config),
     )
-    return starter.start(args.ref, agent=args.agent, no_agent=args.no_agent,
-                         repo=args.repo, checkout=args.checkout, model=args.model, thinking=args.thinking,
-                         base=args.base, no_repo=args.no_repo, new_repo=args.new_repo)
+    return starter.start(
+        args.ref,
+        agent=args.agent,
+        no_agent=args.no_agent,
+        repo=args.repo,
+        checkout=args.checkout,
+        model=args.model,
+        thinking=args.thinking,
+        base=args.base,
+        no_repo=args.no_repo,
+        new_repo=args.new_repo,
+    )
 
 
 def _cmd_plan(ctx: _Context) -> dict:
     args = ctx.args
     interactive = not args.json and _interactive()
-    planner = Planner(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
-                      prompt_checkout=_prompt_checkout if interactive else None,
-                      prompt_target=_prompt_target(ctx.store) if interactive else None,
-                      config_file=config_path(args.config))
-    return planner.plan(args.ref, agent=args.agent, model=args.model, thinking=args.thinking, repo=args.repo,
-                        checkout=args.checkout, base=args.base, no_repo=args.no_repo, new_repo=args.new_repo)
+    planner = Planner(
+        ctx.store,
+        ctx.directory,
+        writer=ctx.writer if LINEAR_REF.match(args.ref) else None,
+        prompt_checkout=_prompt_checkout if interactive else None,
+        prompt_target=_prompt_target(ctx.store) if interactive else None,
+        config_file=config_path(args.config),
+    )
+    return planner.plan(
+        args.ref,
+        agent=args.agent,
+        model=args.model,
+        thinking=args.thinking,
+        repo=args.repo,
+        checkout=args.checkout,
+        base=args.base,
+        no_repo=args.no_repo,
+        new_repo=args.new_repo,
+    )
 
 
 def _cmd_plan_wait(ctx: _Context) -> dict:
@@ -1028,21 +1175,35 @@ def _cmd_review(ctx: _Context) -> dict:
             raise UsageError("--reviewer, --model and --thinking need --agent or --both")
         return Reviewer(ctx.store, ctx.directory, writer=writer, config_file=config_path(args.config)).review(ref)
     reviewer = AgentReviewer(ctx.store, ctx.directory, writer=writer, config_file=config_path(args.config))
-    return {"kind": kind, **reviewer.request(ref, reviewer=args.reviewer, model=args.model,
-                                             thinking=args.thinking, then_hunk=kind == "both")}
+    return {
+        "kind": kind,
+        **reviewer.request(
+            ref, reviewer=args.reviewer, model=args.model, thinking=args.thinking, then_hunk=kind == "both"
+        ),
+    }
 
 
 def _cmd_review_wait(ctx: _Context) -> dict:
     ref = ctx.args.ref
-    code = agent_review.wait(ctx.store, ref, ctx.args.folder, writer=ctx.writer if LINEAR_REF.match(ref) else None,
-                             config_file=config_path(ctx.args.config))
+    code = agent_review.wait(
+        ctx.store,
+        ref,
+        ctx.args.folder,
+        writer=ctx.writer if LINEAR_REF.match(ref) else None,
+        config_file=config_path(ctx.args.config),
+    )
     return {"ref": ref, "exit_code": code}
 
 
 def _merger(ctx: _Context) -> Merger:
     ref = ctx.args.ref
-    return Merger(ctx.store, ctx.directory, writer=ctx.writer if LINEAR_REF.match(ref) else None,
-                  ask_state=ctx.ask(), config_file=config_path(ctx.args.config))
+    return Merger(
+        ctx.store,
+        ctx.directory,
+        writer=ctx.writer if LINEAR_REF.match(ref) else None,
+        ask_state=ctx.ask(),
+        config_file=config_path(ctx.args.config),
+    )
 
 
 def _cmd_merge(ctx: _Context) -> dict:
@@ -1100,17 +1261,32 @@ def _cmd_prs(ctx: _Context) -> dict:
                 raise UsageError(f"There {'is only 1 page' if pages == 1 else f'are only {pages} pages'}")
             after = page.next_cursor
     pr_reviews.annotate(page.prs, repo, pr_reviews.records())
-    return {"repo": repo, "search": args.search, "page": args.page, "pages": pages, "total": page.total,
-            "prs": [pr.to_dict() for pr in page.prs], "marks": [pr.marks() for pr in page.prs]}
+    return {
+        "repo": repo,
+        "search": args.search,
+        "page": args.page,
+        "pages": pages,
+        "total": page.total,
+        "prs": [pr.to_dict() for pr in page.prs],
+        "marks": [pr.marks() for pr in page.prs],
+    }
 
 
 def _cmd_pr_review(ctx: _Context) -> dict:
     args, config = ctx.args, ctx.config
     kind = args.agent or config.start_agent
     model = args.model or (config.start_model if kind == config.start_agent else None)
-    thinking = args.thinking if args.thinking is not None else (
-        start_module.thinking_level(config, model) if kind == "pi" else
-        config.start_thinking if config.start_thinking in thinking_levels(kind) else None)
+    thinking = (
+        args.thinking
+        if args.thinking is not None
+        else (
+            start_module.thinking_level(config, model)
+            if kind == "pi"
+            else config.start_thinking
+            if config.start_thinking in thinking_levels(kind)
+            else None
+        )
+    )
     checkout, repo = _pr_target(ctx)
     return pr_reviews.request(checkout, repo, args.number, kind, model, thinking)
 
@@ -1137,8 +1313,10 @@ def _pr_text(command: str, result: dict) -> str:
             if result["search"]:
                 return f"No open pull requests in {result['repo']} match {result['search']!r}."
             return f"No open pull requests in {result['repo']}."
-        lines = [f"#{pr['number']}\t{pr['title']}\t{pr['author']}\t{', '.join(marks)}".rstrip()
-                 for pr, marks in zip(result["prs"], result["marks"], strict=True)]
+        lines = [
+            f"#{pr['number']}\t{pr['title']}\t{pr['author']}\t{', '.join(marks)}".rstrip()
+            for pr, marks in zip(result["prs"], result["marks"], strict=True)
+        ]
         if result["pages"] > 1:
             page = f"Page {result['page']} of {result['pages']} ({result['total']} open)."
             if result["page"] < result["pages"]:
@@ -1149,8 +1327,10 @@ def _pr_text(command: str, result: dict) -> str:
     if command == "pr-review":
         model = f" ({result['model']})" if result["model"] else ""
         verb = "has the new request" if result.get("prompted") else "reviews"
-        return (f"PR #{number}: {result['agent']}{model} {verb} in workspace {result['workspace_id']}; "
-                f"Hunk in {result['hunk_pane']}.")
+        return (
+            f"PR #{number}: {result['agent']}{model} {verb} in workspace {result['workspace_id']}; "
+            f"Hunk in {result['hunk_pane']}."
+        )
     if command == "pr-review-refresh":
         lines = [f"PR #{number}: Hunk opened again in {result['hunk_pane']}; {result['kept']} notes kept."]
         lines += [f"Note on no diff line any more: {note}" for note in result["dropped"]]
@@ -1174,6 +1354,7 @@ def _ensure_repo_board(ctx: _Context) -> None:
     merge, links = None, []
     interactive = ctx.args.command in ("board", "list", "add") and not ctx.args.json and _interactive()
     if interactive:
+
         def ask(prompt: str) -> str:
             print(prompt, end="", file=sys.stderr, flush=True)
             return input().strip()
@@ -1194,8 +1375,9 @@ def _ensure_repo_board(ctx: _Context) -> None:
                         break
                     labels = ask("Labels for this project (comma-separated; optional): ")
                     try:
-                        links = [_project_link(ctx, project, [label.strip() for label in labels.split(",")
-                                                              if label.strip()])]
+                        links = [
+                            _project_link(ctx, project, [label.strip() for label in labels.split(",") if label.strip()])
+                        ]
                     except HerdboardError as error:
                         print(f"{error}. Retry the project, or press Enter to skip linking.", file=sys.stderr)
                         continue
@@ -1204,11 +1386,14 @@ def _ensure_repo_board(ctx: _Context) -> None:
             raise HerdboardError("Board setup cancelled. Run the command again to retry.") from error
 
     def keep_existing(path: Path) -> None:
-        print(f"Repository board already exists: {path}. Existing settings kept; setup answers were not applied.",
-              file=sys.stderr)
+        print(
+            f"Repository board already exists: {path}. Existing settings kept; setup answers were not applied.",
+            file=sys.stderr,
+        )
 
-    ctx.store.init_board(ctx.identity, merge=merge, links=links, exist_ok=True,
-                         on_existing=keep_existing if interactive else None)
+    ctx.store.init_board(
+        ctx.identity, merge=merge, links=links, exist_ok=True, on_existing=keep_existing if interactive else None
+    )
 
 
 def _read_todo_file(path: Path) -> str:
@@ -1242,14 +1427,18 @@ def _cmd_migrate(ctx: _Context) -> dict:
     if not args.json:
         print(preview_text(target, preview, len(items)))
     asked = not args.yes and not args.json and _interactive()
-    write = args.yes or (
-        asked and _confirm(f"Write {len(items)} cards to {target.path}? [y/N] ")
-    )
+    write = args.yes or (asked and _confirm(f"Write {len(items)} cards to {target.path}? [y/N] "))
     if write:
         keep_path = target.exists or target.identity is None
         store.import_cards(items, target.path if keep_path else None, target.identity)
-    return {"board": target.path, "preview": preview, "cards": len(items),
-            "written": bool(write), "file": path, "asked": asked}
+    return {
+        "board": target.path,
+        "preview": preview,
+        "cards": len(items),
+        "written": bool(write),
+        "file": path,
+        "asked": asked,
+    }
 
 
 def _describe(label: dict) -> str:
@@ -1263,8 +1452,7 @@ def _resolve_project(client, name: str) -> dict:
         raise HerdboardError(f"No Linear project named {name!r}")
     if len(found) > 1:
         options = "; ".join(
-            f"{p['name']} [{', '.join(t['key'] for t in p['teams']) or 'no team'}] ({p['id']})"
-            for p in found
+            f"{p['name']} [{', '.join(t['key'] for t in p['teams']) or 'no team'}] ({p['id']})" for p in found
         )
         raise HerdboardError(f"{len(found)} Linear projects are named {name!r}: {options}")
     return found[0]
@@ -1285,9 +1473,7 @@ def _resolve_label(client, spec: str) -> LabelLink:
         raise HerdboardError(f"No Linear label named {spec!r}")
     if len(matches) > 1:
         options = ", ".join(_describe(label) for label in matches)
-        raise HerdboardError(
-            f"{len(matches)} labels are named {spec!r}: {options}. Use TEAM/label to pick one"
-        )
+        raise HerdboardError(f"{len(matches)} labels are named {spec!r}: {options}. Use TEAM/label to pick one")
     return LabelLink(matches[0]["id"], matches[0]["name"])
 
 
@@ -1295,15 +1481,10 @@ def _linked_project(client, link: ProjectLink) -> dict:
     project = client.project_for_write(link.id)
     if project is not None:
         return project
-    raise HerdboardError(
-        f"Linear project {link.name!r}, linked to this repository, was not found "
-        "or is not accessible"
-    )
+    raise HerdboardError(f"Linear project {link.name!r}, linked to this repository, was not found or is not accessible")
 
 
-def _linear_target(
-    client, project_name: str | None, label_specs: list[str], default: ProjectLink | None
-):
+def _linear_target(client, project_name: str | None, label_specs: list[str], default: ProjectLink | None):
     """The project and label IDs of a new issue: the options, else the `default` link."""
     project = _resolve_project(client, project_name) if project_name else None
     label_ids = [_resolve_label(client, spec).id for spec in label_specs]
@@ -1323,8 +1504,14 @@ def _cmd_add_linear(ctx: _Context, body: str | None = None) -> dict:
     with writer.online() as client:
         project, label_ids = _linear_target(client, args.project, args.label, ctx.default_link())
     issue = writer.create(
-        args.text, team=args.team, project=project, label_ids=label_ids,
-        column=args.column, ask=ctx.ask(), state_name=args.state, type_label=kind,
+        args.text,
+        team=args.team,
+        project=project,
+        label_ids=label_ids,
+        column=args.column,
+        ask=ctx.ask(),
+        state_name=args.state,
+        type_label=kind,
         description=body,
     )
     return {"card": ctx.linear_card(issue), "hint": None}
@@ -1336,9 +1523,7 @@ def _cmd_promote(ctx: _Context) -> dict:
     promotion = promoter.promote(
         args.ref,
         team=args.team,
-        target=lambda client, view: _linear_target(
-            client, args.project, [], ctx.todo_link(view)
-        ),
+        target=lambda client, view: _linear_target(client, args.project, [], ctx.todo_link(view)),
         ask=ctx.ask(),
         state_name=args.state,
         project=args.project,
@@ -1453,7 +1638,8 @@ def _cmd_board(ctx: _Context) -> dict:
         config_file=config_path(ctx.args.config),
         # The project lookup reads Linear, so an offline board gets none.
         resolve_link=(lambda name, labels: _project_link(ctx, name, labels))
-        if views.source.active and not views.source.offline else None,
+        if views.source.active and not views.source.offline
+        else None,
         search_issues=views.source.search if views.source.active and not views.source.offline else None,
         open_prs=ctx.args.prs,
         agent_logos=agent_font_installed(),
@@ -1514,7 +1700,8 @@ def _cmd_automation(ctx: _Context) -> dict:
         from .automation_plan import AutomationPlanner
 
         return AutomationPlanner(store, config_file=config_path(args.config)).plan(
-            args.id, agent=args.agent, model=args.model, thinking=args.thinking)
+            args.id, agent=args.agent, model=args.model, thinking=args.thinking
+        )
     if name == "plan-wait":
         from .automation_plan import wait
 
@@ -1555,8 +1742,10 @@ def _automation_text(action: str, result: dict) -> str:
             last = entry["last_card"] or "-"
             if entry["last_result"]:
                 last += f" {entry['last_result']}"
-            lines.append(f"{entry['id']}  {state}  {entry['title']}  ({entry['schedule']}; board {entry['board']})  "
-                         f"next: {_short_time(entry['next_due'])}  last: {_short_time(entry['last_run'])} {last}")
+            lines.append(
+                f"{entry['id']}  {state}  {entry['title']}  ({entry['schedule']}; board {entry['board']})  "
+                f"next: {_short_time(entry['next_due'])}  last: {_short_time(entry['last_run'])} {last}"
+            )
         return "\n".join(lines) if lines else "No automations. Add one with `herdboard automation add`."
     if action == "remove":
         removed = result["removed"]
@@ -1576,12 +1765,18 @@ def _automation_text(action: str, result: dict) -> str:
             return f"{result['id']}: removed {result['removed']['name']}"
         return f"{result['id']}: attached {result['attachment']['name']}"
     if action == "timer":
-        return (f"{result['backend']}: {result['state']}"
-                + ("" if result["installed"] else " (not installed)") + "\n" + "\n".join(result["files"]))
+        return (
+            f"{result['backend']}: {result['state']}"
+            + ("" if result["installed"] else " (not installed)")
+            + "\n"
+            + "\n".join(result["files"])
+        )
     if action == "plan":
         model = f" ({result['model']})" if result["model"] else ""
-        return (f"{result['id']}: {result['agent']}{model} plans in pane {result['pane_id']}, "
-                f"in {result['worktree_path']}.\nThe plan: {result['plan']}")
+        return (
+            f"{result['id']}: {result['agent']}{model} plans in pane {result['pane_id']}, "
+            f"in {result['worktree_path']}.\nThe plan: {result['plan']}"
+        )
     return _automation_line(result["automation"])
 
 
@@ -1640,8 +1835,7 @@ def _board_dict(board) -> dict:
         "name": board.name,
         "path": str(board.path),
         "columns": [
-            {"title": column.title, "limit": column.limit, "done": column.completed}
-            for column in board.columns
+            {"title": column.title, "limit": column.limit, "done": column.completed} for column in board.columns
         ],
     }
 
@@ -1671,15 +1865,19 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             _emit_json(result)
         elif result.get("mode") == "repoless":
             print(f"{result['ref']}: no repository, in {result['worktree_path']}")
-            print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
-                  f"agent: {result['agent_name'] or 'none'}")
+            print(
+                f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
+                f"agent: {result['agent_name'] or 'none'}"
+            )
             print("Steps done: " + ", ".join(result["steps_done"]))
         else:
             print(f"{result['ref']}: {result['branch']} in {result['worktree_path']}")
             if result.get("base"):
                 print(f"Base: {result['base']}")
-            print(f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
-                  f"agent: {result['agent_name'] or 'none'}")
+            print(
+                f"Workspace: {result['workspace_id']}; pane: {result['pane_id']}; "
+                f"agent: {result['agent_name'] or 'none'}"
+            )
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
     if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
@@ -1715,8 +1913,7 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         elif result["action"] == "updated":
             print(f"{result['ref']}: updated {result['pr_url']}")
         else:
-            print(f"{result['ref']}: wrote {result['path']}. "
-                  f"Edit it, then run herdboard pr-sync {result['ref']}.")
+            print(f"{result['ref']}: wrote {result['path']}. Edit it, then run herdboard pr-sync {result['ref']}.")
         return
     if command in ("prs", "pr-review", "pr-review-refresh", "pr-review-go", "pr-review-finish"):
         if as_json:
@@ -1729,8 +1926,10 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             _emit_json(result)
         else:
             model = f" ({result['model']})" if result["model"] else ""
-            print(f"{result['ref']}: {result['agent']}{model} plans in pane {result['pane_id']}, "
-                  f"in {result['worktree_path']}.")
+            print(
+                f"{result['ref']}: {result['agent']}{model} plans in pane {result['pane_id']}, "
+                f"in {result['worktree_path']}."
+            )
             print(f"The plan: {result['plan']}")
         return
     if command == "review" and "reviewer" in result:
@@ -1738,10 +1937,14 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             _emit_json(result)
         else:
             model = f" ({result['model']})" if result["model"] else ""
-            print(f"{result['ref']}: agent review by {result['reviewer']}{model} "
-                  f"in pane {result['pane_id']}. Files: {result['folder']}")
-            print("The card's agent gets the findings when they are ready."
-                  + (" Hunk opens when the findings are ready." if result["then_hunk"] else ""))
+            print(
+                f"{result['ref']}: agent review by {result['reviewer']}{model} "
+                f"in pane {result['pane_id']}. Files: {result['folder']}"
+            )
+            print(
+                "The card's agent gets the findings when they are ready."
+                + (" Hunk opens when the findings are ready." if result["then_hunk"] else "")
+            )
         return
     if command == "review":
         if as_json:
@@ -1760,12 +1963,16 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
                 print(f"{result['ref']}: pushed to the open pull request {result['pr_url']}")
                 print("Use --rewrite to rewrite its description.")
             elif result["pr_url"]:
-                print(f"{result['ref']}: {result['writer']} rewrites the description of {result['pr_url']}. "
-                      f"Files: {result['folder']}")
+                print(
+                    f"{result['ref']}: {result['writer']} rewrites the description of {result['pr_url']}. "
+                    f"Files: {result['folder']}"
+                )
                 print("The pull request changes when the description is ready.")
             else:
-                print(f"{result['ref']}: {result['writer']} writes the pull request description. "
-                      f"Files: {result['folder']}")
+                print(
+                    f"{result['ref']}: {result['writer']} writes the pull request description. "
+                    f"Files: {result['folder']}"
+                )
                 print("The draft pull request opens when the description is ready.")
             return
         if command == "merge":
@@ -1782,8 +1989,13 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         return
     if command == "archive" and "archived" in result:
         if as_json:
-            _emit_json({"board": result["board"], "archived": [_card_dict(card) for card in result["archived"]],
-                        "skipped": [{"ref": card.ref, "reason": reason} for card, reason in result["skipped"]]})
+            _emit_json(
+                {
+                    "board": result["board"],
+                    "archived": [_card_dict(card) for card in result["archived"]],
+                    "skipped": [{"ref": card.ref, "reason": reason} for card, reason in result["skipped"]],
+                }
+            )
         else:
             count = len(result["archived"])
             print(f"Archived {count} card{'' if count == 1 else 's'} from {result['board']}.")
@@ -1804,8 +2016,14 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         return
     if command == "migrate":
         if as_json:
-            _emit_json({"board": str(result["board"]), "preview": result["preview"],
-                        "cards": result["cards"], "written": result["written"]})
+            _emit_json(
+                {
+                    "board": str(result["board"]),
+                    "preview": result["preview"],
+                    "cards": result["cards"],
+                    "written": result["written"],
+                }
+            )
         elif result["written"]:
             print(f"Wrote {result['cards']} cards to {result['board']}")
             print(f"Original file left unchanged: {result['file']}")
@@ -1819,20 +2037,35 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             deleted = result["deleted"]
             _emit_json({"deleted": _card_dict(deleted) if deleted else None})
         elif command == "list":
-            _emit_json({"cards": [_card_dict(card) for card in result["cards"]],
-                        "boards": [_board_dict(board) for board in result["boards"]],
-                        **_linear_json(linear)})
+            _emit_json(
+                {
+                    "cards": [_card_dict(card) for card in result["cards"]],
+                    "boards": [_board_dict(board) for board in result["boards"]],
+                    **_linear_json(linear),
+                }
+            )
         elif command == "promote":
-            _emit_json({"card": _card_dict(result["card"]), "sub_issues": result["sub_issues"],
-                        "todo": _card_dict(result["todo"]), "warnings": result["warnings"]})
+            _emit_json(
+                {
+                    "card": _card_dict(result["card"]),
+                    "sub_issues": result["sub_issues"],
+                    "todo": _card_dict(result["todo"]),
+                    "warnings": result["warnings"],
+                }
+            )
         elif command == "init":
             _emit_json({"board": str(result["board"])})
         elif command == "link":
-            _emit_json({"board": str(result["board"]),
-                        "links": [link.to_yaml() for link in result["links"]]})
+            _emit_json({"board": str(result["board"]), "links": [link.to_yaml() for link in result["links"]]})
         elif command == "pin":
-            _emit_json({"board": str(result["board"]), "pin": result["pin"].to_yaml(),
-                        "change": result["change"], "pins": [pin.to_yaml() for pin in result["pins"]]})
+            _emit_json(
+                {
+                    "board": str(result["board"]),
+                    "pin": result["pin"].to_yaml(),
+                    "change": result["change"],
+                    "pins": [pin.to_yaml() for pin in result["pins"]],
+                }
+            )
         elif command == "search":
             _emit_json({"issues": result["issues"]})
         else:
@@ -1851,8 +2084,11 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         return
     if command == "delete":
         deleted = result["deleted"]
-        print(f"Deleted {deleted.ref}: {deleted.title} ({deleted.board} / {deleted.column})"
-              if deleted else "Nothing deleted.")
+        print(
+            f"Deleted {deleted.ref}: {deleted.title} ({deleted.board} / {deleted.column})"
+            if deleted
+            else "Nothing deleted."
+        )
     elif command == "list":
         print(_list_text(result["cards"]))
     elif command == "show":
@@ -1869,12 +2105,15 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         print(f"{result['board']}: linked projects: {names}")
     elif command == "pin":
         identifier, board = result["pin"].identifier, result["board"]
-        print({"added": f"{identifier} pinned to {board}",
-               "already_pinned": f"{identifier} is already pinned to {board}",
-               "removed": f"{identifier} unpinned from {board}"}[result["change"]])
+        print(
+            {
+                "added": f"{identifier} pinned to {board}",
+                "already_pinned": f"{identifier} is already pinned to {board}",
+                "removed": f"{identifier} unpinned from {board}",
+            }[result["change"]]
+        )
     elif command == "search":
-        lines = [f"{i['identifier']}\t{i['state']['name']}\t{i['team']['key']}\t{i['title']}"
-                 for i in result["issues"]]
+        lines = [f"{i['identifier']}\t{i['state']['name']}\t{i['team']['key']}\t{i['title']}" for i in result["issues"]]
         print("\n".join(lines) if lines else "No open issues match.")
     elif command == "edit":
         card = result["card"]
@@ -1895,6 +2134,7 @@ def main(argv: list[str] | None = None) -> int:
         as_json = args.json
         if args.command == "doctor":
             from .doctor import diagnose, render
+
             result = diagnose(args.config, repair_ids=args.fix_ids, offline=args.offline)
             if as_json:
                 _emit_json(result)

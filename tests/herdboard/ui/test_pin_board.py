@@ -107,7 +107,8 @@ class ImportIssueTests(PinBoardCase):
             self.assertIsInstance(app.screen, BoardChoiceScreen)
             self.assertEqual([path for _, path in app.screen.options], sorted([self.repo_path, other]))
             app.screen.query_one("#board-choice").highlighted = app.screen.options.index(
-                next(option for option in app.screen.options if option[1] == other))
+                next(option for option in app.screen.options if option[1] == other)
+            )
             await pilot.press("enter")
             await settle(pilot)
             await self.search(pilot, "issue 5")
@@ -170,8 +171,15 @@ class UnpinTests(PinBoardCase):
 
 
 class StartRepositoryTests(PinBoardCase):
-    STARTED = {"ref": "ENG-5", "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work",
-               "branch": "nate/eng-5", "agent_name": None, "steps_done": []}
+    STARTED = {
+        "ref": "ENG-5",
+        "workspace_id": "w1",
+        "pane_id": "w1:p1",
+        "worktree_path": "/tmp/work",
+        "branch": "nate/eng-5",
+        "agent_name": None,
+        "steps_done": [],
+    }
 
     def start_app(self, *errors):
         app = self.make_pin_app(view="mine")

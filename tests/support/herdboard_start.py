@@ -20,13 +20,18 @@ class FakeHerdr:
         operation = " ".join(args[:2])
         if self.fail == operation:
             self.fail = None
-            return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": "broken", "message": "test failure"}}))
+            return subprocess.CompletedProcess(
+                argv, 1, "", json.dumps({"error": {"code": "broken", "message": "test failure"}})
+            )
         result = {}
         if operation == "workspace list":
-            result = {"workspaces": [
-                {"workspace_id": w["open_workspace_id"], "worktree": {"checkout_path": w["path"]}}
-                for w in self.worktrees if isinstance(w.get("open_workspace_id"), str)
-                and w["open_workspace_id"] not in self.closed]}
+            result = {
+                "workspaces": [
+                    {"workspace_id": w["open_workspace_id"], "worktree": {"checkout_path": w["path"]}}
+                    for w in self.worktrees
+                    if isinstance(w.get("open_workspace_id"), str) and w["open_workspace_id"] not in self.closed
+                ]
+            }
         elif operation == "agent list":
             result = {"agents": [{"name": None, "pane_id": "w9:p1", "workspace_id": "w9"}] if self.agent else []}
         elif operation == "worktree list":
@@ -46,7 +51,11 @@ class FakeHerdr:
                 cwd = args[args.index("--cwd") + 1]
                 base = args[args.index("--base") + 1] if "--base" in args else "HEAD"
                 subprocess.run(["git", "-C", cwd, "branch", branch, base], capture_output=True)
-            result = {"workspace": {"workspace_id": workspace}, "root_pane": {"pane_id": workspace + ":p1"}, "worktree": {"path": str(path)}}
+            result = {
+                "workspace": {"workspace_id": workspace},
+                "root_pane": {"pane_id": workspace + ":p1"},
+                "worktree": {"path": str(path)},
+            }
             self.worktrees = [w for w in self.worktrees if w["path"] != str(path)]
             self.worktrees.append({"branch": branch, "path": str(path), "open_workspace_id": workspace})
         elif operation == "workspace get":

@@ -27,22 +27,26 @@ class ConfigTest(unittest.TestCase):
 
     def test_codex_settings_and_agent_thinking_levels(self):
         from herdboard.config import AGENTS, save_global_config, thinking_levels
+
         self.assertEqual(AGENTS, ("claude", "pi", "codex"))
         self.assertEqual(thinking_levels("claude"), ("low", "medium", "high", "xhigh", "max"))
         self.assertIn("off", thinking_levels("pi"))
         self.assertNotIn("off", thinking_levels("codex"))
         self.assertIn("ultra", thinking_levels("codex"))
-        path = self.write(self.dir / "a.toml", 'start_agent = "codex"\nstart_thinking = "ultra"\ncodex_models = ["gpt-6.1"]\n')
+        path = self.write(
+            self.dir / "a.toml", 'start_agent = "codex"\nstart_thinking = "ultra"\ncodex_models = ["gpt-6.1"]\n'
+        )
         config = load_config(path)
-        self.assertEqual((config.start_agent, config.start_thinking, config.codex_models),
-                         ("codex", "ultra", ["gpt-6.1"]))
+        self.assertEqual(
+            (config.start_agent, config.start_thinking, config.codex_models), ("codex", "ultra", ["gpt-6.1"])
+        )
         save_global_config(path, start_agent="codex", start_thinking="ultra")
         self.assertEqual(load_config(path).start_agent, "codex")
 
     def test_codex_models_must_be_a_list_of_names(self):
-        for value in ('"gpt-6.1"', '3', '["gpt-6.1", 2]', '[""]'):
+        for value in ('"gpt-6.1"', "3", '["gpt-6.1", 2]', '[""]'):
             with self.subTest(value=value):
-                path = self.write(self.dir / "a.toml", f'codex_models = {value}\n')
+                path = self.write(self.dir / "a.toml", f"codex_models = {value}\n")
                 with self.assertRaisesRegex(HerdboardError, "codex_models"):
                     load_config(path)
 
@@ -104,7 +108,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(load_config(path).card_style, "compact")
 
     def test_card_style_must_be_known(self):
-        for value in ('"small"', '""', '3'):
+        for value in ('"small"', '""', "3"):
             with self.subTest(value=value):
                 path = self.write(self.dir / "a.toml", f"card_style = {value}\n")
                 with self.assertRaisesRegex(HerdboardError, "card_style"):
@@ -123,7 +127,7 @@ class ConfigTest(unittest.TestCase):
                     self.assertEqual(config.tag_style, tags)
 
     def test_icon_style_must_be_a_known_nonempty_string(self):
-        for value in ('"current"', '"auto"', '"NERD"', '""', '3', 'true', '[]'):
+        for value in ('"current"', '"auto"', '"NERD"', '""', "3", "true", "[]"):
             with self.subTest(value=value):
                 path = self.write(self.dir / "a.toml", f"icon_style = {value}\n")
                 with self.assertRaisesRegex(HerdboardError, "icon_style"):
@@ -131,6 +135,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_creates_the_selected_config_file(self):
         from herdboard.config import save_display_config
+
         path = self.dir / "settings" / "config.toml"
         save_display_config(path, icon_style="nerd", tag_style="block")
         config = load_config(path)
@@ -139,11 +144,14 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_preserves_comments_tables_and_other_settings(self):
         from herdboard.config import save_display_config
-        original = ('# My settings\nicon_style = "plain" # icons\n'
-                    "'tag_style' = 'round' # tags\n"
-                    'theme = "nord"\n\n[linear]\n# Keep this section\n'
-                    'enabled = false\nicon_style = "unrelated"\n'
-                    'api_key_command = "secret-tool lookup service herdboard" # keyring\n')
+
+        original = (
+            '# My settings\nicon_style = "plain" # icons\n'
+            "'tag_style' = 'round' # tags\n"
+            'theme = "nord"\n\n[linear]\n# Keep this section\n'
+            'enabled = false\nicon_style = "unrelated"\n'
+            'api_key_command = "secret-tool lookup service herdboard" # keyring\n'
+        )
         path = self.write(self.dir / "a.toml", original)
         path.chmod(0o640)
         save_display_config(path, icon_style="nerd", tag_style="block")
@@ -153,6 +161,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_adds_root_keys_before_tables_and_only_writes_changed_keys(self):
         from herdboard.config import save_display_config
+
         path = self.write(self.dir / "a.toml", 'tag_style = "block"\n[linear]\nenabled = false\n')
         save_display_config(path, icon_style="nerd")
         config = load_config(path)
@@ -162,6 +171,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_writes_card_style_and_outline_tags(self):
         from herdboard.config import save_display_config
+
         path = self.dir / "a.toml"
         save_display_config(path, card_style="compact", tag_style="outline")
         config = load_config(path)
@@ -169,6 +179,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_uses_the_config_environment_path(self):
         from herdboard.config import save_display_config
+
         path = self.dir / "env.toml"
         with mock.patch.dict(os.environ, {"HERDBOARD_CONFIG": str(path)}):
             save_display_config(icon_style="nerd")
@@ -176,9 +187,9 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_rejects_unknown_values_before_creating_files(self):
         from herdboard.config import save_display_config
+
         path = self.dir / "settings" / "config.toml"
-        for values in ({"icon_style": "auto"}, {"tag_style": "square"}, {"icon_style": 1},
-                       {"card_style": "small"}):
+        for values in ({"icon_style": "auto"}, {"tag_style": "square"}, {"icon_style": 1}, {"card_style": "small"}):
             with self.subTest(values=values):
                 with self.assertRaises(HerdboardError):
                     save_display_config(path, **values)
@@ -186,6 +197,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_does_not_replace_invalid_or_unreadable_configs(self):
         from herdboard.config import save_display_config
+
         for content in (b"invalid = [", b"# \xff"):
             with self.subTest(content=content):
                 path = self.dir / "a.toml"
@@ -200,6 +212,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_failure_keeps_the_file_and_cleans_up_the_temporary_file(self):
         from herdboard.config import save_display_config
+
         path = self.write(self.dir / "a.toml", '# Keep\nicon_style = "plain"\n')
         original = path.read_bytes()
         with mock.patch("herdboard.config.os.replace", side_effect=OSError("read-only directory")):
@@ -210,6 +223,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_display_preserves_a_symlink(self):
         from herdboard.config import save_display_config
+
         target = self.write(self.dir / "target.toml", 'icon_style = "plain"\n')
         path = self.dir / "linked.toml"
         path.symlink_to(target)
@@ -221,7 +235,8 @@ class ConfigTest(unittest.TestCase):
         from concurrent.futures import ThreadPoolExecutor
 
         from herdboard.config import save_display_config
-        path = self.write(self.dir / "a.toml", '# Keep\n[linear]\nenabled = false\n')
+
+        path = self.write(self.dir / "a.toml", "# Keep\n[linear]\nenabled = false\n")
         with ThreadPoolExecutor(max_workers=2) as pool:
             icon = pool.submit(save_display_config, path, icon_style="nerd")
             tag = pool.submit(save_display_config, path, tag_style="block")
@@ -232,30 +247,55 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_writes_each_setting(self):
         from herdboard.config import save_global_config
+
         path = self.dir / "a.toml"
-        save_global_config(path, theme="nord", start_agent="pi", start_model="zai/glm-5.3",
-                           start_thinking="high", merge="pr", icon_style="nerd", tag_style="block",
-                           card_style="compact")
+        save_global_config(
+            path,
+            theme="nord",
+            start_agent="pi",
+            start_model="zai/glm-5.3",
+            start_thinking="high",
+            merge="pr",
+            icon_style="nerd",
+            tag_style="block",
+            card_style="compact",
+        )
         config = load_config(path)
         self.assertEqual(
-            (config.theme, config.start_agent, config.start_model, config.start_thinking, config.merge,
-             config.icon_style, config.tag_style, config.card_style),
-            ("nord", "pi", "zai/glm-5.3", "high", "pr", "nerd", "block", "compact"))
+            (
+                config.theme,
+                config.start_agent,
+                config.start_model,
+                config.start_thinking,
+                config.merge,
+                config.icon_style,
+                config.tag_style,
+                config.card_style,
+            ),
+            ("nord", "pi", "zai/glm-5.3", "high", "pr", "nerd", "block", "compact"),
+        )
 
     def test_save_global_none_removes_the_model_and_thinking_level_only(self):
         from herdboard.config import save_global_config
-        original = ('# Mine\nstart_agent = "pi"\nstart_model = "zai/glm-5.3" # model\n'
-                    'start_thinking = "high"\ntheme = "nord"\n\n[linear]\n# Keep\nenabled = false\n')
+
+        original = (
+            '# Mine\nstart_agent = "pi"\nstart_model = "zai/glm-5.3" # model\n'
+            'start_thinking = "high"\ntheme = "nord"\n\n[linear]\n# Keep\nenabled = false\n'
+        )
         path = self.write(self.dir / "a.toml", original)
         save_global_config(path, start_model=None, start_thinking=None)
-        self.assertEqual(path.read_text(), original.replace('start_model = "zai/glm-5.3" # model\n', "")
-                         .replace('start_thinking = "high"\n', ""))
+        self.assertEqual(
+            path.read_text(),
+            original.replace('start_model = "zai/glm-5.3" # model\n', "").replace('start_thinking = "high"\n', ""),
+        )
         config = load_config(path)
-        self.assertEqual((config.start_agent, config.start_model, config.start_thinking, config.theme),
-                         ("pi", None, None, "nord"))
+        self.assertEqual(
+            (config.start_agent, config.start_model, config.start_thinking, config.theme), ("pi", None, None, "nord")
+        )
 
     def test_save_global_writes_only_the_named_settings(self):
         from herdboard.config import save_global_config
+
         original = '# Mine\nstart_model = "opus"\nmerge = "local" # merge\n'
         path = self.write(self.dir / "a.toml", original)
         save_global_config(path, merge="pr")
@@ -263,6 +303,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_without_changes_creates_no_file(self):
         from herdboard.config import save_global_config
+
         path = self.dir / "settings" / "config.toml"
         save_global_config(path)
         save_global_config(path, start_model=None, start_thinking=None)
@@ -271,12 +312,23 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_rejects_invalid_values_before_any_write(self):
         from herdboard.config import save_global_config
+
         original = 'icon_style = "plain"\n'
         path = self.write(self.dir / "a.toml", original)
-        for values in ({"start_agent": "unsupported"}, {"start_agent": None}, {"start_model": "two words"},
-                       {"start_model": ""}, {"start_model": 3}, {"start_thinking": "huge"},
-                       {"merge": "squash"}, {"merge": None}, {"theme": ""}, {"theme": None},
-                       {"theme": 3}, {"icon_style": "nerd", "card_style": "small"}):
+        for values in (
+            {"start_agent": "unsupported"},
+            {"start_agent": None},
+            {"start_model": "two words"},
+            {"start_model": ""},
+            {"start_model": 3},
+            {"start_thinking": "huge"},
+            {"merge": "squash"},
+            {"merge": None},
+            {"theme": ""},
+            {"theme": None},
+            {"theme": 3},
+            {"icon_style": "nerd", "card_style": "small"},
+        ):
             with self.subTest(values=values):
                 with self.assertRaises(HerdboardError):
                     save_global_config(path, **values)
@@ -284,6 +336,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_check_global_accepts_valid_values_and_rejects_invalid_ones(self):
         from herdboard.config import check_global_config
+
         check_global_config(theme="nord", start_agent="pi", start_model=None, start_thinking=None, merge="pr")
         for values in ({"start_model": "zai/glm 5"}, {"merge": "squash"}, {"start_agent": None}):
             with self.subTest(values=values):
@@ -292,6 +345,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_does_not_replace_an_invalid_config(self):
         from herdboard.config import save_global_config
+
         path = self.write(self.dir / "a.toml", "invalid = [")
         with self.assertRaisesRegex(HerdboardError, "invalid TOML"):
             save_global_config(path, start_agent="pi")
@@ -299,6 +353,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_write_failure_keeps_the_file(self):
         from herdboard.config import save_global_config
+
         path = self.write(self.dir / "a.toml", 'merge = "local"\n')
         with mock.patch("herdboard.config.os.replace", side_effect=OSError("read-only directory")):
             with self.assertRaisesRegex(HerdboardError, "read-only directory"):
@@ -308,6 +363,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_uses_the_config_environment_path(self):
         from herdboard.config import save_global_config
+
         path = self.dir / "env.toml"
         with mock.patch.dict(os.environ, {"HERDBOARD_CONFIG": str(path)}):
             save_global_config(start_agent="pi")
@@ -317,6 +373,7 @@ class ConfigTest(unittest.TestCase):
         from concurrent.futures import ThreadPoolExecutor
 
         from herdboard.config import save_thinking_levels
+
         path = self.write(self.dir / "a.toml", 'icon_style = "nerd"\n')
         with ThreadPoolExecutor(max_workers=2) as pool:
             one = pool.submit(save_thinking_levels, path, "a/b", "high")
@@ -327,20 +384,24 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_uses_the_default_path(self):
         from herdboard.config import save_global_config
+
         save_global_config(theme="nord")
         self.assertEqual(load_config(self.dir / "home/.config/herdboard/config.toml").theme, "nord")
 
     def test_thinking_levels_per_model_load_from_the_thinking_table(self):
-        path = self.write(self.dir / "a.toml",
-                          '[thinking]\n"zai/glm-5.3" = "high"\n"opus" = "low"\n')
+        path = self.write(self.dir / "a.toml", '[thinking]\n"zai/glm-5.3" = "high"\n"opus" = "low"\n')
         self.assertEqual(load_config(path).thinking, {"zai/glm-5.3": "high", "opus": "low"})
 
     def test_thinking_levels_without_a_table_are_empty(self):
         self.assertEqual(load_config(self.write(self.dir / "a.toml", 'theme = "nord"\n')).thinking, {})
 
     def test_thinking_levels_reject_a_bad_level_or_a_flat_value(self):
-        for text in ('[thinking]\n"a/b" = "huge"\n', '[thinking]\n"a/b" = 3\n',
-                     '[thinking]\n"a/b" = ""\n', 'thinking = "high"\n'):
+        for text in (
+            '[thinking]\n"a/b" = "huge"\n',
+            '[thinking]\n"a/b" = 3\n',
+            '[thinking]\n"a/b" = ""\n',
+            'thinking = "high"\n',
+        ):
             with self.subTest(text=text):
                 path = self.write(self.dir / "a.toml", text)
                 with self.assertRaisesRegex(HerdboardError, "thinking"):
@@ -348,12 +409,13 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_thinking_levels_writes_and_removes_one_model(self):
         from herdboard.config import save_thinking_levels
+
         path = self.write(self.dir / "a.toml", '# Keep\nicon_style = "nerd"\n\n[linear]\n# Linear\nenabled = false\n')
         save_thinking_levels(path, "zai/glm-5.3", "high")
         save_thinking_levels(path, "opus", "low")
         self.assertEqual(load_config(path).thinking, {"zai/glm-5.3": "high", "opus": "low"})
         self.assertIn('# Keep\nicon_style = "nerd"\n', path.read_text())
-        self.assertIn('[linear]\n# Linear\nenabled = false\n', path.read_text())
+        self.assertIn("[linear]\n# Linear\nenabled = false\n", path.read_text())
         save_thinking_levels(path, "opus", None)
         self.assertEqual(load_config(path).thinking, {"zai/glm-5.3": "high"})
         save_thinking_levels(path, "zai/glm-5.3", None)
@@ -362,6 +424,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_thinking_levels_rejects_a_bad_model_or_level(self):
         from herdboard.config import save_thinking_levels
+
         path = self.write(self.dir / "a.toml", 'icon_style = "nerd"\n')
         for model, level in (("two words", "high"), ("", "high"), ("a/b", "huge"), ("a/b", "")):
             with self.subTest(model=model, level=level):
@@ -371,6 +434,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_thinking_levels_does_not_create_a_file_for_a_removal(self):
         from herdboard.config import save_thinking_levels
+
         path = self.dir / "settings" / "config.toml"
         save_thinking_levels(path, "a/b", None)
         self.assertFalse(path.exists())
@@ -379,7 +443,8 @@ class ConfigTest(unittest.TestCase):
         from concurrent.futures import ThreadPoolExecutor
 
         from herdboard.config import save_global_config
-        path = self.write(self.dir / "a.toml", '# Keep\n[linear]\nenabled = false\n')
+
+        path = self.write(self.dir / "a.toml", "# Keep\n[linear]\nenabled = false\n")
         with ThreadPoolExecutor(max_workers=2) as pool:
             agent = pool.submit(save_global_config, path, start_agent="pi")
             merge = pool.submit(save_global_config, path, merge="pr")
@@ -398,8 +463,14 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual((config.details_pane, config.details_pane_ratio), (False, 0.4))
 
     def test_details_pane_settings_must_be_valid(self):
-        for text in ('details_pane = "yes"', "details_pane = 1", "details_pane_ratio = 0.05",
-                     "details_pane_ratio = 0.7", 'details_pane_ratio = "0.3"', "details_pane_ratio = true"):
+        for text in (
+            'details_pane = "yes"',
+            "details_pane = 1",
+            "details_pane_ratio = 0.05",
+            "details_pane_ratio = 0.7",
+            'details_pane_ratio = "0.3"',
+            "details_pane_ratio = true",
+        ):
             with self.subTest(text=text):
                 path = self.write(self.dir / "a.toml", text + "\n")
                 with self.assertRaises(HerdboardError):
@@ -407,6 +478,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_save_global_writes_the_details_pane_settings(self):
         from herdboard.config import save_global_config
+
         path = self.dir / "a.toml"
         save_global_config(path, details_pane=False, details_pane_ratio=0.3)
         config = load_config(path)
@@ -414,10 +486,16 @@ class ConfigTest(unittest.TestCase):
 
     def test_check_global_rejects_bad_details_pane_values(self):
         from herdboard.config import check_global_config
+
         check_global_config(details_pane=True, details_pane_ratio=0.1)
         check_global_config(details_pane_ratio=0.6)
-        for values in ({"details_pane": "true"}, {"details_pane": None}, {"details_pane_ratio": 0.61},
-                       {"details_pane_ratio": True}, {"details_pane_ratio": None}):
+        for values in (
+            {"details_pane": "true"},
+            {"details_pane": None},
+            {"details_pane_ratio": 0.61},
+            {"details_pane_ratio": True},
+            {"details_pane_ratio": None},
+        ):
             with self.subTest(values=values):
                 with self.assertRaises(HerdboardError):
                     check_global_config(**values)
@@ -462,9 +540,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(load_config().columns, ["H"])
 
     def test_tilde_expansion(self):
-        path = self.write(
-            self.dir / "a.toml", 'todos_dir = "~/t"\nvault_root = "~/Notes"\n'
-        )
+        path = self.write(self.dir / "a.toml", 'todos_dir = "~/t"\nvault_root = "~/Notes"\n')
         config = load_config(path)
         self.assertEqual(config.todos_dir, self.dir / "home" / "t")
         self.assertEqual(config.vault_root, self.dir / "home" / "Notes")
@@ -578,10 +654,17 @@ class LinearConfigTest(unittest.TestCase):
         linear = load_config().linear
         self.assertIsNone(linear.enabled)
         self.assertEqual(linear.api_key_env, "LINEAR_API_KEY")
-        self.assertEqual(linear.columns, {
-            "backlog": "Backlog", "triage": "Backlog", "unstarted": "Todo",
-            "started": "In progress", "completed": "Done", "canceled": "Done",
-        })
+        self.assertEqual(
+            linear.columns,
+            {
+                "backlog": "Backlog",
+                "triage": "Backlog",
+                "unstarted": "Todo",
+                "started": "In progress",
+                "completed": "Done",
+                "canceled": "Done",
+            },
+        )
         self.assertEqual(linear.state_names, {"In Review": "Review"})
 
     def test_active_follows_key_by_default(self):
@@ -600,7 +683,9 @@ class LinearConfigTest(unittest.TestCase):
         self.assertFalse(load_config(on).linear.active)
 
     def test_custom_key_variable_and_overrides(self):
-        path = self.write(self.dir / "a.toml", """
+        path = self.write(
+            self.dir / "a.toml",
+            """
 [linear]
 api_key_env = "OTHER_KEY"
 
@@ -609,7 +694,8 @@ started = "Doing"
 
 [linear.state_names]
 "Ready" = "Todo"
-""")
+""",
+        )
         os.environ["OTHER_KEY"] = "k"
         linear = load_config(path).linear
         self.assertTrue(linear.active)
@@ -623,22 +709,28 @@ started = "Doing"
             load_config(path)
 
     def test_invalid_values(self):
-        for text in ('linear = 1', '[linear]\nenabled = "yes"', '[linear.columns]\nstarted = 1',
-                     '[linear.columns]\nunknown = "X"', '[linear]\nstate_names = 1'):
+        for text in (
+            "linear = 1",
+            '[linear]\nenabled = "yes"',
+            "[linear.columns]\nstarted = 1",
+            '[linear.columns]\nunknown = "X"',
+            "[linear]\nstate_names = 1",
+        ):
             with self.subTest(text=text):
                 path = self.write(self.dir / "a.toml", text)
                 with self.assertRaises(HerdboardError):
                     load_config(path)
 
     def test_command_forms_and_expansion(self):
-        for value in ('"~/bin/key lookup \'two words\'"', '["~/bin/key", "lookup", "two words"]'):
+        for value in ("\"~/bin/key lookup 'two words'\"", '["~/bin/key", "lookup", "two words"]'):
             with self.subTest(value=value):
                 path = self.write(self.dir / "key.toml", f"[linear]\napi_key_command = {value}\n")
-                self.assertEqual(load_config(path).linear.api_key_command,
-                                 [str(self.dir / "home/bin/key"), "lookup", "two words"])
+                self.assertEqual(
+                    load_config(path).linear.api_key_command, [str(self.dir / "home/bin/key"), "lookup", "two words"]
+                )
 
     def test_invalid_commands(self):
-        for value in ('""', '"  "', '[]', '[""]', '[1]', '"\'unclosed"', '1', 'true'):
+        for value in ('""', '"  "', "[]", '[""]', "[1]", '"\'unclosed"', "1", "true"):
             with self.subTest(value=value):
                 path = self.write(self.dir / "key.toml", f"[linear]\napi_key_command = {value}\n")
                 with self.assertRaisesRegex(HerdboardError, "linear.api_key_command"):
@@ -656,12 +748,14 @@ started = "Doing"
     def test_command_wins_and_caches_success_without_exposing_key(self):
         os.environ["LINEAR_API_KEY"] = "environment-key"
         linear = LinearConfig(api_key_command=["key", "lookup"])
-        with mock.patch("herdboard.config.subprocess.run", return_value=
-                        subprocess.CompletedProcess([], 0, "  command-secret\n", "")) as run:
+        with mock.patch(
+            "herdboard.config.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "  command-secret\n", "")
+        ) as run:
             self.assertEqual(linear.api_key, "command-secret")
             self.assertEqual(linear.api_key, "command-secret")
-            run.assert_called_once_with(["key", "lookup"], capture_output=True, text=True,
-                                        timeout=30, stdin=subprocess.DEVNULL)
+            run.assert_called_once_with(
+                ["key", "lookup"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL
+            )
         self.assertNotIn("command-secret", repr(linear))
         self.assertEqual(linear, LinearConfig(api_key_command=["key", "lookup"]))
 
@@ -712,17 +806,22 @@ started = "Doing"
         self.assertEqual(LinearConfig(api_key_command=[str(script)]).api_key, "lin_api_x")
 
     def test_command_failures_are_auth_errors_and_retry(self):
-        failures = (FileNotFoundError("missing"), PermissionError("denied"),
-                    ValueError("stdout-secret"),
-                    UnicodeDecodeError("utf-8", b"stdout-secret\xff", 13, 14, "stdout-secret"),
-                    subprocess.TimeoutExpired(["key"], 30, output="stdout-secret"),
-                    subprocess.CompletedProcess([], 1, "stdout-secret", "locked\nsecond line"),
-                    subprocess.CompletedProcess([], 0, " \n", ""))
+        failures = (
+            FileNotFoundError("missing"),
+            PermissionError("denied"),
+            ValueError("stdout-secret"),
+            UnicodeDecodeError("utf-8", b"stdout-secret\xff", 13, 14, "stdout-secret"),
+            subprocess.TimeoutExpired(["key"], 30, output="stdout-secret"),
+            subprocess.CompletedProcess([], 1, "stdout-secret", "locked\nsecond line"),
+            subprocess.CompletedProcess([], 0, " \n", ""),
+        )
         for failure in failures:
             with self.subTest(failure=type(failure).__name__, status=getattr(failure, "returncode", None)):
                 linear = LinearConfig(api_key_command=["key", "two words"])
-                with mock.patch("herdboard.config.subprocess.run", side_effect=[
-                        failure, subprocess.CompletedProcess([], 0, "recovered", "")]) as run:
+                with mock.patch(
+                    "herdboard.config.subprocess.run",
+                    side_effect=[failure, subprocess.CompletedProcess([], 0, "recovered", "")],
+                ) as run:
                     with self.assertRaises(LinearAuthError) as caught:
                         _ = linear.api_key
                     message = str(caught.exception)

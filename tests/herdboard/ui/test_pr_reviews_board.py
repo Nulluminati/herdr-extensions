@@ -1,4 +1,5 @@
 """The board's pull request list: G opens it, and its keys start, refresh and finish PR reviews."""
+
 import asyncio
 import os
 import tempfile
@@ -33,8 +34,9 @@ from herdboard.store import Store
 
 
 def pull_request(number, title, **changes):
-    pr = PullRequest(number, title, f"https://github.com/acme/api/pull/{number}", "octo", False, "a" * 40,
-                     "branch", False, False)
+    pr = PullRequest(
+        number, title, f"https://github.com/acme/api/pull/{number}", "octo", False, "a" * 40, "branch", False, False
+    )
     for name, value in changes.items():
         setattr(pr, name, value)
     return pr
@@ -53,27 +55,58 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Board card")
         self.service = Mock()
-        self.service.page.return_value = ("acme/api", Page([
-            pull_request(7, "Fix login timeout", draft=True, requested=True, additions=12, deletions=3,
-                         labels=[{"name": "bug", "color": "d73a4a"}]),
-            pull_request(8, "Add cache", status="reviewed", new_commits=True, notes=3, ci="failed",
-                         decision="approved")], 2, None))
+        self.service.page.return_value = (
+            "acme/api",
+            Page(
+                [
+                    pull_request(
+                        7,
+                        "Fix login timeout",
+                        draft=True,
+                        requested=True,
+                        additions=12,
+                        deletions=3,
+                        labels=[{"name": "bug", "color": "d73a4a"}],
+                    ),
+                    pull_request(
+                        8, "Add cache", status="reviewed", new_commits=True, notes=3, ci="failed", decision="approved"
+                    ),
+                ],
+                2,
+                None,
+            ),
+        )
         self.service.details.return_value = {
             "body": "Sessions **end** too soon.",
             "issues": [{"number": 3, "title": "Logout fails", "url": "u3", "state": "OPEN"}],
             "reviews": [{"author": "octo", "state": "approved", "at": "2026-10-16T18:00:00Z"}],
-            "checks": [{"name": "lint", "state": "passed"}, {"name": "unit tests", "state": "failed"}]}
-        self.service.review.return_value = {"key": "acme/api#7", "number": 7, "workspace_id": "w9",
-                                            "agent": "claude", "model": "sonnet", "prompted": False}
-        self.service.refresh.return_value = {"key": "acme/api#8", "number": 8, "kept": 3, "dropped": [],
-                                             "agent": "pi", "model": "zai/glm-5.3", "thinking": "high"}
+            "checks": [{"name": "lint", "state": "passed"}, {"name": "unit tests", "state": "failed"}],
+        }
+        self.service.review.return_value = {
+            "key": "acme/api#7",
+            "number": 7,
+            "workspace_id": "w9",
+            "agent": "claude",
+            "model": "sonnet",
+            "prompted": False,
+        }
+        self.service.refresh.return_value = {
+            "key": "acme/api#8",
+            "number": 8,
+            "kept": 3,
+            "dropped": [],
+            "agent": "pi",
+            "model": "zai/glm-5.3",
+            "thinking": "high",
+        }
         self.service.finish.return_value = {"key": "acme/api#7", "number": 7, "branch_deleted": True}
         self.service.go.return_value = {"key": "acme/api#7", "workspace_id": "w9"}
         self.notices = []
 
     def app(self, **options):
-        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60,
-                           pr_service=self.service, **options)
+        app = HerdboardApp(
+            self.store, "inbox", lambda _: [self.path], reload_interval=60, pr_service=self.service, **options
+        )
         app.animation_level = "none"
         app.notify = lambda message, **kwargs: self.notices.append((message, kwargs.get("severity")))
         return app
@@ -94,9 +127,13 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             screen = await self.open(app, pilot)
             rows = screen.rows()
-            self.assertEqual([row[:2] + row[3:9] for row in rows], [
-                ("◌", "#7", "octo", "+12 −3", "", "◆ your review", "", ""),
-                ("●", "#8", "octo", "+0 −0", "✗ failed", "✔ approved", "✓ reviewed  ↑ new commits", "3 ✎")])
+            self.assertEqual(
+                [row[:2] + row[3:9] for row in rows],
+                [
+                    ("◌", "#7", "octo", "+12 −3", "", "◆ your review", "", ""),
+                    ("●", "#8", "octo", "+0 −0", "✗ failed", "✔ approved", "✓ reviewed  ↑ new commits", "3 ✎"),
+                ],
+            )
             self.assertTrue(rows[0][2].startswith("Fix login timeout"))
             self.assertIn(" bug ", rows[0][2])
             self.assertEqual([len(row) for row in rows], [len(PR_FIELDS)] * 2)
@@ -153,8 +190,10 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.current().number, 7)
 
     async def test_the_arrow_keys_move_the_selected_row_in_a_list_that_scrolls(self):
-        self.service.page.return_value = ("acme/api", Page(
-            [pull_request(number, f"Change {number}") for number in range(1, 13)], 12, None))
+        self.service.page.return_value = (
+            "acme/api",
+            Page([pull_request(number, f"Change {number}") for number in range(1, 13)], 12, None),
+        )
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             screen = await self.open(app, pilot)
@@ -179,8 +218,7 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         pr = pull_request(7, "Fix", status="reviewed", review={"agent": "pi"})
         agent = PR_FIELDS.index("Agent review (local)")
         self.assertFalse(pr_fields(pr, "plain", None)[agent].plain.startswith(AGENT_LOGOS["pi"]))
-        self.assertEqual(pr_fields(pr, "plain", None, agent_logos=True)[agent].plain,
-                         f"{AGENT_LOGOS['pi']} ✓ reviewed")
+        self.assertEqual(pr_fields(pr, "plain", None, agent_logos=True)[agent].plain, f"{AGENT_LOGOS['pi']} ✓ reviewed")
 
     async def test_the_list_shows_agent_logos_when_the_app_has_them(self):
         prs = self.service.page.return_value[1].prs
@@ -192,9 +230,18 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(screen.rows()[1][7].startswith(AGENT_LOGOS["claude"]), screen.rows()[1][7])
 
     def test_a_narrow_row_keeps_the_title_and_every_part(self):
-        pr = pull_request(123, "Fix login timeout for sessions", status="reviewed", ci="passed", decision="approved",
-                          notes=3, comments=4, head_branch="fix-login", base_branch="main",
-                          updated="2026-10-16T18:00:00Z")
+        pr = pull_request(
+            123,
+            "Fix login timeout for sessions",
+            status="reviewed",
+            ci="passed",
+            decision="approved",
+            notes=3,
+            comments=4,
+            head_branch="fix-login",
+            base_branch="main",
+            updated="2026-10-16T18:00:00Z",
+        )
         fields = pr_fields(pr, "plain", None)
         for width in (76, 100):
             with self.subTest(width=width):
@@ -205,8 +252,17 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("#123", lines[0])
                 self.assertIn("Fix login timeout for sessions", lines[0])
                 text = "\n".join(lines)
-                for part in ("✓ passed", "✔ approved", "✓ reviewed", "3 ✎", "4 comments", "octo", "+0 −0",
-                             "fix-login → main", "updated"):
+                for part in (
+                    "✓ passed",
+                    "✔ approved",
+                    "✓ reviewed",
+                    "3 ✎",
+                    "4 comments",
+                    "octo",
+                    "+0 −0",
+                    "fix-login → main",
+                    "updated",
+                ):
                     self.assertIn(part, text)
         output = StringIO()
         Console(file=output, width=46, color_system=None).print(pr_row_content(fields))
@@ -216,10 +272,17 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
 
     def test_ago_says_how_long_ago_in_one_unit(self):
         from datetime import datetime
+
         now = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
-        for stamp, expected in (("2026-10-18T11:59:30Z", "just now"), ("2026-10-18T11:55:00Z", "5 min ago"),
-                                ("2026-10-18T09:00:00Z", "3 hours ago"), ("2026-10-17T11:00:00Z", "1 day ago"),
-                                ("2026-10-01T12:00:00Z", "2 weeks ago"), ("", ""), ("soon", "")):
+        for stamp, expected in (
+            ("2026-10-18T11:59:30Z", "just now"),
+            ("2026-10-18T11:55:00Z", "5 min ago"),
+            ("2026-10-18T09:00:00Z", "3 hours ago"),
+            ("2026-10-17T11:00:00Z", "1 day ago"),
+            ("2026-10-01T12:00:00Z", "2 weeks ago"),
+            ("", ""),
+            ("soon", ""),
+        ):
             with self.subTest(stamp=stamp):
                 self.assertEqual(ago(stamp, now), expected)
 
@@ -363,8 +426,10 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.service.finish.assert_called_once_with(7, False)
 
     async def test_unsent_notes_ask_again_to_force(self):
-        self.service.finish.side_effect = [PrReviewError("2 notes", "unsent_notes"),
-                                           {"key": "acme/api#7", "number": 7, "branch_deleted": True}]
+        self.service.finish.side_effect = [
+            PrReviewError("2 notes", "unsent_notes"),
+            {"key": "acme/api#7", "number": 7, "branch_deleted": True},
+        ]
         app = self.app()
         async with app.run_test() as pilot:
             await self.open(app, pilot)
@@ -445,8 +510,15 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(app, pilot)
             self.service.details.assert_called_once_with(7)
             text = app.screen.text()
-            for part in ("Sessions **end** too soon.", "#3 Logout fails", "octo approved", "unit tests",
-                         "1 failed, 1 passed", "GitHub review", "Agent review (local)"):
+            for part in (
+                "Sessions **end** too soon.",
+                "#3 Logout fails",
+                "octo approved",
+                "unit tests",
+                "1 failed, 1 passed",
+                "GitHub review",
+                "Agent review (local)",
+            ):
                 self.assertIn(part, text)
             self.assertLess(text.index("unit tests"), text.index("lint"))
         self.service.page.assert_called_with("", None)

@@ -35,9 +35,7 @@ class StateCancelledError(HerdboardError):
     code = "cancelled"
 
 
-def candidates(
-    config: Config, states: list[dict], column: str, only_type: str | None = None
-) -> list[dict]:
+def candidates(config: Config, states: list[dict], column: str, only_type: str | None = None) -> list[dict]:
     """The states of one team that a move to `column` may use, in workflow order.
 
     A canceled state counts only when no other state matches, and a triage state only
@@ -126,8 +124,7 @@ def resolve_state(
         chosen = next((s for s in found if s["name"].casefold() == wanted), None)
         if chosen is None:
             raise AmbiguousStateError(
-                f"Team {team['key']} has no state {state_name!r} for column {column!r}. "
-                f"Candidates: {', '.join(names)}",
+                f"Team {team['key']} has no state {state_name!r} for column {column!r}. Candidates: {', '.join(names)}",
                 names,
             )
     elif len(found) == 1:

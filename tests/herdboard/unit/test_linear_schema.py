@@ -34,25 +34,43 @@ class SchemaTests(unittest.TestCase):
         self.assertTrue(any("noSuchField" in m for m in validation_errors(query, {})))
 
     def test_filters_match_the_schema(self):
-        filters = [linear.recent_filter(14), linear.recent_filter(0),
-                   {"project": {"id": {"eq": "p"}}, "labels": {"some": {"id": {"in": ["l"]}}},
-                    **linear.recent_filter(7)}]
+        filters = [
+            linear.recent_filter(14),
+            linear.recent_filter(0),
+            {"project": {"id": {"eq": "p"}}, "labels": {"some": {"id": {"in": ["l"]}}}, **linear.recent_filter(7)},
+        ]
         for filt in filters:
             with self.subTest(filter=filt):
                 self.assertEqual(validation_errors(linear.ISSUES_QUERY, {"first": 10, "filter": filt}), [])
-        self.assertEqual(validation_errors(linear.LABELS_BY_ID_QUERY,
-                                           {"first": 10, "filter": {"id": {"in": ["a"]}}}), [])
+        self.assertEqual(
+            validation_errors(linear.LABELS_BY_ID_QUERY, {"first": 10, "filter": {"id": {"in": ["a"]}}}), []
+        )
         self.assertEqual(validation_errors(linear.ISSUE_QUERY, {"id": "ENG-1"}), [])
-        self.assertEqual(validation_errors(linear.PINNED_ISSUES_QUERY, {
-            "first": 10, "filter": {"id": {"in": ["a"]}, **linear.recent_filter(14)}}), [])
-        self.assertEqual(validation_errors(linear.SEARCH_ISSUES_QUERY, {
-            "term": "login", "first": 20,
-            "filter": {"team": {"id": {"in": ["t"]}},
-                       "state": {"type": {"nin": ["completed", "canceled"]}}}}), [])
+        self.assertEqual(
+            validation_errors(
+                linear.PINNED_ISSUES_QUERY, {"first": 10, "filter": {"id": {"in": ["a"]}, **linear.recent_filter(14)}}
+            ),
+            [],
+        )
+        self.assertEqual(
+            validation_errors(
+                linear.SEARCH_ISSUES_QUERY,
+                {
+                    "term": "login",
+                    "first": 20,
+                    "filter": {"team": {"id": {"in": ["t"]}}, "state": {"type": {"nin": ["completed", "canceled"]}}},
+                },
+            ),
+            [],
+        )
 
     def test_project_team_filter_matches_the_schema(self):
-        self.assertEqual(validation_errors(linear.PROJECTS_QUERY, {
-            "first": 10, "filter": {"accessibleTeams": {"some": {"id": {"eq": "t"}}}}}), [])
+        self.assertEqual(
+            validation_errors(
+                linear.PROJECTS_QUERY, {"first": 10, "filter": {"accessibleTeams": {"some": {"id": {"eq": "t"}}}}}
+            ),
+            [],
+        )
 
     def test_validation_catches_a_bad_filter(self):
         bad = {"first": 10, "filter": {"completedAt": {"gte": 5, "bogus": True}}}
@@ -60,6 +78,7 @@ class SchemaTests(unittest.TestCase):
 
     def test_invalid_query_gets_a_graphql_error_from_the_fake(self):
         from support.linear_fake import FakeLinear
+
         with FakeLinear({}) as fake:
             client = linear.LinearClient("test-key", endpoint=fake.endpoint)
             with self.assertRaisesRegex(linear.LinearError, "noSuchField"):

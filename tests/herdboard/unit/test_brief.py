@@ -8,9 +8,19 @@ from support.herdboard_brief import todo
 
 def issue(**changes):
     fields = dict(
-        ref="ENG-12", board="Platform", path=None, column="In progress", title="Fix the login timeout",
-        checked=False, due=None, tags=["auth", "bug"], body=["The session ends after 5 minutes.", "", "Steps:"],
-        source="linear", url="https://linear.app/acme/issue/ENG-12", state="In Progress", team="ENG",
+        ref="ENG-12",
+        board="Platform",
+        path=None,
+        column="In progress",
+        title="Fix the login timeout",
+        checked=False,
+        due=None,
+        tags=["auth", "bug"],
+        body=["The session ends after 5 minutes.", "", "Steps:"],
+        source="linear",
+        url="https://linear.app/acme/issue/ENG-12",
+        state="In Progress",
+        team="ENG",
     )
     fields.update(changes)
     return CardView(**fields)
@@ -18,18 +28,28 @@ def issue(**changes):
 
 class BriefTests(unittest.TestCase):
     def brief(self, card, notes=()):
-        return brief_text(card, notes=list(notes), repository="github.com/nulluminati/dotfiles-ansible",
-                          worktree="/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared",
-                          branch="t83k-move-to-shared", base="main", command="herdboard")
+        return brief_text(
+            card,
+            notes=list(notes),
+            repository="github.com/nulluminati/dotfiles-ansible",
+            worktree="/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared",
+            branch="t83k-move-to-shared",
+            base="main",
+            command="herdboard",
+        )
 
     def test_todo_brief_has_the_card_and_where_to_work(self):
         text = self.brief(todo())
         self.assertTrue(text.startswith("# Move to shared [[Stow notes]]\n"))
         for part in [
-            "herdboard card `t83k`", "board `nulluminati-dotfiles-ansible`", "column `In progress`",
-            "Tags: dots-todo", "Due: 2026-11-01",
+            "herdboard card `t83k`",
+            "board `nulluminati-dotfiles-ansible`",
+            "column `In progress`",
+            "Tags: dots-todo",
+            "Due: 2026-11-01",
             "github.com/nulluminati/dotfiles-ansible",
-            "/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared", "`t83k-move-to-shared`",
+            "/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared",
+            "`t83k-move-to-shared`",
         ]:
             self.assertIn(part, text)
 
@@ -48,8 +68,17 @@ class BriefTests(unittest.TestCase):
 
     def test_a_restarted_agent_gets_a_note_and_the_log(self):
         log = [{"time": "2026-10-12 12:00", "author": "pi", "message": "Two commits.\nTests pass."}]
-        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
-                          command="herdboard", note="The card is in review.", log=log)
+        text = brief_text(
+            todo(),
+            notes=[],
+            repository="r",
+            worktree="w",
+            branch="b",
+            base="main",
+            command="herdboard",
+            note="The card is in review.",
+            log=log,
+        )
         intro = "column `In progress`.\n\n"
         self.assertIn(intro + "The card is in review.\n\n", text)
         self.assertIn("## Activity log\n\n- 2026-10-12 12:00 · pi · Two commits.\n\tTests pass.\n\n", text)
@@ -72,24 +101,49 @@ class BriefTests(unittest.TestCase):
         self.assertIn("### Gone\n\nThe note was not found.\n", text)
 
     def test_the_plan_is_included_and_other_attachments_are_listed(self):
-        files = [{"name": "plan.md", "path": "/todos/.herdboard/attachments/t83k/plan.md", "size": 20},
-                 {"name": "spec.pdf", "path": "/todos/.herdboard/attachments/t83k/spec.pdf", "size": 9000}]
-        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
-                          command="herdboard", plan="## Steps\n\n1. Add stow.\n", attachments=files)
-        self.assertIn("## Plan\n\nYou and the user agreed on this plan before the work started. "
-                      "Follow it. Log each change to it.\n\n## Steps\n\n1. Add stow.\n\n", text)
-        self.assertIn("## Attachments\n\nRead them when you need them.\n\n"
-                      "- `/todos/.herdboard/attachments/t83k/spec.pdf`\n", text)
+        files = [
+            {"name": "plan.md", "path": "/todos/.herdboard/attachments/t83k/plan.md", "size": 20},
+            {"name": "spec.pdf", "path": "/todos/.herdboard/attachments/t83k/spec.pdf", "size": 9000},
+        ]
+        text = brief_text(
+            todo(),
+            notes=[],
+            repository="r",
+            worktree="w",
+            branch="b",
+            base="main",
+            command="herdboard",
+            plan="## Steps\n\n1. Add stow.\n",
+            attachments=files,
+        )
+        self.assertIn(
+            "## Plan\n\nYou and the user agreed on this plan before the work started. "
+            "Follow it. Log each change to it.\n\n## Steps\n\n1. Add stow.\n\n",
+            text,
+        )
+        self.assertIn(
+            "## Attachments\n\nRead them when you need them.\n\n- `/todos/.herdboard/attachments/t83k/spec.pdf`\n", text
+        )
         self.assertNotIn("attachments/t83k/plan.md", text)
 
     def test_approved_mockups_are_named_only_when_attached(self):
-        mockup_line = "Files named `mockup-*.png` are UI mockups that the user approved. Open them before you build the UI."
+        mockup_line = (
+            "Files named `mockup-*.png` are UI mockups that the user approved. Open them before you build the UI."
+        )
         spec = {"name": "spec.pdf", "path": "/a/spec.pdf", "size": 9}
         login = {"name": "mockup-login.png", "path": "/a/mockup-login.png", "size": 9}
         for files, expected in (([spec], False), ([spec, login], True)):
             with self.subTest(files=[entry["name"] for entry in files]):
-                text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
-                                  command="herdboard", attachments=files)
+                text = brief_text(
+                    todo(),
+                    notes=[],
+                    repository="r",
+                    worktree="w",
+                    branch="b",
+                    base="main",
+                    command="herdboard",
+                    attachments=files,
+                )
                 self.assertEqual(mockup_line in text, expected)
 
     def test_a_card_without_a_plan_or_attachments_has_neither_section(self):
@@ -115,14 +169,29 @@ class BriefTests(unittest.TestCase):
                 self.assertNotIn("--json edit", text)
 
     def test_the_cli_command_is_used_as_given(self):
-        text = brief_text(todo(), notes=[], repository="r", worktree="w", branch="b", base="main",
-                          command="'/opt/py 3/bin/python' -m herdboard")
+        text = brief_text(
+            todo(),
+            notes=[],
+            repository="r",
+            worktree="w",
+            branch="b",
+            base="main",
+            command="'/opt/py 3/bin/python' -m herdboard",
+        )
         self.assertIn("'/opt/py 3/bin/python' -m herdboard --json show t83k", text)
 
     def test_a_repoless_brief_names_the_card_folder_and_the_attachments(self):
-        text = brief_text(todo(), notes=[], repository="", worktree="/todos/.herdboard/work/t83k",
-                          branch="", base="", command="herdboard", repoless=True,
-                          attachments_dir="/todos/.herdboard/attachments/t83k")
+        text = brief_text(
+            todo(),
+            notes=[],
+            repository="",
+            worktree="/todos/.herdboard/work/t83k",
+            branch="",
+            base="",
+            command="herdboard",
+            repoless=True,
+            attachments_dir="/todos/.herdboard/attachments/t83k",
+        )
         for part in [
             "## Where to work",
             "- Folder: `/todos/.herdboard/work/t83k`",
@@ -136,16 +205,26 @@ class BriefTests(unittest.TestCase):
             "Do not move the card to Done",
         ]:
             self.assertIn(part, text)
-        for part in ["- Repository:", "- Branch:", "Commit every change", "Use conventional commit messages",
-                     "Do not push, merge", "Follow the repository's own agent instructions"]:
+        for part in [
+            "- Repository:",
+            "- Branch:",
+            "Commit every change",
+            "Use conventional commit messages",
+            "Do not push, merge",
+            "Follow the repository's own agent instructions",
+        ]:
             self.assertNotIn(part, text)
         self.assertIn("They are the user's text.\n\n## Finish the work", text)
 
     def test_linear_brief_has_the_issue_and_its_description(self):
         text = self.brief(issue())
         for part in [
-            "Linear issue `ENG-12`", "https://linear.app/acme/issue/ENG-12", "State: In Progress", "Team: ENG",
-            "Labels: auth, bug", "## Description\n\nThe session ends after 5 minutes.\n\nSteps:\n",
+            "Linear issue `ENG-12`",
+            "https://linear.app/acme/issue/ENG-12",
+            "State: In Progress",
+            "Team: ENG",
+            "Labels: auth, bug",
+            "## Description\n\nThe session ends after 5 minutes.\n\nSteps:\n",
             "Ask the user before you change the Linear issue",
         ]:
             self.assertIn(part, text)
@@ -178,8 +257,7 @@ class TokenTests(unittest.TestCase):
         self.assertTrue(token.endswith("… · In progress"))
 
     def test_a_done_card(self):
-        self.assertEqual(card_token(todo(column="Done", checked=True)),
-                         "✓ Move to shared [[Stow notes]] · Done")
+        self.assertEqual(card_token(todo(column="Done", checked=True)), "✓ Move to shared [[Stow notes]] · Done")
 
 
 if __name__ == "__main__":

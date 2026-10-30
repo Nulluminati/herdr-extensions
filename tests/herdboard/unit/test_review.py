@@ -1,4 +1,5 @@
 """Review a started card in Hunk, next to the agent that wrote it."""
+
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,8 +14,7 @@ HUNK = "jhochenbaum.hunkdiff"
 class ReviewTests(ReviewTestCase):
     def test_restarted_agent_models_are_scoped_to_their_agent(self):
         self.starter.start(self.card.ref, agent="codex")
-        for configured, model, expected in (("claude", "opus", None),
-                                             ("codex", "gpt-6.1-sol", "gpt-6.1-sol")):
+        for configured, model, expected in (("claude", "opus", None), ("codex", "gpt-6.1-sol", "gpt-6.1-sol")):
             with self.subTest(configured=configured):
                 self.config.start_agent = configured
                 self.config.start_model = model
@@ -51,8 +51,10 @@ class ReviewTests(ReviewTestCase):
         self.starter.start(self.card.ref, agent="pi")
         result = self.reviewer.review(self.card.ref)
         self.assertEqual(self.calls("agent", "focus"), [["agent", "focus", "w9:p1"]])
-        self.assertEqual(self.calls("plugin", "action", "invoke"),
-                         [["plugin", "action", "invoke", "review:branch", "--plugin", HUNK]])
+        self.assertEqual(
+            self.calls("plugin", "action", "invoke"),
+            [["plugin", "action", "invoke", "review:branch", "--plugin", HUNK]],
+        )
         self.assertEqual(result["review_pane"], "w9:p2:hunk")
         self.assertFalse(result["agent_restarted"])
         self.assertEqual(self.record()["review_pane"], "w9:p2:hunk")
@@ -129,14 +131,22 @@ class ReviewPaneTests(ReviewTestCase):
 class ReviewCliTests(CliTestCase):
     def test_review_prints_where_hunk_opened(self):
         card = self.run_json("add", "Fix it", directory=self.plain)["card"]
-        result = {"ref": card["ref"], "workspace_id": "w9", "pane_id": "w9:p1", "review_pane": "w9:p2",
-                  "agent_restarted": True}
+        result = {
+            "ref": card["ref"],
+            "workspace_id": "w9",
+            "pane_id": "w9:p1",
+            "review_pane": "w9:p2",
+            "agent_restarted": True,
+        }
         with patch("herdboard.cli.Reviewer") as reviewer:
             reviewer.return_value.review.return_value = result
             out, _ = self.run_cli("review", card["ref"], directory=self.plain)
             data = self.run_json("review", card["ref"], directory=self.plain)
-        self.assertEqual(out, f"{card['ref']}: Hunk review in pane w9:p2 (workspace w9)\n"
-                              "The agent was gone; a new agent started with the card and its log.\n")
+        self.assertEqual(
+            out,
+            f"{card['ref']}: Hunk review in pane w9:p2 (workspace w9)\n"
+            "The agent was gone; a new agent started with the card and its log.\n",
+        )
         self.assertEqual(data, result)
 
     def test_review_errors_are_json(self):

@@ -98,14 +98,14 @@ Task: {title}
 
 {description or "(no description)"}
 
-- Repository: `{data['worktree']}`
-- Branch `{data['branch']}`, into `{data['base']}`
-- The change: `{folder / 'branch.patch'}`
+- Repository: `{data["worktree"]}`
+- Branch `{data["branch"]}`, into `{data["base"]}`
+- The change: `{folder / "branch.patch"}`
 
 Notes recorded during the work:
 {log}
 
-Write `{folder / 'pr.md'}`. Its first line is the title. The rest is the description.
+Write `{folder / "pr.md"}`. Its first line is the title. The rest is the description.
 
 - The title follows this guide, whatever the style of the repository:
 
@@ -116,20 +116,22 @@ Write `{folder / 'pr.md'}`. Its first line is the title. The rest is the descrip
 - Describe only the testing that the notes or the change show. Do not claim checks you did not run or see.
   When nothing shows testing, say that the change has no tests.
 - Do not name the tools, the agent or the task card. Do not add a Linear link.
-- Do not run `gh`, push, or change any file other than `{folder / 'pr.md'}`.
+- Do not run `gh`, push, or change any file other than `{folder / "pr.md"}`.
 - Do not run the project's code, tests or builds. Do not start a server. Do not use `terminal-browser`.
-- To change the description after the pull request opens, edit `{folder / 'pr.md'}` and run
+- To change the description after the pull request opens, edit `{folder / "pr.md"}` and run
   `herdboard pr-sync {ref}`.
 """
 
 
 def prompt_text(folder: Path, ref: str) -> str:
-    return (f"Write the pull request title and description for this work. Read {folder / 'request.md'} "
-            f"and follow it. Write the result to {folder / 'pr.md'} and nowhere else. "
-            f"To change the description after the pull request opens, edit {folder / 'pr.md'} "
-            f"and run `herdboard pr-sync {ref}`. "
-            "Do not run gh, push, or change code. Do not run the project's code, tests or builds. "
-            "Do not use terminal-browser.")
+    return (
+        f"Write the pull request title and description for this work. Read {folder / 'request.md'} "
+        f"and follow it. Write the result to {folder / 'pr.md'} and nowhere else. "
+        f"To change the description after the pull request opens, edit {folder / 'pr.md'} "
+        f"and run `herdboard pr-sync {ref}`. "
+        "Do not run gh, push, or change code. Do not run the project's code, tests or builds. "
+        "Do not use terminal-browser."
+    )
 
 
 def check_running(ref: str, record: dict) -> None:
@@ -140,12 +142,12 @@ def check_running(ref: str, record: dict) -> None:
     if time.time() - running.get("started", 0) > WRITE_TIMEOUT_SECONDS + 60:
         return
     if _reviewer_status(running["pane_id"]) is not None:
-        raise merge.MergeError(f"An agent still writes the pull request description of {ref} "
-                               f"in pane {running['pane_id']}", "pr_writing")
+        raise merge.MergeError(
+            f"An agent still writes the pull request description of {ref} in pane {running['pane_id']}", "pr_writing"
+        )
 
 
-def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_url: str | None,
-            persist) -> dict:
+def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_url: str | None, persist) -> dict:
     """Ask an agent for the description, store the request, and start the worker. The caller holds the lock."""
     config = merger.config
     data = {"worktree": str(worktree), "branch": record["branch"], "base": base}
@@ -156,8 +158,9 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
         requests.mkdir(parents=True, exist_ok=True)
         folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-", dir=requests))
         (folder / "branch.patch").write_text(patch, encoding="utf-8")
-        (folder / "request.md").write_text(request_text(card, ref, data, folder, find_templates(worktree), entries),
-                                           encoding="utf-8")
+        (folder / "request.md").write_text(
+            request_text(card, ref, data, folder, find_templates(worktree), entries), encoding="utf-8"
+        )
     except OSError as error:
         raise merge.MergeError(f"{requests}: cannot write the pull request request: {error}", "io") from error
     starter = Starter(merger.store, merger.directory, writer=merger.writer, config_file=merger.config_file)
@@ -167,18 +170,35 @@ def request(merger, card, ref, key, record, worktree: Path, base: str, rewrite_u
     if agent_live(record):
         pane, own, writer = record["pane_id"], False, "the card's agent"
     else:
-        pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),
-                     "--no-focus")["pane"]["pane_id"]
+        pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree), "--no-focus")[
+            "pane"
+        ]["pane_id"]
         model = config.start_model if kind == config.start_agent else None
         thinking = config.start_thinking if config.start_thinking in thinking_levels(kind) else None
         # A startup prompt waits for the user, and a busy writer never looks ready: the worker watches it.
-        herdr("agent", "start", f"hb-{ref.lower()}-pr", "--kind", kind, "--pane", pane, "--",
-              *reviewer_arguments(kind, prompt_text(folder, ref), folder, worktree, model, thinking),
-              tolerated=("timeout", "agent_not_ready"))
+        herdr(
+            "agent",
+            "start",
+            f"hb-{ref.lower()}-pr",
+            "--kind",
+            kind,
+            "--pane",
+            pane,
+            "--",
+            *reviewer_arguments(kind, prompt_text(folder, ref), folder, worktree, model, thinking),
+            tolerated=("timeout", "agent_not_ready"),
+        )
         activity.record_pane_agent(pane, kind)
         own, writer = True, f"a {kind} writer agent"
-    data.update(folder=str(folder), pane_id=pane, kind=kind, own_pane=own, rewrite_url=rewrite_url,
-                linear_url=card.url if card.source == "linear" else None, started=time.time())
+    data.update(
+        folder=str(folder),
+        pane_id=pane,
+        kind=kind,
+        own_pane=own,
+        rewrite_url=rewrite_url,
+        linear_url=card.url if card.source == "linear" else None,
+        started=time.time(),
+    )
     record["pr_write"] = data
     persist()
     # The worker reads the request from here: the start record is gone once the card is finished.
@@ -209,8 +229,7 @@ def _wait_for_text(path: Path, pane: str, who: str) -> None:
         if seen and status is None:
             raise merge.MergeError(f"The {who} stopped before it wrote {path}", "pr_failed")
         if time.monotonic() >= deadline:
-            raise merge.MergeError(f"The {who} did not finish in {WRITE_TIMEOUT_SECONDS // 60} minutes",
-                                   "pr_failed")
+            raise merge.MergeError(f"The {who} did not finish in {WRITE_TIMEOUT_SECONDS // 60} minutes", "pr_failed")
         time.sleep(POLL_SECONDS)
 
 
@@ -254,8 +273,7 @@ def _settle(ref: str, **updates) -> dict | None:
         return record
 
 
-def _push_text(worktree: Path, branch: str, base: str, folder: Path,
-               linear_url: str | None) -> tuple[str, Path]:
+def _push_text(worktree: Path, branch: str, base: str, folder: Path, linear_url: str | None) -> tuple[str, Path]:
     """Parse `pr.md`, push the branch, and write the GitHub body next to it. Returns the title and body file."""
     title, body = parse((folder / "pr.md").read_text(encoding="utf-8"), linear_url)
     merge.push_branch(worktree, branch, base)
@@ -264,8 +282,7 @@ def _push_text(worktree: Path, branch: str, base: str, folder: Path,
     return title, body_file
 
 
-def _sync_text(worktree: Path, branch: str, base: str, url: str, folder: Path,
-               linear_url: str | None) -> None:
+def _sync_text(worktree: Path, branch: str, base: str, url: str, folder: Path, linear_url: str | None) -> None:
     """Push the branch, then replace the open pull request's title and description with `pr.md`."""
     title, body_file = _push_text(worktree, branch, base, folder, linear_url)
     merge._gh_output(worktree, "pr", "edit", url, "--title", title, "--body-file", str(body_file))
@@ -278,8 +295,20 @@ def _open(data: dict, folder: Path) -> tuple[str, str]:
         _sync_text(worktree, branch, base, data["rewrite_url"], folder, data.get("linear_url"))
         return data["rewrite_url"], "PR description rewritten"
     title, body_file = _push_text(worktree, branch, base, folder, data.get("linear_url"))
-    created = merge._gh_output(worktree, "pr", "create", "--draft", "--base", base, "--head", branch,
-                               "--title", title, "--body-file", str(body_file))
+    created = merge._gh_output(
+        worktree,
+        "pr",
+        "create",
+        "--draft",
+        "--base",
+        base,
+        "--head",
+        branch,
+        "--title",
+        title,
+        "--body-file",
+        str(body_file),
+    )
     return created.strip().splitlines()[-1], "PR opened"
 
 
@@ -295,9 +324,19 @@ def wait(store, ref, folder: Path, writer=None) -> int:
     who = f"{data['kind']} writer agent" if data["own_pane"] else "card's agent"
     try:
         if not data["own_pane"]:
-            start_module.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", pane,
-                                  "--until", "idle", "--timeout", str(WRITE_TIMEOUT_SECONDS * 1000)],
-                                 timeout=WRITE_TIMEOUT_SECONDS + 60)
+            start_module.command(
+                [
+                    os.environ.get("HERDR_BIN_PATH") or "herdr",
+                    "agent",
+                    "wait",
+                    pane,
+                    "--until",
+                    "idle",
+                    "--timeout",
+                    str(WRITE_TIMEOUT_SECONDS * 1000),
+                ],
+                timeout=WRITE_TIMEOUT_SECONDS + 60,
+            )
             herdr("agent", "prompt", pane, prompt_text(folder, ref))
         _wait_for_text(folder / "pr.md", pane, who)
         error = None
@@ -331,8 +370,9 @@ def open_url(worktree: Path, branch: str, record: dict) -> str | None:
     """The open pull request of the branch: from the record, else from GitHub."""
     if record.get("pr_state") == "open" and record.get("pr_url"):
         return record["pr_url"]
-    listed = json.loads(merge._gh_output(worktree, "pr", "list", "--head", branch, "--state", "open",
-                                         "--json", "url") or "[]")
+    listed = json.loads(
+        merge._gh_output(worktree, "pr", "list", "--head", branch, "--state", "open", "--json", "url") or "[]"
+    )
     return listed[0]["url"] if listed else None
 
 
@@ -362,8 +402,7 @@ def sync(merger, ref: str, fetch: bool = False) -> dict:
     card, ref, key, record = merger._started(ref)
     worktree = Path(record.get("worktree_path") or "")
     if not record.get("worktree_path") or not worktree.exists():
-        raise merge.MergeError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again",
-                               "not_started")
+        raise merge.MergeError(f"The worktree of {ref} was removed; run `herdboard start {ref}` again", "not_started")
     branch, base = record["branch"], record["base"]
     with _lock(".start-" + safe_key(key) + ".lock"):
         # Inside the lock, as in `merge`: a rewrite that starts between a check and the lock would race.
@@ -371,18 +410,22 @@ def sync(merger, ref: str, fetch: bool = False) -> dict:
         check_running(ref, current[1] if current is not None else record)
         url = open_url(worktree, branch, record)
         if url is None:
-            raise merge.MergeError(f"{ref} has no open pull request. "
-                                   f"Press m or run `herdboard merge {ref} --pr` first", "no_pr")
+            raise merge.MergeError(
+                f"{ref} has no open pull request. Press m or run `herdboard merge {ref} --pr` first", "no_pr"
+            )
         if fetch:
             return _fetch_description(merger, ref, key, record, worktree, url)
         folder = Path(record.get("pr_folder") or "")
         file = folder / "pr.md"
         if not record.get("pr_folder") or not file.exists():
-            raise merge.MergeError(f"{ref} has no written pull request description; "
-                                   f"run `herdboard pr-sync {ref} --fetch` first", "no_description")
+            raise merge.MergeError(
+                f"{ref} has no written pull request description; run `herdboard pr-sync {ref} --fetch` first",
+                "no_description",
+            )
         if merge._dirty(worktree):
-            raise merge.MergeError(f"{worktree} has uncommitted changes. The agent must commit them first.",
-                                   "worktree_dirty")
+            raise merge.MergeError(
+                f"{worktree} has uncommitted changes. The agent must commit them first.", "worktree_dirty"
+            )
         # A Linear card's link is not in the record after the writer settled. Only a Linear ref has
         # no card here, so then the issue is worth a read. A failed read fails the sync, as `merge` does.
         linear_url = card.url if card is not None and card.source == "linear" else None

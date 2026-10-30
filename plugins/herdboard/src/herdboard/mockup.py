@@ -66,7 +66,7 @@ def _slug(prompt: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")
     if len(slug) > SLUG_LENGTH:
         # Cut at a word end, unless the first word alone is too long.
-        cut = slug[:SLUG_LENGTH + 1]
+        cut = slug[: SLUG_LENGTH + 1]
         slug = cut.rsplit("-", 1)[0] if "-" in cut else cut[:SLUG_LENGTH]
     return slug or "mockup"
 
@@ -76,12 +76,13 @@ def _stamp() -> str:
 
 
 def _instruction(prompt: str, quality: str, images) -> str:
-    lines = ["Generate exactly one image with your image generation tool: a UI mockup of the screen below.",
-             f"Make it {quality} quality." if quality != "auto" else "Choose the image quality yourself."]
+    lines = [
+        "Generate exactly one image with your image generation tool: a UI mockup of the screen below.",
+        f"Make it {quality} quality." if quality != "auto" else "Choose the image quality yourself.",
+    ]
     if images:
         lines.append("Use the attached images: edit them, or follow their layout and style, as the description says.")
-    lines += ["Do not write or change any other file. Reply with only the path of the saved image.", "",
-              prompt.strip()]
+    lines += ["Do not write or change any other file. Reply with only the path of the saved image.", "", prompt.strip()]
     return "\n".join(lines)
 
 
@@ -123,11 +124,22 @@ def _error_text(event: dict) -> str | None:
 def _saved_image(events: list[dict]) -> tuple[Path | None, bool, str]:
     """The PNG that Codex saved, True when it is in Codex's own folder for this run, and the text that
     explains a missing one."""
-    thread = next((event.get("thread_id") for event in events
-                   if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str)), None)
-    messages = [event["item"]["text"] for event in events
-                if event.get("type") == "item.completed" and isinstance(event.get("item"), dict)
-                and event["item"].get("type") == "agent_message" and isinstance(event["item"].get("text"), str)]
+    thread = next(
+        (
+            event.get("thread_id")
+            for event in events
+            if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str)
+        ),
+        None,
+    )
+    messages = [
+        event["item"]["text"]
+        for event in events
+        if event.get("type") == "item.completed"
+        and isinstance(event.get("item"), dict)
+        and event["item"].get("type") == "agent_message"
+        and isinstance(event["item"].get("text"), str)
+    ]
     errors = [text for text in map(_error_text, events) if text]
     if thread:
         folder = _codex_home() / "generated_images" / thread
@@ -147,15 +159,28 @@ def generate(config, ref: str, prompt: str, images=(), quality: str = "medium", 
     """Run Codex for one image of `prompt` and return the draft's path."""
     images = _check(prompt, images, quality)
     if shutil.which("codex") is None:
-        raise MockupError("The codex command is not installed. Install the Codex CLI and log in with a "
-                          "ChatGPT account.", "codex_missing")
+        raise MockupError(
+            "The codex command is not installed. Install the Codex CLI and log in with a ChatGPT account.",
+            "codex_missing",
+        )
     folder = drafts_dir(ref)
     try:
         folder.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         raise MockupError(f"{folder}: cannot create the drafts folder: {error}", "io") from error
-    argv = ["codex", "exec", "--json", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
-            "-m", config.mockup_model, "-C", str(folder)]
+    argv = [
+        "codex",
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "-s",
+        "read-only",
+        "-m",
+        config.mockup_model,
+        "-C",
+        str(folder),
+    ]
     for image in images:
         argv += ["-i", str(image)]
     # `-i` takes every value after it, so `--` ends it before the instruction.
@@ -220,8 +245,13 @@ def open_file(path: Path) -> None:
     """Open the file in the system's default application, and do not wait for it."""
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     try:
-        subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(
+            [opener, str(path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     except OSError as error:
         print(f"herdboard: cannot open {path} with {opener}: {error}", file=sys.stderr)
 
@@ -241,8 +271,14 @@ def show(paths, config_file: Path | None = None, numbers=None, total=None) -> st
         if pane:
             labels = [f"--option {number}" for number in numbers or []]
             labels += [f"--total {total}"] if total is not None else []
-            viewer = " ".join([start.herdboard_command(config_file), "mockup-view", *labels,
-                               *(shlex.quote(str(path)) for path in paths)])
+            viewer = " ".join(
+                [
+                    start.herdboard_command(config_file),
+                    "mockup-view",
+                    *labels,
+                    *(shlex.quote(str(path)) for path in paths),
+                ]
+            )
             # Herdr prints nothing for `pane run` when it works, so only the exit code counts.
             try:
                 result = start.command([os.environ.get("HERDR_BIN_PATH") or "herdr", "pane", "run", pane, viewer])
@@ -265,6 +301,7 @@ class Terminal:
     def __enter__(self):
         import termios
         import tty
+
         self.input = sys.stdin.fileno()
         self.out = sys.stdout.fileno()
         self.saved = termios.tcgetattr(self.input)
@@ -274,12 +311,13 @@ class Terminal:
 
     def __exit__(self, *exc):
         import termios
+
         self.write(b"\033[?25h")
         termios.tcsetattr(self.input, termios.TCSADRAIN, self.saved)
 
     def write(self, data: bytes) -> None:
         while data:
-            data = data[os.write(self.out, data):]
+            data = data[os.write(self.out, data) :]
 
     def read(self, timeout: float | None = None) -> bytes:
         ready, _, _ = select.select([self.input], [], [], timeout)
@@ -290,9 +328,9 @@ class Terminal:
         import fcntl
         import struct
         import termios
+
         try:
-            rows, columns, width, height = struct.unpack(
-                "HHHH", fcntl.ioctl(self.out, termios.TIOCGWINSZ, b"\0" * 8))
+            rows, columns, width, height = struct.unpack("HHHH", fcntl.ioctl(self.out, termios.TIOCGWINSZ, b"\0" * 8))
         except OSError:
             columns, rows = shutil.get_terminal_size()
             width = height = 0
@@ -332,8 +370,10 @@ def _fit(data: bytes, terminal) -> tuple[int, int]:
     if not size or not all(size):
         return columns, rows
     scale = min(columns * cell_width / size[0], rows * cell_height / size[1])
-    return (max(1, min(columns, round(size[0] * scale / cell_width))),
-            max(1, min(rows, round(size[1] * scale / cell_height))))
+    return (
+        max(1, min(columns, round(size[0] * scale / cell_width))),
+        max(1, min(rows, round(size[1] * scale / cell_height))),
+    )
 
 
 def _draw(terminal, paths: list[Path], index: int, numbers: list[int], total: int) -> None:
@@ -342,7 +382,7 @@ def _draw(terminal, paths: list[Path], index: int, numbers: list[int], total: in
     columns, rows = _fit(data, terminal)
     terminal.write(b"\033[2J\033[H\033_Ga=d\033\\")
     encoded = base64.b64encode(data)
-    chunks = [encoded[at:at + CHUNK] for at in range(0, len(encoded), CHUNK)] or [b""]
+    chunks = [encoded[at : at + CHUNK] for at in range(0, len(encoded), CHUNK)] or [b""]
     for number, chunk in enumerate(chunks):
         more = 1 if number < len(chunks) - 1 else 0
         controls = f"a=T,f=100,c={columns},r={rows},q=2,m={more}" if number == 0 else f"m={more}"
@@ -432,8 +472,12 @@ def view(paths, terminal=None, numbers=None, total=None) -> int:
         else:
             for path in paths:
                 open_file(path)
-            lines = ["This terminal shows no images. The drafts open in the default viewer:",
-                     *(f"{number}. {path}" for number, path in zip(numbers, paths, strict=False)), "", "Enter close"]
+            lines = [
+                "This terminal shows no images. The drafts open in the default viewer:",
+                *(f"{number}. {path}" for number, path in zip(numbers, paths, strict=False)),
+                "",
+                "Enter close",
+            ]
             screen.write("\r\n".join(lines).encode())
             for key in _read_keys(screen):
                 if key in CLOSE_KEYS:

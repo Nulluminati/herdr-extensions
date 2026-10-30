@@ -40,8 +40,12 @@ class CandidateTests(unittest.TestCase):
         self.config = Config()
 
     def test_states_match_the_column_of_their_type(self):
-        states = [state("Backlog", "backlog"), state("Todo", "unstarted"), state("Doing", "started"),
-                  state("Done", "completed")]
+        states = [
+            state("Backlog", "backlog"),
+            state("Todo", "unstarted"),
+            state("Doing", "started"),
+            state("Done", "completed"),
+        ]
         self.assertEqual(names(candidates(self.config, states, "In progress")), ["Doing"])
         self.assertEqual(names(candidates(self.config, states, "done")), ["Done"])
 
@@ -67,8 +71,9 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(names(candidates(self.config, only, "Backlog")), ["Triage"])
 
     def test_two_backlog_states_stay_candidates(self):
-        found = candidates(self.config, [state("Icebox", "backlog"), state("Backlog", "backlog"),
-                                         state("Triage", "triage")], "Backlog")
+        found = candidates(
+            self.config, [state("Icebox", "backlog"), state("Backlog", "backlog"), state("Triage", "triage")], "Backlog"
+        )
         self.assertEqual(names(found), ["Icebox", "Backlog"])
 
     def test_config_columns_change_the_mapping(self):
@@ -84,6 +89,7 @@ class CandidateTests(unittest.TestCase):
 class ResolveTests(unittest.TestCase):
     def setUp(self):
         import tempfile
+
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.folder = Path(self.tmp.name) / "o1" / "u1"
@@ -96,11 +102,11 @@ class ResolveTests(unittest.TestCase):
         def ask(team_key, column, found):
             self.asked.append((team_key, column, names(found)))
             return next(s for s in found if s["name"] == pick)
+
         return ask
 
     def resolve(self, column="In progress", ask=refuse, state_name=None, states=None):
-        return resolve_state(self.config, self.choices, ENG, states or self.states, column, ask,
-                             state_name)
+        return resolve_state(self.config, self.choices, ENG, states or self.states, column, ask, state_name)
 
     def test_one_candidate_needs_no_question(self):
         self.assertEqual(self.resolve("Todo")["name"], "Todo")
@@ -135,8 +141,9 @@ class ResolveTests(unittest.TestCase):
         left = [s for s in self.states if s["name"] != "Coding"] + [state("Building", "started")]
         self.assertEqual(self.resolve(ask=self.ask("Building"), states=left)["name"], "Building")
         self.assertEqual(len(self.asked), 2)
-        self.assertEqual(json.loads((self.folder / "state-choices.json").read_text()),
-                         {"t-eng": {"in progress": "id-Building"}})
+        self.assertEqual(
+            json.loads((self.folder / "state-choices.json").read_text()), {"t-eng": {"in progress": "id-Building"}}
+        )
 
     def test_stale_choice_without_a_new_answer_is_removed(self):
         self.resolve(ask=self.ask("Coding"))
@@ -174,8 +181,7 @@ class ResolveTests(unittest.TestCase):
     def test_choices_are_per_team(self):
         self.resolve(ask=self.ask("Coding"))
         other = {"id": "t-ops", "key": "OPS"}
-        found = resolve_state(self.config, self.choices, other, self.states, "In progress",
-                              self.ask("Doing"))
+        found = resolve_state(self.config, self.choices, other, self.states, "In progress", self.ask("Doing"))
         self.assertEqual(found["name"], "Doing")
 
     def test_unreadable_choices_file_is_ignored(self):
@@ -196,6 +202,7 @@ class MoveTests(WriterCase):
         eng = next(s for s in self.fixtures["teams"][0]["states"] if s["name"] == "Doing")
         self.assertNotEqual(moved["state"]["id"], eng["id"])
         from herdboard.linear import LinearWriteRejectedError
+
         with self.assertRaises(LinearWriteRejectedError):
             self.source_in_use.client.update_issue(issue["id"], state_id=eng["id"])
         self.assertEqual(issue["state"]["id"], "ws-OPS-Doing")
@@ -295,8 +302,7 @@ class AmbiguityTests(WriterCase):
         writer = self.writer()
         writer.move("ENG-1", "In progress", ask=ask)
         self.assertEqual(self.issue("ENG-1")["state"]["name"], "Coding")
-        self.assertEqual(json.loads(self.choices_file().read_text()),
-                         {"t-eng": {"in progress": "ws-ENG-Coding"}})
+        self.assertEqual(json.loads(self.choices_file().read_text()), {"t-eng": {"in progress": "ws-ENG-Coding"}})
         writer.move("ENG-3", "In progress", ask=ask)
         self.assertEqual(asked, [["Doing", "Coding"]])
         self.assertEqual(self.issue("ENG-3")["state"]["name"], "Coding")
@@ -321,6 +327,7 @@ class AmbiguityTests(WriterCase):
 class UnknownResultTests(WriterCase):
     def test_delayed_commit_after_first_verification_read_succeeds(self):
         import time
+
         self.slow_mutation("delayed_commit")
         writer = self.writer()
         real = writer.source.client.issue_for_write
@@ -455,8 +462,7 @@ class UnknownResultTests(WriterCase):
         issue_id = self.requests("IssueCreate")[0]["variables"]["input"]["id"]
         self.assertEqual(caught.exception.issue_id, issue_id)
         self.assertIn(issue_id, str(caught.exception))
-        self.assertEqual(writer.source.client.issue_for_write.call_args_list,
-                         [mock.call(issue_id)] * 3)
+        self.assertEqual(writer.source.client.issue_for_write.call_args_list, [mock.call(issue_id)] * 3)
 
 
 class CreateTests(WriterCase):
@@ -470,8 +476,16 @@ class CreateTests(WriterCase):
         issue = self.writer().create("New thing", team="eng")
         inputs = self.create_input()
         self.assertEqual(str(uuid.UUID(inputs["id"])), inputs["id"])
-        self.assertEqual(inputs, {"id": inputs["id"], "teamId": "t-eng", "title": "New thing",
-                                  "stateId": "ws-ENG-Backlog", "assigneeId": "u1"})
+        self.assertEqual(
+            inputs,
+            {
+                "id": inputs["id"],
+                "teamId": "t-eng",
+                "title": "New thing",
+                "stateId": "ws-ENG-Backlog",
+                "assigneeId": "u1",
+            },
+        )
         self.assertEqual((issue["id"], issue["identifier"]), (inputs["id"], "ENG-7"))
 
     def test_two_creates_use_different_ids(self):
@@ -543,8 +557,11 @@ class CreateTests(WriterCase):
 class ConnectionTests(WriterCase):
     def test_offline_writes_are_refused_without_a_request(self):
         writer = self.writer(offline=True)
-        for call in (lambda: writer.move("ENG-1", "Todo"), lambda: writer.done("ENG-1"),
-                     lambda: writer.create("x", team="ENG")):
+        for call in (
+            lambda: writer.move("ENG-1", "Todo"),
+            lambda: writer.done("ENG-1"),
+            lambda: writer.create("x", team="ENG"),
+        ):
             with self.assertRaises(LinearOfflineError) as caught:
                 call()
             self.assertEqual(caught.exception.code, "linear_offline")
@@ -560,6 +577,7 @@ class ConnectionTests(WriterCase):
 
     def test_linear_off_is_reported(self):
         import os
+
         del os.environ["LINEAR_API_KEY"]
         with self.assertRaises(Exception) as caught:
             self.writer().move("ENG-1", "Todo")

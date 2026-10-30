@@ -72,8 +72,7 @@ def agents_in_scope() -> list[dict]:
         if not wanted:
             return []
     agents = herdr_json("agent", "list").get("result", {}).get("agents") or []
-    return [agent for agent in agents
-            if isinstance(agent.get("pane_id"), str) and wanted in (None, agent["pane_id"])]
+    return [agent for agent in agents if isinstance(agent.get("pane_id"), str) and wanted in (None, agent["pane_id"])]
 
 
 def shows_codex_values(agent: dict) -> bool:
@@ -138,6 +137,7 @@ def load_price(model: str | None) -> dict | None:
 
 def call_cost(usage: dict, price: dict) -> float:
     """The cost of one model call in dollars, as pi's calculateCost works it out."""
+
     def count(name):
         value = usage.get(name)
         return value if isinstance(value, (int, float)) else 0
@@ -152,10 +152,12 @@ def call_cost(usage: dict, price: dict) -> float:
         above = tier.get("inputTokensAbove", -1)
         if total_input > above > threshold:
             rates, threshold = tier, above
-    return ((total_input - cached - written) * rates.get("input", 0)
-            + cached * rates.get("cacheRead", 0)
-            + written * rates.get("cacheWrite", 0)
-            + count("output_tokens") * rates.get("output", 0)) / 1_000_000
+    return (
+        (total_input - cached - written) * rates.get("input", 0)
+        + cached * rates.get("cacheRead", 0)
+        + written * rates.get("cacheWrite", 0)
+        + count("output_tokens") * rates.get("output", 0)
+    ) / 1_000_000
 
 
 def tokens(agent: dict) -> tuple[str | None, str | None]:
@@ -180,8 +182,9 @@ def report(pane_id: str, context: str | None, cost: str | None) -> None:
     changes = []
     for name, value in ((CONTEXT_TOKEN, context), (COST_TOKEN, cost)):
         changes += ["--token", f"{name}={value}"] if value else ["--clear-token", name]
-    command([herdr_bin(), "pane", "report-metadata", pane_id,
-             "--source", SOURCE, "--seq", str(time.time_ns()), *changes])
+    command(
+        [herdr_bin(), "pane", "report-metadata", pane_id, "--source", SOURCE, "--seq", str(time.time_ns()), *changes]
+    )
 
 
 def failure(error: Exception) -> str:

@@ -23,6 +23,7 @@ class LinearCliCase(CliTestCase, LinearEnvTestCase):
 
     def store_for(self):
         from herdboard.config import load_config
+
         return Store(load_config(self.config))
 
     def relink(self, *links):

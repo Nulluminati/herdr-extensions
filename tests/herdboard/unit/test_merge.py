@@ -1,4 +1,5 @@
 """Merge a card branch into its base with a rebase and a fast-forward, then finish the card."""
+
 import json
 import os
 import shutil
@@ -39,8 +40,17 @@ class MergeLocalTests(MergeTestCase):
         main = self.main_branch()
         self.assertEqual(self.git(self.repo, "rev-parse", main), head)
         self.assertEqual((self.repo / "a.txt").read_text(), "a\n")
-        self.assertEqual(result, {"ref": self.card.ref, "mode": "local", "base": main, "commit": head,
-                                  "worktree_removed": True, "branch_deleted": True})
+        self.assertEqual(
+            result,
+            {
+                "ref": self.card.ref,
+                "mode": "local",
+                "base": main,
+                "commit": head,
+                "worktree_removed": True,
+                "branch_deleted": True,
+            },
+        )
         self.assertFalse(self.worktree.exists())
         self.assertFalse(self.branch_exists(self.branch))
         card = self.store.show(self.card.ref)
@@ -151,25 +161,31 @@ class OldRecordTests(MergeTestCase):
 
 class ConflictTests(MergeTestCase):
     def test_conflict_restart_models_are_scoped_to_their_agent(self):
-        for kind, configured, model, expected in (("codex", "claude", "opus", None),
-                                                  ("pi", "claude", "opus", None),
-                                                  ("codex", "codex", "gpt-6.1-sol", "gpt-6.1-sol")):
+        for kind, configured, model, expected in (
+            ("codex", "claude", "opus", None),
+            ("pi", "claude", "opus", None),
+            ("codex", "codex", "gpt-6.1-sol", "gpt-6.1-sol"),
+        ):
             with self.subTest(kind=kind, configured=configured):
                 self.config.start_agent = configured
                 self.config.start_model = model
                 record = {"agent": kind, "pane_id": "w9:p1"}
-                with patch.object(merge, "agent_live", return_value=False), \
-                        patch.object(self.merger, "_move", return_value=self.card), \
-                        patch.object(merge, "Starter") as starter:
+                with (
+                    patch.object(merge, "agent_live", return_value=False),
+                    patch.object(self.merger, "_move", return_value=self.card),
+                    patch.object(merge, "Starter") as starter,
+                ):
                     self.merger._send_conflict(self.card, self.card.ref, self.card.ref, record, "main", ["a.py"])
                 self.assertEqual(starter.return_value.launch_agent.call_args.args[3], expected)
 
     def test_a_restarted_codex_gets_its_config_thinking_level(self):
         self.config.start_thinking = "ultra"
         record = {"agent": "codex", "pane_id": "w9:p1"}
-        with patch.object(merge, "agent_live", return_value=False), \
-                patch.object(self.merger, "_move", return_value=self.card), \
-                patch.object(merge, "Starter") as starter:
+        with (
+            patch.object(merge, "agent_live", return_value=False),
+            patch.object(self.merger, "_move", return_value=self.card),
+            patch.object(merge, "Starter") as starter,
+        ):
             self.merger._send_conflict(self.card, self.card.ref, self.card.ref, record, "main", ["a.py"])
         args = starter.return_value.launch_agent.call_args.args
         self.assertEqual((args[2], args[4]), ("codex", "ultra"))
@@ -239,6 +255,7 @@ class FinishTests(MergeTestCase):
         self.started()
         self.store.move(self.card.ref, "Review")
         from herdboard import review
+
         review.Reviewer(self.store, self.repo).review(self.card.ref)
         self.merger.finish(self.card.ref, force=True)
         self.assertEqual(self.calls("plugin", "pane", "close"), [["plugin", "pane", "close", "w9:p2:hunk"]])
@@ -323,8 +340,9 @@ class PullRequestTests(PullRequestTestCase):
 
     def test_the_board_merge_setting_picks_the_pull_request(self):
         text = self.board.read_text(encoding="utf-8")
-        self.board.write_text(text.replace("kanban-plugin: board\n", "kanban-plugin: board\nmerge: pr\n", 1),
-                              encoding="utf-8")
+        self.board.write_text(
+            text.replace("kanban-plugin: board\n", "kanban-plugin: board\nmerge: pr\n", 1), encoding="utf-8"
+        )
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.assertEqual(self.merger.merge(self.card.ref)["mode"], "pr")
@@ -401,7 +419,6 @@ class PullRequestStateTests(PullRequestTestCase):
         start.mark_removed([done])
         self.assertTrue(done.worktree_left)
 
-
     def test_the_board_card_knows_its_started_agent_while_the_worktree_exists(self):
         card = self.store.show(self.card.ref)
         start.mark_removed([card])
@@ -412,11 +429,11 @@ class PullRequestStateTests(PullRequestTestCase):
 
 
 class MergeModeTests(MergeTestCase):
-
     def set_board_merge(self, value):
         text = self.board.read_text(encoding="utf-8")
-        self.board.write_text(text.replace("kanban-plugin: board\n", f"kanban-plugin: board\nmerge: {value}\n", 1),
-                              encoding="utf-8")
+        self.board.write_text(
+            text.replace("kanban-plugin: board\n", f"kanban-plugin: board\nmerge: {value}\n", 1), encoding="utf-8"
+        )
 
     def test_the_mode_comes_from_the_board_then_the_config(self):
         record = {"repository": "x"}
@@ -446,19 +463,37 @@ class MergeCliTests(CliTestCase):
 
     def test_merge_pr_text(self):
         ref = self.card()
-        writing = {"ref": ref, "mode": "pr", "base": "main", "pr_url": None, "pr_action": "writing",
-                   "writer": "the card's agent", "folder": "/f"}
-        pushed = {"ref": ref, "mode": "pr", "base": "main", "pr_url": "https://github.com/acme/api/pull/7",
-                  "pr_action": "pushed"}
+        writing = {
+            "ref": ref,
+            "mode": "pr",
+            "base": "main",
+            "pr_url": None,
+            "pr_action": "writing",
+            "writer": "the card's agent",
+            "folder": "/f",
+        }
+        pushed = {
+            "ref": ref,
+            "mode": "pr",
+            "base": "main",
+            "pr_url": "https://github.com/acme/api/pull/7",
+            "pr_action": "pushed",
+        }
         with patch("herdboard.cli.Merger") as merger:
             merger.return_value.merge.return_value = writing
             out, _ = self.run_cli("merge", ref, "--pr", directory=self.plain)
-            self.assertEqual(out, f"{ref}: the card's agent writes the pull request description. Files: /f\n"
-                                  "The draft pull request opens when the description is ready.\n")
+            self.assertEqual(
+                out,
+                f"{ref}: the card's agent writes the pull request description. Files: /f\n"
+                "The draft pull request opens when the description is ready.\n",
+            )
             merger.return_value.merge.return_value = pushed
             out, _ = self.run_cli("merge", ref, "--pr", directory=self.plain)
-            self.assertEqual(out, f"{ref}: pushed to the open pull request https://github.com/acme/api/pull/7\n"
-                                  "Use --rewrite to rewrite its description.\n")
+            self.assertEqual(
+                out,
+                f"{ref}: pushed to the open pull request https://github.com/acme/api/pull/7\n"
+                "Use --rewrite to rewrite its description.\n",
+            )
             merger.return_value.merge.return_value = {**writing, "pr_url": "https://github.com/acme/api/pull/7"}
             out, _ = self.run_cli("merge", ref, "--rewrite", directory=self.plain)
             self.assertIn("rewrites the description of https://github.com/acme/api/pull/7", out)
@@ -466,14 +501,22 @@ class MergeCliTests(CliTestCase):
 
     def test_merge_and_finish_text(self):
         ref = self.card()
-        merged = {"ref": ref, "mode": "local", "base": "main", "commit": "abcdef1234",
-                  "worktree_removed": True, "branch_deleted": True}
+        merged = {
+            "ref": ref,
+            "mode": "local",
+            "base": "main",
+            "commit": "abcdef1234",
+            "worktree_removed": True,
+            "branch_deleted": True,
+        }
         finished = {"ref": ref, "worktree_removed": True, "branch_deleted": False}
         with patch("herdboard.cli.Merger") as merger:
             merger.return_value.merge.return_value = merged
             merger.return_value.finish.return_value = finished
             out, _ = self.run_cli("merge", ref, "--local", directory=self.plain)
-            self.assertEqual(out, f"{ref}: merged into main at abcdef1\n{ref}: finished; worktree removed; branch deleted\n")
+            self.assertEqual(
+                out, f"{ref}: merged into main at abcdef1\n{ref}: finished; worktree removed; branch deleted\n"
+            )
             merger.return_value.merge.assert_called_with(ref, mode="local", force=False, rewrite=False)
             out, _ = self.run_cli("finish", ref, "--force", directory=self.plain)
             self.assertEqual(out, f"{ref}: finished; worktree removed; branch kept\n")
@@ -481,8 +524,12 @@ class MergeCliTests(CliTestCase):
 
     def test_finish_text_for_a_card_without_a_repository(self):
         with patch("herdboard.cli.Merger") as merger:
-            merger.return_value.finish.return_value = {"ref": "t123", "worktree_removed": True,
-                                                       "branch_deleted": False, "mode": "new_repo"}
+            merger.return_value.finish.return_value = {
+                "ref": "t123",
+                "worktree_removed": True,
+                "branch_deleted": False,
+                "mode": "new_repo",
+            }
             out, _ = self.run_cli("finish", "t123", directory=self.plain)
         self.assertEqual(out, "t123: finished; card folder removed\n")
 
@@ -515,12 +562,20 @@ class PrSyncCliTests(CliTestCase):
         ref = self.card()
         url = "https://github.com/acme/api/pull/7"
         with patch("herdboard.cli.Merger") as merger:
-            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": url, "path": "/p/pr.md",
-                                                        "action": "updated"}
+            merger.return_value.sync_pr.return_value = {
+                "ref": ref,
+                "pr_url": url,
+                "path": "/p/pr.md",
+                "action": "updated",
+            }
             out, _ = self.run_cli("pr-sync", ref, directory=self.plain)
             self.assertEqual(out, f"{ref}: updated {url}\n")
-            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": None, "path": "/p/pr.md",
-                                                        "action": "fetched"}
+            merger.return_value.sync_pr.return_value = {
+                "ref": ref,
+                "pr_url": None,
+                "path": "/p/pr.md",
+                "action": "fetched",
+            }
             out, _ = self.run_cli("pr-sync", ref, "--fetch", directory=self.plain)
             self.assertEqual(out, f"{ref}: wrote /p/pr.md. Edit it, then run herdboard pr-sync {ref}.\n")
             merger.return_value.sync_pr.assert_called_with(ref, fetch=True)
@@ -529,12 +584,20 @@ class PrSyncCliTests(CliTestCase):
         ref = self.card()
         url = "https://github.com/acme/api/pull/7"
         with patch("herdboard.cli.Merger") as merger:
-            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": url, "path": "/p/pr.md",
-                                                        "action": "updated"}
+            merger.return_value.sync_pr.return_value = {
+                "ref": ref,
+                "pr_url": url,
+                "path": "/p/pr.md",
+                "action": "updated",
+            }
             data = self.run_json("pr-sync", ref, directory=self.plain)
             self.assertEqual(data, {"ref": ref, "pr_url": url, "path": "/p/pr.md", "action": "updated"})
-            merger.return_value.sync_pr.return_value = {"ref": ref, "pr_url": None, "path": "/p/pr.md",
-                                                        "action": "fetched"}
+            merger.return_value.sync_pr.return_value = {
+                "ref": ref,
+                "pr_url": None,
+                "path": "/p/pr.md",
+                "action": "fetched",
+            }
             data = self.run_json("pr-sync", ref, "--fetch", directory=self.plain)
         self.assertEqual(data, {"ref": ref, "pr_url": None, "path": "/p/pr.md", "action": "fetched"})
 
@@ -570,8 +633,9 @@ class NoRepositoryFinishTests(MergeTestCase):
     def test_finish_closes_the_workspace_and_deletes_a_non_empty_folder(self):
         (self.folder / "scratch.txt").write_text("work in progress\n")
         result = self.merger.finish(self.card.ref)
-        self.assertEqual(result, {"ref": self.card.ref, "worktree_removed": True, "branch_deleted": False,
-                                  "mode": "repoless"})
+        self.assertEqual(
+            result, {"ref": self.card.ref, "worktree_removed": True, "branch_deleted": False, "mode": "repoless"}
+        )
         self.assertFalse(self.folder.exists())
         self.assertIn(["workspace", "close", "x1"], self.fake.calls)
         card = self.store.show(self.card.ref)

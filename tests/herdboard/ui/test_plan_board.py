@@ -1,4 +1,5 @@
 """The board shows a planner without moving its card to another column."""
+
 import fcntl
 import threading
 from unittest.mock import patch
@@ -16,9 +17,12 @@ class PlanningBoardTests(BoardTestCase):
         self.pane_exists = self.enterContext(patch.object(plan, "_pane_exists", return_value=True))
 
     def record(self, kind="pi"):
-        start._write(start.state_dir() / "plans.json", {
-            self.card.ref: {"pane_id": "w1:p7", "kind": kind},
-        })
+        start._write(
+            start.state_dir() / "plans.json",
+            {
+                self.card.ref: {"pane_id": "w1:p7", "kind": kind},
+            },
+        )
 
     async def test_a_live_planner_shows_its_kind_without_moving_the_card(self):
         for kind in ("pi", "claude"):
@@ -161,5 +165,3 @@ class PlanningBoardTests(BoardTestCase):
             await app.check_files()
         self.assertTrue(threads)
         self.assertNotIn(threading.get_ident(), threads)
-
-

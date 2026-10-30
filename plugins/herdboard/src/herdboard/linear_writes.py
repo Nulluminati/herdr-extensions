@@ -49,8 +49,7 @@ class LinearWriter:
         self.source.require_active()
         if self.source.offline:
             raise LinearOfflineError(
-                "Linear writes need a connection: do not use --offline, "
-                "and Linear cards are read only offline"
+                "Linear writes need a connection: do not use --offline, and Linear cards are read only offline"
             )
         return self.source.client
 
@@ -61,9 +60,7 @@ class LinearWriter:
         try:
             yield client
         except LinearNetworkError as error:
-            raise LinearOfflineError(
-                f"Linear is not reachable, and writes need a connection: {error}"
-            ) from error
+            raise LinearOfflineError(f"Linear is not reachable, and writes need a connection: {error}") from error
 
     # Operations
 
@@ -85,16 +82,12 @@ class LinearWriter:
                 raise NotFoundError(f"No card {identifier}")
             team = issue["team"]
             choices = StateChoices(self.source.account_dir())
-            state = resolve_state(
-                self.config, choices, team, client.team_states(team["id"]), column, ask, state_name
-            )
+            state = resolve_state(self.config, choices, team, client.team_states(team["id"]), column, ask, state_name)
             if issue["state"]["id"] == state["id"] and position is None:
                 return self._full(client, issue["identifier"], {"labels": [], **issue})
             sort_order = self._sort_order(client, team, state, position)
             try:
-                result = client.update_issue(
-                    issue["id"], state_id=state["id"], sort_order=sort_order
-                )
+                result = client.update_issue(issue["id"], state_id=state["id"], sort_order=sort_order)
             except LinearWriteUnknownError as error:
                 try:
                     result = self._reconcile_update(client, issue, state, sort_order, error)
@@ -106,9 +99,7 @@ class LinearWriter:
 
     def done(self, identifier: str, ask: Ask = refuse, state_name: str | None = None) -> dict:
         """Move an issue to the column that config maps completed states to."""
-        return self.move(
-            identifier, self.config.linear.columns["completed"], None, ask, state_name
-        )
+        return self.move(identifier, self.config.linear.columns["completed"], None, ask, state_name)
 
     def create(
         self,
@@ -203,9 +194,7 @@ class LinearWriter:
         if position is None:
             return None
         closed = state["type"] in ("completed", "canceled")
-        orders = client.state_sort_orders(
-            team["id"], state["id"], self.config.linear.done_days if closed else None
-        )
+        orders = client.state_sort_orders(team["id"], state["id"], self.config.linear.done_days if closed else None)
         if not orders:
             return None
         return min(orders) - 1 if position == "top" else max(orders) + 1
@@ -238,8 +227,10 @@ class LinearWriter:
         """Fetch the issue after an unknown result. Never sends the write again."""
         identifier = issue["identifier"]
         for found in self._verification_reads(client, identifier):
-            if found is not None and found["state"]["id"] == state["id"] and (
-                sort_order is None or found["sortOrder"] == sort_order
+            if (
+                found is not None
+                and found["state"]["id"] == state["id"]
+                and (sort_order is None or found["sortOrder"] == sort_order)
             ):
                 return found
         raise self._unknown(identifier) from error

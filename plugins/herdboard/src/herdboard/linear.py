@@ -99,13 +99,16 @@ def nested_query(operation, root, field, fields):
 VIEWER_QUERY = """query Viewer {
     viewer { id name email organization { id name urlKey } }
 }"""
-TEAMS_QUERY = list_query("Teams", "teams", "TeamFilter",
-                         f"id key name states(first: 50) {{ nodes {{ {STATE_FIELDS} }} {PAGE_INFO} }}")
-PROJECTS_QUERY = list_query("Projects", "projects", "ProjectFilter",
-                            f"id name teams(first: 50) {{ nodes {{ id key }} {PAGE_INFO} }}")
+TEAMS_QUERY = list_query(
+    "Teams", "teams", "TeamFilter", f"id key name states(first: 50) {{ nodes {{ {STATE_FIELDS} }} {PAGE_INFO} }}"
+)
+PROJECTS_QUERY = list_query(
+    "Projects", "projects", "ProjectFilter", f"id name teams(first: 50) {{ nodes {{ id key }} {PAGE_INFO} }}"
+)
 PROJECT_QUERY = list_query("Project", "projects", "ProjectFilter", "id name")
-PROJECT_FOR_WRITE_QUERY = list_query("ProjectForWrite", "projects", "ProjectFilter",
-                                     f"id name teams(first: 50) {{ nodes {{ id key }} {PAGE_INFO} }}")
+PROJECT_FOR_WRITE_QUERY = list_query(
+    "ProjectForWrite", "projects", "ProjectFilter", f"id name teams(first: 50) {{ nodes {{ id key }} {PAGE_INFO} }}"
+)
 LABEL_FIELDS = "id name team { id key }"
 LABELS_QUERY = list_query("Labels", "issueLabels", "IssueLabelFilter", LABEL_FIELDS)
 LABELS_BY_ID_QUERY = list_query("LabelsById", "issueLabels", "IssueLabelFilter", LABEL_FIELDS)
@@ -148,8 +151,7 @@ ISSUE_CREATE_QUERY = f"""mutation IssueCreate($input: IssueCreateInput!) {{
     issueCreate(input: $input) {{ success issue {{ {WRITE_ISSUE_FIELDS} url }} }}
 }}"""
 # Every query and mutation string above, for the schema validation test.
-QUERIES = {name: value for name, value in globals().items()
-           if name.endswith("_QUERY") and isinstance(value, str)}
+QUERIES = {name: value for name, value in globals().items() if name.endswith("_QUERY") and isinstance(value, str)}
 
 
 def response_field(data, path):
@@ -198,8 +200,7 @@ def number(value):
 def build_opener():
     """An opener without the redirect handler, so the key never reaches another host."""
     opener = OpenerDirector()
-    for handler in (ProxyHandler(), HTTPHandler(), HTTPSHandler(),
-                    HTTPDefaultErrorHandler(), HTTPErrorProcessor()):
+    for handler in (ProxyHandler(), HTTPHandler(), HTTPSHandler(), HTTPDefaultErrorHandler(), HTTPErrorProcessor()):
         opener.add_handler(handler)
     return opener
 
@@ -236,12 +237,13 @@ def rate_limit_wait(headers, attempt):
                 seconds = None
         if seconds is not None:
             return max(0.0, seconds)
-    return float(2 ** attempt)
+    return float(2**attempt)
 
 
 class LinearClient:
-    def __init__(self, api_key, endpoint="https://api.linear.app/graphql", timeout=20.0,
-                 max_retries=3, sleep=time.sleep):
+    def __init__(
+        self, api_key, endpoint="https://api.linear.app/graphql", timeout=20.0, max_retries=3, sleep=time.sleep
+    ):
         parts = urlsplit(endpoint)
         if parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in LOCAL_HOSTS):
             raise LinearError("Linear endpoint must use https://")
@@ -255,10 +257,15 @@ class LinearClient:
         self._opener = build_opener()
 
     def _send(self, body):
-        request = Request(self.endpoint, data=body, headers={
-            "Authorization": self.api_key, "Content-Type": "application/json",
-            "Accept": "application/json",
-        })
+        request = Request(
+            self.endpoint,
+            data=body,
+            headers={
+                "Authorization": self.api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
         try:
             with self._opener.open(request, timeout=self.timeout) as response:
                 return response.status, response.headers, response.read()
@@ -271,23 +278,23 @@ class LinearClient:
     def _request(self, operation, query, variables=None, *, mutation=False):
         try:
             return self._request_response(operation, query, variables, mutation=mutation)
-        except (LinearAuthError, LinearWriteRejectedError, LinearWriteUnknownError,
-                _LinearWriteRateLimitError):
+        except (LinearAuthError, LinearWriteRejectedError, LinearWriteUnknownError, _LinearWriteRateLimitError):
             raise
         except LinearError as error:
             if mutation:
                 raise LinearWriteUnknownError(
-                    f"Linear write result is unknown; check the issue in Linear: {error}") from error
+                    f"Linear write result is unknown; check the issue in Linear: {error}"
+                ) from error
             raise
 
     def _request_response(self, operation, query, variables=None, *, mutation=False):
-        body = json.dumps({"operationName": operation, "query": query,
-                           "variables": variables or {}}).encode("utf-8")
+        body = json.dumps({"operationName": operation, "query": query, "variables": variables or {}}).encode("utf-8")
         for attempt in range(1 if mutation else self.max_retries + 1):
             status, headers, raw = self._send(body)
             if mutation and 500 <= status < 600:
                 raise LinearWriteUnknownError(
-                    f"Linear write result is unknown (HTTP {status}); check the issue in Linear")
+                    f"Linear write result is unknown (HTTP {status}); check the issue in Linear"
+                )
             if status in (401, 403):
                 raise LinearAuthError(f"Linear authentication failed (HTTP {status}); check the API key and access")
             if status == 429:
@@ -309,10 +316,11 @@ class LinearClient:
             if "RATELIMITED" in codes:
                 if mutation:
                     message = "Linear write was rate limited and not applied"
-                    if any(headers.get(name) is not None for name in (
-                            "X-RateLimit-Requests-Reset", "X-RateLimit-Complexity-Reset", "Retry-After")):
-                        allowed = datetime.fromtimestamp(
-                            time.time() + rate_limit_wait(headers, attempt), UTC)
+                    if any(
+                        headers.get(name) is not None
+                        for name in ("X-RateLimit-Requests-Reset", "X-RateLimit-Complexity-Reset", "Retry-After")
+                    ):
+                        allowed = datetime.fromtimestamp(time.time() + rate_limit_wait(headers, attempt), UTC)
                         message += "; requests are allowed again at " + allowed.strftime("%Y-%m-%dT%H:%M:%SZ")
                     # This is a known non-write, not an unknown transport result.
                     raise _LinearWriteRateLimitError(message)
@@ -321,15 +329,16 @@ class LinearClient:
                 delay = rate_limit_wait(headers, attempt)
                 if delay > MAX_RATE_LIMIT_WAIT:
                     allowed = datetime.fromtimestamp(time.time() + delay, UTC)
-                    raise LinearError("Linear rate limit exceeded; requests are allowed again at "
-                                      + allowed.strftime("%Y-%m-%dT%H:%M:%SZ"))
+                    raise LinearError(
+                        "Linear rate limit exceeded; requests are allowed again at "
+                        + allowed.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    )
                 self.sleep(delay)
                 continue
             if "UNAUTHENTICATED" in codes or "AUTHENTICATION_ERROR" in codes:
                 raise LinearAuthError("Linear authentication failed; check the API key")
             if errors:
-                messages = "; ".join(str(e.get("message", e)) if isinstance(e, dict) else str(e)
-                                     for e in errors)
+                messages = "; ".join(str(e.get("message", e)) if isinstance(e, dict) else str(e) for e in errors)
                 if mutation:
                     raise LinearWriteRejectedError(f"Linear rejected the write: {messages}")
                 if "not found" in messages.casefold():
@@ -366,8 +375,9 @@ class LinearClient:
         nodes, cursor = read_page(response_field(owner, (field,)))
         if cursor is None:
             return nodes
-        return nodes + self._pages(operation, query, (root, "nodes", 0, field),
-                                   {"id": owner["id"]}, after=cursor, page_size=NESTED_PAGE_SIZE)
+        return nodes + self._pages(
+            operation, query, (root, "nodes", 0, field), {"id": owner["id"]}, after=cursor, page_size=NESTED_PAGE_SIZE
+        )
 
     def viewer(self) -> dict:
         return response_field(self._request("Viewer", VIEWER_QUERY), ("viewer",))
@@ -379,12 +389,12 @@ class LinearClient:
         return teams
 
     def team_states(self, team_id) -> list[dict]:
-        return self._pages("TeamStates", STATES_QUERY, ("teams", "nodes", 0, "states"),
-                           {"id": team_id}, page_size=NESTED_PAGE_SIZE)
+        return self._pages(
+            "TeamStates", STATES_QUERY, ("teams", "nodes", 0, "states"), {"id": team_id}, page_size=NESTED_PAGE_SIZE
+        )
 
     def team_by_key(self, key) -> dict | None:
-        teams = self._pages("TeamByKey", TEAM_BY_KEY_QUERY, ("teams",),
-                            {"filter": {"key": {"eqIgnoreCase": key}}})
+        teams = self._pages("TeamByKey", TEAM_BY_KEY_QUERY, ("teams",), {"filter": {"key": {"eqIgnoreCase": key}}})
         return teams[0] if teams else None
 
     def my_teams(self) -> list[dict]:
@@ -400,8 +410,7 @@ class LinearClient:
     def state_sort_orders(self, team_id, state_id, done_days) -> list[float]:
         filters = {"team": {"id": {"eq": team_id}}, "state": {"id": {"eq": state_id}}}
         filters.update(recent_filter(done_days))
-        issues = self._pages("StateSortOrders", STATE_SORT_ORDERS_QUERY, ("issues",),
-                             {"filter": filters})
+        issues = self._pages("StateSortOrders", STATE_SORT_ORDERS_QUERY, ("issues",), {"filter": filters})
         return [float(issue["sortOrder"]) for issue in issues]
 
     def _mutate(self, operation, query, field, variables):
@@ -416,9 +425,16 @@ class LinearClient:
             issue = response_field(payload, ("issue",))
             if not isinstance(issue, dict):
                 raise LinearError("Linear mutation is missing its issue")
-            for path in (("id",), ("identifier",), ("sortOrder",),
-                         ("state", "id"), ("state", "name"), ("state", "type"),
-                         ("team", "id"), ("team", "key")):
+            for path in (
+                ("id",),
+                ("identifier",),
+                ("sortOrder",),
+                ("state", "id"),
+                ("state", "name"),
+                ("state", "type"),
+                ("team", "id"),
+                ("team", "key"),
+            ):
                 if response_field(issue, path) is None:
                     raise LinearError("Linear mutation is missing issue fields")
             if field == "issueCreate" and not isinstance(issue.get("url"), str):
@@ -428,69 +444,88 @@ class LinearClient:
             raise
         except LinearError as error:
             raise LinearWriteUnknownError(
-                f"Linear write result is unknown; check the issue in Linear: {error}") from error
+                f"Linear write result is unknown; check the issue in Linear: {error}"
+            ) from error
 
     def update_issue(self, issue_id, *, state_id=None, sort_order=None) -> dict:
         fields = {"stateId": state_id, "sortOrder": sort_order}
         inputs = {key: value for key, value in fields.items() if value is not None}
-        return self._mutate("IssueUpdate", ISSUE_UPDATE_QUERY, "issueUpdate",
-                            {"id": issue_id, "input": inputs})
+        return self._mutate("IssueUpdate", ISSUE_UPDATE_QUERY, "issueUpdate", {"id": issue_id, "input": inputs})
 
-    def create_issue(self, *, issue_id, team_id, title, state_id=None, project_id=None,
-                     label_ids=None, assignee_id=None, sort_order=None, description=None,
-                     due_date=None, parent_id=None) -> dict:
-        fields = {"id": issue_id, "teamId": team_id, "title": title, "stateId": state_id,
-                  "projectId": project_id, "labelIds": label_ids, "assigneeId": assignee_id,
-                  "sortOrder": sort_order, "description": description, "dueDate": due_date,
-                  "parentId": parent_id}
+    def create_issue(
+        self,
+        *,
+        issue_id,
+        team_id,
+        title,
+        state_id=None,
+        project_id=None,
+        label_ids=None,
+        assignee_id=None,
+        sort_order=None,
+        description=None,
+        due_date=None,
+        parent_id=None,
+    ) -> dict:
+        fields = {
+            "id": issue_id,
+            "teamId": team_id,
+            "title": title,
+            "stateId": state_id,
+            "projectId": project_id,
+            "labelIds": label_ids,
+            "assigneeId": assignee_id,
+            "sortOrder": sort_order,
+            "description": description,
+            "dueDate": due_date,
+            "parentId": parent_id,
+        }
         inputs = {key: value for key, value in fields.items() if value is not None}
         return self._mutate("IssueCreate", ISSUE_CREATE_QUERY, "issueCreate", {"input": inputs})
 
     def find_projects(self, name) -> list[dict]:
-        projects = self._pages("Projects", PROJECTS_QUERY, ("projects",),
-                               {"filter": {"name": {"eqIgnoreCase": name}}})
+        projects = self._pages("Projects", PROJECTS_QUERY, ("projects",), {"filter": {"name": {"eqIgnoreCase": name}}})
         for project in projects:
-            project["teams"] = self._rest(project, "teams", "ProjectTeams",
-                                          PROJECT_TEAMS_QUERY, "projects")
+            project["teams"] = self._rest(project, "teams", "ProjectTeams", PROJECT_TEAMS_QUERY, "projects")
         return projects
 
     def projects_for_team(self, team_id) -> list[dict]:
         """The projects of one team, each with all its teams."""
-        projects = self._pages("Projects", PROJECTS_QUERY, ("projects",),
-                               {"filter": {"accessibleTeams": {"some": {"id": {"eq": team_id}}}}})
+        projects = self._pages(
+            "Projects",
+            PROJECTS_QUERY,
+            ("projects",),
+            {"filter": {"accessibleTeams": {"some": {"id": {"eq": team_id}}}}},
+        )
         for project in projects:
-            project["teams"] = self._rest(project, "teams", "ProjectTeams",
-                                          PROJECT_TEAMS_QUERY, "projects")
+            project["teams"] = self._rest(project, "teams", "ProjectTeams", PROJECT_TEAMS_QUERY, "projects")
         return projects
 
     def project(self, project_id) -> dict | None:
         # The filtered connection returns no nodes for missing or inaccessible
         # projects, without the non-null direct project query's error response.
-        projects = self._pages("Project", PROJECT_QUERY, ("projects",),
-                               {"filter": {"id": {"eq": project_id}}})
+        projects = self._pages("Project", PROJECT_QUERY, ("projects",), {"filter": {"id": {"eq": project_id}}})
         return projects[0] if projects else None
 
     def project_for_write(self, project_id) -> dict | None:
         """Find a project by stable ID, including all its teams."""
-        projects = self._pages("ProjectForWrite", PROJECT_FOR_WRITE_QUERY, ("projects",),
-                               {"filter": {"id": {"eq": project_id}}})
+        projects = self._pages(
+            "ProjectForWrite", PROJECT_FOR_WRITE_QUERY, ("projects",), {"filter": {"id": {"eq": project_id}}}
+        )
         if not projects:
             return None
         project = projects[0]
-        project["teams"] = self._rest(project, "teams", "ProjectTeams",
-                                      PROJECT_TEAMS_QUERY, "projects")
+        project["teams"] = self._rest(project, "teams", "ProjectTeams", PROJECT_TEAMS_QUERY, "projects")
         return project
 
     def find_labels(self, name) -> list[dict]:
-        return self._pages("Labels", LABELS_QUERY, ("issueLabels",),
-                           {"filter": {"name": {"eqIgnoreCase": name}}})
+        return self._pages("Labels", LABELS_QUERY, ("issueLabels",), {"filter": {"name": {"eqIgnoreCase": name}}})
 
     def labels(self, ids: list[str]) -> list[dict]:
         """The labels among ids that exist and are accessible."""
         if not ids:
             return []
-        return self._pages("LabelsById", LABELS_BY_ID_QUERY, ("issueLabels",),
-                           {"filter": {"id": {"in": list(ids)}}})
+        return self._pages("LabelsById", LABELS_BY_ID_QUERY, ("issueLabels",), {"filter": {"id": {"in": list(ids)}}})
 
     def project_issues(self, project_id, label_ids=None, done_days: int | None = 14) -> list[dict]:
         filters = {"project": {"id": {"eq": project_id}}}
@@ -518,10 +553,8 @@ class LinearClient:
         """
         if not team_ids:
             return []
-        filters = {"team": {"id": {"in": list(team_ids)}},
-                   "state": {"type": {"nin": ["completed", "canceled"]}}}
-        data = self._request("SearchIssues", SEARCH_ISSUES_QUERY,
-                             {"term": term, "first": first, "filter": filters})
+        filters = {"team": {"id": {"in": list(team_ids)}}, "state": {"type": {"nin": ["completed", "canceled"]}}}
+        data = self._request("SearchIssues", SEARCH_ISSUES_QUERY, {"term": term, "first": first, "filter": filters})
         nodes = response_field(data, ("searchIssues", "nodes"))
         if not isinstance(nodes, list):
             raise LinearError("Linear returned an invalid search response")
@@ -556,5 +589,4 @@ def recent_filter(done_days):
         return {}
     if isinstance(done_days, bool) or not isinstance(done_days, int) or done_days < 0:
         raise ValueError("done_days must be a non-negative integer or None")
-    return {"or": [{"completedAt": {"null": True}},
-                   {"completedAt": {"gte": f"-P{done_days}D"}}]}
+    return {"or": [{"completedAt": {"null": True}}, {"completedAt": {"gte": f"-P{done_days}D"}}]}

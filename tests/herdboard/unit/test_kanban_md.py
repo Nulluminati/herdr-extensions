@@ -159,9 +159,7 @@ class ParseFullTest(unittest.TestCase):
         self.board = kanban_md.parse(FULL)
 
     def test_frontmatter_and_preamble(self):
-        self.assertEqual(
-            self.board.frontmatter, ["---", "", "kanban-plugin: board", "", "---"]
-        )
+        self.assertEqual(self.board.frontmatter, ["---", "", "kanban-plugin: board", "", "---"])
         self.assertEqual(self.board.preamble, [""])
         self.assertEqual(self.board.frontmatter_value("kanban-plugin"), "board")
 
@@ -205,9 +203,7 @@ class ParseFullTest(unittest.TestCase):
 
 class NewBoardTest(unittest.TestCase):
     def test_matches_empty_fixture(self):
-        self.assertEqual(
-            kanban_md.new_board(["Backlog", "Todo", "Done"], "Done"), EMPTY
-        )
+        self.assertEqual(kanban_md.new_board(["Backlog", "Todo", "Done"], "Done"), EMPTY)
 
     def test_extra_frontmatter_and_no_complete(self):
         text = kanban_md.new_board(["A"], None, [("repo", "x/y")])
@@ -284,7 +280,7 @@ class MoveTest(unittest.TestCase):
             "## In progress\n\n- [ ] Compare tile suppliers #research ^t3m9\n\n\n## Review",
             out,
         )
-        self.assertTrue(out.endswith(FULL[FULL.index("\n***\n"):]))
+        self.assertTrue(out.endswith(FULL[FULL.index("\n***\n") :]))
 
     def test_remove_last_card_gives_empty_column_layout(self):
         board = kanban_md.parse(FULL)

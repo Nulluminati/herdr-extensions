@@ -68,7 +68,7 @@ def preview_markdown(text: str) -> str:
             if closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= len(fence):
                 fence = None
         elif not line.strip():
-            following = next((later for later in source[index + 1:] if later.strip()), None)
+            following = next((later for later in source[index + 1 :] if later.strip()), None)
             if not lines or lines[-1]:
                 lines.append("")
             lines.extend([" " * _empty_row_indent(items, following) + EMPTY_ROW, ""])

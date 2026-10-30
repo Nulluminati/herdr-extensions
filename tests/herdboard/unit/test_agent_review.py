@@ -1,4 +1,5 @@
 """Agent review: a second agent reviews a started card's work, then the card's agent answers."""
+
 import contextlib
 import io
 import json
@@ -20,8 +21,9 @@ class AgentReviewTestCase(MergeTestCase):
         self.fake.__class__ = ReviewerHerdr
         ReviewerHerdr.__init__(self.fake, self.root)
         self.workers = []
-        self.enterContext(patch.object(agent_review, "start_worker",
-                                       lambda arguments, log: self.workers.append((arguments, log))))
+        self.enterContext(
+            patch.object(agent_review, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+        )
         self.enterContext(patch.object(agent_review, "POLL_SECONDS", 0))
         self.reviewer = agent_review.AgentReviewer(self.store, self.repo)
 
@@ -54,19 +56,27 @@ class WorkerTests(CliTestCase):
         def launch(argv, **options):
             captured.update(argv=argv, options=options)
 
-        with patch.dict(os.environ, {"PYTHONPATH": str(stale)}), \
-                patch.object(agent_review.subprocess, "Popen", side_effect=launch):
-            agent_review.start_worker(["--config", str(self.config), "review-wait", "t123",
-                                       "--folder", str(folder)], folder / "worker.log")
+        with (
+            patch.dict(os.environ, {"PYTHONPATH": str(stale)}),
+            patch.object(agent_review.subprocess, "Popen", side_effect=launch),
+        ):
+            agent_review.start_worker(
+                ["--config", str(self.config), "review-wait", "t123", "--folder", str(folder)], folder / "worker.log"
+            )
         environment = captured["options"]["env"]
         self.assertEqual(environment["PYTHONPATH"].split(os.pathsep)[1:], [str(stale)])
-        result = subprocess.run([sys.executable, "-c", "import herdboard; print(herdboard.__file__)"],
-                                cwd=self.plain, env=environment, capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", "import herdboard; print(herdboard.__file__)"],
+            cwd=self.plain,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(Path(result.stdout.strip()).resolve(),
-                         Path(agent_review.__file__).with_name("__init__.py").resolve())
-        result = subprocess.run(captured["argv"], cwd=self.plain, env=environment,
-                                capture_output=True, text=True)
+        self.assertEqual(
+            Path(result.stdout.strip()).resolve(), Path(agent_review.__file__).with_name("__init__.py").resolve()
+        )
+        result = subprocess.run(captured["argv"], cwd=self.plain, env=environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("cannot read the agent review", result.stderr)
         self.assertNotIn("tag_style must be", result.stderr)
@@ -86,11 +96,16 @@ class RequestTests(AgentReviewTestCase):
         for browser in (False, True):
             with self.subTest(browser=browser):
                 args = agent_review.reviewer_arguments("claude", "task", folder, repo, None, None, browser=browser)
-                self.assertEqual(args, ["task", *sandbox.claude_reviewer_options(folder, repo, browser, hunk=False),
-                                        *sandbox.claude_reviewer_tools(folder)])
+                self.assertEqual(
+                    args,
+                    [
+                        "task",
+                        *sandbox.claude_reviewer_options(folder, repo, browser, hunk=False),
+                        *sandbox.claude_reviewer_tools(folder),
+                    ],
+                )
                 args = agent_review.reviewer_arguments("pi", "task", folder, repo, None, None, browser=browser)
-                self.assertEqual(args, [*sandbox.pi_reviewer_options(folder, repo, browser, hunk=False),
-                                        "--", "task"])
+                self.assertEqual(args, [*sandbox.pi_reviewer_options(folder, repo, browser, hunk=False), "--", "task"])
 
     def test_the_codex_reviewer_is_asked_to_use_the_browser(self):
         self.started()
@@ -135,8 +150,9 @@ class RequestTests(AgentReviewTestCase):
                     self.assertIn("You may run any read-only command", text)
                     self.assertNotIn("Run no other command", text)
                     if browser:
-                        self.assertLess(text.index("Do not run the project's code"),
-                                        text.index("terminal-browser open"))
+                        self.assertLess(
+                            text.index("Do not run the project's code"), text.index("terminal-browser open")
+                        )
                     else:
                         self.assertNotIn("terminal-browser", text)
 
@@ -167,8 +183,14 @@ class RequestTests(AgentReviewTestCase):
         self.assertIn("+committed", (folder / "branch.patch").read_text())
         self.assertIn("+changed", (folder / "uncommitted.patch").read_text())
         text = (folder / "request.md").read_text()
-        for part in ("Fix login timeout", self.branch, self.main_branch(), str(self.worktree), "b.txt",
-                     str(folder / "findings.md")):
+        for part in (
+            "Fix login timeout",
+            self.branch,
+            self.main_branch(),
+            str(self.worktree),
+            "b.txt",
+            str(folder / "findings.md"),
+        ):
             self.assertIn(part, text)
 
     def test_the_request_names_the_plan_and_the_other_attachments(self):
@@ -187,8 +209,10 @@ class RequestTests(AgentReviewTestCase):
     def test_an_unreadable_attachment_folder_leaves_no_review_folder(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
-        with patch.object(attachments, "listing", side_effect=attachments.IoError("cannot read")), \
-                self.assertRaises(attachments.IoError):
+        with (
+            patch.object(attachments, "listing", side_effect=attachments.IoError("cannot read")),
+            self.assertRaises(attachments.IoError),
+        ):
             self.reviewer.request(self.card.ref)
         reviews = start.state_dir() / "reviews"
         self.assertEqual(list(reviews.iterdir()) if reviews.exists() else [], [])
@@ -205,15 +229,16 @@ class RequestTests(AgentReviewTestCase):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         result = self.request()
-        self.assertEqual(self.calls("pane", "split"),
-                         [["pane", "split", "w9:p1", "--direction", "right", "--cwd", str(self.worktree),
-                           "--no-focus"]])
+        self.assertEqual(
+            self.calls("pane", "split"),
+            [["pane", "split", "w9:p1", "--direction", "right", "--cwd", str(self.worktree), "--no-focus"]],
+        )
         start_call = self.reviewer_start()
         self.assertEqual(start_call[2], f"hb-{self.card.ref}-review")
         self.assertEqual(start_call[start_call.index("--kind") + 1], "codex")
         self.assertEqual(start_call[start_call.index("--pane") + 1], result["pane_id"])
         folder = Path(result["folder"])
-        args = start_call[start_call.index("--") + 1:]
+        args = start_call[start_call.index("--") + 1 :]
         self.assertIn(str(folder / "request.md"), args[-1])
         self.assertEqual(args[:-1], sandbox.codex_reviewer_options("hb-review", folder, hunk=False))
         self.assertEqual(result["reviewer"], "codex")
@@ -262,7 +287,7 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="pi", model="zai/glm-5.3", thinking="high")
         args = self.reviewer_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         options = sandbox.pi_reviewer_options(self.folder, self.worktree, browser=True, hunk=False)
         self.assertEqual(args[:-2], [*options, "--model", "zai/glm-5.3", "--thinking", "high"])
         self.assertEqual(args[-2], "--")
@@ -272,7 +297,7 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="claude", model="sonnet")
         args = self.reviewer_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[1:2], ["--permission-mode"])
         self.assertLess(args.index("--model"), args.index("--allowedTools"))
         self.assertEqual(args[args.index("--model") + 1], "sonnet")
@@ -288,7 +313,7 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="claude", model="sonnet", thinking="high")
         args = self.reviewer_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[1:3], ["--permission-mode", "dontAsk"])
         self.assertEqual(args[5:10], ["--model", "sonnet", "--effort", "high", "--allowedTools"])
 
@@ -300,7 +325,7 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="pi", model="zai/glm-5.3")
         args = self.reviewer_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
 
     def test_a_pi_reviewer_without_a_model_takes_the_saved_level_of_start_model(self):
@@ -311,7 +336,7 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="pi")
         args = self.reviewer_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[args.index("--thinking") + 1], "xhigh")
 
     def test_a_pi_reviewer_takes_the_default_level_without_a_saved_one(self):
@@ -323,7 +348,7 @@ class RequestTests(AgentReviewTestCase):
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.request(reviewer="pi")
         args = self.reviewer_start()
-        args = args[args.index("--") + 1:]
+        args = args[args.index("--") + 1 :]
         self.assertEqual(args[args.index("--thinking") + 1], "low")
 
     def test_a_saved_level_is_never_given_to_claude(self):
@@ -341,8 +366,17 @@ class RequestTests(AgentReviewTestCase):
         result = self.request(reviewer="pi", model="zai/glm-5.3", then_hunk=True)
         stored = self.records()[self.card.ref]["agent_review"]
         head = self.git(self.worktree, "rev-parse", "HEAD")
-        self.assertEqual(stored, {"folder": result["folder"], "pane_id": result["pane_id"], "kind": "pi",
-                                  "model": "zai/glm-5.3", "then_hunk": True, "head": head})
+        self.assertEqual(
+            stored,
+            {
+                "folder": result["folder"],
+                "pane_id": result["pane_id"],
+                "kind": "pi",
+                "model": "zai/glm-5.3",
+                "then_hunk": True,
+                "head": head,
+            },
+        )
         self.assertEqual(self.log(), ["Agent review started: pi (zai/glm-5.3)."])
         self.assertEqual(len(self.workers), 1)
         arguments, log = self.workers[0]
@@ -412,9 +446,16 @@ class WaitTests(AgentReviewTestCase):
         self.assertEqual(self.log()[-1], f"Agent review by codex done: 2 findings. {findings}")
         prompt = self.calls("agent", "prompt")[-1]
         self.assertEqual(prompt[2], "w9:p1")
-        for part in (str(findings), "| # | Description | Severity | Agree/Disagree | Reasoning |",
-                     "one row for each finding", "what the problem is",
-                     "Do not give only the finding's name or number", "herdboard log", "Do not change any code", "Wait for the user"):
+        for part in (
+            str(findings),
+            "| # | Description | Severity | Agree/Disagree | Reasoning |",
+            "one row for each finding",
+            "what the problem is",
+            "Do not give only the finding's name or number",
+            "herdboard log",
+            "Do not change any code",
+            "Wait for the user",
+        ):
             self.assertIn(part, prompt[3])
         notification = self.calls("notification", "show")[-1]
         self.assertEqual(notification[2], f"Agent review of {self.card.ref} done")
@@ -424,9 +465,13 @@ class WaitTests(AgentReviewTestCase):
     def test_ready_findings_save_the_reviewed_head(self):
         result = self.request()
         self.assertEqual(self.wait(), 0)
-        self.assertEqual(self.records()[self.card.ref]["agent_reviewed"],
-                         {"head": self.git(self.worktree, "rev-parse", "HEAD"),
-                          "findings": str(Path(result["folder"]) / "findings.md")})
+        self.assertEqual(
+            self.records()[self.card.ref]["agent_reviewed"],
+            {
+                "head": self.git(self.worktree, "rev-parse", "HEAD"),
+                "findings": str(Path(result["folder"]) / "findings.md"),
+            },
+        )
 
     def test_a_failed_review_saves_no_reviewed_head(self):
         self.fake.findings = None
@@ -454,9 +499,12 @@ class WaitTests(AgentReviewTestCase):
         second = self.request()
         self.fake.reviewer_states = ["working", None]
         self.fake.findings = None
-        with contextlib.redirect_stderr(io.StringIO()), \
-                patch.object(agent_review, "_wait_for_findings",
-                             side_effect=review.ReviewError("Reviewer stopped", "review_failed")):
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            patch.object(
+                agent_review, "_wait_for_findings", side_effect=review.ReviewError("Reviewer stopped", "review_failed")
+            ),
+        ):
             self.assertEqual(agent_review.wait(self.store, self.card.ref, Path(first["folder"])), 1)
         self.assertEqual(self.records()[self.card.ref]["agent_review"]["folder"], second["folder"])
         self.fake.reviewer_states = ["idle"]
@@ -479,8 +527,7 @@ class WaitTests(AgentReviewTestCase):
         self.assertIn("cannot prompt", self.errors.getvalue())
         self.assertTrue(any("done: 2 findings" in entry for entry in self.log()))
         self.assertIn(str(self.folder / "findings.md"), self.log()[-1])
-        self.assertEqual(self.calls("notification", "show")[-1][2],
-                         f"Agent review of {self.card.ref} delivery failed")
+        self.assertEqual(self.calls("notification", "show")[-1][2], f"Agent review of {self.card.ref} delivery failed")
 
     def test_a_prompt_failure_reports_completed_findings_and_delivery_failure(self):
         self.request()
@@ -497,8 +544,7 @@ class WaitTests(AgentReviewTestCase):
         self.assertTrue(any("done: 2 findings" in entry for entry in self.log()))
         self.assertTrue(self.log()[-1].startswith("Agent review delivery failed:"))
         self.assertIn(str(self.folder / "findings.md"), self.log()[-1])
-        self.assertEqual(self.calls("notification", "show")[-1][2],
-                         f"Agent review of {self.card.ref} delivery failed")
+        self.assertEqual(self.calls("notification", "show")[-1][2], f"Agent review of {self.card.ref} delivery failed")
 
     def test_the_answer_command_uses_the_worker_config_file(self):
         self.request()
@@ -527,8 +573,12 @@ class WaitTests(AgentReviewTestCase):
         self.request(then_hunk=True)
         self.assertEqual(self.wait(), 1)
         self.assertIn("stopped before it wrote", self.errors.getvalue())
-        self.assertTrue(any(entry.startswith("Agent review failed: The codex reviewer stopped before it wrote")
-                            for entry in self.log()))
+        self.assertTrue(
+            any(
+                entry.startswith("Agent review failed: The codex reviewer stopped before it wrote")
+                for entry in self.log()
+            )
+        )
         self.assertEqual(self.calls("agent", "prompt"), [])
         self.assertEqual(self.calls("notification", "show")[-1][2], f"Agent review of {self.card.ref} failed")
         self.assertEqual(len(self.calls("plugin", "action", "invoke")), 1)
@@ -572,9 +622,18 @@ class AgentReviewCliTests(CliTestCase):
         card = self.run_json("add", "Research corvid memory", directory=self.plain)["card"]
         folder = self.todos / ".herdboard" / "work" / card["ref"]
         folder.mkdir(parents=True)
-        start._write(start.state_dir() / "starts.json", {card["ref"]: {
-            "ref": card["ref"], "mode": "repoless", "workspace_id": "x1", "pane_id": "x1:p1",
-            "worktree_path": str(folder)}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                card["ref"]: {
+                    "ref": card["ref"],
+                    "mode": "repoless",
+                    "workspace_id": "x1",
+                    "pane_id": "x1:p1",
+                    "worktree_path": str(folder),
+                }
+            },
+        )
         data = self.run_json("review", card["ref"], "--both", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "no_repository")
 
@@ -583,28 +642,51 @@ class AgentReviewCliTests(CliTestCase):
 
         def fake_request(reviewer_self, ref, reviewer=None, model=None, thinking=None, then_hunk=False):
             calls.append((ref, reviewer, model, thinking, then_hunk, reviewer_self.config_file))
-            return {"ref": ref, "reviewer": reviewer or "claude", "model": model, "pane_id": "w9:p2", "folder": "/f",
-                    "then_hunk": then_hunk}
+            return {
+                "ref": ref,
+                "reviewer": reviewer or "claude",
+                "model": model,
+                "pane_id": "w9:p2",
+                "folder": "/f",
+                "then_hunk": then_hunk,
+            }
 
         with patch.object(agent_review.AgentReviewer, "request", fake_request):
-            data = self.run_json("review", "t123", "--agent", "--reviewer", "pi", "--model", "zai/glm-5.3",
-                                 "--thinking", "high", directory=self.plain)
+            data = self.run_json(
+                "review",
+                "t123",
+                "--agent",
+                "--reviewer",
+                "pi",
+                "--model",
+                "zai/glm-5.3",
+                "--thinking",
+                "high",
+                directory=self.plain,
+            )
             self.assertEqual(data["pane_id"], "w9:p2")
             out, _ = self.run_cli("review", "t123", "--both", "--model", "opus", directory=self.plain)
-        self.assertEqual([c[:5] for c in calls], [("t123", "pi", "zai/glm-5.3", "high", False),
-                                                  ("t123", None, "opus", None, True)])
+        self.assertEqual(
+            [c[:5] for c in calls], [("t123", "pi", "zai/glm-5.3", "high", False), ("t123", None, "opus", None, True)]
+        )
         self.assertIsNotNone(calls[0][5])
         self.assertIn("t123: agent review by claude (opus) in pane w9:p2", out)
         self.assertIn("Hunk opens when the findings are ready", out)
 
 
 LINEAR_ISSUE = {
-    "id": "i7", "identifier": "ENG-7", "title": "Map corvid caches",
+    "id": "i7",
+    "identifier": "ENG-7",
+    "title": "Map corvid caches",
     "description": "Find where the caches are.\n\nReport the sites.",
     "state": {"name": "In Progress", "type": "started"},
-    "labels": [], "project": None, "team": {"key": "ENG", "id": "team-eng"},
-    "url": "https://linear.app/acme/issue/ENG-7", "branchName": "nate/eng-7",
-    "sortOrder": 1.0, "attachments": [],
+    "labels": [],
+    "project": None,
+    "team": {"key": "ENG", "id": "team-eng"},
+    "url": "https://linear.app/acme/issue/ENG-7",
+    "branchName": "nate/eng-7",
+    "sortOrder": 1.0,
+    "attachments": [],
 }
 
 
@@ -625,9 +707,20 @@ class LinearRequestTests(AgentReviewTestCase):
     def test_a_repoless_linear_review_reads_the_issue(self):
         folder = start.work_folder(self.config, "ENG-7")
         folder.mkdir(parents=True)
-        start._write(start.state_dir() / "starts.json", {"i7": {
-            "ref": "ENG-7", "mode": "repoless", "workspace_id": "x9", "pane_id": "x9:p1",
-            "worktree_path": str(folder), "agent": "claude", "agent_name": "hb-eng-7"}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                "i7": {
+                    "ref": "ENG-7",
+                    "mode": "repoless",
+                    "workspace_id": "x9",
+                    "pane_id": "x9:p1",
+                    "worktree_path": str(folder),
+                    "agent": "claude",
+                    "agent_name": "hb-eng-7",
+                }
+            },
+        )
         self.fake.agent = True
         source = self.root / "findings.md"
         source.write_text("# Findings\n\nCaches are here.\n", encoding="utf-8")

@@ -163,130 +163,178 @@ AUTOMATION_MARK = "↻"
 # The help screen: a title, then its keys. A screen's keys are in its own section; the keys of
 # every screen are in "Everywhere".
 HELP_SECTIONS = [
-    ("Board", [
-        ("left, h", "previous column"),
-        ("right, l", "next column"),
-        ("up, k", "previous card"),
-        ("down, j", "next card"),
-        ("/", "filter: words match title, tags and details; #tag matches a tag, #type/bug a type; enter keeps it"),
-        ("escape", "clear the filter"),
-        ("enter", "card detail"),
-        ("v", "cycle view: repo, inbox, all, mine"),
-        ("t", "hide or show Linear cards"),
-        ("i", "create the board for this repository"),
-        ("I", "search Linear (on enter) and pin an issue to this repository's board"),
-        ("u", "remove the pin of a pinned Linear issue"),
-        ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
-        ("r", "reload, and fetch Linear again"),
-        ("G", "go to the next tab: Board, Pull requests, Notes, Automations; a click on a tab opens it"),
-    ]),
-    ("Cards", [
-        ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
-        ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
-        ("shift+up, K", "move the todo up in its column"),
-        ("shift+down, J", "move the todo down in its column"),
-        ("a", "add a card to the selected column: title, type, tags, due date, details, and the board"),
-        ("d", "mark the card done (a Linear card moves to its completed state)"),
-        ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
-        ("b", "move the todo to another board, for example from the inbox to this repository"),
-        ("x", "delete the todo, after you confirm"),
-        ("A", "archive the todo; in the archive column, move it back to the done column"
-              " (an archived parent too, after you confirm)"),
-        ("D", "archive every card in the done column, after you confirm"),
-        ("T", "promote the todo to a Linear issue: choose its team and project; its checklist and sub-cards "
-              "become sub-issues, and the todo moves to Done"),
-        ("z", "show or hide the archive column"),
-        ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
-    ]),
-    ("Agents and branches", [
-        ("s", "start work with the default agent"),
-        ("S", "choose claude, pi or codex (and the model and thinking level), then start work"),
-        ("P", "plan the card with an agent in a tab in its worktree, or in its card folder without a repository"),
-        ("g", "go to the started card's Herdr workspace"),
-        ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
-        ("m", "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm"),
-        ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
-    ]),
-    ("Card detail", [
-        ("up, k", "previous checklist item"),
-        ("down, j", "next checklist item"),
-        ("space", "check or clear the checklist item"),
-        ("e", "edit the todo"),
-        ("o", "open an attachment"),
-    ]),
-    ("Pull requests", [
-        ("up, k", "previous pull request"),
-        ("down, j", "next pull request"),
-        ("enter", "its details, the agent review and the description"),
-        ("/", "search GitHub (words, author:NAME, draft:true, review-requested:@me)"),
-        ("escape", "close the search box, else clear the search, else go back to the board"),
-        ("n", "the next page of 50"),
-        ("p", "the previous page of 50"),
-        ("R", "choose an agent and its model; it reviews the PR with notes in Hunk"),
-        ("g", "go to its review workspace"),
-        ("u", "Update: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
-        ("f", "finish the review: close the workspace, remove the worktree and pr/N branch"),
-        ("o", "open it in the browser"),
-        ("r", "read GitHub again"),
-        ("G", "go to the Notes tab"),
-    ]),
-    ("Notes", [
-        ("e, enter", "edit the note; it saves 2 seconds after the last change"),
-        ("t", "show the global note, or go back to the board's note"),
-        ("up, k", "scroll up"),
-        ("down, j", "scroll down"),
-        ("r", "read the note file again"),
-        ("escape", "in the editor, save and show the note; else go back to the board"),
-        ("ctrl+s", "in the editor, save now"),
-        ("G", "go to the Automations tab"),
-    ]),
-    ("Automations", [
-        ("up, k", "previous automation"),
-        ("down, j", "next automation"),
-        ("enter", "its details, attachments and last run; o opens an attachment"),
-        ("a", "add an automation: title, board, schedule, type, tags, agent, merge permission, details"),
-        ("e", "edit the automation"),
-        ("P", "plan the automation with an agent; the plan goes into each spawned card's brief"),
-        ("space", "pause or resume; a resumed automation waits for its next due time"),
-        ("n", "run now: spawn a card and start its agent, after you confirm"),
-        ("x", "remove the automation, after you confirm; its cards stay"),
-        ("r", "read the automations again"),
-        ("escape, G", "go back to the board"),
-    ]),
-    ("Pull request detail", [
-        ("R", "review the pull request with an agent"),
-        ("g", "go to its review workspace"),
-        ("u", "fetch new commits"),
-        ("f", "finish the review"),
-        ("o", "open it in the browser"),
-    ]),
-    ("Everywhere", [
-        ("?", "this help, on the board, on the pull request list and on the notes"),
-        ("escape", "close a screen or cancel input"),
-        ("q", "quit"),
-    ]),
-    ("Mouse", [
-        ("click", "select a card, or a column on its header"),
-        ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
-        ("right-click", "the card's actions; Herdr sends right-clicks only when its \"send right clicks to pane\" is on"),
-        ("drag", "move the card to the bottom of another column"),
-    ]),
-    ("Icons", [
-        ("◐", "an agent works (yellow), as in the Herdr sidebar"),
-        ("×", "an agent is blocked and waits for you (red)"),
-        ("✓", "an agent is done and you did not look yet (cyan); a card in the completed column (green)"),
-        ("○", "an agent is idle (green); a card that is not started"),
-        ("·", "Herdr does not know the agent's state (dim)"),
-        ("●", "a started card without a live agent (yellow)"),
-        ("✎", "a planner runs, then its state and agent"),
-        ("▤", "the card has a plan"),
-        ("⌕", "an agent review runs, then the reviewer's state and agent"),
-        ("✔", "the agent review findings are ready"),
-        ("↑", "new commits since the agent review"),
-        ("↻", "an automation spawned the card"),
-        ("⠋", "the board starts, plans, reviews, merges or changes the card; other cards stay free"),
-        ("nerd", "with the Nerd Font icon style, the phase icons are Nerd Font glyphs; the agent states stay the same"),
-    ]),
+    (
+        "Board",
+        [
+            ("left, h", "previous column"),
+            ("right, l", "next column"),
+            ("up, k", "previous card"),
+            ("down, j", "next card"),
+            ("/", "filter: words match title, tags and details; #tag matches a tag, #type/bug a type; enter keeps it"),
+            ("escape", "clear the filter"),
+            ("enter", "card detail"),
+            ("v", "cycle view: repo, inbox, all, mine"),
+            ("t", "hide or show Linear cards"),
+            ("i", "create the board for this repository"),
+            ("I", "search Linear (on enter) and pin an issue to this repository's board"),
+            ("u", "remove the pin of a pinned Linear issue"),
+            ("c", "config: display styles, board merge mode, linked Linear projects and pinned issues (ctrl+s saves)"),
+            ("r", "reload, and fetch Linear again"),
+            ("G", "go to the next tab: Board, Pull requests, Notes, Automations; a click on a tab opens it"),
+        ],
+    ),
+    (
+        "Cards",
+        [
+            ("shift+left, H", "move card to previous column (a Linear card needs a connection)"),
+            ("shift+right, L", "move card to next column (a Linear card needs a connection)"),
+            ("shift+up, K", "move the todo up in its column"),
+            ("shift+down, J", "move the todo down in its column"),
+            ("a", "add a card to the selected column: title, type, tags, due date, details, and the board"),
+            ("d", "mark the card done (a Linear card moves to its completed state)"),
+            ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
+            ("b", "move the todo to another board, for example from the inbox to this repository"),
+            ("x", "delete the todo, after you confirm"),
+            (
+                "A",
+                "archive the todo; in the archive column, move it back to the done column"
+                " (an archived parent too, after you confirm)",
+            ),
+            ("D", "archive every card in the done column, after you confirm"),
+            (
+                "T",
+                "promote the todo to a Linear issue: choose its team and project; its checklist and sub-cards "
+                "become sub-issues, and the todo moves to Done",
+            ),
+            ("z", "show or hide the archive column"),
+            ("p", "set or remove the todo's parent: sub-cards show ↳ parent, a parent shows its done count"),
+        ],
+    ),
+    (
+        "Agents and branches",
+        [
+            ("s", "start work with the default agent"),
+            ("S", "choose claude, pi or codex (and the model and thinking level), then start work"),
+            ("P", "plan the card with an agent in a tab in its worktree, or in its card folder without a repository"),
+            ("g", "go to the started card's Herdr workspace"),
+            ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
+            (
+                "m",
+                "merge the card branch into its base (local, or a draft PR that an agent describes), after you confirm",
+            ),
+            ("f", "finish a merged card: remove its worktree and branch, move it to Done, after you confirm"),
+        ],
+    ),
+    (
+        "Card detail",
+        [
+            ("up, k", "previous checklist item"),
+            ("down, j", "next checklist item"),
+            ("space", "check or clear the checklist item"),
+            ("e", "edit the todo"),
+            ("o", "open an attachment"),
+        ],
+    ),
+    (
+        "Pull requests",
+        [
+            ("up, k", "previous pull request"),
+            ("down, j", "next pull request"),
+            ("enter", "its details, the agent review and the description"),
+            ("/", "search GitHub (words, author:NAME, draft:true, review-requested:@me)"),
+            ("escape", "close the search box, else clear the search, else go back to the board"),
+            ("n", "the next page of 50"),
+            ("p", "the previous page of 50"),
+            ("R", "choose an agent and its model; it reviews the PR with notes in Hunk"),
+            ("g", "go to its review workspace"),
+            ("u", "Update: fetch new commits, open Hunk again with the old notes, offer a new agent review"),
+            ("f", "finish the review: close the workspace, remove the worktree and pr/N branch"),
+            ("o", "open it in the browser"),
+            ("r", "read GitHub again"),
+            ("G", "go to the Notes tab"),
+        ],
+    ),
+    (
+        "Notes",
+        [
+            ("e, enter", "edit the note; it saves 2 seconds after the last change"),
+            ("t", "show the global note, or go back to the board's note"),
+            ("up, k", "scroll up"),
+            ("down, j", "scroll down"),
+            ("r", "read the note file again"),
+            ("escape", "in the editor, save and show the note; else go back to the board"),
+            ("ctrl+s", "in the editor, save now"),
+            ("G", "go to the Automations tab"),
+        ],
+    ),
+    (
+        "Automations",
+        [
+            ("up, k", "previous automation"),
+            ("down, j", "next automation"),
+            ("enter", "its details, attachments and last run; o opens an attachment"),
+            ("a", "add an automation: title, board, schedule, type, tags, agent, merge permission, details"),
+            ("e", "edit the automation"),
+            ("P", "plan the automation with an agent; the plan goes into each spawned card's brief"),
+            ("space", "pause or resume; a resumed automation waits for its next due time"),
+            ("n", "run now: spawn a card and start its agent, after you confirm"),
+            ("x", "remove the automation, after you confirm; its cards stay"),
+            ("r", "read the automations again"),
+            ("escape, G", "go back to the board"),
+        ],
+    ),
+    (
+        "Pull request detail",
+        [
+            ("R", "review the pull request with an agent"),
+            ("g", "go to its review workspace"),
+            ("u", "fetch new commits"),
+            ("f", "finish the review"),
+            ("o", "open it in the browser"),
+        ],
+    ),
+    (
+        "Everywhere",
+        [
+            ("?", "this help, on the board, on the pull request list and on the notes"),
+            ("escape", "close a screen or cancel input"),
+            ("q", "quit"),
+        ],
+    ),
+    (
+        "Mouse",
+        [
+            ("click", "select a card, or a column on its header"),
+            ("double-click", "card detail; there, a click checks a checklist item or opens an attachment"),
+            (
+                "right-click",
+                'the card\'s actions; Herdr sends right-clicks only when its "send right clicks to pane" is on',
+            ),
+            ("drag", "move the card to the bottom of another column"),
+        ],
+    ),
+    (
+        "Icons",
+        [
+            ("◐", "an agent works (yellow), as in the Herdr sidebar"),
+            ("×", "an agent is blocked and waits for you (red)"),
+            ("✓", "an agent is done and you did not look yet (cyan); a card in the completed column (green)"),
+            ("○", "an agent is idle (green); a card that is not started"),
+            ("·", "Herdr does not know the agent's state (dim)"),
+            ("●", "a started card without a live agent (yellow)"),
+            ("✎", "a planner runs, then its state and agent"),
+            ("▤", "the card has a plan"),
+            ("⌕", "an agent review runs, then the reviewer's state and agent"),
+            ("✔", "the agent review findings are ready"),
+            ("↑", "new commits since the agent review"),
+            ("↻", "an automation spawned the card"),
+            ("⠋", "the board starts, plans, reviews, merges or changes the card; other cards stay free"),
+            (
+                "nerd",
+                "with the Nerd Font icon style, the phase icons are Nerd Font glyphs; the agent states stay the same",
+            ),
+        ],
+    ),
 ]
 HELP_KEYS = [entry for _title, entries in HELP_SECTIONS for entry in entries]
 
@@ -328,8 +376,13 @@ class ColumnData:
 CHIP_COLORS = ["blue", "magenta", "cyan", "green", "yellow", "bright_blue", "bright_magenta", "bright_cyan"]
 # The RGB that an outline tag's tint mixes, for each chip color: a terminal color has no RGB of its own.
 CHIP_RGB = {
-    "blue": (59, 142, 234), "magenta": (188, 63, 188), "cyan": (17, 168, 205), "green": (13, 188, 121),
-    "yellow": (229, 229, 16), "bright_blue": (59, 142, 234), "bright_magenta": (214, 112, 214),
+    "blue": (59, 142, 234),
+    "magenta": (188, 63, 188),
+    "cyan": (17, 168, 205),
+    "green": (13, 188, 121),
+    "yellow": (229, 229, 16),
+    "bright_blue": (59, 142, 234),
+    "bright_magenta": (214, 112, 214),
     "bright_cyan": (41, 184, 219),
 }
 
@@ -355,8 +408,9 @@ AGENT_LOGOS = {"claude": "\ue1a0", "pi": "\ue1a9", "codex": "\ue1a1"}
 def agent_font_installed() -> bool:
     """Whether Fontconfig has the agent logo font. fc-match always returns some font, so compare the family."""
     try:
-        output = subprocess.run(["fc-match", "--format", "%{family}\n", AGENT_FONT], check=True,
-                                capture_output=True, text=True, timeout=10).stdout
+        output = subprocess.run(
+            ["fc-match", "--format", "%{family}\n", AGENT_FONT], check=True, capture_output=True, text=True, timeout=10
+        ).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     return any(family.strip() == AGENT_FONT for family in output.replace(",", "\n").splitlines())
@@ -397,8 +451,7 @@ TYPE_STYLES = {"bug": "bold red", "feature": "bold green", "docs": "bold cyan", 
 
 def type_badge(kind: str, icon_style: str = "plain") -> Text:
     """A card type as bold text, colored for the default types."""
-    return Text(icon_label(f"type/{kind.casefold()}", kind, icon_style),
-                style=TYPE_STYLES.get(kind.casefold(), "bold"))
+    return Text(icon_label(f"type/{kind.casefold()}", kind, icon_style), style=TYPE_STYLES.get(kind.casefold(), "bold"))
 
 
 # Nerd Font half circles that round off a tag block.
@@ -464,8 +517,14 @@ def phase_icon(key: str, icon_style: str) -> str:
     return ICONS[f"phase/{key}"] if icon_style == "nerd" else PHASE_ICONS[key]
 
 
-def phase_item(key: str, icon_style: str, style: str, agent: str | None = None, status: str | None = None,
-               agent_logos: bool = False) -> Text:
+def phase_item(
+    key: str,
+    icon_style: str,
+    style: str,
+    agent: str | None = None,
+    status: str | None = None,
+    agent_logos: bool = False,
+) -> Text:
     """A status row item: the phase icon, then the agent's Herdr glyph and its logo, else its name."""
     item = Text(phase_icon(key, icon_style), style=style)
     if status:
@@ -498,7 +557,7 @@ class ClampedText:
     def __rich_console__(self, console, options):
         lines = self.text.wrap(console, options.max_width)
         if len(lines) > self.rows:
-            lines = lines[:self.rows]
+            lines = lines[: self.rows]
             last = lines[-1]
             last.rstrip()
             last.truncate(max(options.max_width - 1, 0))
@@ -561,8 +620,8 @@ class TitleLine:
             yield self.corner
             return
         first = self.title.wrap(console, room)[0]
-        rest = self.title[len(first.plain):]
-        rest = rest[len(rest.plain) - len(rest.plain.lstrip()):]
+        rest = self.title[len(first.plain) :]
+        rest = rest[len(rest.plain) - len(rest.plain.lstrip()) :]
         first.rstrip()
         first.append(" " * (width - first.cell_len - self.corner.cell_len))
         first.append_text(self.corner)
@@ -654,9 +713,18 @@ class CardFace:
         return Text("\n").join(self.lines())
 
 
-def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-              card_style: str = "full", done: bool = False, dark: bool = True,
-              agent_logos: bool = False, busy: str | None = None, frame: int = 0) -> CardFace:
+def card_face(
+    card: CardView,
+    show_board: bool,
+    tag_style: str = "outline",
+    icon_style: str = "plain",
+    card_style: str = "full",
+    done: bool = False,
+    dark: bool = True,
+    agent_logos: bool = False,
+    busy: str | None = None,
+    frame: int = 0,
+) -> CardFace:
     """A card's rows: the state icon, the planning and review markers and the ID, the title, the description,
     the type and tags, the sub-card count and due date, then the other status markers of the card.
     `busy` names the board action that runs on the card, and `frame` is its spinner frame."""
@@ -691,8 +759,7 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     chips += [tag_chip(tag, tag_style, dark) for tag in plain_tags(tags)]
     count = Text()
     if card.sub_cards:
-        count = Text(icon_label("sub_cards", f"{card.sub_cards[0]}/{card.sub_cards[1]} done", icon_style),
-                     style="dim")
+        count = Text(icon_label("sub_cards", f"{card.sub_cards[0]}/{card.sub_cards[1]} done", icon_style), style="dim")
     # The status items: `marks` follow the state icon in the first row, `info` stays in the status row.
     # Every item also gives its words for the plain text, in the order the items are added.
     marks: list[Text] = []
@@ -706,8 +773,11 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     if busy:
         add(Text(f"{SPINNER[frame % len(SPINNER)]} {busy}", style="bold yellow"), f"busy: {busy}", mark=True)
     if is_automation_title(title or card.title):
-        add(Text(ICONS["automation"] if icon_style == "nerd" else AUTOMATION_MARK, style="bold"),
-            "automation", mark=True)
+        add(
+            Text(ICONS["automation"] if icon_style == "nerd" else AUTOMATION_MARK, style="bold"),
+            "automation",
+            mark=True,
+        )
     if card.source == "linear" and card.pr:
         add(Text(icon_label("pr", "PR", icon_style), style="bold"))
     if show_board:
@@ -719,13 +789,19 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
     if card.worktree_left:
         add(Text(icon_label("branch", "worktree still exists", icon_style), style="bold yellow"))
     if card.agent_review:
-        add(phase_item("reviewing", icon_style, "bold", card.agent_review, card.review_status, agent_logos),
-            f"agent review: {agent_label(card.agent_review, agent_logos)}", mark=True)
+        add(
+            phase_item("reviewing", icon_style, "bold", card.agent_review, card.review_status, agent_logos),
+            f"agent review: {agent_label(card.agent_review, agent_logos)}",
+            mark=True,
+        )
     elif card.reviewed == "reviewed":
         add(phase_item("reviewed", icon_style, PR_STATES["agent:reviewed"][2]), "reviewed", mark=True)
     elif card.reviewed == "new commits":
-        add(phase_item("new commits", icon_style, PR_STATES["agent:new commits"][2]),
-            "new commits since review", mark=True)
+        add(
+            phase_item("new commits", icon_style, PR_STATES["agent:new commits"][2]),
+            "new commits since review",
+            mark=True,
+        )
     if card.pr_writing:
         writing = Text(icon_label("pr", "PR: writing", icon_style), style="bold")
         writing_words = writing.plain
@@ -734,21 +810,40 @@ def card_face(card: CardView, show_board: bool, tag_style: str = "outline", icon
             writing.append_text(agent_glyph(card.pr_write_status))
         add(writing, writing_words)
     if card.planning:
-        add(phase_item("planning", icon_style, "bold cyan", card.planning, card.planning_status, agent_logos),
-            f"planning: {agent_label(card.planning, agent_logos)}", mark=True)
+        add(
+            phase_item("planning", icon_style, "bold cyan", card.planning, card.planning_status, agent_logos),
+            f"planning: {agent_label(card.planning, agent_logos)}",
+            mark=True,
+        )
     elif card.planned and not done:
         add(phase_item("planned", icon_style, "bold cyan"), "planned", mark=True)
     if card.parent_title:
         add(Text(f"↳ {card.parent_title}", style="dim"))
     separator = Text(" · ", style="dim")
-    return CardFace(icon, heading, corner, description, chips, count,
-                    due_label(due, icon_style=icon_style) if due else Text(),
-                    separator.join(info), card_style == "compact",
-                    separator.join(Text(word) for word in words), marks=marks)
+    return CardFace(
+        icon,
+        heading,
+        corner,
+        description,
+        chips,
+        count,
+        due_label(due, icon_style=icon_style) if due else Text(),
+        separator.join(info),
+        card_style == "compact",
+        separator.join(Text(word) for word in words),
+        marks=marks,
+    )
 
 
-def card_text(card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-              card_style: str = "full", done: bool = False, busy: str | None = None) -> Text:
+def card_text(
+    card: CardView,
+    show_board: bool,
+    tag_style: str = "outline",
+    icon_style: str = "plain",
+    card_style: str = "full",
+    done: bool = False,
+    busy: str | None = None,
+) -> Text:
     """A card's rows as one text, as the board shows them."""
     return card_face(card, show_board, tag_style, icon_style, card_style, done, busy=busy).text()
 
@@ -766,9 +861,19 @@ class CardWidget(Static):
     # A drag moves the card, so it must not also select text.
     ALLOW_SELECT = False
 
-    def __init__(self, card: CardView, show_board: bool, tag_style: str = "outline", icon_style: str = "plain",
-                 card_style: str = "full", done: bool = False, dark: bool = True, agent_logos: bool = False,
-                 busy: str | None = None, frame: int = 0):
+    def __init__(
+        self,
+        card: CardView,
+        show_board: bool,
+        tag_style: str = "outline",
+        icon_style: str = "plain",
+        card_style: str = "full",
+        done: bool = False,
+        dark: bool = True,
+        agent_logos: bool = False,
+        busy: str | None = None,
+        frame: int = 0,
+    ):
         self.card = card
         self.agent_logos = agent_logos
         self.face_options = (show_board, tag_style, icon_style, card_style, done, dark, agent_logos)
@@ -784,12 +889,13 @@ class CardWidget(Static):
     def _content(self, frame: int) -> Group:
         """The card's rows. Also sets the plain text and the key that a redraw compares."""
         show_board, tag_style, icon_style, card_style, done, dark, agent_logos = self.face_options
-        face = card_face(self.card, show_board, tag_style, icon_style, card_style, done, dark, agent_logos,
-                         self.busy, frame)
+        face = card_face(
+            self.card, show_board, tag_style, icon_style, card_style, done, dark, agent_logos, self.busy, frame
+        )
         self.rich_text = face.text()
         # The state icon and the agent logo are not card text: `plain` has the title, then the corner.
         first = face.title.plain + (f"  {face.corner.plain}" if face.corner else "")
-        rest = [line.plain for line in replace(face, status=face.words).lines()[1 if face.compact else 2:]]
+        rest = [line.plain for line in replace(face, status=face.words).lines()[1 if face.compact else 2 :]]
         self.plain = "\n".join([first, *rest])
         # What a redraw compares: the text with its styles and the classes. The board draws new cards at the
         # spinner frame of the busy cards it shows, so a turn of the spinner does not replace a card.
@@ -1027,8 +1133,15 @@ class DetailScreen(ModalBase):
         Binding("up,k", "item(-1)", "Previous item", show=False),
     ]
 
-    def __init__(self, card: CardView, notes: list[dict] | None, tag_style: str = "round",
-                 log: list[dict] | None = None, files: list[dict] | None = None, icon_style: str = "plain"):
+    def __init__(
+        self,
+        card: CardView,
+        notes: list[dict] | None,
+        tag_style: str = "round",
+        log: list[dict] | None = None,
+        files: list[dict] | None = None,
+        icon_style: str = "plain",
+    ):
         super().__init__()
         self.notes = notes or []
         self.entries = log or []
@@ -1043,9 +1156,11 @@ class DetailScreen(ModalBase):
         """Keep the card and the indexes of its checklist lines. Linear descriptions stay read only."""
         self.card = card
         self.body = card.body if card.source == "linear" else [_unindent(line) for line in card.body]
-        self.items = [] if card.source == "linear" else [
-            index for index, line in enumerate(self.body) if CHECK_ITEM.match(_hold_indent(line))
-        ]
+        self.items = (
+            []
+            if card.source == "linear"
+            else [index for index, line in enumerate(self.body) if CHECK_ITEM.match(_hold_indent(line))]
+        )
         self.cursor = min(self.cursor, max(len(self.items) - 1, 0))
 
     def _selected(self) -> int | None:
@@ -1190,8 +1305,11 @@ class DetailScreen(ModalBase):
                 yield RichStatic(chips, id="detail-chips")
             yield RichStatic(self._meta(), id="detail-meta")
             if any(line.strip() for line in body):
-                block = RichStatic(detail_lines(body, self._selected(), self.card.source != "linear"),
-                                   id="detail-body", classes="detail-block")
+                block = RichStatic(
+                    detail_lines(body, self._selected(), self.card.source != "linear"),
+                    id="detail-body",
+                    classes="detail-block",
+                )
                 # A text drag that ends on a checklist line would also check it.
                 block.ALLOW_SELECT = not self.items
                 block.border_title = "Details"
@@ -1244,8 +1362,9 @@ class DetailScreen(ModalBase):
         elif len(choices) == 1:
             self.open_attachment(choices[0])
         else:
-            self.app.push_screen(AttachmentChoiceScreen(choices),
-                                 lambda entry: self.open_attachment(entry) if entry else None)
+            self.app.push_screen(
+                AttachmentChoiceScreen(choices), lambda entry: self.open_attachment(entry) if entry else None
+            )
 
     def open_url(self, url: str) -> None:
         """Open a pull request or a Linear attachment in the system's default browser. Linear integrations
@@ -1255,8 +1374,13 @@ class DetailScreen(ModalBase):
             return
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         try:
-            process = subprocess.Popen([opener, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.PIPE, start_new_session=True)
+            process = subprocess.Popen(
+                [opener, url],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
         except OSError as error:
             self.notify(f"Cannot open {url} with {opener}: {error}", severity="error")
             return
@@ -1280,8 +1404,13 @@ class DetailScreen(ModalBase):
             return
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         try:
-            process = subprocess.Popen([opener, str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.PIPE, start_new_session=True)
+            process = subprocess.Popen(
+                [opener, str(path)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
         except OSError as error:
             self.notify(f"Cannot open {entry['name']} with {opener}: {error}", severity="error")
             return
@@ -1379,8 +1508,15 @@ class CardFormScreen(ModalBase):
     AUTO_FOCUS = "#card-title"
     heading = ""
 
-    def __init__(self, title: str = "", tags: list[str] = (), due: str | None = None, body: list[str] = (),
-                 kind: str | None = None, types: list[str] = ()):
+    def __init__(
+        self,
+        title: str = "",
+        tags: list[str] = (),
+        due: str | None = None,
+        body: list[str] = (),
+        kind: str | None = None,
+        types: list[str] = (),
+    ):
         super().__init__()
         self.initial = (title, " ".join(tags), due or "", "\n".join(body))
         self.kind = kind
@@ -1399,15 +1535,25 @@ class CardFormScreen(ModalBase):
         with Vertical(classes="dialog card-form"):
             yield target
             yield from self.destination()
-            yield self._titled(Input(value=title, placeholder="What needs doing", id="card-title",
-                                     select_on_focus=False), "Title")
+            yield self._titled(
+                Input(value=title, placeholder="What needs doing", id="card-title", select_on_focus=False), "Title"
+            )
             with Horizontal(classes="form-row"):
-                yield self._titled(Select([(kind, kind) for kind in self.types], prompt="none",
-                                          value=self.kind or Select.NULL, id="card-type"), "Type")
-                yield self._titled(Input(value=tags, placeholder="auth, web", id="card-tags",
-                                         select_on_focus=False), "Tags")
-                yield self._titled(Input(value=due, placeholder="YYYY-MM-DD", id="card-due",
-                                         select_on_focus=False), "Due date")
+                yield self._titled(
+                    Select(
+                        [(kind, kind) for kind in self.types],
+                        prompt="none",
+                        value=self.kind or Select.NULL,
+                        id="card-type",
+                    ),
+                    "Type",
+                )
+                yield self._titled(
+                    Input(value=tags, placeholder="auth, web", id="card-tags", select_on_focus=False), "Tags"
+                )
+                yield self._titled(
+                    Input(value=due, placeholder="YYYY-MM-DD", id="card-due", select_on_focus=False), "Due date"
+                )
             yield self._titled(
                 TextArea(body, id="card-body", placeholder="Notes, links or a checklist such as - [ ] step one"),
                 "Details",
@@ -1506,8 +1652,9 @@ class EditScreen(CardFormScreen):
 
     def __init__(self, card: CardView, types: list[str] = ()):
         title, tags, due = split_title(card.title)
-        super().__init__(title, plain_tags(tags), due, [_unindent(line) for line in card.body],
-                         kind=card.type, types=types)
+        super().__init__(
+            title, plain_tags(tags), due, [_unindent(line) for line in card.body], kind=card.type, types=types
+        )
         self.card = card
         self.heading = f"Edit {card.ref} ({card.board} / {card.column})"
 
@@ -1564,9 +1711,11 @@ class ReviewKindScreen(ModalBase):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label("Review")
-            yield OptionList("Human: open Hunk next to the card's agent",
-                             "Agent: another agent reviews, the card's agent answers",
-                             "Both: an agent review first, then Hunk")
+            yield OptionList(
+                "Human: open Hunk next to the card's agent",
+                "Agent: another agent reviews, the card's agent answers",
+                "Both: an agent review first, then Hunk",
+            )
             yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -1601,8 +1750,14 @@ class TargetScreen(ModalBase):
     It returns `(mode, value)`, where mode is `"repo"`, `"new_repo"` or `"repoless"`.
     """
 
-    def __init__(self, ref: str, options: list[tuple[str, Path]], default_path: Path | None = None,
-                 linear: bool = False, title: str | None = None):
+    def __init__(
+        self,
+        ref: str,
+        options: list[tuple[str, Path]],
+        default_path: Path | None = None,
+        linear: bool = False,
+        title: str | None = None,
+    ):
         super().__init__()
         self.ref = ref
         self.options = options
@@ -1623,11 +1778,13 @@ class TargetScreen(ModalBase):
             yield OptionList(*self.labels, id="target-choice")
             if not self.linear and self.default_path is not None:
                 yield Label("New repository path")
-                yield Input(value=str(self.default_path), placeholder="path of the new repository",
-                            id="target-path")
-            yield Label("enter: choose a repository"
-                        + (" · type a path and press enter for a new repository" if not self.linear else "")
-                        + " · escape: cancel", classes="dim")
+                yield Input(value=str(self.default_path), placeholder="path of the new repository", id="target-path")
+            yield Label(
+                "enter: choose a repository"
+                + (" · type a path and press enter for a new repository" if not self.linear else "")
+                + " · escape: cancel",
+                classes="dim",
+            )
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1658,8 +1815,9 @@ class BoardChoiceScreen(ModalBase):
         with Vertical(classes="dialog"):
             yield Label(self.prompt or f"Move {split_title(self.card.title)[0]} to")
             yield OptionList(*self.board_labels, id="board-choice")
-            yield Label("enter: choose, escape: cancel" if self.prompt else "enter: move, escape: cancel",
-                        classes="dim")
+            yield Label(
+                "enter: choose, escape: cancel" if self.prompt else "enter: move, escape: cancel", classes="dim"
+            )
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1684,8 +1842,11 @@ class IssueSearchScreen(ModalBase):
         with Vertical(classes="dialog"):
             yield Label(f"Pin a Linear issue to {self.board_name}")
             yield Input(placeholder="words, or an identifier such as ENG-123", id="issue-search")
-            yield RichStatic(Text("Open issues of your teams. An identifier finds an issue of any team."),
-                             id="issue-status", classes="dim")
+            yield RichStatic(
+                Text("Open issues of your teams. An identifier finds an issue of any team."),
+                id="issue-status",
+                classes="dim",
+            )
             yield OptionList(id="issue-results")
             yield Label("enter: search, or pin the issue · tab: results · escape: cancel", classes="dim")
 
@@ -1762,8 +1923,9 @@ class PromoteScreen(ModalBase):
 
     BINDINGS = [Binding("ctrl+s", "promote", "Promote")]
 
-    def __init__(self, ref: str, title: str, load_teams: Callable[[], list[dict]],
-                 load_projects: Callable[[str], list[dict]]):
+    def __init__(
+        self, ref: str, title: str, load_teams: Callable[[], list[dict]], load_projects: Callable[[str], list[dict]]
+    ):
         super().__init__()
         self.ref = ref
         self.title_text = title
@@ -1781,8 +1943,10 @@ class PromoteScreen(ModalBase):
         self.sequence = 0
 
     def compose(self) -> ComposeResult:
-        note = (f"This creates Linear issues for {self.title_text}, its checklist and its sub-cards, "
-                "then moves the todo to Done.")
+        note = (
+            f"This creates Linear issues for {self.title_text}, its checklist and its sub-cards, "
+            "then moves the todo to Done."
+        )
         with Vertical(classes="dialog"):
             yield Label(f"Promote {self.title_text} to Linear")
             yield RichStatic(Text(note), id="promote-note", classes="dim")
@@ -1869,8 +2033,11 @@ class PromoteScreen(ModalBase):
         options.add_options(labels)
         options.disabled = False
         team = self.team["key"]
-        self._status(f"Choose a project of {team}, or No project." if projects
-                     else f"Team {team} has no projects. Choose No project.")
+        self._status(
+            f"Choose a project of {team}, or No project."
+            if projects
+            else f"Team {team} has no projects. Choose No project."
+        )
         options.focus()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -1976,8 +2143,7 @@ def family_refusal(card: CardView, children: list[CardView]) -> str | None:
     for child in children:
         if child.worktree:
             name = split_title(child.title)[0] or child.title
-            return (f"Its sub-card {name} has a worktree. "
-                    "Finish the sub-card before you promote the parent.")
+            return f"Its sub-card {name} has a worktree. Finish the sub-card before you promote the parent."
     return None
 
 
@@ -2006,8 +2172,11 @@ def card_actions(card: CardView) -> list[tuple[str, str]]:
             wanted.add("promote")
         if card.checked and card.worktree_left:
             wanted.add("finish")
-    return [(f"{key}  {'Unarchive' if action == 'archive' and card.archived else label}", action)
-            for action, key, label in MENU_ENTRIES if action in wanted]
+    return [
+        (f"{key}  {'Unarchive' if action == 'archive' and card.archived else label}", action)
+        for action, key, label in MENU_ENTRIES
+        if action in wanted
+    ]
 
 
 class CardMenuScreen(ModalBase):
@@ -2085,8 +2254,14 @@ class ModelScreen(ModalBase):
     for that model in the `[thinking]` table of the config file, else at the agent default.
     """
 
-    def __init__(self, default: str | None, models: list[str], remembered: dict[str, str] | None = None,
-                 default_model: str | None = None, agent: str = "pi"):
+    def __init__(
+        self,
+        default: str | None,
+        models: list[str],
+        remembered: dict[str, str] | None = None,
+        default_model: str | None = None,
+        agent: str = "pi",
+    ):
         super().__init__()
         self.agent = agent
         self.models = [None, *models]
@@ -2165,15 +2340,32 @@ class ConfigScreen(ModalBase):
     BINDINGS = [Binding("ctrl+s", "save", "Save")]
     AUTO_FOCUS = "#config-theme"
     # The global settings that the Global tab shows, in the order of its fields.
-    GLOBAL_KEYS = ("theme", "start_agent", "start_model", "start_thinking", "merge", "icon_style",
-                   "tag_style", "card_style", "details_pane", "details_pane_ratio")
+    GLOBAL_KEYS = (
+        "theme",
+        "start_agent",
+        "start_model",
+        "start_thinking",
+        "merge",
+        "icon_style",
+        "tag_style",
+        "card_style",
+        "details_pane",
+        "details_pane_ratio",
+    )
     # The details pane heights that the Global tab offers, as a share of the agent pane.
     DETAILS_RATIOS = (0.15, 0.2, 0.25, 0.33, 0.4, 0.5)
 
-    def __init__(self, path: Path | None, meta: BoardMeta, can_link: bool, settings: dict[str, str | None],
-                 themes: list[str], pi_choices: tuple[str | None, list[str]],
-                 codex_choices: tuple[str | None, list[str]] | None = None,
-                 remembered: dict[str, str] | None = None):
+    def __init__(
+        self,
+        path: Path | None,
+        meta: BoardMeta,
+        can_link: bool,
+        settings: dict[str, str | None],
+        themes: list[str],
+        pi_choices: tuple[str | None, list[str]],
+        codex_choices: tuple[str | None, list[str]] | None = None,
+        remembered: dict[str, str] | None = None,
+    ):
         super().__init__()
         self.path = path
         self.meta = meta
@@ -2241,9 +2433,11 @@ class ConfigScreen(ModalBase):
         return [(f"{round(ratio * 100)}% of the agent pane", ratio) for ratio in ratios]
 
     def _board_merge_options(self, default: str) -> list[tuple[str, str]]:
-        return [(f"Global default ({default})", "default"),
-                ("local: merge into the base branch", "local"),
-                ("pr: open a draft pull request", "pr")]
+        return [
+            (f"Global default ({default})", "default"),
+            ("local: merge into the base branch", "local"),
+            ("pr: open a draft pull request", "pr"),
+        ]
 
     def _thinking_model(self) -> str | None:
         """The model whose thinking level the field shows: the chosen model, or None for the agent default."""
@@ -2265,43 +2459,112 @@ class ConfigScreen(ModalBase):
             with TabbedContent(initial="config-global", id="config-tabs"):
                 with TabPane("Global (all boards)", id="config-global"):
                     with VerticalScroll(classes="config-pane", can_focus=False):
-                        yield self._titled(Select([(name, name) for name in self.themes], value=settings["theme"],
-                                                  allow_blank=False, id="config-theme"), "Theme")
-                        yield self._titled(Select([(agent, agent) for agent in AGENTS],
-                                                  value=settings["start_agent"], allow_blank=False,
-                                                  id="config-agent"), "Agent")
-                        yield self._titled(Select(self._model_options(self.agent),
-                                                  value=settings["start_model"] or "default", allow_blank=False,
-                                                  id="config-model"), "Model")
-                        yield self._titled(Select(thinking, value=self._effective_thinking(),
-                                                  allow_blank=False, disabled=not thinking_levels(self.agent),
-                                                  id="config-thinking"), "Thinking (pi, codex)")
-                        yield self._titled(Select([("local: merge into the base branch", "local"),
-                                                   ("pr: open a draft pull request", "pr")],
-                                                  value=settings["merge"], allow_blank=False,
-                                                  id="config-default-merge"), "Merge")
-                        yield self._titled(Select([("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
-                                                  value=settings["icon_style"], allow_blank=False,
-                                                  id="config-icon-style"), "Icons")
-                        yield self._titled(Select([("outline: text on a tint", "outline"),
-                                                   ("round: Nerd Font ends", "round"),
-                                                   ("block: square ends", "block")],
-                                                  value=settings["tag_style"], allow_blank=False,
-                                                  id="config-tag-style"), "Tags")
-                        yield self._titled(Select([("full: a border and a description", "full"),
-                                                   ("compact: title, tags and status", "compact")],
-                                                  value=settings["card_style"], allow_blank=False,
-                                                  id="config-card-style"), "Cards")
-                        yield self._titled(Select([("on: open with each card agent and planner", True),
-                                                   ("off", False)],
-                                                  value=settings["details_pane"], allow_blank=False,
-                                                  id="config-details-pane"), "Details pane")
-                        yield self._titled(Select(self._details_ratio_options(),
-                                                  value=settings["details_pane_ratio"], allow_blank=False,
-                                                  id="config-details-ratio"), "Details pane height")
+                        yield self._titled(
+                            Select(
+                                [(name, name) for name in self.themes],
+                                value=settings["theme"],
+                                allow_blank=False,
+                                id="config-theme",
+                            ),
+                            "Theme",
+                        )
+                        yield self._titled(
+                            Select(
+                                [(agent, agent) for agent in AGENTS],
+                                value=settings["start_agent"],
+                                allow_blank=False,
+                                id="config-agent",
+                            ),
+                            "Agent",
+                        )
+                        yield self._titled(
+                            Select(
+                                self._model_options(self.agent),
+                                value=settings["start_model"] or "default",
+                                allow_blank=False,
+                                id="config-model",
+                            ),
+                            "Model",
+                        )
+                        yield self._titled(
+                            Select(
+                                thinking,
+                                value=self._effective_thinking(),
+                                allow_blank=False,
+                                disabled=not thinking_levels(self.agent),
+                                id="config-thinking",
+                            ),
+                            "Thinking (pi, codex)",
+                        )
+                        yield self._titled(
+                            Select(
+                                [
+                                    ("local: merge into the base branch", "local"),
+                                    ("pr: open a draft pull request", "pr"),
+                                ],
+                                value=settings["merge"],
+                                allow_blank=False,
+                                id="config-default-merge",
+                            ),
+                            "Merge",
+                        )
+                        yield self._titled(
+                            Select(
+                                [("plain: text labels", "plain"), ("nerd: Nerd Font icons", "nerd")],
+                                value=settings["icon_style"],
+                                allow_blank=False,
+                                id="config-icon-style",
+                            ),
+                            "Icons",
+                        )
+                        yield self._titled(
+                            Select(
+                                [
+                                    ("outline: text on a tint", "outline"),
+                                    ("round: Nerd Font ends", "round"),
+                                    ("block: square ends", "block"),
+                                ],
+                                value=settings["tag_style"],
+                                allow_blank=False,
+                                id="config-tag-style",
+                            ),
+                            "Tags",
+                        )
+                        yield self._titled(
+                            Select(
+                                [
+                                    ("full: a border and a description", "full"),
+                                    ("compact: title, tags and status", "compact"),
+                                ],
+                                value=settings["card_style"],
+                                allow_blank=False,
+                                id="config-card-style",
+                            ),
+                            "Cards",
+                        )
+                        yield self._titled(
+                            Select(
+                                [("on: open with each card agent and planner", True), ("off", False)],
+                                value=settings["details_pane"],
+                                allow_blank=False,
+                                id="config-details-pane",
+                            ),
+                            "Details pane",
+                        )
+                        yield self._titled(
+                            Select(
+                                self._details_ratio_options(),
+                                value=settings["details_pane_ratio"],
+                                allow_blank=False,
+                                id="config-details-ratio",
+                            ),
+                            "Details pane height",
+                        )
                         yield Label("Nerd icons and round tags need Nerd Font Mono.", classes="dim")
-                        yield Label("Thinking is kept for each model; Agent default clears the chosen model's level.",
-                                    classes="dim")
+                        yield Label(
+                            "Thinking is kept for each model; Agent default clears the chosen model's level.",
+                            classes="dim",
+                        )
                 with TabPane("Current board", id="config-board"):
                     with VerticalScroll(classes="config-pane", can_focus=False):
                         yield from self._compose_board()
@@ -2310,29 +2573,41 @@ class ConfigScreen(ModalBase):
 
     def _compose_board(self) -> ComposeResult:
         if not self.path:
-            yield Label("No repository board. Press i in a repository to create one.",
-                        id="config-board-hint", classes="dim")
+            yield Label(
+                "No repository board. Press i in a repository to create one.", id="config-board-hint", classes="dim"
+            )
             return
         yield RichStatic(Text(f"Board: {self.path.stem}", style="bold"), id="config-board-name")
         if self.meta.repo:
             yield Label(f"repo: {self.meta.repo}", classes="dim")
-        yield self._titled(Select(self._board_merge_options(self.settings["merge"]),
-                                  value=self.meta.merge or "default", allow_blank=False,
-                                  id="config-merge"), "Merge")
+        yield self._titled(
+            Select(
+                self._board_merge_options(self.settings["merge"]),
+                value=self.meta.merge or "default",
+                allow_blank=False,
+                id="config-merge",
+            ),
+            "Merge",
+        )
         if self.meta.links:
-            yield self._titled(OptionList(*[self._link_label(link) for link in self.meta.links],
-                                          id="config-links"), "Linear projects")
+            yield self._titled(
+                OptionList(*[self._link_label(link) for link in self.meta.links], id="config-links"), "Linear projects"
+            )
         else:
             yield Label("No Linear projects are linked.", classes="dim")
         if self.meta.pins:
-            yield self._titled(OptionList(*[self._pin_label(pin) for pin in self.meta.pins],
-                                          id="config-pins"), "Pinned Linear issues")
+            yield self._titled(
+                OptionList(*[self._pin_label(pin) for pin in self.meta.pins], id="config-pins"), "Pinned Linear issues"
+            )
         if self.can_link:
             with Horizontal(classes="form-row"):
-                yield self._titled(Input(placeholder="API Platform", id="config-project",
-                                         select_on_focus=False), "Link a Linear project")
-                yield self._titled(Input(placeholder="repo:api, bug", id="config-labels",
-                                         select_on_focus=False), "Labels")
+                yield self._titled(
+                    Input(placeholder="API Platform", id="config-project", select_on_focus=False),
+                    "Link a Linear project",
+                )
+                yield self._titled(
+                    Input(placeholder="repo:api, bug", id="config-labels", select_on_focus=False), "Labels"
+                )
         if self.meta.links or self.meta.pins:
             yield Label("enter on a project or an issue: remove it, or keep it again", classes="dim")
 
@@ -2393,9 +2668,22 @@ class ConfigScreen(ModalBase):
         `start_thinking`; only the agent default's level stays a global default.
         """
         values = {}
-        for key, widget in zip(self.GLOBAL_KEYS, ("theme", "agent", "model", "thinking", "default-merge",
-                                                  "icon-style", "tag-style", "card-style",
-                                                  "details-pane", "details-ratio"), strict=True):
+        for key, widget in zip(
+            self.GLOBAL_KEYS,
+            (
+                "theme",
+                "agent",
+                "model",
+                "thinking",
+                "default-merge",
+                "icon-style",
+                "tag-style",
+                "card-style",
+                "details-pane",
+                "details-ratio",
+            ),
+            strict=True,
+        ):
             value = self.query_one(f"#config-{widget}", Select).value
             values[key] = None if value == "default" else value
         return values
@@ -2425,17 +2713,23 @@ class ConfigScreen(ModalBase):
         if self.can_link:
             project = self.query_one("#config-project", Input).value.strip()
             labels = [label.strip() for label in self.query_one("#config-labels", Input).value.split(",")]
-        self.app.submit_config(self, None if merge == "default" else merge, set(self.removed),
-                               project, [label for label in labels if label], set(self.removed_pins),
-                               settings=changed, levels=levels)
+        self.app.submit_config(
+            self,
+            None if merge == "default" else merge,
+            set(self.removed),
+            project,
+            [label for label in labels if label],
+            set(self.removed_pins),
+            settings=changed,
+            levels=levels,
+        )
 
 
 # The tabs under the header: (tab, label). G goes to the next tab, and from the last to the first.
 TABS = [("board", "Board"), ("prs", "Pull requests"), ("notes", "Notes"), ("automations", "Automations")]
 TAB_KEY = "G"
 # Each tab's icon: its Nerd Font icon and its plain icon.
-TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂"), "notes": ("\uf249", "✎"),
-             "automations": ("\uf017", "↻")}
+TAB_ICONS = {"board": ("\uf0db", "▦"), "prs": ("\uf407", "⑂"), "notes": ("\uf249", "✎"), "automations": ("\uf017", "↻")}
 # The actions that the tabs show, so the key list leaves them out.
 TAB_ACTIONS = {"pull_requests", "next_tab"}
 
@@ -2505,8 +2799,11 @@ class TabBar(Vertical):
         yield RichStatic(self._hint(), id="tab-next")
         with Horizontal(id="tab-row"):
             for tab, _label in TABS:
-                box = Container(Static("", classes="tab-label"), id=f"tab-{tab}",
-                                classes="tab active" if tab == self.active else "tab")
+                box = Container(
+                    Static("", classes="tab-label"),
+                    id=f"tab-{tab}",
+                    classes="tab active" if tab == self.active else "tab",
+                )
                 box.plain = ""
                 yield box
 
@@ -2662,7 +2959,7 @@ class KeyBar(Static):
             key = self.app.get_key_display(binding).replace(" ", "\u00a0")
             text = Text()
             text.append(f"\u00a0{key}\u00a0", style=Style(bold=True, reverse=True, dim=not enabled) + click)
-            text.append(f"\u00a0{binding.description.replace(' ', chr(0xa0))}", style=click)
+            text.append(f"\u00a0{binding.description.replace(' ', chr(0xA0))}", style=click)
             labels.append(text)
         return labels
 
@@ -2752,7 +3049,7 @@ def label_chip(label: dict) -> Text:
     color = label.get("color") or ""
     if not re.fullmatch(r"[0-9a-fA-F]{6}", color):
         return Text(f" {label['name']} ", style="reverse")
-    red, green, blue = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+    red, green, blue = (int(color[i : i + 2], 16) for i in (0, 2, 4))
     text = "black" if 0.299 * red + 0.587 * green + 0.114 * blue > 150 else "white"
     return Text(f" {label['name']} ", style=f"{text} on #{color}")
 
@@ -2820,12 +3117,25 @@ def ago(stamp: str, now: datetime | None = None) -> str:
 
 
 # The parts of a pull request row, in the order that `PullRequestsScreen.rows` gives them.
-PR_FIELDS = ["", "PR", "Title", "Author", "Size", "CI", "GitHub review", "Agent review (local)", "Notes",
-             "Comments", "Branch", "Updated"]
+PR_FIELDS = [
+    "",
+    "PR",
+    "Title",
+    "Author",
+    "Size",
+    "CI",
+    "GitHub review",
+    "Agent review (local)",
+    "Notes",
+    "Comments",
+    "Branch",
+    "Updated",
+]
 
 
-def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None = None,
-              agent_logos: bool = False) -> list[Text]:
+def pr_fields(
+    pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None = None, agent_logos: bool = False
+) -> list[Text]:
     """Each part of a pull request row, as `PR_FIELDS` names them."""
     state = "draft" if pr.draft else "open"
     notes = Text(f"{pr.notes} {pr_icon('notes', icon_style)}".rstrip()) if pr.notes else Text("")
@@ -2834,18 +3144,20 @@ def pr_fields(pr: pr_reviews.PullRequest, icon_style: str, now: datetime | None 
     if pr.base_branch:
         branch.append(f" → {pr.base_branch}", style="dim")
     updated = ago(pr.updated, now)
-    return [Text(pr_icon(state, icon_style), style=PR_STATES[state][2]),
-            Text(f"#{pr.number}", style="bold"),
-            pr_title_line(pr),
-            Text(pr.author, style="bold cyan" if pr.mine else ""),
-            pr_size_cell(pr),
-            pr_ci_cell(pr, icon_style),
-            pr_github_cell(pr, icon_style),
-            pr_agent_cell(pr, icon_style, agent_logos),
-            notes,
-            comments,
-            branch,
-            Text(f"updated {updated}" if updated else "", style="dim")]
+    return [
+        Text(pr_icon(state, icon_style), style=PR_STATES[state][2]),
+        Text(f"#{pr.number}", style="bold"),
+        pr_title_line(pr),
+        Text(pr.author, style="bold cyan" if pr.mine else ""),
+        pr_size_cell(pr),
+        pr_ci_cell(pr, icon_style),
+        pr_github_cell(pr, icon_style),
+        pr_agent_cell(pr, icon_style, agent_logos),
+        notes,
+        comments,
+        branch,
+        Text(f"updated {updated}" if updated else "", style="dim"),
+    ]
 
 
 # The narrowest row that keeps the fixed columns of the wide layout and a readable title.
@@ -2944,8 +3256,9 @@ class PullRequestList(VerticalScroll, can_focus=True):
                 widget.show(pr, fields)
         else:
             await self.remove_children()
-            await self.mount_all([PullRequestRow(index, pr, fields)
-                                  for index, (pr, fields) in enumerate(zip(prs, rows, strict=False))])
+            await self.mount_all(
+                [PullRequestRow(index, pr, fields) for index, (pr, fields) in enumerate(zip(prs, rows, strict=False))]
+            )
 
     def move_cursor(self, row: int, scroll: bool = True) -> None:
         widgets = list(self.query(PullRequestRow))
@@ -2966,8 +3279,11 @@ class PullRequestList(VerticalScroll, can_focus=True):
 
 def check_order(check: dict) -> int:
     """Failed checks first, then running, passed and skipped ones."""
-    return ["failed", "pending", "passed", "skipped"].index(check["state"]) \
-        if check["state"] in ("failed", "pending", "passed", "skipped") else 0
+    return (
+        ["failed", "pending", "passed", "skipped"].index(check["state"])
+        if check["state"] in ("failed", "pending", "passed", "skipped")
+        else 0
+    )
 
 
 def pr_key_applies(pr: pr_reviews.PullRequest | None, action: str) -> bool:
@@ -2994,8 +3310,13 @@ class PullRequestDetailScreen(ModalBase):
         Binding("o", "act('open')", "Open in browser"),
     ]
 
-    def __init__(self, pr: pr_reviews.PullRequest, repo: str, icon_style: str = "plain",
-                 load_details: Callable[[], dict] | None = None):
+    def __init__(
+        self,
+        pr: pr_reviews.PullRequest,
+        repo: str,
+        icon_style: str = "plain",
+        load_details: Callable[[], dict] | None = None,
+    ):
         super().__init__()
         self.pr = pr
         self.repo = repo
@@ -3025,8 +3346,7 @@ class PullRequestDetailScreen(ModalBase):
         review = pr.review or {}
         # Each line has its own style: a style of the whole Text would carry over to the lines after it.
         text = Text()
-        text.append("herdboard's reviewer agent, in a workspace on this machine. Its notes are in Hunk.\n",
-                    style="dim")
+        text.append("herdboard's reviewer agent, in a workspace on this machine. Its notes are in Hunk.\n", style="dim")
         if not pr.status:
             text.append("No agent review yet. Press s to start one.", style="dim")
             return text
@@ -3035,8 +3355,10 @@ class PullRequestDetailScreen(ModalBase):
             text.append("  ")
             text.append_text(pr_label("agent:new commits", "new commits since the review", style))
         agent = " ".join(part for part in (review.get("agent"), review.get("model"), review.get("thinking")) if part)
-        lines = [("agent", agent or "unknown"),
-                 ("notes", f"{pr.notes} notes" if pr.notes is not None else "notes not counted yet")]
+        lines = [
+            ("agent", agent or "unknown"),
+            ("notes", f"{pr.notes} notes" if pr.notes is not None else "notes not counted yet"),
+        ]
         if review.get("reviewed_sha"):
             lines.append(("commit", f"reviewed at {review['reviewed_sha'][:8]}"))
         if review.get("workspace_id"):
@@ -3053,8 +3375,7 @@ class PullRequestDetailScreen(ModalBase):
         text = Text()
         text.append("Reviews on GitHub. You submit yours with S in Hunk.\n", style="dim")
         head = [part for part in (pr_github_cell(pr, style),) if part.plain]
-        text.append_text(head[0] if head else Text("No review decision: the repository requires none.",
-                                                   style="dim"))
+        text.append_text(head[0] if head else Text("No review decision: the repository requires none.", style="dim"))
         if self.details is None:
             text.append("\nReading the reviews…", style="dim")
             return text
@@ -3081,8 +3402,9 @@ class PullRequestDetailScreen(ModalBase):
         counts = {}
         for check in checks:
             counts[check["state"]] = counts.get(check["state"], 0) + 1
-        summary = ", ".join(f"{counts[state]} {state}" for state in ("failed", "pending", "passed", "skipped")
-                            if state in counts)
+        summary = ", ".join(
+            f"{counts[state]} {state}" for state in ("failed", "pending", "passed", "skipped") if state in counts
+        )
         text = Text()
         text.append_text(pr_label(f"ci:{pr.ci}", summary, style) if pr.ci else Text(summary))
         for check in checks:
@@ -3141,16 +3463,21 @@ class PullRequestDetailScreen(ModalBase):
         with dialog:
             yield self._static(title, id="pr-detail-title")
             yield self._static(meta, id="pr-detail-meta")
-            blocks = [("pr-detail-checks", "CI checks", self._checks_text()),
-                      ("pr-detail-issues", "Closes issues", self._issues_text()),
-                      ("pr-detail-github", "GitHub review", self._github_text()),
-                      ("pr-detail-agent", "Agent review (local)", self._agent_text())]
+            blocks = [
+                ("pr-detail-checks", "CI checks", self._checks_text()),
+                ("pr-detail-issues", "Closes issues", self._issues_text()),
+                ("pr-detail-github", "GitHub review", self._github_text()),
+                ("pr-detail-agent", "Agent review (local)", self._agent_text()),
+            ]
             for widget_id, name, text in blocks:
                 block = self._static(text, id=widget_id, classes="detail-block")
                 block.border_title = name
                 yield block
-            body = Markdown("*Reading the description…*" if self.load_details else pr.body.strip()
-                            or "*No description.*", id="pr-detail-body", classes="detail-block")
+            body = Markdown(
+                "*Reading the description…*" if self.load_details else pr.body.strip() or "*No description.*",
+                id="pr-detail-body",
+                classes="detail-block",
+            )
             body.border_title = "Description"
             yield body
 
@@ -3255,8 +3582,11 @@ class PullRequestsScreen(Screen):
         status = Static("Reading GitHub…", id="pr-status")
         yield status
         yield PullRequestList(id="pr-list")
-        search = Input(placeholder="GitHub search: words, author:NAME, draft:true, review-requested:@me · "
-                                   "enter searches · escape cancels", id="pr-search")
+        search = Input(
+            placeholder="GitHub search: words, author:NAME, draft:true, review-requested:@me · "
+            "enter searches · escape cancels",
+            id="pr-search",
+        )
         search.display = False
         with Vertical(classes="bottom-dock"):
             yield search
@@ -3308,8 +3638,9 @@ class PullRequestsScreen(Screen):
         """Where the list is (the total, the page, the search), then what the shown PRs need."""
         if not prs:
             if self.search:
-                return Text(f"No open pull requests in {repo} match {self.search!r}. Escape clears the search.",
-                            style="dim")
+                return Text(
+                    f"No open pull requests in {repo} match {self.search!r}. Escape clears the search.", style="dim"
+                )
             return Text(f"No open pull requests in {repo}", style="dim")
         style = self.icon_style
         page = self.page
@@ -3322,14 +3653,29 @@ class PullRequestsScreen(Screen):
         if self.search:
             text.append(f" · search: {self.search}", style="bold")
         # What needs the user, by where it comes from: GitHub, its checks, and the local agent.
-        groups = [("GitHub", [("gh:requested", sum(pr.requested for pr in prs), "your review"),
-                              ("gh:changes requested", sum(pr.decision == "changes requested" for pr in prs),
-                               "changes requested")]),
-                  ("CI", [("ci:failed", sum(pr.ci == "failed" for pr in prs), "failed")]),
-                  ("agent", [("agent:reviewing", sum(pr.status == "reviewing" for pr in prs), "reviewing"),
-                             ("agent:reviewed", sum(pr.status == "reviewed" for pr in prs), "reviewed"),
-                             ("agent:failed", sum(pr.status == "failed" for pr in prs), "failed"),
-                             ("agent:new commits", sum(pr.new_commits for pr in prs), "new commits")])]
+        groups = [
+            (
+                "GitHub",
+                [
+                    ("gh:requested", sum(pr.requested for pr in prs), "your review"),
+                    (
+                        "gh:changes requested",
+                        sum(pr.decision == "changes requested" for pr in prs),
+                        "changes requested",
+                    ),
+                ],
+            ),
+            ("CI", [("ci:failed", sum(pr.ci == "failed" for pr in prs), "failed")]),
+            (
+                "agent",
+                [
+                    ("agent:reviewing", sum(pr.status == "reviewing" for pr in prs), "reviewing"),
+                    ("agent:reviewed", sum(pr.status == "reviewed" for pr in prs), "reviewed"),
+                    ("agent:failed", sum(pr.status == "failed" for pr in prs), "failed"),
+                    ("agent:new commits", sum(pr.new_commits for pr in prs), "new commits"),
+                ],
+            ),
+        ]
         shown = [(name, [entry for entry in entries if entry[1]]) for name, entries in groups]
         shown = [(name, entries) for name, entries in shown if entries]
         if shown and paged:
@@ -3343,8 +3689,9 @@ class PullRequestsScreen(Screen):
         text.append(f" │ read at {datetime.now().strftime('%H:%M')}", style="dim")
         return text
 
-    async def _show(self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None,
-                    searched: bool = False) -> None:
+    async def _show(
+        self, repo: str, prs: list[pr_reviews.PullRequest], page: pr_reviews.Page | None = None, searched: bool = False
+    ) -> None:
         """Show a page. A search page leaves the tab's open count as it is."""
         selected = self.current()
         self.repo, self.prs = repo, prs
@@ -3363,8 +3710,10 @@ class PullRequestsScreen(Screen):
             self.shown_rows = rows
             await listing.show(prs, rows)
             numbers = [pr.number for pr in prs]
-            listing.move_cursor(numbers.index(selected.number) if selected and selected.number in numbers else 0,
-                                scroll=selected is None)
+            listing.move_cursor(
+                numbers.index(selected.number) if selected and selected.number in numbers else 0,
+                scroll=selected is None,
+            )
         self._status(self._summary(repo, prs))
         self.refresh_bindings()
 
@@ -3404,7 +3753,7 @@ class PullRequestsScreen(Screen):
             if self.page.next_cursor is None:
                 self.app.notify("This is the last page")
                 return
-            del self.cursors[self.page_index + 1:]
+            del self.cursors[self.page_index + 1 :]
             self.cursors.append(self.page.next_cursor)
             self.page_index += 1
         else:
@@ -3447,9 +3796,13 @@ class PullRequestsScreen(Screen):
         else:
             self.action_close()
 
-    def _run(self, work: Callable[[], dict], notice: Callable[[dict], str],
-             then: Callable[[dict], None] | None = None,
-             failed: Callable[[HerdboardError], bool] | None = None) -> None:
+    def _run(
+        self,
+        work: Callable[[], dict],
+        notice: Callable[[dict], str],
+        then: Callable[[dict], None] | None = None,
+        failed: Callable[[HerdboardError], bool] | None = None,
+    ) -> None:
         """Run one PR action in a thread. `failed` handles an error itself when it returns True."""
         if self.busy:
             self.app.notify("Busy: a pull request action is in progress", severity="warning")
@@ -3503,8 +3856,12 @@ class PullRequestsScreen(Screen):
             if action:
                 getattr(self, f"action_{action}")()
 
-        self.app.push_screen(PullRequestDetailScreen(pr, self.repo, self.icon_style,
-                                                     load_details=lambda: self.service.details(pr.number)), chosen)
+        self.app.push_screen(
+            PullRequestDetailScreen(
+                pr, self.repo, self.icon_style, load_details=lambda: self.service.details(pr.number)
+            ),
+            chosen,
+        )
 
     def action_review(self) -> None:
         pr = self.current()
@@ -3513,13 +3870,16 @@ class PullRequestsScreen(Screen):
 
         def chosen(kind: str | None) -> None:
             if kind == "claude":
-                self.app.push_screen(ClaudeModelScreen(),
-                                     lambda choice: choice and self._review(pr.number, kind, choice[0], None))
+                self.app.push_screen(
+                    ClaudeModelScreen(), lambda choice: choice and self._review(pr.number, kind, choice[0], None)
+                )
             elif thinking_levels(kind):
-                screen = (ModelScreen(*codex_model_choices(self.app.store.config), agent=kind)
-                          if kind == "codex" else pi_model_screen(self.app.store.config))
-                self.app.push_screen(screen,
-                                     lambda choice: choice and self._review(pr.number, kind, *choice))
+                screen = (
+                    ModelScreen(*codex_model_choices(self.app.store.config), agent=kind)
+                    if kind == "codex"
+                    else pi_model_screen(self.app.store.config)
+                )
+                self.app.push_screen(screen, lambda choice: choice and self._review(pr.number, kind, *choice))
 
         self.app.push_screen(AgentScreen(f"Choose the reviewer of PR #{pr.number}"), chosen)
 
@@ -3533,9 +3893,12 @@ class PullRequestsScreen(Screen):
             if getattr(error, "code", None) != "new_commits":
                 return False
             self.app.push_screen(
-                ConfirmScreen(f"PR #{number} has new commits since its worktree was made. Fetch them first?",
-                              "Then herdboard offers the review again."),
-                lambda answer: answer and self._refresh(number))
+                ConfirmScreen(
+                    f"PR #{number} has new commits since its worktree was made. Fetch them first?",
+                    "Then herdboard offers the review again.",
+                ),
+                lambda answer: answer and self._refresh(number),
+            )
             return True
 
         def run() -> dict:
@@ -3547,8 +3910,10 @@ class PullRequestsScreen(Screen):
     def action_go(self) -> None:
         pr = self.current()
         if pr is not None:
-            self._run(lambda: self.service.go(pr.number),
-                      lambda result: f"Went to the review workspace {result['workspace_id']} of PR #{pr.number}")
+            self._run(
+                lambda: self.service.go(pr.number),
+                lambda result: f"Went to the review workspace {result['workspace_id']} of PR #{pr.number}",
+            )
 
     def action_refresh(self) -> None:
         pr = self.current()
@@ -3570,7 +3935,8 @@ class PullRequestsScreen(Screen):
             model = f" ({result['model']})" if result.get("model") else ""
             self.app.push_screen(
                 ConfirmScreen(f"Start a new agent review of PR #{number}?", f"The reviewer: {kind}{model}."),
-                lambda answer: answer and self._review(number, kind, result.get("model"), result.get("thinking")))
+                lambda answer: answer and self._review(number, kind, result.get("model"), result.get("thinking")),
+            )
 
         self._run(lambda: self.service.refresh(number), notice, then=offer)
 
@@ -3584,19 +3950,28 @@ class PullRequestsScreen(Screen):
             def unsent(error: HerdboardError) -> bool:
                 if getattr(error, "code", None) != "unsent_notes":
                     return False
-                self.app.push_screen(ConfirmScreen(f"Finish PR #{number} anyway?", f"{error} Their notes are lost."),
-                                     lambda answer: answer and finish(True))
+                self.app.push_screen(
+                    ConfirmScreen(f"Finish PR #{number} anyway?", f"{error} Their notes are lost."),
+                    lambda answer: answer and finish(True),
+                )
                 return True
 
-            self._run(lambda: self.service.finish(number, force),
-                      lambda result: f"PR #{number}: review finished; worktree removed"
-                                     + ("; branch deleted" if result.get("branch_deleted") else ""),
-                      failed=None if force else unsent)
+            self._run(
+                lambda: self.service.finish(number, force),
+                lambda result: (
+                    f"PR #{number}: review finished; worktree removed"
+                    + ("; branch deleted" if result.get("branch_deleted") else "")
+                ),
+                failed=None if force else unsent,
+            )
 
         self.app.push_screen(
-            ConfirmScreen(f"Finish the review of PR #{number}?",
-                          f"Closes its workspace, removes the worktree and deletes the branch pr/{number}."),
-            lambda answer: answer and finish(False))
+            ConfirmScreen(
+                f"Finish the review of PR #{number}?",
+                f"Closes its workspace, removes the worktree and deletes the branch pr/{number}.",
+            ),
+            lambda answer: answer and finish(False),
+        )
 
     def action_open(self) -> None:
         pr = self.current()
@@ -3604,8 +3979,13 @@ class PullRequestsScreen(Screen):
             return
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         try:
-            process = subprocess.Popen([opener, pr.url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.PIPE, start_new_session=True)
+            process = subprocess.Popen(
+                [opener, pr.url],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
         except OSError as error:
             self.app.notify(f"Cannot open {pr.url} with {opener}: {error}", severity="error")
             return
@@ -3629,8 +4009,10 @@ class NoteChangedScreen(ModalBase):
         with Vertical(classes="dialog"):
             yield Label("The note changed on disk while you edited it.")
             yield Label(str(self.path), classes="dim")
-            yield Label("o: overwrite the file with your edit · r: reload the file and drop your edit · "
-                        "escape: keep editing", classes="dim")
+            yield Label(
+                "o: overwrite the file with your edit · r: reload the file and drop your edit · escape: keep editing",
+                classes="dim",
+            )
 
     def action_answer(self, answer: str) -> None:
         self.dismiss(answer)
@@ -3889,8 +4271,15 @@ class AutomationFormScreen(ModalBase):
     BINDINGS = [Binding("ctrl+s", "save", "Save")]
     AUTO_FOCUS = "#automation-title"
 
-    def __init__(self, heading: str, boards: list[str], types: list[str], save: Callable[[dict], None],
-                 config, item: automations.Automation | None = None):
+    def __init__(
+        self,
+        heading: str,
+        boards: list[str],
+        types: list[str],
+        save: Callable[[dict], None],
+        config,
+        item: automations.Automation | None = None,
+    ):
         super().__init__()
         self.heading = heading
         self.item = item
@@ -3900,8 +4289,11 @@ class AutomationFormScreen(ModalBase):
         self.save = save
         # The agent that "default" runs.
         self.start_agent = config.start_agent
-        self.models = {"claude": [model for model in ClaudeModelScreen.MODELS if model],
-                       "pi": pi_model_choices(config)[1], "codex": codex_model_choices(config)[1]}
+        self.models = {
+            "claude": [model for model in ClaudeModelScreen.MODELS if model],
+            "pi": pi_model_choices(config)[1],
+            "codex": codex_model_choices(config)[1],
+        }
         self.agent = item.agent if item and item.agent else "default"
 
     def _model_options(self, agent: str) -> list[tuple[str, str]]:
@@ -3930,37 +4322,94 @@ class AutomationFormScreen(ModalBase):
         thinking = item.thinking if item and item.thinking else "default"
         with VerticalScroll(classes="dialog card-form automation-form", can_focus=False):
             yield Static(Text(self.heading), id="automation-heading")
-            yield titled(Input(value=item.title if item else "", placeholder="What each run does",
-                               id="automation-title", select_on_focus=False), "Title")
+            yield titled(
+                Input(
+                    value=item.title if item else "",
+                    placeholder="What each run does",
+                    id="automation-title",
+                    select_on_focus=False,
+                ),
+                "Title",
+            )
             with Horizontal(classes="form-row"):
-                yield titled(Select([(board, board) for board in self.boards], allow_blank=False,
-                                    value=item.board if item else "inbox", id="automation-board"), "Board")
-                yield titled(Input(value=item.schedule if item else "", placeholder="every weekday at 07:30",
-                                   id="automation-schedule", select_on_focus=False), "Schedule")
+                yield titled(
+                    Select(
+                        [(board, board) for board in self.boards],
+                        allow_blank=False,
+                        value=item.board if item else "inbox",
+                        id="automation-board",
+                    ),
+                    "Board",
+                )
+                yield titled(
+                    Input(
+                        value=item.schedule if item else "",
+                        placeholder="every weekday at 07:30",
+                        id="automation-schedule",
+                        select_on_focus=False,
+                    ),
+                    "Schedule",
+                )
             with Horizontal(classes="form-row"):
-                yield titled(Select([(kind, kind) for kind in self.types], prompt="none",
-                                    value=item.type if item and item.type else Select.NULL,
-                                    id="automation-type"), "Type")
-                yield titled(Input(value=" ".join(item.tags) if item else "", placeholder="security, deps",
-                                   id="automation-tags", select_on_focus=False), "Tags")
+                yield titled(
+                    Select(
+                        [(kind, kind) for kind in self.types],
+                        prompt="none",
+                        value=item.type if item and item.type else Select.NULL,
+                        id="automation-type",
+                    ),
+                    "Type",
+                )
+                yield titled(
+                    Input(
+                        value=" ".join(item.tags) if item else "",
+                        placeholder="security, deps",
+                        id="automation-tags",
+                        select_on_focus=False,
+                    ),
+                    "Tags",
+                )
             with Horizontal(classes="form-row"):
                 yield titled(Select(agents, allow_blank=False, value=self.agent, id="automation-agent"), "Agent")
-                yield titled(Select(self._model_options(self.agent), allow_blank=False,
-                                    value=item.model if item and item.model else "default",
-                                    id="automation-model"), "Model")
+                yield titled(
+                    Select(
+                        self._model_options(self.agent),
+                        allow_blank=False,
+                        value=item.model if item and item.model else "default",
+                        id="automation-model",
+                    ),
+                    "Model",
+                )
                 # A saved level that the agent does not take shows as "default"; a save then clears it.
-                yield titled(Select(levels, allow_blank=False,
-                                    value=thinking if thinking in (value for _, value in levels) else "default",
-                                    id="automation-thinking"), "Thinking")
-            yield Checkbox("Tell the agent it may merge other PRs",
-                           value=bool(item and item.may_merge_prs), id="automation-merge")
-            yield Label("Only PRs that pass checks and need no change "
-                        "(instruction only, no extra permissions)", id="automation-merge-help", classes="dim")
-            yield titled(TextArea(item.body if item else "", id="automation-body",
-                                  placeholder="What the agent does on each run"), "Details")
+                yield titled(
+                    Select(
+                        levels,
+                        allow_blank=False,
+                        value=thinking if thinking in (value for _, value in levels) else "default",
+                        id="automation-thinking",
+                    ),
+                    "Thinking",
+                )
+            yield Checkbox(
+                "Tell the agent it may merge other PRs", value=bool(item and item.may_merge_prs), id="automation-merge"
+            )
+            yield Label(
+                "Only PRs that pass checks and need no change (instruction only, no extra permissions)",
+                id="automation-merge-help",
+                classes="dim",
+            )
+            yield titled(
+                TextArea(
+                    item.body if item else "", id="automation-body", placeholder="What the agent does on each run"
+                ),
+                "Details",
+            )
             yield error
-            yield Label("ctrl+s: save · tab: next field · escape: cancel · schedules: every day, every weekday, "
-                        "every week on monday, every month on the 1st, every N days, with at HH:MM", classes="dim")
+            yield Label(
+                "ctrl+s: save · tab: next field · escape: cancel · schedules: every day, every weekday, "
+                "every week on monday, every month on the 1st, every N days, with at HH:MM",
+                classes="dim",
+            )
 
     def values(self) -> dict:
         def choice(name: str) -> str | None:
@@ -3994,8 +4443,10 @@ class AutomationFormScreen(ModalBase):
             return
         event.stop()
         self.agent = str(event.value)
-        for name, options in (("model", self._model_options(self.agent)),
-                              ("thinking", self._thinking_options(self.agent))):
+        for name, options in (
+            ("model", self._model_options(self.agent)),
+            ("thinking", self._thinking_options(self.agent)),
+        ):
             select = self.query_one(f"#automation-{name}", Select)
             value = select.value
             select.set_options(options)
@@ -4030,14 +4481,19 @@ class AutomationDetailScreen(ModalBase):
 
     def compose(self) -> ComposeResult:
         entry = self.entry
-        facts = [("ID", entry["id"]), ("State", "on" if entry["enabled"] else "paused"),
-                 ("Board", entry["board"]), ("Schedule", entry["schedule"]),
-                 ("Next run", _short_time(entry["next_due"])), ("Type", entry["type"] or "none"),
-                 ("Tags", ", ".join(entry["tags"]) or "none"),
-                 ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
-                 ("May merge other PRs (instruction)", "yes" if entry["may_merge_prs"] else "no"),
-                 ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
-                 ("Last result", entry["last_result"] or "-")]
+        facts = [
+            ("ID", entry["id"]),
+            ("State", "on" if entry["enabled"] else "paused"),
+            ("Board", entry["board"]),
+            ("Schedule", entry["schedule"]),
+            ("Next run", _short_time(entry["next_due"])),
+            ("Type", entry["type"] or "none"),
+            ("Tags", ", ".join(entry["tags"]) or "none"),
+            ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
+            ("May merge other PRs (instruction)", "yes" if entry["may_merge_prs"] else "no"),
+            ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
+            ("Last result", entry["last_result"] or "-"),
+        ]
         if entry["schedule_error"]:
             facts.append(("Schedule error", entry["schedule_error"]))
         meta = Text()
@@ -4130,8 +4586,10 @@ class AutomationsScreen(Screen):
     def rows(self) -> list[tuple[str, ...]]:
         """Each row's cells as plain text, for tests."""
         table = self.query_one("#automation-list", DataTable)
-        return [tuple(str(cell.plain if isinstance(cell, Text) else cell) for cell in table.get_row_at(index))
-                for index in range(table.row_count)]
+        return [
+            tuple(str(cell.plain if isinstance(cell, Text) else cell) for cell in table.get_row_at(index))
+            for index in range(table.row_count)
+        ]
 
     def status_text(self) -> str:
         return self.query_one("#automation-status", Static).plain
@@ -4148,13 +4606,30 @@ class AutomationsScreen(Screen):
 
     def _row(self, entry: dict) -> list[Text]:
         state = Text("on", style="green") if entry["enabled"] else Text("paused", style="yellow")
-        last = " ".join(filter(None, (_short_time(entry["last_run"]) if entry["last_run"] else None,
-                                       entry["last_card"], entry["last_result"]))) or "-"
+        last = (
+            " ".join(
+                filter(
+                    None,
+                    (
+                        _short_time(entry["last_run"]) if entry["last_run"] else None,
+                        entry["last_card"],
+                        entry["last_result"],
+                    ),
+                )
+            )
+            or "-"
+        )
         failed = (entry["last_result"] or "").startswith(("start_failed", "spawn_failed"))
         next_run = entry["schedule_error"] or _short_time(entry["next_due"])
-        return [state, Text(entry["id"]), Text(entry["title"]), Text(entry["board"]), Text(entry["schedule"]),
-                Text(next_run, style="red" if entry["schedule_error"] else ""),
-                Text(last, style="red" if failed else "")]
+        return [
+            state,
+            Text(entry["id"]),
+            Text(entry["title"]),
+            Text(entry["board"]),
+            Text(entry["schedule"]),
+            Text(next_run, style="red" if entry["schedule_error"] else ""),
+            Text(last, style="red" if failed else ""),
+        ]
 
     def action_load(self) -> None:
         try:
@@ -4175,9 +4650,11 @@ class AutomationsScreen(Screen):
             self._status("No automations. a adds one: a card that a schedule spawns and starts.")
         else:
             paused = sum(not entry["enabled"] for entry in entries)
-            self._status(f"{len(entries)} automation{'' if len(entries) == 1 else 's'}"
-                         + (f", {paused} paused" if paused else "")
-                         + f" · {automations.definitions_path(self.store.config)}")
+            self._status(
+                f"{len(entries)} automation{'' if len(entries) == 1 else 's'}"
+                + (f", {paused} paused" if paused else "")
+                + f" · {automations.definitions_path(self.store.config)}"
+            )
         self.refresh_bindings()
 
     def _status(self, text: str) -> None:
@@ -4207,8 +4684,10 @@ class AutomationsScreen(Screen):
         entry = self.current()
         if entry is None:
             return
-        self.app.push_screen(AutomationDetailScreen(entry, self.store.config.icon_style),
-                             lambda answer: answer == "edit" and self.action_edit())
+        self.app.push_screen(
+            AutomationDetailScreen(entry, self.store.config.icon_style),
+            lambda answer: answer == "edit" and self.action_edit(),
+        )
 
     def _boards(self) -> list[str]:
         names = ["inbox"]
@@ -4222,8 +4701,10 @@ class AutomationsScreen(Screen):
         def save(values: dict) -> None:
             automations.add(self.store, **values)
 
-        self.app.push_screen(AutomationFormScreen("Add an automation", self._boards(), self.store.config.types,
-                                                  save, self.store.config), lambda saved: saved and self.action_load())
+        self.app.push_screen(
+            AutomationFormScreen("Add an automation", self._boards(), self.store.config.types, save, self.store.config),
+            lambda saved: saved and self.action_load(),
+        )
 
     def action_edit(self) -> None:
         entry = self.current()
@@ -4234,9 +4715,12 @@ class AutomationsScreen(Screen):
         def save(values: dict) -> None:
             automations.edit(self.store, item.id, **values)
 
-        self.app.push_screen(AutomationFormScreen(f"Edit {item.id}", self._boards(), self.store.config.types, save,
-                                                  self.store.config, item=item),
-                             lambda saved: saved and self.action_load())
+        self.app.push_screen(
+            AutomationFormScreen(
+                f"Edit {item.id}", self._boards(), self.store.config.types, save, self.store.config, item=item
+            ),
+            lambda saved: saved and self.action_load(),
+        )
 
     def action_toggle(self) -> None:
         entry = self.current()
@@ -4266,8 +4750,12 @@ class AutomationsScreen(Screen):
             self.app.notify(f"Removed {entry['id']}")
             self.action_load()
 
-        self.app.push_screen(ConfirmScreen(f"Remove automation {entry['id']}: {entry['title']}?",
-                                           "Its spawned cards stay on their boards."), answered)
+        self.app.push_screen(
+            ConfirmScreen(
+                f"Remove automation {entry['id']}: {entry['title']}?", "Its spawned cards stay on their boards."
+            ),
+            answered,
+        )
 
     def _call(self, function, *args, **options) -> None:
         """Run a function on the event loop from a worker thread. Nothing runs once the board quits."""
@@ -4316,11 +4804,20 @@ class AutomationsScreen(Screen):
                     return f"{item.id}: {result['result']}"
                 return f"{item.id}: spawned {result['card']}: {result['result']}"
 
-            self._work(lambda: automations.run(self.store, item, datetime.now().astimezone(),
-                                               config_file=self.app.config_file), notice)
+            self._work(
+                lambda: automations.run(
+                    self.store, item, datetime.now().astimezone(), config_file=self.app.config_file
+                ),
+                notice,
+            )
 
-        self.app.push_screen(ConfirmScreen(f"Run {entry['id']} now: {entry['title']}?",
-                                           f"Spawns a card on {entry['board']} and starts {agent} on it."), answered)
+        self.app.push_screen(
+            ConfirmScreen(
+                f"Run {entry['id']} now: {entry['title']}?",
+                f"Spawns a card on {entry['board']} and starts {agent} on it.",
+            ),
+            answered,
+        )
 
     def action_plan(self) -> None:
         entry = self.current()
@@ -4335,30 +4832,46 @@ class AutomationsScreen(Screen):
                 model_text = f" ({result['model']})" if result["model"] else ""
                 return f"{result['agent']}{model_text} plans {automation_id} in workspace {result['workspace_id']}"
 
-            self._work(lambda: AutomationPlanner(self.store, config_file=self.app.config_file).plan(
-                automation_id, agent=agent, model=model, thinking=thinking), notice)
+            self._work(
+                lambda: AutomationPlanner(self.store, config_file=self.app.config_file).plan(
+                    automation_id, agent=agent, model=model, thinking=thinking
+                ),
+                notice,
+            )
 
         def chosen_agent(agent: str | None) -> None:
             if agent == "claude":
                 self.app.push_screen(ClaudeModelScreen(), lambda choice: choice and plan(agent, choice[0], None))
             elif thinking_levels(agent):
-                screen = (ModelScreen(*codex_model_choices(self.store.config), agent=agent)
-                          if agent == "codex" else pi_model_screen(self.store.config))
+                screen = (
+                    ModelScreen(*codex_model_choices(self.store.config), agent=agent)
+                    if agent == "codex"
+                    else pi_model_screen(self.store.config)
+                )
                 self.app.push_screen(screen, lambda choice: choice and plan(agent, *choice))
 
         self.app.push_screen(AgentScreen("Choose the planner"), chosen_agent)
 
 
 # The column colors in turn, as (color, ANSI color), and the completed column's green.
-COLUMN_PALETTE = [("#4ea8de", "ansi_blue"), ("#d670b8", "ansi_magenta"), ("#e3b341", "ansi_yellow"),
-                  ("#3fb8c9", "ansi_cyan"), ("#7bc96f", "ansi_green")]
+COLUMN_PALETTE = [
+    ("#4ea8de", "ansi_blue"),
+    ("#d670b8", "ansi_magenta"),
+    ("#e3b341", "ansi_yellow"),
+    ("#3fb8c9", "ansi_cyan"),
+    ("#7bc96f", "ansi_green"),
+]
 DONE_COLORS = ("$success", "ansi_green")
 
 
 # The border of a pull request row by its CI state, as (color, ANSI color).
-PR_ROW_COLORS = {"passed": ("$success", "ansi_green"), "failed": ("$error", "ansi_red"),
-                 "pending": ("$warning", "ansi_yellow"), "skipped": ("$surface-lighten-2", "ansi_bright_black"),
-                 "none": ("$surface-lighten-2", "ansi_bright_black")}
+PR_ROW_COLORS = {
+    "passed": ("$success", "ansi_green"),
+    "failed": ("$error", "ansi_red"),
+    "pending": ("$warning", "ansi_yellow"),
+    "skipped": ("$surface-lighten-2", "ansi_bright_black"),
+    "none": ("$surface-lighten-2", "ansi_bright_black"),
+}
 
 
 def pr_row_css() -> str:
@@ -4366,12 +4879,15 @@ def pr_row_css() -> str:
     rules = []
     for state, (color, ansi) in PR_ROW_COLORS.items():
         for prefix, value in (("", color), ("App:ansi ", ansi)):
-            rules += [f"{prefix}.pr-row.ci-{state} {{ border: round {value}; }}",
-                      f"{prefix}.pr-row.ci-{state}.selected {{ border: heavy {value}; }}"]
+            rules += [
+                f"{prefix}.pr-row.ci-{state} {{ border: round {value}; }}",
+                f"{prefix}.pr-row.ci-{state}.selected {{ border: heavy {value}; }}",
+            ]
     # Without a CI color, the selected row's border takes the text color.
-    rules += [".pr-row.ci-none.selected, .pr-row.ci-skipped.selected { border: heavy $foreground; }",
-              "App:ansi .pr-row.ci-none.selected, App:ansi .pr-row.ci-skipped.selected "
-              "{ border: heavy ansi_default; }"]
+    rules += [
+        ".pr-row.ci-none.selected, .pr-row.ci-skipped.selected { border: heavy $foreground; }",
+        "App:ansi .pr-row.ci-none.selected, App:ansi .pr-row.ci-skipped.selected { border: heavy ansi_default; }",
+    ]
     return "\n".join(rules)
 
 
@@ -4382,15 +4898,19 @@ def column_css() -> str:
     named = [(f"col-{index}", colors) for index, colors in enumerate(COLUMN_PALETTE[:COLUMN_COLORS])]
     for name, (color, ansi) in named + [("col-done", DONE_COLORS)]:
         for prefix, value in (("", color), ("App:ansi ", ansi)):
-            rules += [f"{prefix}.{name} {{ border: round {value}; }}",
-                      f"{prefix}.{name} .column-header {{ color: {value}; }}",
-                      f"{prefix}.{name} .card {{ border: round {value}; }}",
-                      f"{prefix}.{name}.current {{ border: heavy {value}; }}",
-                      f"{prefix}.{name}.current .column-header {{ text-style: bold underline; }}",
-                      f"{prefix}.{name} .cards {{ scrollbar-color: {value}; scrollbar-color-hover: {value}; "
-                      f"scrollbar-color-active: {value}; }}"]
-    rules += ["App:ansi .col-archive .card { border: round ansi_bright_black; }",
-              ".col-archive .column-header { color: $text-muted; }"]
+            rules += [
+                f"{prefix}.{name} {{ border: round {value}; }}",
+                f"{prefix}.{name} .column-header {{ color: {value}; }}",
+                f"{prefix}.{name} .card {{ border: round {value}; }}",
+                f"{prefix}.{name}.current {{ border: heavy {value}; }}",
+                f"{prefix}.{name}.current .column-header {{ text-style: bold underline; }}",
+                f"{prefix}.{name} .cards {{ scrollbar-color: {value}; scrollbar-color-hover: {value}; "
+                f"scrollbar-color-active: {value}; }}",
+            ]
+    rules += [
+        "App:ansi .col-archive .card { border: round ansi_bright_black; }",
+        ".col-archive .column-header { color: $text-muted; }",
+    ]
     return "\n".join(rules)
 
 
@@ -4418,7 +4938,8 @@ class HerdboardApp(App):
     # The open pull request count of the last read, for the tab; None before the first read. Every tab bar
     # watches it, also the bars of the tabs that are installed but hidden.
     pr_count: reactive[int | None] = reactive(None)
-    CSS = """
+    CSS = (
+        """
     /* The header row of the board and the pull requests: herdboard | board or repository, view, version. */
     #header-bar { height: 2; padding: 0 1; border-bottom: solid $surface-lighten-2; }
     #header-app { width: auto; color: $accent; text-style: bold; }
@@ -4540,7 +5061,9 @@ class HerdboardApp(App):
     #automation-list { height: 1fr; scrollbar-size-vertical: 1; }
     #automation-merge { width: 100%; border: none; padding: 0 1; }
     .pr-row { height: auto; padding: 0 1; }
-    """ + pr_row_css() + """
+    """
+        + pr_row_css()
+        + """
     .pr-row.selected { background: $accent 20%; }
     App:ansi #pr-repo { color: ansi_magenta; }
     App:ansi #pr-status { color: ansi_default; }
@@ -4558,7 +5081,9 @@ class HerdboardApp(App):
     /* Cards outside the current column fade in the ANSI themes, so the eye goes to one column. */
     App:ansi .column .card { color: ansi_bright_black; border: round ansi_bright_black; }
     App:ansi .column.current .card { color: ansi_default; }
-    """ + column_css() + """
+    """
+        + column_css()
+        + """
     .column.archive { border: dashed $surface-lighten-2; }
     App:ansi .column.archive { border: dashed ansi_bright_black; }
     .column.archive.current { border: dashed $accent; }
@@ -4580,6 +5105,7 @@ class HerdboardApp(App):
     .column.drop-target { border: heavy $accent; }
     App:ansi .column.drop-target { border: heavy ansi_yellow; }
     """
+    )
     BINDINGS = [
         Binding("left,h", "column(-1)", "Column", show=False),
         Binding("right,l", "column(1)", "Column", show=False),
@@ -4673,9 +5199,7 @@ class HerdboardApp(App):
         self.reload_interval = reload_interval
         self.linear_for = linear_for
         self.linear_active = linear_active and linear_for is not None
-        self.available = available or (
-            lambda view: view != "mine" and (view != "repo" or repo_board is not None)
-        )
+        self.available = available or (lambda view: view != "mine" and (view != "repo" or repo_board is not None))
         self.linear_interval = linear_interval
         self.linear_writer = linear_writer
         self.start_card = start_card
@@ -4907,8 +5431,7 @@ class HerdboardApp(App):
         if not terms:
             return columns
         return [
-            ColumnData(c.name, c.limit, c.completed, [card for card in c.cards if card_matches(card, terms)],
-                       c.archive)
+            ColumnData(c.name, c.limit, c.completed, [card for card in c.cards if card_matches(card, terms)], c.archive)
             for c in columns
         ]
 
@@ -4986,21 +5509,38 @@ class HerdboardApp(App):
                     await self._update_column(widget, index, column, show_board)
             else:
                 await container.remove_children()
-                await container.mount_all([self._column_widget(index, c, show_board)
-                                           for index, c in enumerate(self.columns)])
+                await container.mount_all(
+                    [self._column_widget(index, c, show_board) for index, c in enumerate(self.columns)]
+                )
             self._show_selection()
 
     def _card_widgets(self, column: ColumnData, show_board: bool) -> list[CardWidget]:
         config = self.store.config
         dark = self.current_theme.dark
         busy = self.busy_refs()
-        return [CardWidget(card, show_board, config.tag_style, config.icon_style, config.card_style,
-                           column.completed, dark, self.agent_logos, busy.get(card.ref), self.spin_frame)
-                for card in column.cards]
+        return [
+            CardWidget(
+                card,
+                show_board,
+                config.tag_style,
+                config.icon_style,
+                config.card_style,
+                column.completed,
+                dark,
+                self.agent_logos,
+                busy.get(card.ref),
+                self.spin_frame,
+            )
+            for card in column.cards
+        ]
 
     def _column_widget(self, index: int, column: ColumnData, show_board: bool) -> Vertical:
-        classes = ("column " + column_class(index, column) + (" completed" if column.completed else "")
-                   + (" archive" if column.archive else ""))
+        classes = (
+            "column "
+            + column_class(index, column)
+            + (" completed" if column.completed else "")
+            + (" archive" if column.archive else "")
+        )
         cards = VerticalScroll(*self._card_widgets(column, show_board), classes="cards", can_focus=False)
         widget = Vertical(ColumnHeader(column, self.store.config.start_column), cards, classes=classes)
         widget.column_name = column.name
@@ -5044,10 +5584,26 @@ class HerdboardApp(App):
         cards = [card for column in self.loaded for card in column.cards]
 
         def status():
-            return [(card.worktree_removed, card.worktree, card.worktree_left, card.pr_state, card.agent_review,
-                     card.pr_writing, card.planning, card.has_attachments, card.agent, card.planned, card.reviewed,
-                     card.agent_status, card.planning_status, card.review_status, card.pr_write_status)
-                    for card in cards]
+            return [
+                (
+                    card.worktree_removed,
+                    card.worktree,
+                    card.worktree_left,
+                    card.pr_state,
+                    card.agent_review,
+                    card.pr_writing,
+                    card.planning,
+                    card.has_attachments,
+                    card.agent,
+                    card.planned,
+                    card.reviewed,
+                    card.agent_status,
+                    card.planning_status,
+                    card.review_status,
+                    card.pr_write_status,
+                )
+                for card in cards
+            ]
 
         old = status()
         try:
@@ -5074,8 +5630,10 @@ class HerdboardApp(App):
         # Modal screens handle their own keys: the board's own key actions stop
         # behind a dialog. Textual's actions, such as tab to the next field, stay.
         # The pull request list is a full screen with its own keys, so the board's stop there too.
-        if isinstance(self.screen, (ModalScreen, PullRequestsScreen, NotesScreen, AutomationsScreen)) \
-                and action in BOARD_ACTIONS:
+        if (
+            isinstance(self.screen, (ModalScreen, PullRequestsScreen, NotesScreen, AutomationsScreen))
+            and action in BOARD_ACTIONS
+        ):
             return False
         return True
 
@@ -5252,8 +5810,10 @@ class HerdboardApp(App):
                 if not self._ask_target(error, job.target_request):
                     self.notify(str(error), severity="error")
             elif result:
-                self.notify(result.get("notice") or
-                            f"Started {result['ref']} in {result['workspace_id']} ({result['worktree_path']})")
+                self.notify(
+                    result.get("notice")
+                    or f"Started {result['ref']} in {result['workspace_id']} ({result['worktree_path']})"
+                )
             await self.reload(result["ref"] if result else None)
             self.fetch_linear()
             return
@@ -5424,8 +5984,7 @@ class HerdboardApp(App):
     def submit_edit(self, screen: EditScreen, title: str, body: list[str]) -> None:
         """Save the dialog's text, if the card still matches what the dialog showed."""
         ref, before = screen.card.ref, screen.card
-        self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen,
-                          refs={ref})
+        self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen, refs={ref})
 
     def action_parent(self) -> None:
         card = self.current_card()
@@ -5434,14 +5993,16 @@ class HerdboardApp(App):
         if card.source == "linear":
             self.notify("A Linear issue's sub-issues are set in Linear.", severity="warning")
             return
-        options = [other for other in self.store.list_cards([card.path])
-                   if other.ref != card.ref and other.parent is None and not TEMP_REF.match(other.ref)]
+        options = [
+            other
+            for other in self.store.list_cards([card.path])
+            if other.ref != card.ref and other.parent is None and not TEMP_REF.match(other.ref)
+        ]
         ref = card.ref
 
         def chosen(answer: tuple[str, str | None] | None) -> None:
             if answer is not None:
-                self._start_write(lambda: self.store.set_parent(ref, answer[1]),
-                                  refs={ref, answer[1]} - {None})
+                self._start_write(lambda: self.store.set_parent(ref, answer[1]), refs={ref, answer[1]} - {None})
 
         self.push_screen(ParentScreen(card, options), chosen)
 
@@ -5449,8 +6010,12 @@ class HerdboardApp(App):
         card = self.current_card()
         if card is None:
             return
-        children = [other for data in self.loaded for other in data.cards
-                    if other.parent == card.ref and other.source != "linear"]
+        children = [
+            other
+            for data in self.loaded
+            for other in data.cards
+            if other.parent == card.ref and other.source != "linear"
+        ]
         refusal = family_refusal(card, children)
         if refusal is not None:
             self.notify(refusal, severity="warning")
@@ -5488,8 +6053,10 @@ class HerdboardApp(App):
                 return None, []
             found = client.project_for_write(project["id"])
             if found is None or team["id"] not in {t["id"] for t in found["teams"]}:
-                raise HerdboardError(f"Linear project {project['name']} is not a project of team "
-                                     f"{team['key']}. Press T and choose the project again")
+                raise HerdboardError(
+                    f"Linear project {project['name']} is not a project of team "
+                    f"{team['key']}. Press T and choose the project again"
+                )
             return found, []
 
         def change() -> CardView | None:
@@ -5502,14 +6069,18 @@ class HerdboardApp(App):
                 raise HerdboardError(refusal)
             try:
                 promotion = Promoter(self.store.config, self.store, writer).promote(
-                    ref, team=team["key"], target=target, ask=self.ask_state,
+                    ref,
+                    team=team["key"],
+                    target=target,
+                    ask=self.ask_state,
                     # An empty name tells the service that "No project" was chosen.
                     project=project["name"] if project else "",
                     again="Press T on the todo again to finish",
                 )
             except StateCancelledError:
-                self.call_from_thread(self.notify, "Promotion cancelled: no Linear issue was created.",
-                                      severity="warning")
+                self.call_from_thread(
+                    self.notify, "Promotion cancelled: no Linear issue was created.", severity="warning"
+                )
                 return None
             count = len(promotion.sub_issues)
             subs = f" with {count} sub-issue{'s' if count != 1 else ''}" if count else ""
@@ -5568,8 +6139,9 @@ class HerdboardApp(App):
         ref = card.ref
         self.push_screen(
             DeleteScreen(card),
-            lambda delete: self._start_write(lambda: self.store.delete(ref), removed=True, refs={ref})
-            if delete else None,
+            lambda delete: (
+                self._start_write(lambda: self.store.delete(ref), removed=True, refs={ref}) if delete else None
+            ),
         )
 
     def action_archive(self) -> None:
@@ -5606,8 +6178,10 @@ class HerdboardApp(App):
             self._start_write(unarchive, refs={ref})
             return
         self.push_screen(
-            ConfirmScreen(f"Unarchive {parent.ref}: {parent.title} too?",
-                          f"The parent of {ref} is archived. Both move back to the done column."),
+            ConfirmScreen(
+                f"Unarchive {parent.ref}: {parent.title} too?",
+                f"The parent of {ref} is archived. Both move back to the done column.",
+            ),
             lambda answer: self._start_write(lambda: unarchive(parent), refs={ref, parent.ref}) if answer else None,
         )
 
@@ -5643,8 +6217,10 @@ class HerdboardApp(App):
 
         names = ", ".join(self.store.board_name(path) for path in paths)
         self.push_screen(
-            ConfirmScreen(f"Archive {count} card{'' if count == 1 else 's'} from the done column?",
-                          f"Boards: {names}. Press z to show the archive."),
+            ConfirmScreen(
+                f"Archive {count} card{'' if count == 1 else 's'} from the done column?",
+                f"Boards: {names}. Press z to show the archive.",
+            ),
             lambda answer: self._start_write(write) if answer else None,
         )
 
@@ -5652,14 +6228,28 @@ class HerdboardApp(App):
         self.show_archive = not self.show_archive
         await self.reload()
 
-    def _start_card(self, ref: str, agent: str | None, model: str | None = None,
-                    thinking: str | None = None, repo: Path | None = None, no_repo: bool = False,
-                    new_repo: Path | None = None) -> None:
+    def _start_card(
+        self,
+        ref: str,
+        agent: str | None,
+        model: str | None = None,
+        thinking: str | None = None,
+        repo: Path | None = None,
+        no_repo: bool = False,
+        new_repo: Path | None = None,
+    ) -> None:
         """Start a card in a thread. `repo` is a board that names the card's repository."""
         # A dict, so a target chosen later adds one option.
-        request = {"kind": "start", "ref": ref, "agent": agent, "model": model,
-                   "thinking": thinking, "repo": repo, "no_repo": no_repo,
-                   "new_repo": new_repo}
+        request = {
+            "kind": "start",
+            "ref": ref,
+            "agent": agent,
+            "model": model,
+            "thinking": thinking,
+            "repo": repo,
+            "no_repo": no_repo,
+            "new_repo": new_repo,
+        }
 
         def guarded():
             try:
@@ -5673,12 +6263,18 @@ class HerdboardApp(App):
                     if new_repo is not None:
                         options["new_repo"] = new_repo
                     return self.start_card(ref, agent, **options), None
-                starter = Starter(self.store, self.directory, writer=self.linear_writer,
-                                  ask_state=self.ask_state, repository_view=self.view == "repo",
-                                  config_file=self.config_file)
+                starter = Starter(
+                    self.store,
+                    self.directory,
+                    writer=self.linear_writer,
+                    ask_state=self.ask_state,
+                    repository_view=self.view == "repo",
+                    config_file=self.config_file,
+                )
                 board = repo or (self.repo_board if self.view == "repo" else None)
-                return starter.start(ref, agent=agent, repo=board, model=model, thinking=thinking,
-                                     no_repo=no_repo, new_repo=new_repo), None
+                return starter.start(
+                    ref, agent=agent, repo=board, model=model, thinking=thinking, no_repo=no_repo, new_repo=new_repo
+                ), None
             except HerdboardError as error:
                 return None, error
 
@@ -5720,8 +6316,7 @@ class HerdboardApp(App):
             if answer is None:
                 return
             mode, value = answer
-            arguments = {"agent": request["agent"], "model": request["model"],
-                         "thinking": request["thinking"]}
+            arguments = {"agent": request["agent"], "model": request["model"], "thinking": request["thinking"]}
             if mode == "repo":
                 arguments["repo"] = value
             elif mode == "new_repo":
@@ -5763,8 +6358,14 @@ class HerdboardApp(App):
         else:
             self.store.config.thinking[model] = thinking
 
-    def _card_action(self, ref: str, kind: str, run: Callable[[], dict], notice: Callable[[dict], str],
-                     target_request: dict | None = None) -> None:
+    def _card_action(
+        self,
+        ref: str,
+        kind: str,
+        run: Callable[[], dict],
+        notice: Callable[[dict], str],
+        target_request: dict | None = None,
+    ) -> None:
         """Run a review, merge or finish in a thread worker, like a start: one at a time per card."""
 
         def guarded():
@@ -5783,44 +6384,58 @@ class HerdboardApp(App):
         ref = card.ref
         if card.repoless:
             # A repoless card has no branch for Hunk, so only an agent review applies.
-            self.push_screen(AgentScreen("Choose the reviewer"),
-                             lambda reviewer: self._chosen_reviewer(ref, reviewer, False))
+            self.push_screen(
+                AgentScreen("Choose the reviewer"), lambda reviewer: self._chosen_reviewer(ref, reviewer, False)
+            )
             return
 
         def chosen(kind: str | None) -> None:
             if kind == "human":
                 self._human_review(ref)
             elif kind is not None:
-                self.push_screen(AgentScreen("Choose the reviewer"),
-                                 lambda reviewer: self._chosen_reviewer(ref, reviewer, kind == "both"))
+                self.push_screen(
+                    AgentScreen("Choose the reviewer"),
+                    lambda reviewer: self._chosen_reviewer(ref, reviewer, kind == "both"),
+                )
 
         self.push_screen(ReviewKindScreen(), chosen)
 
     def _human_review(self, ref: str) -> None:
-        run = (lambda: self.review_card(ref)) if self.review_card else (
-            lambda: Reviewer(self.store, self.directory, writer=self.linear_writer,
-                             config_file=self.config_file).review(ref))
-        self._card_action(ref, "reviewing", run,
-                          lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}")
+        run = (
+            (lambda: self.review_card(ref))
+            if self.review_card
+            else (
+                lambda: Reviewer(
+                    self.store, self.directory, writer=self.linear_writer, config_file=self.config_file
+                ).review(ref)
+            )
+        )
+        self._card_action(
+            ref, "reviewing", run, lambda result: f"Review of {result['ref']} opened in {result['workspace_id']}"
+        )
 
     def _chosen_reviewer(self, ref: str, reviewer: str | None, then_hunk: bool) -> None:
         if reviewer is None:
             return
         if reviewer == "claude":
-            self.push_screen(ClaudeModelScreen(), lambda choice: choice and
-                             self._agent_review(ref, reviewer, choice[0], None, then_hunk))
+            self.push_screen(
+                ClaudeModelScreen(),
+                lambda choice: choice and self._agent_review(ref, reviewer, choice[0], None, then_hunk),
+            )
             return
 
         def chosen(choice: tuple[str | None, str | None] | None) -> None:
             if choice is not None:
                 self._agent_review(ref, reviewer, *choice, then_hunk)
 
-        screen = (ModelScreen(*codex_model_choices(self.store.config), agent=reviewer)
-                  if reviewer == "codex" else pi_model_screen(self.store.config))
+        screen = (
+            ModelScreen(*codex_model_choices(self.store.config), agent=reviewer)
+            if reviewer == "codex"
+            else pi_model_screen(self.store.config)
+        )
         self.push_screen(screen, chosen)
 
-    def _agent_review(self, ref: str, reviewer: str, model: str | None, thinking: str | None,
-                      then_hunk: bool) -> None:
+    def _agent_review(self, ref: str, reviewer: str, model: str | None, thinking: str | None, then_hunk: bool) -> None:
         options = {"reviewer": reviewer, "model": model, "thinking": thinking, "then_hunk": then_hunk}
 
         def run() -> dict:
@@ -5845,19 +6460,36 @@ class HerdboardApp(App):
             if agent == "claude":
                 self.push_screen(ClaudeModelScreen(), lambda choice: choice and self._plan(ref, agent, choice[0], None))
             elif thinking_levels(agent):
-                screen = (ModelScreen(*codex_model_choices(self.store.config), agent=agent)
-                          if agent == "codex" else pi_model_screen(self.store.config))
-                self.push_screen(screen,
-                                 lambda choice: choice and self._plan(ref, agent, *choice))
+                screen = (
+                    ModelScreen(*codex_model_choices(self.store.config), agent=agent)
+                    if agent == "codex"
+                    else pi_model_screen(self.store.config)
+                )
+                self.push_screen(screen, lambda choice: choice and self._plan(ref, agent, *choice))
 
         self.push_screen(AgentScreen("Choose the planner"), chosen_agent)
 
-    def _plan(self, ref: str, agent: str, model: str | None, thinking: str | None, repo: Path | None = None,
-              no_repo: bool = False, new_repo: Path | None = None) -> None:
+    def _plan(
+        self,
+        ref: str,
+        agent: str,
+        model: str | None,
+        thinking: str | None,
+        repo: Path | None = None,
+        no_repo: bool = False,
+        new_repo: Path | None = None,
+    ) -> None:
         options = {"agent": agent, "model": model, "thinking": thinking}
-        request = {"kind": "plan", "ref": ref, "agent": agent, "model": model,
-                   "thinking": thinking, "repo": repo, "no_repo": no_repo,
-                   "new_repo": new_repo}
+        request = {
+            "kind": "plan",
+            "ref": ref,
+            "agent": agent,
+            "model": model,
+            "thinking": thinking,
+            "repo": repo,
+            "no_repo": no_repo,
+            "new_repo": new_repo,
+        }
         if self.plan_card:
             for name, value in (("repo", repo), ("no_repo", no_repo), ("new_repo", new_repo)):
                 if value:
@@ -5872,8 +6504,7 @@ class HerdboardApp(App):
 
         def notice(result: dict) -> str:
             model_text = f" ({result['model']})" if result["model"] else ""
-            where = ("its work folder" if result.get("mode") in ("repoless", "new_repo")
-                     else "a tab in its worktree")
+            where = "its work folder" if result.get("mode") in ("repoless", "new_repo") else "a tab in its worktree"
             return f"{result['agent']}{model_text} plans {result['ref']} in {where}"
 
         self._card_action(ref, "planning", run, notice, request)
@@ -5882,12 +6513,22 @@ class HerdboardApp(App):
         return AgentReviewer(self.store, self.directory, writer=self.linear_writer, config_file=self.config_file)
 
     def _planner(self) -> Planner:
-        return Planner(self.store, self.directory, writer=self.linear_writer, repository_view=self.view == "repo",
-                       config_file=self.config_file)
+        return Planner(
+            self.store,
+            self.directory,
+            writer=self.linear_writer,
+            repository_view=self.view == "repo",
+            config_file=self.config_file,
+        )
 
     def _merger(self) -> Merger:
-        return Merger(self.store, self.directory, writer=self.linear_writer, ask_state=self.ask_state,
-                      config_file=self.config_file)
+        return Merger(
+            self.store,
+            self.directory,
+            writer=self.linear_writer,
+            ask_state=self.ask_state,
+            config_file=self.config_file,
+        )
 
     def action_merge(self) -> None:
         card = self.current_card()
@@ -5922,17 +6563,20 @@ class HerdboardApp(App):
                 self._card_action(ref, "merging", run_merge, notice)
                 return
             self.push_screen(
-                ConfirmScreen("A pull request is open. Rewrite its description?",
-                              "Yes: an agent writes it again. This replaces any edits made on GitHub. "
-                              "No: only push the branch."),
+                ConfirmScreen(
+                    "A pull request is open. Rewrite its description?",
+                    "Yes: an agent writes it again. This replaces any edits made on GitHub. No: only push the branch.",
+                ),
                 rewrite,
             )
 
         self.push_screen(
-            ConfirmScreen(f"Merge {ref}: {card.title} into its base?",
-                          "Local: rebase onto the base, move the base forward, remove the worktree. "
-                          "PR: an agent writes the description, then a draft pull request opens. "
-                          "The board or config sets the mode."),
+            ConfirmScreen(
+                f"Merge {ref}: {card.title} into its base?",
+                "Local: rebase onto the base, move the base forward, remove the worktree. "
+                "PR: an agent writes the description, then a draft pull request opens. "
+                "The board or config sets the mode.",
+            ),
             confirmed,
         )
 
@@ -5948,11 +6592,15 @@ class HerdboardApp(App):
                 return f"Finished {result['ref']}; card folder removed"
             return f"Finished {result['ref']}; branch {'deleted' if result['branch_deleted'] else 'kept'}"
 
-        detail = ("The card folder is deleted, with everything in it, and the card moves to Done."
-                  if card.repoless else
-                  "The worktree and the merged branch are removed, and the card moves to Done.")
-        self.push_screen(ConfirmScreen(f"Finish {ref}: {card.title}?", detail),
-                         lambda answer: self._card_action(ref, "finishing", run, notice) if answer else None)
+        detail = (
+            "The card folder is deleted, with everything in it, and the card moves to Done."
+            if card.repoless
+            else "The worktree and the merged branch are removed, and the card moves to Done."
+        )
+        self.push_screen(
+            ConfirmScreen(f"Finish {ref}: {card.title}?", detail),
+            lambda answer: self._card_action(ref, "finishing", run, notice) if answer else None,
+        )
 
     def action_go(self) -> None:
         card = self.current_card()
@@ -5960,8 +6608,9 @@ class HerdboardApp(App):
             return
         ref = card.ref
         run = (lambda: self.go_card(ref)) if self.go_card else (lambda: start_module.go_to_workspace(ref))
-        self._card_action(ref, "opening", run,
-                          lambda result: f"Went to the workspace {result['workspace_id']} of {result['ref']}")
+        self._card_action(
+            ref, "opening", run, lambda result: f"Went to the workspace {result['workspace_id']} of {result['ref']}"
+        )
 
     def action_start(self) -> None:
         card = self.current_card()
@@ -5985,8 +6634,11 @@ class HerdboardApp(App):
             if choice is not None:
                 self._start_card(ref, agent, *choice)
 
-        screen = (ModelScreen(*codex_model_choices(self.store.config), agent=agent)
-                  if agent == "codex" else pi_model_screen(self.store.config))
+        screen = (
+            ModelScreen(*codex_model_choices(self.store.config), agent=agent)
+            if agent == "codex"
+            else pi_model_screen(self.store.config)
+        )
         self.push_screen(screen, chosen)
 
     def action_detail(self) -> None:
@@ -6029,8 +6681,9 @@ class HerdboardApp(App):
             self.notify("The view has no columns", severity="error")
             return
         if self.columns[self.col].archive:
-            self.notify("Cards cannot be added to the archive. Add the card to a column, then archive it.",
-                        severity="warning")
+            self.notify(
+                "Cards cannot be added to the archive. Add the card to a column, then archive it.", severity="warning"
+            )
             return
         path = self._add_path()
         column = self.columns[self.col].name
@@ -6106,14 +6759,30 @@ class HerdboardApp(App):
             return
         config = self.store.config
         settings = {key: getattr(config, key) for key in ConfigScreen.GLOBAL_KEYS}
-        self.push_screen(ConfigScreen(path, meta, path is not None and self.resolve_link is not None, settings,
-                                      sorted(self.available_themes), pi_model_choices(config), codex_model_choices(config),
-                                      remembered=config.thinking))
+        self.push_screen(
+            ConfigScreen(
+                path,
+                meta,
+                path is not None and self.resolve_link is not None,
+                settings,
+                sorted(self.available_themes),
+                pi_model_choices(config),
+                codex_model_choices(config),
+                remembered=config.thinking,
+            )
+        )
 
-    def submit_config(self, screen: ConfigScreen, merge: str | None, removed: set[str],
-                      project: str, labels: list[str], removed_pins: set[str] = frozenset(),
-                      settings: dict[str, str | None] | None = None,
-                      levels: dict[str, str | None] | None = None) -> None:
+    def submit_config(
+        self,
+        screen: ConfigScreen,
+        merge: str | None,
+        removed: set[str],
+        project: str,
+        labels: list[str],
+        removed_pins: set[str] = frozenset(),
+        settings: dict[str, str | None] | None = None,
+        levels: dict[str, str | None] | None = None,
+    ) -> None:
         """Write the dialog's settings. The Linear lookup runs first, so a failed one writes nothing.
 
         `settings` holds the changed global settings, and `levels` the changed thinking level of each
@@ -6150,9 +6819,11 @@ class HerdboardApp(App):
             board_changed = path is not None and (merge != before or removed or link or removed_pins)
             if board_changed:
                 self.store.update_config(
-                    path, merge=KEEP if merge == before else merge,
+                    path,
+                    merge=KEEP if merge == before else merge,
                     change_links=change if removed or link else None,
-                    change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None)
+                    change_pins=(lambda pins: [p for p in pins if p.id not in removed_pins]) if removed_pins else None,
+                )
                 if merge != before:
                     # A global-save failure leaves the dialog open; retries compare against the saved merge mode.
                     self.call_from_thread(setattr, screen.meta, "merge", merge)
@@ -6184,8 +6855,9 @@ class HerdboardApp(App):
             self.notify(str(error), severity="error")
             return
         if not boards:
-            self.notify("There is no repository board to pin to. Press i in a repository to create one.",
-                        severity="warning")
+            self.notify(
+                "There is no repository board to pin to. Press i in a repository to create one.", severity="warning"
+            )
             return
         options = [(self.store.board_name(path), path) for path in sorted(boards, key=self.store.board_name)]
 
@@ -6205,8 +6877,10 @@ class HerdboardApp(App):
 
             def write() -> None:
                 _, added = add_pin(self.store, board, issue)
-                self.call_from_thread(self.notify, f"Pinned {identifier} to {name}" if added
-                                      else f"{identifier} is already pinned to {name}")
+                self.call_from_thread(
+                    self.notify,
+                    f"Pinned {identifier} to {name}" if added else f"{identifier} is already pinned to {name}",
+                )
 
             self._start_write(write, refetch=True)
 
@@ -6231,8 +6905,7 @@ class HerdboardApp(App):
         # The pin may keep an older identifier, from before the issue moved team: match the ID.
         ref, issue_id = card.ref, card.issue_id
         if not any(pin.id == issue_id for pin in pins):
-            self.notify(f"{ref} is not pinned to this board: a linked Linear project shows it.",
-                        severity="warning")
+            self.notify(f"{ref} is not pinned to this board: a linked Linear project shows it.", severity="warning")
             return
 
         def write() -> None:
@@ -6306,13 +6979,13 @@ class HerdboardApp(App):
             screen = self.get_screen(NOTES_SCREEN)
             if not screen.save():
                 if not screen.asking:
-                    self.push_screen(ConfirmScreen("Quit without saving the note?", screen.status_text()),
-                                     lambda answer: answer and self.exit())
+                    self.push_screen(
+                        ConfirmScreen("Quit without saving the note?", screen.status_text()),
+                        lambda answer: answer and self.exit(),
+                    )
                 return
         self.exit()
 
 
 # The board's own key actions, without parameters. Quit stays available in dialogs.
-BOARD_ACTIONS = {
-    binding.action.split("(")[0] for binding in HerdboardApp.BINDINGS if binding.action != "quit"
-}
+BOARD_ACTIONS = {binding.action.split("(")[0] for binding in HerdboardApp.BINDINGS if binding.action != "quit"}

@@ -2,13 +2,16 @@
 
 import copy
 
-VIEWER = {"id": "u1", "name": "Nate", "email": "nate@example.com",
-          "organization": {"id": "o1", "name": "Workspace", "urlKey": "workspace"}}
+VIEWER = {
+    "id": "u1",
+    "name": "Nate",
+    "email": "nate@example.com",
+    "organization": {"id": "o1", "name": "Workspace", "urlKey": "workspace"},
+}
 ENG = {"id": "t-eng", "key": "ENG"}
 OPS = {"id": "t-ops", "key": "OPS"}
 STATES = [{"id": "s1", "name": "Todo", "type": "unstarted", "position": 1}]
-TEAMS = [{**ENG, "name": "Engineering", "states": STATES},
-         {**OPS, "name": "Operations", "states": STATES}]
+TEAMS = [{**ENG, "name": "Engineering", "states": STATES}, {**OPS, "name": "Operations", "states": STATES}]
 PROJECTS = [
     {"id": "p-plat", "name": "Platform", "teams": [ENG]},
     {"id": "p-mob", "name": "Mobile", "teams": [ENG, OPS]},
@@ -29,20 +32,35 @@ def attachment(url, title=None, subtitle=None):
     return {"url": url, "title": title or url, "subtitle": subtitle}
 
 
-def make_issue(number, project="p-plat", state=("Todo", "unstarted"), labels=(), assignee="u1",
-               attachments=(), title=None, description="Line one\nLine two", due="2026-10-20"):
+def make_issue(
+    number,
+    project="p-plat",
+    state=("Todo", "unstarted"),
+    labels=(),
+    assignee="u1",
+    attachments=(),
+    title=None,
+    description="Line one\nLine two",
+    due="2026-10-20",
+):
     projects = {p["id"]: {"id": p["id"], "name": p["name"]} for p in PROJECTS}
     return {
-        "id": f"i{number}", "identifier": f"ENG-{number}", "title": title or f"Issue {number}",
-        "description": description, "dueDate": due,
-        "url": f"https://linear.app/workspace/issue/ENG-{number}", "branchName": f"nate/eng-{number}",
-        "sortOrder": float(number), "priority": 0, "updatedAt": "2026-07-01T00:00:00Z",
+        "id": f"i{number}",
+        "identifier": f"ENG-{number}",
+        "title": title or f"Issue {number}",
+        "description": description,
+        "dueDate": due,
+        "url": f"https://linear.app/workspace/issue/ENG-{number}",
+        "branchName": f"nate/eng-{number}",
+        "sortOrder": float(number),
+        "priority": 0,
+        "updatedAt": "2026-07-01T00:00:00Z",
         "state": {"id": f"st-{state[0]}", "name": state[0], "type": state[1]},
         "team": ENG,
-        "labels": {"nodes": [{"id": label["id"], "name": label["name"]}
-                             for label in LABELS if label["id"] in labels]},
+        "labels": {"nodes": [{"id": label["id"], "name": label["name"]} for label in LABELS if label["id"] in labels]},
         "project": projects.get(project),
-        "parent": None, "children": {"nodes": []},
+        "parent": None,
+        "children": {"nodes": []},
         "assignee": {"id": assignee, "name": "x"} if assignee else None,
         "attachments": {"nodes": [attachment(url) for url in attachments]},
     }
@@ -60,13 +78,20 @@ def default_issues():
 
 
 def fixtures():
-    return copy.deepcopy({"viewer": VIEWER, "teams": TEAMS, "projects": PROJECTS,
-                          "labels": LABELS, "issues": default_issues()})
+    return copy.deepcopy(
+        {"viewer": VIEWER, "teams": TEAMS, "projects": PROJECTS, "labels": LABELS, "issues": default_issues()}
+    )
 
 
-WORKFLOW = [("Backlog", "backlog"), ("Triage", "triage"), ("Todo", "unstarted"),
-            ("Doing", "started"), ("In Review", "started"), ("Done", "completed"),
-            ("Cancelled", "canceled")]
+WORKFLOW = [
+    ("Backlog", "backlog"),
+    ("Triage", "triage"),
+    ("Todo", "unstarted"),
+    ("Doing", "started"),
+    ("In Review", "started"),
+    ("Done", "completed"),
+    ("Cancelled", "canceled"),
+]
 # Fixture issues whose state name the workflow does not have.
 RENAMED_STATES = {"Shipped": "Done", "Dropped": "Cancelled"}
 
@@ -74,8 +99,7 @@ RENAMED_STATES = {"Shipped": "Done", "Dropped": "Cancelled"}
 def add_state(data, team_key, name, state_type):
     """Add a workflow state to a team and return it."""
     team = next(t for t in data["teams"] if t["key"] == team_key)
-    state = {"id": f"ws-{team_key}-{name}", "name": name, "type": state_type,
-             "position": float(len(team["states"]))}
+    state = {"id": f"ws-{team_key}-{name}", "name": name, "type": state_type, "position": float(len(team["states"]))}
     team["states"].append(state)
     return state
 

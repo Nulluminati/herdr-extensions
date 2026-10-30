@@ -97,8 +97,9 @@ class FormTests(PromoteBoardCase):
             await settle(pilot)
             screen = await self.open_form(pilot)
             # The board links the Platform project; the form still starts empty.
-            self.assertEqual(prompts(screen.query_one("#promote-teams", OptionList)),
-                             ["ENG  Engineering", "OPS  Operations"])
+            self.assertEqual(
+                prompts(screen.query_one("#promote-teams", OptionList)), ["ENG  Engineering", "OPS  Operations"]
+            )
             self.assertIsNone(screen.team)
             self.assertFalse(screen.project_chosen)
             self.assertFalse(screen.key_applies("promote"))
@@ -185,8 +186,7 @@ class FormTests(PromoteBoardCase):
             self.assertIsNone(screen.project)
 
     async def test_a_team_without_projects_says_so_and_allows_no_project(self):
-        self.fixtures["projects"] = [p for p in self.fixtures["projects"]
-                                     if linear_data.OPS not in p["teams"]]
+        self.fixtures["projects"] = [p for p in self.fixtures["projects"] if linear_data.OPS not in p["teams"]]
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await settle(pilot)
@@ -294,15 +294,21 @@ class RefusalTests(PromoteBoardCase):
         path = state_dir() / "starts.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         records = json.loads(path.read_text()) if path.exists() else {}
-        records[ref] = {"ref": ref, "worktree_path": str(worktree), "branch": f"feat/{ref}",
-                        "base": "main", "agent": "claude"}
+        records[ref] = {
+            "ref": ref,
+            "worktree_path": str(worktree),
+            "branch": f"feat/{ref}",
+            "base": "main",
+            "agent": "claude",
+        }
         path.write_text(json.dumps(records))
 
 
 class PromoteTests(PromoteBoardCase):
     async def test_promotion_creates_the_issues_and_completes_the_todo(self):
-        self.store.update_links(self.repo_path, lambda _: [
-            ProjectLink("p-plat", "Platform", (LabelLink("l-api", "repo:api"),))])
+        self.store.update_links(
+            self.repo_path, lambda _: [ProjectLink("p-plat", "Platform", (LabelLink("l-api", "repo:api"),))]
+        )
         self.store.add(self.repo_path, "Choose tiles", "Todo", parent=self.target.ref)
         self.store.edit(self.target.ref, title=TITLE, body=["Ask for two quotes", "- [ ] Book the plumber"])
         app = self.make_linear_app()
@@ -387,8 +393,7 @@ class PromoteTests(PromoteBoardCase):
             app._notifications.clear()
             # Other choices on the retry: the recorded plan wins, with a warning.
             await self.promote(pilot, "OPS", "p-mob")
-            self.assertEqual(len([i for i in self.fixtures["issues"]
-                                  if i["title"] == "Renovate the bathroom"]), 1)
+            self.assertEqual(len([i for i in self.fixtures["issues"] if i["title"] == "Renovate the bathroom"]), 1)
             self.assertTrue(self.card(app, "Renovate").title.endswith("→ ENG-7"))
             warnings = [m for m, s in self.notifications(app) if s == "warning"]
             self.assertTrue(any("team OPS" in m and "ENG" in m for m in warnings), warnings)

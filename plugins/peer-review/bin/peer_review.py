@@ -24,8 +24,19 @@ POLL_SECONDS = 5
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
 CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
 # Tools outside pi's sandbox that only read remote documentation and search results.
-PI_READ_TOOLS = ("read", "grep", "find", "ls", "bash", "web_fetch", "web_search", "context7_resolve_library_id",
-                 "context7_get_library_docs", "context7_get_cached_doc_raw", "code_search")
+PI_READ_TOOLS = (
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "web_fetch",
+    "web_search",
+    "context7_resolve_library_id",
+    "context7_get_library_docs",
+    "context7_get_cached_doc_raw",
+    "code_search",
+)
 
 
 class ReviewError(RuntimeError):
@@ -90,8 +101,11 @@ def review_root() -> Path:
 def shared_git_folder(path: Path) -> list[Path]:
     """The Git folder that a linked worktree shares with its main checkout, when it lies outside `path`."""
     try:
-        result = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                capture_output=True, text=True)
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+        )
     except OSError:
         return []
     if result.returncode or not result.stdout.strip():
@@ -105,9 +119,13 @@ def sandbox_policy(review: Path, repository: Path) -> dict:
 
     The same shape as herdboard's reviewer sandbox (herdboard/sandbox.py), without the browser.
     The sandbox writes the working directory unless denyWrite names it."""
-    return {"network": {"allowedDomains": list(GITHUB_DOMAINS)},
-            "filesystem": {"allowWrite": [str(review)],
-                           "denyWrite": [str(repository), *map(str, shared_git_folder(repository))]}}
+    return {
+        "network": {"allowedDomains": list(GITHUB_DOMAINS)},
+        "filesystem": {
+            "allowWrite": [str(review)],
+            "denyWrite": [str(repository), *map(str, shared_git_folder(repository))],
+        },
+    }
 
 
 def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[str]:
@@ -121,23 +139,61 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
     # the review folder and reaches only GitHub. Nobody answers prompts, so no approval judge runs.
     if reviewer == "pi":
         tools = ",".join((*PI_READ_TOOLS, "write"))
-        return ["--approval-mode", "off", "--sandbox", json.dumps(sandbox_policy(review, repository)),
-                "--tools", tools, "--", prompt]
+        return [
+            "--approval-mode",
+            "off",
+            "--sandbox",
+            json.dumps(sandbox_policy(review, repository)),
+            "--tools",
+            tools,
+            "--",
+            prompt,
+        ]
     if reviewer == "codex":
         path = json.dumps(str(review), ensure_ascii=False)
         domains = ",".join(f'{json.dumps(domain)}="allow"' for domain in CODEX_GITHUB_DOMAINS)
-        return ["-a", "never", "-c", "features.network_proxy=true", "-c", 'web_search="live"',
-                "-c", 'default_permissions="hb-review"',
-                "-c", f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}',
-                "-c", f"permissions.hb-review.network={{enabled=true,domains={{{domains}}}}}", prompt]
-    settings = {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
-                            **sandbox_policy(review, repository)}}
+        return [
+            "-a",
+            "never",
+            "-c",
+            "features.network_proxy=true",
+            "-c",
+            'web_search="live"',
+            "-c",
+            'default_permissions="hb-review"',
+            "-c",
+            f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}',
+            "-c",
+            f"permissions.hb-review.network={{enabled=true,domains={{{domains}}}}}",
+            prompt,
+        ]
+    settings = {
+        "sandbox": {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "allowUnsandboxedCommands": False,
+            **sandbox_policy(review, repository),
+        }
+    }
     # The prompt goes first because --allowedTools takes every value after it.
     return [
         prompt,
-        "--permission-mode", "dontAsk", "--settings", json.dumps(settings),
-        "--allowedTools", "Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Skill",
-        "mcp__context7", "mcp__grep_app", f"Edit(/{review}/**)", f"Write(/{review}/**)",
+        "--permission-mode",
+        "dontAsk",
+        "--settings",
+        json.dumps(settings),
+        "--allowedTools",
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+        "Skill",
+        "mcp__context7",
+        "mcp__grep_app",
+        f"Edit(/{review}/**)",
+        f"Write(/{review}/**)",
     ]
 
 
@@ -164,8 +220,7 @@ def changes(repository: Path, requester: str) -> tuple[str, list[str], str]:
     diff = command(["git", "-C", str(repository), "diff", f"{upstream}...HEAD"]).stdout
     if not diff:
         raise ReviewError(f"No uncommitted changes, and no commits on {branch} since {upstream}, in {repository}")
-    return diff, [], (f"{requester} made commits on `{branch}` since `{upstream}` "
-                      f"in the repository at `{repository}`.")
+    return diff, [], (f"{requester} made commits on `{branch}` since `{upstream}` in the repository at `{repository}`.")
 
 
 def create_review() -> Path:
@@ -230,9 +285,7 @@ def request(pane_option: str | None) -> int:
     agent = json.loads(herdr("agent", "get", pane).stdout)["result"]["agent"]
     requester = agent["agent"]
     reviewer = reviewer_for(requester)
-    repository = Path(command(
-        ["git", "-C", agent["cwd"], "rev-parse", "--show-toplevel"]
-    ).stdout.rstrip("\n"))
+    repository = Path(command(["git", "-C", agent["cwd"], "rev-parse", "--show-toplevel"]).stdout.rstrip("\n"))
 
     review = write_request(repository, requester)
 
@@ -240,8 +293,15 @@ def request(pane_option: str | None) -> int:
     reviewer_pane = json.loads(split.stdout)["result"]["pane"]["pane_id"]
     try:
         herdr(
-            "agent", "start", f"review-{review.name}", "--kind", reviewer, "--pane", reviewer_pane,
-            "--", *reviewer_arguments(reviewer, review, repository),
+            "agent",
+            "start",
+            f"review-{review.name}",
+            "--kind",
+            reviewer,
+            "--pane",
+            reviewer_pane,
+            "--",
+            *reviewer_arguments(reviewer, review, repository),
         )
     except ReviewError as error:
         # A startup prompt (such as Claude's folder trust check) is for the user to answer,
@@ -249,12 +309,24 @@ def request(pane_option: str | None) -> int:
         # The worker watches the reviewer in both cases.
         if '"agent_not_ready"' not in str(error) and '"timeout"' not in str(error):
             raise
-        print(f"{reviewer} has not reported ready in pane {reviewer_pane}. "
-              "If it shows a prompt there, answer it and the review continues.")
-    start_worker([
-        "deliver", "--review", str(review), "--requester", pane,
-        "--reviewer-pane", reviewer_pane, "--reviewer", reviewer,
-    ], review / "worker.log")
+        print(
+            f"{reviewer} has not reported ready in pane {reviewer_pane}. "
+            "If it shows a prompt there, answer it and the review continues."
+        )
+    start_worker(
+        [
+            "deliver",
+            "--review",
+            str(review),
+            "--requester",
+            pane,
+            "--reviewer-pane",
+            reviewer_pane,
+            "--reviewer",
+            reviewer,
+        ],
+        review / "worker.log",
+    )
     print(f"{reviewer} is reviewing in pane {reviewer_pane}. Review files: {review}")
     print("The findings arrive as a new prompt when the review is done.")
     return 0
@@ -265,7 +337,9 @@ def start_worker(arguments: list[str], log: Path) -> None:
     with log.open("a") as output:
         subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), *arguments],
-            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
 
@@ -321,7 +395,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     request_parser = commands.add_parser(
-        "request", help="start a review of uncommitted changes, else of the commits since the upstream")
+        "request", help="start a review of uncommitted changes, else of the commits since the upstream"
+    )
     request_parser.add_argument("--pane", help="pane of the requesting agent (default: this pane)")
     deliver_parser = commands.add_parser("deliver", help=argparse.SUPPRESS)
     deliver_parser.add_argument("--review", type=Path, required=True)

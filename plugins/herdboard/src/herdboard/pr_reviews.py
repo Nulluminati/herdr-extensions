@@ -65,15 +65,23 @@ DETAILS_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
     } } } } } }
   } }
 }"""
-CI_STATES = {"SUCCESS": "passed", "FAILURE": "failed", "ERROR": "failed", "PENDING": "pending",
-             "EXPECTED": "pending"}
+CI_STATES = {"SUCCESS": "passed", "FAILURE": "failed", "ERROR": "failed", "PENDING": "pending", "EXPECTED": "pending"}
 DECISIONS = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes requested", "REVIEW_REQUIRED": "review required"}
-CHECK_CONCLUSIONS = {"SUCCESS": "passed", "NEUTRAL": "passed", "SKIPPED": "skipped", "FAILURE": "failed",
-                     "TIMED_OUT": "failed", "CANCELLED": "failed", "ACTION_REQUIRED": "failed",
-                     "STARTUP_FAILURE": "failed", "STALE": "skipped"}
+CHECK_CONCLUSIONS = {
+    "SUCCESS": "passed",
+    "NEUTRAL": "passed",
+    "SKIPPED": "skipped",
+    "FAILURE": "failed",
+    "TIMED_OUT": "failed",
+    "CANCELLED": "failed",
+    "ACTION_REQUIRED": "failed",
+    "STARTUP_FAILURE": "failed",
+    "STALE": "skipped",
+}
 # The parts of a review record that the board's detail screen shows.
 REVIEW_FIELDS = ("agent", "model", "thinking", "workspace_id", "reviewed_sha", "error")
 GITHUB_URL = re.compile(r"github\.com[:/]+(?P<path>[^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+
 
 class PrReviewError(HerdboardError):
     def __init__(self, message, code="pr_review_failed"):
@@ -103,8 +111,9 @@ def _json(argv: list[str], cwd=None, input: str | None = None):
     try:
         return json.loads(text)
     except ValueError as error:
-        raise PrReviewError(f"`{' '.join(argv[:4])}` returned no valid JSON: {text[:200]}",
-                            f"{argv[0]}_failed") from error
+        raise PrReviewError(
+            f"`{' '.join(argv[:4])}` returned no valid JSON: {text[:200]}", f"{argv[0]}_failed"
+        ) from error
 
 
 def _git(directory, *args) -> str:
@@ -150,21 +159,35 @@ class PullRequest:
         if isinstance(requests, dict):
             # GraphQL nests each request: {"nodes": [{"requestedReviewer": {"login": ...}}]}.
             requests = [(node or {}).get("requestedReviewer") or {} for node in requests.get("nodes") or []]
-        return cls(number=int(data["number"]), title=data.get("title") or "", url=data.get("url") or "",
-                   author=author, draft=bool(data.get("isDraft")), head_sha=data.get("headRefOid") or "",
-                   head_branch=data.get("headRefName") or "",
-                   requested=bool(me) and any((r.get("login") or "").casefold() == me for r in requests
-                                              if isinstance(r, dict)),
-                   mine=bool(me) and author.casefold() == me, base_branch=data.get("baseRefName") or "",
-                   additions=int(data.get("additions") or 0), deletions=int(data.get("deletions") or 0),
-                   files=int(data.get("changedFiles") or 0), updated=data.get("updatedAt") or "",
-                   body=data.get("body") or "", labels=_labels(data.get("labels")),
-                   comments=int((data.get("comments") or {}).get("totalCount") or 0),
-                   ci=CI_STATES.get(_rollup(data).get("state")), decision=DECISIONS.get(data.get("reviewDecision")))
+        return cls(
+            number=int(data["number"]),
+            title=data.get("title") or "",
+            url=data.get("url") or "",
+            author=author,
+            draft=bool(data.get("isDraft")),
+            head_sha=data.get("headRefOid") or "",
+            head_branch=data.get("headRefName") or "",
+            requested=bool(me)
+            and any((r.get("login") or "").casefold() == me for r in requests if isinstance(r, dict)),
+            mine=bool(me) and author.casefold() == me,
+            base_branch=data.get("baseRefName") or "",
+            additions=int(data.get("additions") or 0),
+            deletions=int(data.get("deletions") or 0),
+            files=int(data.get("changedFiles") or 0),
+            updated=data.get("updatedAt") or "",
+            body=data.get("body") or "",
+            labels=_labels(data.get("labels")),
+            comments=int((data.get("comments") or {}).get("totalCount") or 0),
+            ci=CI_STATES.get(_rollup(data).get("state")),
+            decision=DECISIONS.get(data.get("reviewDecision")),
+        )
 
     def marks(self) -> list[str]:
-        marks = [name for name, on in (("draft", self.draft), ("review requested", self.requested),
-                                       ("mine", self.mine)) if on]
+        marks = [
+            name
+            for name, on in (("draft", self.draft), ("review requested", self.requested), ("mine", self.mine))
+            if on
+        ]
         if self.ci:
             marks.append(f"CI {self.ci}")
         if self.decision:
@@ -176,14 +199,30 @@ class PullRequest:
         return marks
 
     def to_dict(self) -> dict:
-        return {"number": self.number, "title": self.title, "url": self.url, "author": self.author,
-                "draft": self.draft, "head_sha": self.head_sha, "head_branch": self.head_branch,
-                "requested": self.requested, "mine": self.mine, "base_branch": self.base_branch,
-                "additions": self.additions, "deletions": self.deletions, "files": self.files,
-                "updated": self.updated, "labels": self.labels, "comments": self.comments, "ci": self.ci,
-                "decision": self.decision,
-                "status": self.status, "new_commits": self.new_commits,
-                "notes": self.notes, "review": self.review}
+        return {
+            "number": self.number,
+            "title": self.title,
+            "url": self.url,
+            "author": self.author,
+            "draft": self.draft,
+            "head_sha": self.head_sha,
+            "head_branch": self.head_branch,
+            "requested": self.requested,
+            "mine": self.mine,
+            "base_branch": self.base_branch,
+            "additions": self.additions,
+            "deletions": self.deletions,
+            "files": self.files,
+            "updated": self.updated,
+            "labels": self.labels,
+            "comments": self.comments,
+            "ci": self.ci,
+            "decision": self.decision,
+            "status": self.status,
+            "new_commits": self.new_commits,
+            "notes": self.notes,
+            "review": self.review,
+        }
 
 
 def _nodes(value) -> list:
@@ -219,6 +258,7 @@ def review_key(repo: str, number: int) -> str:
 @dataclass
 class Page:
     """One page of open PRs: `total` counts all that match, `next_cursor` is None on the last page."""
+
     prs: list[PullRequest]
     total: int
     next_cursor: str | None
@@ -247,8 +287,17 @@ def search_text(repo: str, text: str = "") -> str:
 
 def list_page(checkout, repo: str, text: str = "", after: str | None = None, size: int = PAGE_SIZE) -> Page:
     """One page of the repository's open PRs that match `text`, after the cursor of the page before."""
-    argv = ["gh", "api", "graphql", "-f", f"query={SEARCH_QUERY}", "-f", f"q={search_text(repo, text)}",
-            "-F", f"first={size}"]
+    argv = [
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        f"query={SEARCH_QUERY}",
+        "-f",
+        f"q={search_text(repo, text)}",
+        "-F",
+        f"first={size}",
+    ]
     if after:
         argv += ["-f", f"after={after}"]
     reply = _json(argv, cwd=checkout)
@@ -270,22 +319,46 @@ def pr_details(checkout, repo: str, number: int) -> dict:
     """What a PR's details show beyond the list, read when they open: the description, the issues
     that the PR closes, the latest review of each reviewer on GitHub, and the checks of the last commit."""
     owner, name = repo.split("/", 1)
-    reply = _json(["gh", "api", "graphql", "-f", f"query={DETAILS_QUERY}", "-f", f"owner={owner}",
-                   "-f", f"name={name}", "-F", f"number={number}"], cwd=checkout)
+    reply = _json(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={DETAILS_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={name}",
+            "-F",
+            f"number={number}",
+        ],
+        cwd=checkout,
+    )
     try:
         data = reply["data"]["repository"]["pullRequest"]
     except (KeyError, TypeError) as error:
         messages = "; ".join(e.get("message", "") for e in reply.get("errors") or [] if isinstance(e, dict))
-        raise PrReviewError(f"GitHub has no details for {repo}#{number}: {messages or str(reply)[:200]}",
-                            "gh_failed") from error
-    reviews = [{"author": (node.get("author") or {}).get("login") or "ghost",
-                "state": (node.get("state") or "").lower().replace("_", " "), "at": node.get("submittedAt") or ""}
-               for node in _nodes(data.get("latestReviews"))]
-    return {"body": data.get("body") or "",
-            "issues": [{k: node.get(k) for k in ("number", "title", "url", "state")}
-                       for node in _nodes(data.get("closingIssuesReferences"))],
-            "reviews": reviews,
-            "checks": [_check(node) for node in _nodes(_rollup(data).get("contexts"))]}
+        raise PrReviewError(
+            f"GitHub has no details for {repo}#{number}: {messages or str(reply)[:200]}", "gh_failed"
+        ) from error
+    reviews = [
+        {
+            "author": (node.get("author") or {}).get("login") or "ghost",
+            "state": (node.get("state") or "").lower().replace("_", " "),
+            "at": node.get("submittedAt") or "",
+        }
+        for node in _nodes(data.get("latestReviews"))
+    ]
+    return {
+        "body": data.get("body") or "",
+        "issues": [
+            {k: node.get(k) for k in ("number", "title", "url", "state")}
+            for node in _nodes(data.get("closingIssuesReferences"))
+        ],
+        "reviews": reviews,
+        "checks": [_check(node) for node in _nodes(_rollup(data).get("contexts"))],
+    }
 
 
 def view_pr(checkout, repo: str, number: int) -> PullRequest:
@@ -294,6 +367,7 @@ def view_pr(checkout, repo: str, number: int) -> PullRequest:
 
 
 # State
+
 
 def records() -> dict:
     return _read(state_dir() / STATE_FILE)
@@ -337,14 +411,18 @@ def annotate(prs: list[PullRequest], repo: str, found: dict) -> None:
 
 # Workspace and Hunk
 
+
 def _request_path(key: str, suffix: str) -> Path:
     return state_dir() / "pr-reviews" / f"{safe_key(key)}{suffix}"
 
 
 def _workspace_fields(result: dict) -> dict:
     try:
-        fields = {"workspace_id": result["workspace"]["workspace_id"], "pane_id": result["root_pane"]["pane_id"],
-                  "worktree_path": result["worktree"]["path"]}
+        fields = {
+            "workspace_id": result["workspace"]["workspace_id"],
+            "pane_id": result["root_pane"]["pane_id"],
+            "worktree_path": result["worktree"]["path"],
+        }
     except (KeyError, TypeError) as error:
         raise PrReviewError(f"Unexpected Herdr worktree result: {result}", "herdr_error") from error
     if not all(isinstance(v, str) and v for v in fields.values()):
@@ -359,27 +437,56 @@ def open_workspace(checkout, repo: str, number: int, title: str) -> dict:
     record = record if isinstance(record, dict) else None
     branch = f"pr/{number}"
     if record and Path(record.get("worktree_path") or "").exists():
-        if record.get("workspace_id") and herdr("workspace", "get", record["workspace_id"],
-                                                tolerated=("workspace_not_found",)):
+        if record.get("workspace_id") and herdr(
+            "workspace", "get", record["workspace_id"], tolerated=("workspace_not_found",)
+        ):
             return record
-        result = herdr("worktree", "open", "--cwd", str(checkout), "--path", record["worktree_path"],
-                       "--no-focus", "--trust-repository")
+        result = herdr(
+            "worktree",
+            "open",
+            "--cwd",
+            str(checkout),
+            "--path",
+            record["worktree_path"],
+            "--no-focus",
+            "--trust-repository",
+        )
         record.update(_workspace_fields(result), hunk_pane=None, hunk_session=None)
         save(key, record)
         return record
     exists = run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"])
     if exists.returncode == 0 and not record:
-        raise PrReviewError(f"The branch {branch} exists, and no review owns it. Delete or rename it first",
-                            "branch_exists")
+        raise PrReviewError(
+            f"The branch {branch} exists, and no review owns it. Delete or rename it first", "branch_exists"
+        )
     # Prune first: a removed worktree must not keep the branch checked out. The forced fetch then
     # also moves a branch that the review kept to the PR's current head.
     _git(checkout, "worktree", "prune")
     _git(checkout, "fetch", base_remote(checkout, repo), f"+pull/{number}/head:refs/heads/{branch}")
     label = f"PR #{number} {title[:TITLE_LENGTH]}".rstrip()
-    result = herdr("worktree", "create", "--cwd", str(checkout), "--branch", branch, "--label", label,
-                   "--no-focus", "--trust-repository")
-    record = {**(record or {}), "checkout": str(checkout), "repo": repo, "number": number, "title": title,
-              "branch": branch, **_workspace_fields(result), "hunk_pane": None, "hunk_session": None}
+    result = herdr(
+        "worktree",
+        "create",
+        "--cwd",
+        str(checkout),
+        "--branch",
+        branch,
+        "--label",
+        label,
+        "--no-focus",
+        "--trust-repository",
+    )
+    record = {
+        **(record or {}),
+        "checkout": str(checkout),
+        "repo": repo,
+        "number": number,
+        "title": title,
+        "branch": branch,
+        **_workspace_fields(result),
+        "hunk_pane": None,
+        "hunk_session": None,
+    }
     save(key, record)
     return record
 
@@ -391,9 +498,11 @@ def _sessions() -> list[dict]:
 
 def _is_pr_session(entry: dict, record: dict) -> bool:
     review = entry.get("review") or {}
-    return ((review.get("repository") or "").casefold() == record["repo"].casefold()
-            and review.get("id") == f"#{record['number']}"
-            and os.path.realpath(entry.get("cwd") or "") == os.path.realpath(record["worktree_path"]))
+    return (
+        (review.get("repository") or "").casefold() == record["repo"].casefold()
+        and review.get("id") == f"#{record['number']}"
+        and os.path.realpath(entry.get("cwd") or "") == os.path.realpath(record["worktree_path"])
+    )
 
 
 def _token() -> str | None:
@@ -425,8 +534,19 @@ def open_hunk(record: dict) -> dict:
         # Hunk needs the token for a private repository. It stays out of the command text.
         environment.insert(0, "GH_TOKEN=" + token)
     options = [part for pair in environment for part in ("--env", pair)]
-    pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--ratio", "0.5",
-                 "--cwd", record["worktree_path"], *options, "--no-focus")["pane"]["pane_id"]
+    pane = herdr(
+        "pane",
+        "split",
+        record["pane_id"],
+        "--direction",
+        "right",
+        "--ratio",
+        "0.5",
+        "--cwd",
+        record["worktree_path"],
+        *options,
+        "--no-focus",
+    )["pane"]["pane_id"]
     record["hunk_pane"] = pane
     record["hunk_session"] = None
     save(key, record)
@@ -439,8 +559,10 @@ def open_hunk(record: dict) -> dict:
             save(key, record)
             return record
         if time.monotonic() >= deadline:
-            raise PrReviewError(f"Hunk showed no session for {target} in pane {pane}. "
-                                "Check that `hunk gh pr` works there", "hunk_unavailable")
+            raise PrReviewError(
+                f"Hunk showed no session for {target} in pane {pane}. Check that `hunk gh pr` works there",
+                "hunk_unavailable",
+            )
         time.sleep(POLL_SECONDS)
 
 
@@ -460,20 +582,26 @@ def _comments(session_id: str, kind: str) -> list[dict]:
 
 # The reviewer agent
 
-def reviewer_arguments(kind: str, prompt: str, checkout: Path, model: str | None,
-                       thinking: str | None) -> list[str]:
+
+def reviewer_arguments(kind: str, prompt: str, checkout: Path, model: str | None, thinking: str | None) -> list[str]:
     """The reviewer's arguments after Herdr's `--`: any shell command in a sandbox that writes nothing, keeps
     `checkout` read-only and reaches only GitHub and the Hunk daemon. terminal-browser runs outside it."""
     if kind == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return [*sandbox.pi_reviewer_options(None, checkout, browser=True, hunk=True), *options, "--", prompt]
     if kind == "codex":
-        return [*sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
-                *start.agent_arguments(kind, prompt, model, thinking)]
+        return [
+            *sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
+            *start.agent_arguments(kind, prompt, model, thinking),
+        ]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
-    return [prompt, *sandbox.claude_reviewer_options(None, checkout, browser=True, hunk=True),
-            *(["--model", model] if model else []), *(["--effort", thinking] if thinking else []),
-            *sandbox.claude_reviewer_tools(None)]
+    return [
+        prompt,
+        *sandbox.claude_reviewer_options(None, checkout, browser=True, hunk=True),
+        *(["--model", model] if model else []),
+        *(["--effort", thinking] if thinking else []),
+        *sandbox.claude_reviewer_tools(None),
+    ]
 
 
 def prompt_text(record: dict, pr: PullRequest, kind: str | None = None) -> str:
@@ -485,7 +613,7 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 
 - URL: {pr.url}
 - Head commit: `{pr.head_sha}`
-- The PR head is checked out read-only for you at `{record['worktree_path']}`
+- The PR head is checked out read-only for you at `{record["worktree_path"]}`
 - A live Hunk session shows the PR diff: session `{session}`
 
 ## How to work
@@ -537,16 +665,18 @@ def _agent_status(record: dict) -> str | None:
     return None
 
 
-def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: str | None,
-                   thinking: str | None) -> dict:
+def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: str | None, thinking: str | None) -> dict:
     """Start the reviewer in the workspace's root pane, or give a running one the new request."""
     name = record.get("agent_name") or _agent_name(record["repo"], record["number"])
     running = bool(record.get("agent_name")) and _agent_status(record) is not None
     # A running agent keeps its kind, model and thinking level, so a request for others cannot reach it.
     if running and (record.get("agent"), record.get("model"), record.get("thinking")) != (kind, model, thinking):
-        old = record.get("agent") + "".join(f" {part}" for part in (record.get("model"), record.get("thinking")) if part)
-        raise PrReviewError(f"A {old} reviewer still runs for {key}. Close it, or review with the same agent "
-                            "and model", "agent_running")
+        old = record.get("agent") + "".join(
+            f" {part}" for part in (record.get("model"), record.get("thinking")) if part
+        )
+        raise PrReviewError(
+            f"A {old} reviewer still runs for {key}. Close it, or review with the same agent and model", "agent_running"
+        )
     path = _request_path(key, ".md")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -554,25 +684,47 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
     except OSError as error:
         raise PrReviewError(f"{path}: cannot write the review request: {error}", "io") from error
     # Herdr rejects line breaks in agent arguments, so the request is a file and the message names it.
-    message = (f"Read {path} and do the pull request review it asks for. "
-               "Add notes only with hunk session comment add. Never submit anything to GitHub.")
+    message = (
+        f"Read {path} and do the pull request review it asks for. "
+        "Add notes only with hunk session comment add. Never submit anything to GitHub."
+    )
     # The notes in the session now are not this review's: old reviews and refreshes left them.
     try:
         known = [note.get("noteId") for note in _comments(record["hunk_session"], "agent")]
     except PrReviewError:
         known = []
     # The worker of an older request watches the same agent name, and ends once the ID changes.
-    record.update(agent=kind, agent_name=name, model=model, thinking=thinking, reviewed_sha=pr.head_sha,
-                  status="reviewing", notes=None, error=None, review_id=time.time_ns(), prompted=running,
-                  known_notes=known)
+    record.update(
+        agent=kind,
+        agent_name=name,
+        model=model,
+        thinking=thinking,
+        reviewed_sha=pr.head_sha,
+        status="reviewing",
+        notes=None,
+        error=None,
+        review_id=time.time_ns(),
+        prompted=running,
+        known_notes=known,
+    )
     # Record intent before Herdr can return an unknown startup result.
     save(key, record)
     try:
         if running:
             herdr("agent", "prompt", record["pane_id"], message)
         else:
-            herdr("agent", "start", name, "--kind", kind, "--pane", record["pane_id"], "--",
-                  *reviewer_arguments(kind, message, Path(record["worktree_path"]), model, thinking), tolerated=("timeout", "agent_not_ready"))
+            herdr(
+                "agent",
+                "start",
+                name,
+                "--kind",
+                kind,
+                "--pane",
+                record["pane_id"],
+                "--",
+                *reviewer_arguments(kind, message, Path(record["worktree_path"]), model, thinking),
+                tolerated=("timeout", "agent_not_ready"),
+            )
             activity.record_pane_agent(record["pane_id"], kind)
     except HerdboardError as error:
         # No worker starts, so without this the PR would show `reviewing` for good.
@@ -585,10 +737,19 @@ def start_reviewer(key: str, record: dict, pr: PullRequest, kind: str, model: st
         record.update(status="failed", error=f"The review worker did not start: {error}")
         save(key, record)
         raise PrReviewError(f"The review worker did not start: {error}", "worker_failed") from error
-    return {"key": key, "number": record["number"], "workspace_id": record["workspace_id"],
-            "pane_id": record["pane_id"], "hunk_pane": record.get("hunk_pane"),
-            "hunk_session": record.get("hunk_session"), "agent": kind, "agent_name": name, "model": model,
-            "thinking": thinking, "prompted": bool(running)}
+    return {
+        "key": key,
+        "number": record["number"],
+        "workspace_id": record["workspace_id"],
+        "pane_id": record["pane_id"],
+        "hunk_pane": record.get("hunk_pane"),
+        "hunk_session": record.get("hunk_session"),
+        "agent": kind,
+        "agent_name": name,
+        "model": model,
+        "thinking": thinking,
+        "prompted": bool(running),
+    }
 
 
 def _validate(kind: str, model: str | None, thinking: str | None) -> None:
@@ -603,8 +764,7 @@ def _validate(kind: str, model: str | None, thinking: str | None) -> None:
         raise PrReviewError(f"Thinking must be one of {', '.join(levels)}", "usage")
 
 
-def request(checkout, repo: str, number: int, kind: str, model: str | None = None,
-            thinking: str | None = None) -> dict:
+def request(checkout, repo: str, number: int, kind: str, model: str | None = None, thinking: str | None = None) -> dict:
     """Open the PR's workspace and Hunk, then start the reviewer agent and its worker."""
     _validate(kind, model, thinking)
     key = review_key(repo, number)
@@ -614,8 +774,11 @@ def request(checkout, repo: str, number: int, kind: str, model: str | None = Non
         record = open_workspace(checkout, repo, number, pr.title)
         # A kept worktree stays at the head it had. The agent must not review old code as the new head.
         if kept and _git(record["worktree_path"], "rev-parse", "HEAD").strip() != pr.head_sha:
-            raise PrReviewError(f"PR #{number} has new commits since its worktree was made. Fetch them first: "
-                                f"run pr-review-refresh {number}, or press u on the list", "new_commits")
+            raise PrReviewError(
+                f"PR #{number} has new commits since its worktree was made. Fetch them first: "
+                f"run pr-review-refresh {number}, or press u on the list",
+                "new_commits",
+            )
         if not _session_live(record.get("hunk_session")):
             if record.get("hunk_pane"):
                 herdr("pane", "close", record["hunk_pane"], tolerated=("pane_not_found",))
@@ -628,6 +791,7 @@ def request(checkout, repo: str, number: int, kind: str, model: str | None = Non
 
 
 # The worker
+
 
 def _current(key: str, review_id) -> bool:
     """Whether the request that a worker waits for is still the PR's latest one."""
@@ -653,8 +817,7 @@ def _wait_for_agent(record: dict, current) -> bool:
         if seen and status is None:
             raise PrReviewError(f"The reviewer {record['agent_name']} stopped before it finished", "review_failed")
         if time.monotonic() >= deadline:
-            raise PrReviewError(f"The review did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes",
-                                "review_failed")
+            raise PrReviewError(f"The review did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes", "review_failed")
         time.sleep(POLL_SECONDS)
 
 
@@ -695,6 +858,7 @@ def wait(key: str) -> int:
 
 
 # Refresh, go and finish
+
 
 def _note_entry(note: dict) -> dict | None:
     """A saved note in the shape that `hunk session comment apply` takes."""
@@ -777,8 +941,10 @@ def _apply(session_id: str, entries: list[dict]) -> tuple[list[dict], list[dict]
 
 
 def _refused_notes(key: str, failed: list[dict], error: str) -> PrReviewError:
-    return PrReviewError(f"Hunk did not take {len(failed)} notes of {key}: {error}. They stay saved; "
-                         f"refresh {key} to apply them again", "hunk_failed")
+    return PrReviewError(
+        f"Hunk did not take {len(failed)} notes of {key}: {error}. They stay saved; refresh {key} to apply them again",
+        "hunk_failed",
+    )
 
 
 def refresh(key: str) -> dict:
@@ -786,14 +952,14 @@ def refresh(key: str) -> dict:
     record = find(key)
     worktree = Path(record["worktree_path"])
     if not worktree.exists():
-        raise PrReviewError(f"The worktree of {key} is gone; finish the review and review it again",
-                            "worktree_missing")
+        raise PrReviewError(f"The worktree of {key} is gone; finish the review and review it again", "worktree_missing")
     with _lock(".pr-review-" + safe_key(key) + ".lock"):
         if record.get("status") == "reviewing":
             # The reviewer writes to the session that a refresh replaces.
             if _agent_status(record) == "working":
-                raise PrReviewError(f"The reviewer of {key} is still working; refresh after it finishes",
-                                    "agent_running")
+                raise PrReviewError(
+                    f"The reviewer of {key} is still working; refresh after it finishes", "agent_running"
+                )
             # No worker moves this status on any more, so it would block every refresh.
             record.update(status="failed", error="The reviewer stopped before it finished")
         if _git(worktree, "status", "--porcelain").strip():
@@ -809,8 +975,9 @@ def refresh(key: str) -> dict:
                 # stops the refresh, so the open Hunk keeps them.
                 live = any(s.get("sessionId") == record["hunk_session"] for s in _sessions())
                 if live:
-                    raise PrReviewError(f"Cannot read the notes of {key} from Hunk, so Hunk stays open: {error}",
-                                        "hunk_failed") from error
+                    raise PrReviewError(
+                        f"Cannot read the notes of {key} from Hunk, so Hunk stays open: {error}", "hunk_failed"
+                    ) from error
         # The notes go to a file before Hunk closes, so a new Hunk that fails to open loses none.
         # A refresh that failed before left its notes there too.
         entries = _saved_notes(key) or []
@@ -834,18 +1001,26 @@ def refresh(key: str) -> dict:
         def line(e):
             return f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary'].splitlines()[0][:80]}"
 
-        return {"key": key, "number": record["number"], "hunk_pane": record["hunk_pane"],
-                "hunk_session": record["hunk_session"], "kept": kept,
-                "dropped": [line(e) for e in dropped], "agent": record.get("agent"), "model": record.get("model"),
-                "thinking": record.get("thinking")}
+        return {
+            "key": key,
+            "number": record["number"],
+            "hunk_pane": record["hunk_pane"],
+            "hunk_session": record["hunk_session"],
+            "kept": kept,
+            "dropped": [line(e) for e in dropped],
+            "agent": record.get("agent"),
+            "model": record.get("model"),
+            "thinking": record.get("thinking"),
+        }
 
 
 def go(key: str) -> dict:
     record = find(key)
-    if not record.get("workspace_id") or herdr("workspace", "focus", record["workspace_id"],
-                                               tolerated=("workspace_not_found",)) is None:
-        raise PrReviewError(f"Herdr has no open workspace for {key}; review it again to open it",
-                            "workspace_closed")
+    if (
+        not record.get("workspace_id")
+        or herdr("workspace", "focus", record["workspace_id"], tolerated=("workspace_not_found",)) is None
+    ):
+        raise PrReviewError(f"Herdr has no open workspace for {key}; review it again to open it", "workspace_closed")
     return {"key": key, "workspace_id": record["workspace_id"]}
 
 
@@ -860,21 +1035,39 @@ def finish(key: str, force: bool = False) -> dict:
             # The file holds the notes that a failed refresh saved, or that Hunk did not take.
             unsent = [entry for entry in _saved_notes(key) or [] if _note_place(entry) in mine]
             if _session_live(record.get("hunk_session")):
-                unsent += [note for note in _comments(record["hunk_session"], "all")
-                           if note.get("source") == "user" or _note_place(_note_entry(note)) in mine]
+                unsent += [
+                    note
+                    for note in _comments(record["hunk_session"], "all")
+                    if note.get("source") == "user" or _note_place(_note_entry(note)) in mine
+                ]
             if unsent:
-                raise PrReviewError(f"{key} has {len(unsent)} notes of yours that are not submitted. "
-                                    "Submit them with S in Hunk, or finish with force", "unsent_notes")
+                raise PrReviewError(
+                    f"{key} has {len(unsent)} notes of yours that are not submitted. "
+                    "Submit them with S in Hunk, or finish with force",
+                    "unsent_notes",
+                )
         # The worktree goes first: when Herdr or Git refuses it, Hunk and its notes are still there.
         removed = False
         if record.get("workspace_id"):
             try:
-                removed = herdr("worktree", "remove", "--workspace", record["workspace_id"], "--trust-repository",
-                                *(["--force"] if force else []), tolerated=("workspace_not_found",)) is not None
+                removed = (
+                    herdr(
+                        "worktree",
+                        "remove",
+                        "--workspace",
+                        record["workspace_id"],
+                        "--trust-repository",
+                        *(["--force"] if force else []),
+                        tolerated=("workspace_not_found",),
+                    )
+                    is not None
+                )
             except start.StartError as error:
                 if error.code == "dirty_worktree_requires_force":
-                    raise PrReviewError(f"{worktree} has uncommitted changes. Commit or remove them, "
-                                        "or finish with force", "worktree_dirty") from error
+                    raise PrReviewError(
+                        f"{worktree} has uncommitted changes. Commit or remove them, or finish with force",
+                        "worktree_dirty",
+                    ) from error
                 raise
         if not removed and worktree and Path(worktree).exists():
             _git(checkout, "worktree", "remove", *(["--force"] if force else []), worktree)
@@ -889,8 +1082,11 @@ def finish(key: str, force: bool = False) -> dict:
             # at a branch that no review owns.
             record.update(workspace_id=None, pane_id=None, hunk_pane=None, hunk_session=None)
             save(key, record)
-            raise PrReviewError(f"Git did not delete {record['branch']}: {(branch.stderr or '').strip()}. "
-                                f"Fix it, then finish {key} again", "git_failed")
+            raise PrReviewError(
+                f"Git did not delete {record['branch']}: {(branch.stderr or '').strip()}. "
+                f"Fix it, then finish {key} again",
+                "git_failed",
+            )
         forget(key)
         for suffix in (".md", ".log", ".notes.json"):
             _request_path(key, suffix).unlink(missing_ok=True)

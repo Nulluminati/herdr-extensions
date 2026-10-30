@@ -22,9 +22,13 @@ class LinearEnvTestCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.state = self.root / "state"
-        env = {"HOME": str(self.root / "home"), "XDG_STATE_HOME": str(self.state),
-               "XDG_CONFIG_HOME": str(self.root / "xdg"), "HERDBOARD_CONFIG": "",
-               "LINEAR_API_KEY": "test-key"}
+        env = {
+            "HOME": str(self.root / "home"),
+            "XDG_STATE_HOME": str(self.state),
+            "XDG_CONFIG_HOME": str(self.root / "xdg"),
+            "HERDBOARD_CONFIG": "",
+            "LINEAR_API_KEY": "test-key",
+        }
         self.enterContext(mock.patch.dict(os.environ, env))
         self.fixtures = linear_data.fixtures()
         self.fake = self.enterContext(FakeLinear(self.fixtures, page_size=50))

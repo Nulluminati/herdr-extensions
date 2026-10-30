@@ -1,4 +1,5 @@
 """The board shows a planner without moving its card to another column."""
+
 from unittest.mock import patch
 
 from herdboard import cli, plan, start
@@ -20,8 +21,14 @@ class PlanningStatusTests(BoardTestCase):
         self.pane_exists.assert_not_called()
 
     def test_stale_and_malformed_records_do_not_show_a_marker(self):
-        for record in (None, [], {}, {"kind": "pi"}, {"kind": "pi", "pane_id": 7},
-                       {"kind": "unknown", "pane_id": "w1:p7"}):
+        for record in (
+            None,
+            [],
+            {},
+            {"kind": "pi"},
+            {"kind": "pi", "pane_id": 7},
+            {"kind": "unknown", "pane_id": "w1:p7"},
+        ):
             with self.subTest(record=record):
                 start._write(start.state_dir() / "plans.json", {self.card.ref: record})
                 plan.mark_planning([self.card])

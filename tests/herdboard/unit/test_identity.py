@@ -15,9 +15,7 @@ from herdboard.model import HerdboardError
 
 
 def git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    )
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
     return result.stdout
 
 
@@ -57,12 +55,17 @@ class NormalizeRemoteTest(unittest.TestCase):
                 self.assertEqual(normalize_remote(url), ("github.com", ("acme", "api")))
 
     def test_other_hosts_keep_case(self):
-        self.assertEqual(
-            normalize_remote("https://gitlab.com/Group/Repo.git"), ("gitlab.com", ("Group", "Repo"))
-        )
+        self.assertEqual(normalize_remote("https://gitlab.com/Group/Repo.git"), ("gitlab.com", ("Group", "Repo")))
 
     def test_invalid(self):
-        for url in ["", "/srv/git/repo.git", "../repo", "file:///srv/repo", "https://github.com", "https://github.com/"]:
+        for url in [
+            "",
+            "/srv/git/repo.git",
+            "../repo",
+            "file:///srv/repo",
+            "https://github.com",
+            "https://github.com/",
+        ]:
             with self.subTest(url=url):
                 with self.assertRaises(IdentityError):
                     normalize_remote(url)
@@ -186,9 +189,7 @@ class BoardLookupTest(unittest.TestCase):
 
     def test_new_path_taken_uses_host(self):
         self.board("acme-api.md", "gitlab.com/acme/api")
-        self.assertEqual(
-            new_board_path(self.dir, self.ident), self.dir / "github.com-acme-api.md"
-        )
+        self.assertEqual(new_board_path(self.dir, self.ident), self.dir / "github.com-acme-api.md")
 
     def test_new_path_both_taken(self):
         self.board("acme-api.md", "gitlab.com/acme/api")

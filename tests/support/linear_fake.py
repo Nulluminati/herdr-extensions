@@ -47,10 +47,13 @@ def connection(nodes, variables, page_size):
     start = int(variables.get("after") or 0)
     end = start + min(variables.get("first", 50), page_size)
     page = copy.deepcopy(nodes[start:end])
-    return {"nodes": page, "pageInfo": {
-        "hasNextPage": end < len(nodes),
-        "endCursor": str(start + len(page)) if page else None,
-    }}
+    return {
+        "nodes": page,
+        "pageInfo": {
+            "hasNextPage": end < len(nodes),
+            "endCursor": str(start + len(page)) if page else None,
+        },
+    }
 
 
 class FakeLinear:
@@ -85,8 +88,14 @@ class FakeLinear:
                 status, body, headers = 200, None, {}
                 errors = validation_errors(request["query"], request["variables"])
                 if errors:
-                    status, body = 400, {"errors": [{"message": m, "extensions": {
-                        "code": "GRAPHQL_VALIDATION_FAILED"}} for m in errors]}
+                    status, body = (
+                        400,
+                        {
+                            "errors": [
+                                {"message": m, "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"}} for m in errors
+                            ]
+                        },
+                    )
                 elif self.headers.get("Authorization") != fake.api_key:
                     status, body = 401, {"errors": [{"message": "Invalid API key"}]}
                 elif fake.rate_limits:
@@ -170,16 +179,14 @@ class FakeLinear:
                 return False
         if "id" in filt and issue["id"] not in filt["id"]["in"]:
             return False
-        if "project" in filt and (issue["project"] is None
-                                  or issue["project"]["id"] != filt["project"]["id"]["eq"]):
+        if "project" in filt and (issue["project"] is None or issue["project"]["id"] != filt["project"]["id"]["eq"]):
             return False
         if "labels" in filt:
             ids = filt["labels"]["some"]["id"]["in"]
             if not any(label["id"] in ids for label in issue["labels"]["nodes"]):
                 return False
         if "or" in filt:
-            return any(self.matches_completed(issue.get("completedAt"), option["completedAt"])
-                       for option in filt["or"])
+            return any(self.matches_completed(issue.get("completedAt"), option["completedAt"]) for option in filt["or"])
         return True
 
     def matches_completed(self, completed_at, comparator):
@@ -228,15 +235,12 @@ class FakeLinear:
             return {"projects": {"nodes": [{"teams": page(project["teams"])}]}}
         if op == "Labels":
             name = variables["filter"]["name"]["eqIgnoreCase"].casefold()
-            return {"issueLabels": page([label for label in fixtures["labels"]
-                                         if label["name"].casefold() == name])}
+            return {"issueLabels": page([label for label in fixtures["labels"] if label["name"].casefold() == name])}
         if op == "LabelsById":
             ids = variables["filter"]["id"]["in"]
-            return {"issueLabels": page([label for label in fixtures["labels"]
-                                         if label["id"] in ids])}
+            return {"issueLabels": page([label for label in fixtures["labels"] if label["id"] in ids])}
         if op in ("IssueAttachments", "IssueLabels", "IssueChildren"):
-            field = {"IssueAttachments": "attachments", "IssueLabels": "labels",
-                     "IssueChildren": "children"}[op]
+            field = {"IssueAttachments": "attachments", "IssueLabels": "labels", "IssueChildren": "children"}[op]
             nodes = [i for i in fixtures["issues"] if i["id"] == variables["id"]]
             if not nodes:
                 return {"issues": {"nodes": []}}
@@ -244,22 +248,27 @@ class FakeLinear:
         if op == "SearchIssues":
             filt = variables["filter"]
             term = variables["term"].casefold()
-            nodes = [i for i in fixtures["issues"]
-                     if term in f"{i['identifier']} {i['title']}".casefold()
-                     and i["team"]["id"] in filt["team"]["id"]["in"]
-                     and i["state"]["type"] not in filt["state"]["type"]["nin"]]
+            nodes = [
+                i
+                for i in fixtures["issues"]
+                if term in f"{i['identifier']} {i['title']}".casefold()
+                and i["team"]["id"] in filt["team"]["id"]["in"]
+                and i["state"]["type"] not in filt["state"]["type"]["nin"]
+            ]
             return {"searchIssues": {"nodes": nodes}}
         if op in ("ProjectIssues", "StateSortOrders", "PinnedIssues"):
-            return {"issues": page([i for i in fixtures["issues"]
-                                    if self.matches(i, variables["filter"])])}
+            return {"issues": page([i for i in fixtures["issues"] if self.matches(i, variables["filter"])])}
         if op == "MyIssues":
-            nodes = [i for i in fixtures["issues"] if i["assignee"] is not None
-                     and i["assignee"]["id"] == fixtures["viewer"]["id"]
-                     and self.matches(i, variables.get("filter") or {})]
+            nodes = [
+                i
+                for i in fixtures["issues"]
+                if i["assignee"] is not None
+                and i["assignee"]["id"] == fixtures["viewer"]["id"]
+                and self.matches(i, variables.get("filter") or {})
+            ]
             return {"viewer": {"assignedIssues": page(nodes)}}
         if op in ("Issue", "IssueForWrite"):
-            found = [i for i in fixtures["issues"]
-                     if variables["id"] in (i["identifier"], i["id"])]
+            found = [i for i in fixtures["issues"] if variables["id"] in (i["identifier"], i["id"])]
             return {"issue": copy.deepcopy(found[0])} if found else None
         if op in ("IssueUpdate", "IssueCreate"):
             inputs = variables["input"]
@@ -283,15 +292,26 @@ class FakeLinear:
                 raise ValueError("Unknown state id")
             if issue is None:
                 identifier = f"{team['key']}-{len(fixtures['issues']) + 1}"
-                issue = {"id": inputs["id"], "identifier": identifier, "title": inputs["title"],
-                         "team": {k: team[k] for k in ("id", "key")},
-                         "state": {k: team["states"][0][k] for k in ("id", "name", "type")},
-                         "sortOrder": float(len(fixtures["issues"])),
-                         "url": f"https://linear.app/workspace/issue/{identifier}",
-                         "project": None, "labels": {"nodes": []}, "assignee": None,
-                         "description": None, "dueDate": None, "branchName": None,
-                         "priority": 0, "updatedAt": self.now.isoformat(), "parent": None,
-                         "children": {"nodes": []}, "attachments": {"nodes": []}}
+                issue = {
+                    "id": inputs["id"],
+                    "identifier": identifier,
+                    "title": inputs["title"],
+                    "team": {k: team[k] for k in ("id", "key")},
+                    "state": {k: team["states"][0][k] for k in ("id", "name", "type")},
+                    "sortOrder": float(len(fixtures["issues"])),
+                    "url": f"https://linear.app/workspace/issue/{identifier}",
+                    "project": None,
+                    "labels": {"nodes": []},
+                    "assignee": None,
+                    "description": None,
+                    "dueDate": None,
+                    "branchName": None,
+                    "priority": 0,
+                    "updatedAt": self.now.isoformat(),
+                    "parent": None,
+                    "children": {"nodes": []},
+                    "attachments": {"nodes": []},
+                }
                 fixtures["issues"].append(issue)
             if state is not None:
                 issue["state"] = {k: state[k] for k in ("id", "name", "type")}
@@ -301,9 +321,13 @@ class FakeLinear:
                 project = next((p for p in fixtures["projects"] if p["id"] == inputs["projectId"]), None)
                 issue["project"] = {k: project[k] for k in ("id", "name")} if project else None
             if "labelIds" in inputs:
-                issue["labels"] = {"nodes": [{k: label[k] for k in ("id", "name")}
-                                             for label in fixtures["labels"]
-                                             if label["id"] in inputs["labelIds"]]}
+                issue["labels"] = {
+                    "nodes": [
+                        {k: label[k] for k in ("id", "name")}
+                        for label in fixtures["labels"]
+                        if label["id"] in inputs["labelIds"]
+                    ]
+                }
             if "assigneeId" in inputs:
                 issue["assignee"] = {"id": inputs["assigneeId"], "name": "x"}
             for key in ("description", "dueDate"):
@@ -324,8 +348,7 @@ def argument(field, name, variables):
     for arg in field.arguments or ():
         if arg.name.value == name:
             value = arg.value
-            return (variables.get(value.name.value) if isinstance(value, graphql.VariableNode)
-                    else int(value.value))
+            return variables.get(value.name.value) if isinstance(value, graphql.VariableNode) else int(value.value)
     return None
 
 
@@ -346,8 +369,7 @@ def prune(selection_set, value, variables, page_size):
         if field.selection_set is None or sub is None:
             result[name] = sub
             continue
-        if argument(field, "first", variables) is not None and not (
-                isinstance(sub, dict) and "pageInfo" in sub):
+        if argument(field, "first", variables) is not None and not (isinstance(sub, dict) and "pageInfo" in sub):
             nodes = sub["nodes"] if isinstance(sub, dict) else sub
             sub = connection(nodes, {"first": argument(field, "first", variables)}, page_size)
         result[name] = prune(field.selection_set, sub, variables, page_size)

@@ -69,14 +69,12 @@ class CommitTypeTests(unittest.TestCase):
         self.assertEqual((commit_type("bug"), commit_type("feature")), ("fix", "feat"))
 
     def test_other_types_are_their_own_commit_type(self):
-        self.assertEqual((commit_type("chore"), commit_type("docs"), commit_type("Spike")),
-                         ("chore", "docs", "spike"))
+        self.assertEqual((commit_type("chore"), commit_type("docs"), commit_type("Spike")), ("chore", "docs", "spike"))
 
 
 class WithTypeTests(unittest.TestCase):
     def test_adds_the_type_before_the_tags(self):
-        self.assertEqual(with_type("Fix login #auth 📅 2026-11-01", "bug"),
-                         "Fix login #type/bug #auth 📅 2026-11-01")
+        self.assertEqual(with_type("Fix login #auth 📅 2026-11-01", "bug"), "Fix login #type/bug #auth 📅 2026-11-01")
 
     def test_adds_the_type_at_the_end(self):
         self.assertEqual(with_type("Fix login", "bug"), "Fix login #type/bug")

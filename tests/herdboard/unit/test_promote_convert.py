@@ -48,6 +48,7 @@ class TitleTests(unittest.TestCase):
 
     def test_a_card_without_text_has_no_title(self):
         from herdboard.model import HerdboardError
+
         with self.assertRaises(HerdboardError):
             convert(["- [ ] #only-a-tag 📅 2026-01-02 ^t0aa"])
 
@@ -55,8 +56,10 @@ class TitleTests(unittest.TestCase):
 class SubItemTests(unittest.TestCase):
     def test_checklist_items_become_sub_issues_in_order_with_their_flag(self):
         found = convert(card_lines(FIXTURE, "t5r1"))
-        self.assertEqual(found.subs, [SubItem("Choose tiles", False), SubItem("Measure the room", True),
-                                      SubItem("Book the plumber", False)])
+        self.assertEqual(
+            found.subs,
+            [SubItem("Choose tiles", False), SubItem("Measure the room", True), SubItem("Book the plumber", False)],
+        )
 
     def test_fixture_card_with_tab_indented_items(self):
         found = convert(card_lines(FULL, text="Plan the lighting"))
@@ -66,8 +69,7 @@ class SubItemTests(unittest.TestCase):
     def test_four_space_indentation_counts_like_a_tab(self):
         lines = [line.replace("\t", "    ") for line in card_lines(FIXTURE, "t5r1")]
         found = convert(lines)
-        self.assertEqual([s.title for s in found.subs],
-                         ["Choose tiles", "Measure the room", "Book the plumber"])
+        self.assertEqual([s.title for s in found.subs], ["Choose tiles", "Measure the room", "Book the plumber"])
         self.assertEqual(found.leftover[0], "Budget is tight, ask for two quotes")
 
     def test_checked_flag_follows_the_card_rule(self):
@@ -83,12 +85,15 @@ class SubItemTests(unittest.TestCase):
 class LeftoverTests(unittest.TestCase):
     def test_other_lines_stay_as_description_text(self):
         found = convert(card_lines(FIXTURE, "t5r1"))
-        self.assertEqual(found.leftover, [
-            "Budget is tight, ask for two quotes",
-            "\t- [ ] Measure the ceiling",
-            "\tCeiling is uneven",
-            "- Not a checklist item",
-        ])
+        self.assertEqual(
+            found.leftover,
+            [
+                "Budget is tight, ask for two quotes",
+                "\t- [ ] Measure the ceiling",
+                "\tCeiling is uneven",
+                "- Not a checklist item",
+            ],
+        )
 
     def test_deeper_items_keep_their_indentation_relative_to_the_description(self):
         found = convert(["- [ ] Card", "    - [ ] One", "        - [ ] Deeper"])

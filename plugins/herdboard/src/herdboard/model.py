@@ -274,7 +274,7 @@ def card_type(tags: list[str]) -> str | None:
     """The name in the first `type/<name>` tag, or None."""
     for tag in tags:
         if tag.startswith(TYPE_TAG_PREFIX) and len(tag) > len(TYPE_TAG_PREFIX):
-            return tag[len(TYPE_TAG_PREFIX):]
+            return tag[len(TYPE_TAG_PREFIX) :]
     return None
 
 
@@ -314,4 +314,3 @@ def parse_tags(text: str) -> list[str]:
         if tag and tag not in tags:
             tags.append(tag)
     return tags
-

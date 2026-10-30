@@ -25,7 +25,7 @@ def type_and_labels(config: Config, labels: list[str]) -> tuple[str | None, list
     types = {kind.casefold(): kind for kind in config.types}
     for index, label in enumerate(labels):
         if label.casefold() in types:
-            return types[label.casefold()], labels[:index] + labels[index + 1:]
+            return types[label.casefold()], labels[:index] + labels[index + 1 :]
     return None, labels
 
 
@@ -45,8 +45,9 @@ def attachment_links(attachments: list) -> list[dict]:
     for entry in attachments:
         if isinstance(entry, str):
             entry = {"url": entry}
-        links.append({"title": entry.get("title") or entry["url"], "subtitle": entry.get("subtitle"),
-                      "url": entry["url"]})
+        links.append(
+            {"title": entry.get("title") or entry["url"], "subtitle": entry.get("subtitle"), "url": entry["url"]}
+        )
     return links
 
 

@@ -7,8 +7,11 @@ from herdboard.linear_cards import issue_card
 
 def issue(*labels):
     return {
-        "identifier": "ENG-12", "title": "Fix login", "state": {"name": "Todo", "type": "unstarted"},
-        "labels": [{"name": name} for name in labels], "team": {"key": "ENG"},
+        "identifier": "ENG-12",
+        "title": "Fix login",
+        "state": {"name": "Todo", "type": "unstarted"},
+        "labels": [{"name": name} for name in labels],
+        "team": {"key": "ENG"},
     }
 
 

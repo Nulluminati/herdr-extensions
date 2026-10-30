@@ -1,4 +1,5 @@
 """Pull request reviews: an agent reviews a GitHub PR in its own worktree workspace and leaves notes in Hunk."""
+
 import contextlib
 import io
 import json
@@ -17,17 +18,33 @@ HEAD = "a" * 40
 
 
 def pr_json(number=7, **changes):
-    data = {"number": number, "title": "Fix login timeout", "url": f"https://github.com/acme/api/pull/{number}",
-            "author": {"login": "octo"}, "isDraft": False, "headRefOid": HEAD, "headRefName": "fix-login",
-            "baseRefName": "main", "reviewRequests": [], "additions": 12, "deletions": 3, "changedFiles": 2,
-            "updatedAt": "2026-10-16T18:00:00Z", "body": "Sessions end too soon."}
+    data = {
+        "number": number,
+        "title": "Fix login timeout",
+        "url": f"https://github.com/acme/api/pull/{number}",
+        "author": {"login": "octo"},
+        "isDraft": False,
+        "headRefOid": HEAD,
+        "headRefName": "fix-login",
+        "baseRefName": "main",
+        "reviewRequests": [],
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "updatedAt": "2026-10-16T18:00:00Z",
+        "body": "Sessions end too soon.",
+    }
     data.update(changes)
     return data
 
 
 def session(session_id, cwd, number=7, repo=REPO):
-    return {"sessionId": session_id, "cwd": str(cwd), "launchedAt": "2026-10-16T19:00:36.858Z",
-            "review": {"id": f"#{number}", "repository": repo, "provider": "GitHub"}}
+    return {
+        "sessionId": session_id,
+        "cwd": str(cwd),
+        "launchedAt": "2026-10-16T19:00:36.858Z",
+        "review": {"id": f"#{number}", "repository": repo, "provider": "GitHub"},
+    }
 
 
 class Fake:
@@ -49,7 +66,7 @@ class Fake:
     def __call__(self, argv, timeout=120, **options):
         argv = ["herdr" if argv[0].endswith("herdr") else argv[0], *argv[1:]]
         self.calls.append((argv, options))
-        matches = [p for p in self.replies if tuple(argv[:len(p)]) == p]
+        matches = [p for p in self.replies if tuple(argv[: len(p)]) == p]
         if not matches:
             out = json.dumps({"result": {"type": "ok"}}) if argv[0] == "herdr" else ""
             return subprocess.CompletedProcess(argv, 0, out, "")
@@ -60,10 +77,10 @@ class Fake:
         return subprocess.CompletedProcess(argv, code, out, err)
 
     def made(self, *prefix):
-        return [argv for argv, _ in self.calls if tuple(argv[:len(prefix)]) == prefix]
+        return [argv for argv, _ in self.calls if tuple(argv[: len(prefix)]) == prefix]
 
     def options(self, *prefix):
-        return [options for argv, options in self.calls if tuple(argv[:len(prefix)]) == prefix]
+        return [options for argv, options in self.calls if tuple(argv[: len(prefix)]) == prefix]
 
 
 class PrReviewTestCase(unittest.TestCase):
@@ -71,8 +88,9 @@ class PrReviewTestCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.enterContext(patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state"),
-                                                  "HERDR_BIN_PATH": "herdr"}))
+        self.enterContext(
+            patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state"), "HERDR_BIN_PATH": "herdr"})
+        )
         self.checkout = self.root / "api"
         self.checkout.mkdir()
         self.worktree = self.root / "worktrees" / "pr-7"
@@ -81,10 +99,17 @@ class PrReviewTestCase(unittest.TestCase):
         self.enterContext(patch.object(start, "command", self.fake))
         self.enterContext(patch.object(pr_reviews, "POLL_SECONDS", 0))
         self.workers = []
-        self.enterContext(patch.object(agent_review, "start_worker",
-                                       lambda arguments, log: self.workers.append((arguments, log))))
-        self.fake.on("git", "-C", str(self.checkout), "remote", "-v",
-                     out="origin\tgit@github.com:acme/api.git (fetch)\norigin\tgit@github.com:acme/api.git (push)\n")
+        self.enterContext(
+            patch.object(agent_review, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+        )
+        self.fake.on(
+            "git",
+            "-C",
+            str(self.checkout),
+            "remote",
+            "-v",
+            out="origin\tgit@github.com:acme/api.git (fetch)\norigin\tgit@github.com:acme/api.git (push)\n",
+        )
         self.fake.on("gh", "auth", "token", out="secret-token\n")
         # Herdr prints nothing for `pane run` when it works.
         self.fake.on("herdr", "pane", "run", out="")
@@ -95,9 +120,16 @@ class PrReviewTestCase(unittest.TestCase):
     def new_workspace(self):
         """Herdr answers a new worktree workspace, and Git has no `pr/7` branch yet."""
         self.fake.on("git", "-C", str(self.checkout), "rev-parse", "--verify", "--quiet", code=1)
-        self.fake.on("herdr", "worktree", "create", result={
-            "workspace": {"workspace_id": "w9"}, "root_pane": {"pane_id": "w9:p1"},
-            "worktree": {"path": str(self.worktree)}})
+        self.fake.on(
+            "herdr",
+            "worktree",
+            "create",
+            result={
+                "workspace": {"workspace_id": "w9"},
+                "root_pane": {"pane_id": "w9:p1"},
+                "worktree": {"path": str(self.worktree)},
+            },
+        )
 
     def new_session(self, session_id="s-new"):
         """Hunk lists one old session, then also the new one for the PR."""
@@ -106,11 +138,26 @@ class PrReviewTestCase(unittest.TestCase):
         self.fake.on("hunk", "session", "list", out={"sessions": [old, session(session_id, self.worktree)]})
 
     def record(self, **changes):
-        record = {"checkout": str(self.checkout), "repo": REPO, "number": 7, "title": "Fix login timeout",
-                  "branch": "pr/7", "worktree_path": str(self.worktree), "workspace_id": "w9", "pane_id": "w9:p1",
-                  "hunk_pane": "w9:p2", "hunk_session": "s-new", "agent": "claude", "agent_name": "pr-api-7",
-                  "model": "sonnet", "thinking": None, "reviewed_sha": HEAD, "status": "reviewing", "notes": None,
-                  "error": None}
+        record = {
+            "checkout": str(self.checkout),
+            "repo": REPO,
+            "number": 7,
+            "title": "Fix login timeout",
+            "branch": "pr/7",
+            "worktree_path": str(self.worktree),
+            "workspace_id": "w9",
+            "pane_id": "w9:p1",
+            "hunk_pane": "w9:p2",
+            "hunk_session": "s-new",
+            "agent": "claude",
+            "agent_name": "pr-api-7",
+            "model": "sonnet",
+            "thinking": None,
+            "reviewed_sha": HEAD,
+            "status": "reviewing",
+            "notes": None,
+            "error": None,
+        }
         record.update(changes)
         pr_reviews.save(KEY, record)
         return record
@@ -125,9 +172,16 @@ def search_json(nodes, total=None, end="c2", more=False, login="me"):
         requests = node.pop("reviewRequests", [])
         node["reviewRequests"] = {"nodes": [{"requestedReviewer": r} for r in requests]}
         node.pop("body", None)
-    return {"data": {"viewer": {"login": login}, "search": {
-        "issueCount": len(nodes) if total is None else total,
-        "pageInfo": {"hasNextPage": more, "endCursor": end}, "nodes": nodes}}}
+    return {
+        "data": {
+            "viewer": {"login": login},
+            "search": {
+                "issueCount": len(nodes) if total is None else total,
+                "pageInfo": {"hasNextPage": more, "endCursor": end},
+                "nodes": nodes,
+            },
+        }
+    }
 
 
 class ListTests(PrReviewTestCase):
@@ -136,15 +190,29 @@ class ListTests(PrReviewTestCase):
         return {arg.split("=", 1)[0]: arg.split("=", 1)[1] for arg in call if "=" in arg}
 
     def test_a_page_reads_github_search_and_sets_the_markers(self):
-        prs = [pr_json(7), pr_json(8, isDraft=True, author={"login": "Me"}),
-               pr_json(9, reviewRequests=[{"name": "core"}, {"login": "ME"}])]
+        prs = [
+            pr_json(7),
+            pr_json(8, isDraft=True, author={"login": "Me"}),
+            pr_json(9, reviewRequests=[{"name": "core"}, {"login": "ME"}]),
+        ]
         self.fake.on("gh", "api", "graphql", out=search_json(prs, total=120, more=True, end="c3"))
         page = pr_reviews.list_page(self.checkout, REPO)
         self.assertEqual([p.number for p in page.prs], [7, 8, 9])
-        self.assertEqual([(p.draft, p.mine, p.requested) for p in page.prs],
-                         [(False, False, False), (True, True, False), (False, False, True)])
-        self.assertEqual((page.prs[0].head_sha, page.prs[0].author, page.prs[0].base_branch, page.prs[0].additions,
-                          page.prs[0].files, page.prs[0].body), (HEAD, "octo", "main", 12, 2, ""))
+        self.assertEqual(
+            [(p.draft, p.mine, p.requested) for p in page.prs],
+            [(False, False, False), (True, True, False), (False, False, True)],
+        )
+        self.assertEqual(
+            (
+                page.prs[0].head_sha,
+                page.prs[0].author,
+                page.prs[0].base_branch,
+                page.prs[0].additions,
+                page.prs[0].files,
+                page.prs[0].body,
+            ),
+            (HEAD, "octo", "main", 12, 2, ""),
+        )
         self.assertEqual((page.total, page.next_cursor), (120, "c3"))
         query = self.query()
         self.assertEqual(query["q"], f"repo:{REPO} is:pr is:open sort:created-desc")
@@ -153,13 +221,25 @@ class ListTests(PrReviewTestCase):
         self.assertNotIn("body", query["query"])
 
     def test_a_page_has_labels_ci_and_the_github_review_decision(self):
-        nodes = [pr_json(7, labels={"nodes": [{"name": "bug", "color": "d73a4a"}]}, reviewDecision="APPROVED",
-                         commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}),
-                 pr_json(8, reviewDecision="CHANGES_REQUESTED",
-                         commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]}),
-                 pr_json(9, reviewDecision="REVIEW_REQUIRED",
-                         commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}),
-                 pr_json(10, commits={"nodes": [{"commit": {"statusCheckRollup": None}}]})]
+        nodes = [
+            pr_json(
+                7,
+                labels={"nodes": [{"name": "bug", "color": "d73a4a"}]},
+                reviewDecision="APPROVED",
+                commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]},
+            ),
+            pr_json(
+                8,
+                reviewDecision="CHANGES_REQUESTED",
+                commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]},
+            ),
+            pr_json(
+                9,
+                reviewDecision="REVIEW_REQUIRED",
+                commits={"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+            ),
+            pr_json(10, commits={"nodes": [{"commit": {"statusCheckRollup": None}}]}),
+        ]
         self.fake.on("gh", "api", "graphql", out=search_json(nodes))
         prs = pr_reviews.list_page(self.checkout, REPO).prs
         self.assertEqual(prs[0].labels, [{"name": "bug", "color": "d73a4a"}])
@@ -192,27 +272,69 @@ class ListTests(PrReviewTestCase):
         self.assertIn("Bad search", str(raised.exception))
 
     def test_the_details_are_read_on_their_own(self):
-        checks = [{"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
-                  {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"},
-                  {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": None},
-                  {"__typename": "CheckRun", "name": "label", "status": "COMPLETED", "conclusion": "SKIPPED"},
-                  {"__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"}]
-        self.fake.on("gh", "api", "graphql", out={"data": {"repository": {"pullRequest": {
-            "body": "Sessions end too soon.",
-            "closingIssuesReferences": {"nodes": [{"number": 3, "title": "Logout", "url": "u3", "state": "OPEN"}]},
-            "latestReviews": {"nodes": [{"author": {"login": "octo"}, "state": "APPROVED",
-                                         "submittedAt": "2026-10-16T18:00:00Z"},
-                                        {"author": None, "state": "COMMENTED", "submittedAt": None}]},
-            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE",
-                                                                    "contexts": {"nodes": checks}}}}]}}}}})
+        checks = [
+            {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"},
+            {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": None},
+            {"__typename": "CheckRun", "name": "label", "status": "COMPLETED", "conclusion": "SKIPPED"},
+            {"__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"},
+        ]
+        self.fake.on(
+            "gh",
+            "api",
+            "graphql",
+            out={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "body": "Sessions end too soon.",
+                            "closingIssuesReferences": {
+                                "nodes": [{"number": 3, "title": "Logout", "url": "u3", "state": "OPEN"}]
+                            },
+                            "latestReviews": {
+                                "nodes": [
+                                    {
+                                        "author": {"login": "octo"},
+                                        "state": "APPROVED",
+                                        "submittedAt": "2026-10-16T18:00:00Z",
+                                    },
+                                    {"author": None, "state": "COMMENTED", "submittedAt": None},
+                                ]
+                            },
+                            "commits": {
+                                "nodes": [
+                                    {
+                                        "commit": {
+                                            "statusCheckRollup": {"state": "FAILURE", "contexts": {"nodes": checks}}
+                                        }
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                }
+            },
+        )
         details = pr_reviews.pr_details(self.checkout, REPO, 7)
         self.assertEqual(details["body"], "Sessions end too soon.")
         self.assertEqual(details["issues"], [{"number": 3, "title": "Logout", "url": "u3", "state": "OPEN"}])
-        self.assertEqual(details["reviews"], [{"author": "octo", "state": "approved", "at": "2026-10-16T18:00:00Z"},
-                                              {"author": "ghost", "state": "commented", "at": ""}])
-        self.assertEqual(details["checks"], [{"name": "lint", "state": "passed"}, {"name": "test", "state": "failed"},
-                                             {"name": "e2e", "state": "pending"}, {"name": "label", "state": "skipped"},
-                                             {"name": "ci/legacy", "state": "failed"}])
+        self.assertEqual(
+            details["reviews"],
+            [
+                {"author": "octo", "state": "approved", "at": "2026-10-16T18:00:00Z"},
+                {"author": "ghost", "state": "commented", "at": ""},
+            ],
+        )
+        self.assertEqual(
+            details["checks"],
+            [
+                {"name": "lint", "state": "passed"},
+                {"name": "test", "state": "failed"},
+                {"name": "e2e", "state": "pending"},
+                {"name": "label", "state": "skipped"},
+                {"name": "ci/legacy", "state": "failed"},
+            ],
+        )
         query = self.query()
         self.assertEqual((query["owner"], query["name"], query["number"]), ("acme", "api", "7"))
 
@@ -258,16 +380,18 @@ class WorkspaceTests(PrReviewTestCase):
     def test_a_new_review_fetches_the_pr_head_into_a_local_branch(self):
         self.new_workspace()
         record = pr_reviews.open_workspace(self.checkout, REPO, 7, "Fix login timeout " + "x" * 60)
-        self.assertIn(["git", "-C", str(self.checkout), "fetch", "origin", "+pull/7/head:refs/heads/pr/7"],
-                      self.fake.made("git"))
+        self.assertIn(
+            ["git", "-C", str(self.checkout), "fetch", "origin", "+pull/7/head:refs/heads/pr/7"], self.fake.made("git")
+        )
         create = self.fake.made("herdr", "worktree", "create")[0]
         self.assertEqual(create[create.index("--branch") + 1], "pr/7")
         label = create[create.index("--label") + 1]
         self.assertTrue(label.startswith("PR #7 Fix login timeout"))
         self.assertEqual(len(label), len("PR #7 ") + 40)
         self.assertIn("--no-focus", create)
-        self.assertEqual((record["workspace_id"], record["pane_id"], record["worktree_path"]),
-                         ("w9", "w9:p1", str(self.worktree)))
+        self.assertEqual(
+            (record["workspace_id"], record["pane_id"], record["worktree_path"]), ("w9", "w9:p1", str(self.worktree))
+        )
         self.assertEqual(pr_reviews.records()[KEY]["branch"], "pr/7")
 
     def test_a_branch_that_no_review_owns_is_refused(self):
@@ -280,9 +404,16 @@ class WorkspaceTests(PrReviewTestCase):
     def test_a_kept_branch_of_a_removed_worktree_gets_the_new_head(self):
         self.record(worktree_path=str(self.root / "gone"))
         self.fake.on("git", "-C", str(self.checkout), "rev-parse", "--verify", "--quiet", out="abc\n")
-        self.fake.on("herdr", "worktree", "create", result={
-            "workspace": {"workspace_id": "w9"}, "root_pane": {"pane_id": "w9:p1"},
-            "worktree": {"path": str(self.worktree)}})
+        self.fake.on(
+            "herdr",
+            "worktree",
+            "create",
+            result={
+                "workspace": {"workspace_id": "w9"},
+                "root_pane": {"pane_id": "w9:p1"},
+                "worktree": {"path": str(self.worktree)},
+            },
+        )
         pr_reviews.open_workspace(self.checkout, REPO, 7, "Fix")
         git = self.fake.made("git", "-C", str(self.checkout))
         fetch = git.index(["git", "-C", str(self.checkout), "fetch", "origin", "+pull/7/head:refs/heads/pr/7"])
@@ -301,9 +432,16 @@ class WorkspaceTests(PrReviewTestCase):
         self.worktree.mkdir(parents=True)
         self.record()
         self.fake.on("herdr", "workspace", "get", error="workspace_not_found")
-        self.fake.on("herdr", "worktree", "open", result={
-            "workspace": {"workspace_id": "w10"}, "root_pane": {"pane_id": "w10:p1"},
-            "worktree": {"path": str(self.worktree)}})
+        self.fake.on(
+            "herdr",
+            "worktree",
+            "open",
+            result={
+                "workspace": {"workspace_id": "w10"},
+                "root_pane": {"pane_id": "w10:p1"},
+                "worktree": {"path": str(self.worktree)},
+            },
+        )
         record = pr_reviews.open_workspace(self.checkout, REPO, 7, "Fix")
         opened = self.fake.made("herdr", "worktree", "open")[0]
         self.assertEqual(opened[opened.index("--path") + 1], str(self.worktree))
@@ -347,8 +485,17 @@ class HunkTests(PrReviewTestCase):
 class ReviewerTests(PrReviewTestCase):
     def test_codex_pr_reviewer_writes_nothing_and_reaches_github_and_hunk(self):
         args = pr_reviews.reviewer_arguments("codex", "task", Path("/pr"), "gpt-6.1", "ultra")
-        self.assertEqual(args, [*sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
-                                "--model", "gpt-6.1", "-c", 'model_reasoning_effort="ultra"', "task"])
+        self.assertEqual(
+            args,
+            [
+                *sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
+                "--model",
+                "gpt-6.1",
+                "-c",
+                'model_reasoning_effort="ultra"',
+                "task",
+            ],
+        )
         self.assertEqual(pr_reviews.AUTHORS["codex"], "Codex")
         pr_reviews._validate("codex", None, "ultra")
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
@@ -359,9 +506,9 @@ class ReviewerTests(PrReviewTestCase):
         arguments = pr_reviews.reviewer_arguments("claude", "Read it", Path("/pr"), "sonnet", None)
         self.assertEqual(arguments[0], "Read it")
         options = sandbox.claude_reviewer_options(None, Path("/pr"), browser=True, hunk=True)
-        self.assertEqual(arguments[1:1 + len(options)], options)
+        self.assertEqual(arguments[1 : 1 + len(options)], options)
         self.assertLess(arguments.index("--model"), arguments.index("--allowedTools"))
-        self.assertEqual(arguments[arguments.index("--allowedTools"):], sandbox.claude_reviewer_tools(None))
+        self.assertEqual(arguments[arguments.index("--allowedTools") :], sandbox.claude_reviewer_tools(None))
 
     def test_claude_gets_its_effort_before_its_allowed_tools(self):
         arguments = pr_reviews.reviewer_arguments("claude", "Read it", Path("/pr"), None, "xhigh")
@@ -372,7 +519,7 @@ class ReviewerTests(PrReviewTestCase):
     def test_pi_gets_the_sandbox_and_its_thinking_level(self):
         arguments = pr_reviews.reviewer_arguments("pi", "Read it", Path("/pr"), "zai/glm-5.3", "high")
         options = sandbox.pi_reviewer_options(None, Path("/pr"), browser=True, hunk=True)
-        self.assertEqual(arguments[:len(options)], options)
+        self.assertEqual(arguments[: len(options)], options)
         self.assertNotIn("--bash-allow", arguments)
         self.assertEqual(arguments[-2:], ["--", "Read it"])
         self.assertIn("high", arguments)
@@ -386,10 +533,21 @@ class ReviewerTests(PrReviewTestCase):
 
     def test_the_prompt_names_the_session_and_forbids_a_submit(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
-        for part in ("s-new", "hunk skill path", f"gh pr diff 7 --repo {REPO}", HEAD, str(self.worktree),
-                     "--author Claude", "Do not submit", "terminal-browser open --no-merge --split right",
-                     "terminal-browser action", "do not start a server", "Do not open a file from the PR checkout",
-                     "Never run `terminal-browser shutdown`", "You may run any read-only command"):
+        for part in (
+            "s-new",
+            "hunk skill path",
+            f"gh pr diff 7 --repo {REPO}",
+            HEAD,
+            str(self.worktree),
+            "--author Claude",
+            "Do not submit",
+            "terminal-browser open --no-merge --split right",
+            "terminal-browser action",
+            "do not start a server",
+            "Do not open a file from the PR checkout",
+            "Never run `terminal-browser shutdown`",
+            "You may run any read-only command",
+        ):
             self.assertIn(part, text)
         self.assertNotIn("Run no command other than", text)
 
@@ -655,8 +813,9 @@ class AnnotateTests(PrReviewTestCase):
         pr = pr_reviews.PullRequest.from_json(pr_json(isDraft=True, reviewRequests=[{"login": "me"}]), "me")
         pr.status, pr.new_commits = "reviewed", True
         pr.ci, pr.decision = "failed", "approved"
-        self.assertEqual(pr.marks(), ["draft", "review requested", "CI failed", "GitHub: approved",
-                                      "agent: reviewed", "new commits"])
+        self.assertEqual(
+            pr.marks(), ["draft", "review requested", "CI failed", "GitHub: approved", "agent: reviewed", "new commits"]
+        )
 
 
 class RefreshTests(PrReviewTestCase):
@@ -674,38 +833,80 @@ class RefreshTests(PrReviewTestCase):
 
     def test_refresh_moves_the_branch_reopens_hunk_and_applies_the_notes(self):
         self.record(status="reviewed")
-        notes = [{"noteId": "1", "source": "agent", "filePath": "a.py", "newRange": [3, 3], "body": "Bug here",
-                  "author": "Claude"},
-                 {"noteId": "2", "source": "user", "filePath": "b.py", "oldRange": [9, 9], "body": "Why?"},
-                 {"noteId": "3", "source": "user", "filePath": "gone.py", "newRange": [1, 1], "body": "Old\n\nThe rationale."}]
+        notes = [
+            {
+                "noteId": "1",
+                "source": "agent",
+                "filePath": "a.py",
+                "newRange": [3, 3],
+                "body": "Bug here",
+                "author": "Claude",
+            },
+            {"noteId": "2", "source": "user", "filePath": "b.py", "oldRange": [9, 9], "body": "Why?"},
+            {
+                "noteId": "3",
+                "source": "user",
+                "filePath": "gone.py",
+                "newRange": [1, 1],
+                "body": "Old\n\nThe rationale.",
+            },
+        ]
         self.fake.on("hunk", "session", "comment", "list", out={"comments": notes})
         self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p3"}})
         self.new_session("s-two")
         applied = []
-        self.fake.on("hunk", "session", "comment", "apply", code=1, err=NO_LINE,
-                     then=lambda argv, options: applied.append(json.loads(options["input"])))
-        self.fake.on("hunk", "session", "comment", "apply", out="{}",
-                     then=lambda argv, options: applied.append(json.loads(options["input"])))
-        self.fake.on("hunk", "session", "comment", "apply", out="{}",
-                     then=lambda argv, options: applied.append(json.loads(options["input"])))
-        self.fake.on("hunk", "session", "comment", "apply", code=1, err=NO_LINE,
-                     then=lambda argv, options: applied.append(json.loads(options["input"])))
+        self.fake.on(
+            "hunk",
+            "session",
+            "comment",
+            "apply",
+            code=1,
+            err=NO_LINE,
+            then=lambda argv, options: applied.append(json.loads(options["input"])),
+        )
+        self.fake.on(
+            "hunk",
+            "session",
+            "comment",
+            "apply",
+            out="{}",
+            then=lambda argv, options: applied.append(json.loads(options["input"])),
+        )
+        self.fake.on(
+            "hunk",
+            "session",
+            "comment",
+            "apply",
+            out="{}",
+            then=lambda argv, options: applied.append(json.loads(options["input"])),
+        )
+        self.fake.on(
+            "hunk",
+            "session",
+            "comment",
+            "apply",
+            code=1,
+            err=NO_LINE,
+            then=lambda argv, options: applied.append(json.loads(options["input"])),
+        )
         result = pr_reviews.refresh(KEY)
         git = self.fake.made("git", "-C", str(self.worktree))
         self.assertIn(["git", "-C", str(self.worktree), "fetch", "origin", "pull/7/head"], git)
         self.assertIn(["git", "-C", str(self.worktree), "reset", "--keep", "FETCH_HEAD"], git)
         self.assertIn(["herdr", "pane", "close", "w9:p2"], self.fake.made("herdr", "pane", "close"))
         self.assertEqual(len(applied[0]["comments"]), 3)
-        self.assertEqual(applied[1]["comments"], [{"filePath": "a.py", "newLine": 3, "summary": "Bug here",
-                                                   "author": "Claude"}])
+        self.assertEqual(
+            applied[1]["comments"], [{"filePath": "a.py", "newLine": 3, "summary": "Bug here", "author": "Claude"}]
+        )
         self.assertEqual(applied[2]["comments"][0]["oldLine"], 9)
         self.assertEqual(result["kept"], 2)
         self.assertEqual(result["dropped"], ["gone.py:1: Old"])
         self.assertEqual(pr_reviews.records()[KEY]["hunk_session"], "s-two")
         self.assertEqual(self.fake.made("hunk", "session", "comment", "apply")[0][4], "s-two")
         # Hunk restores every note as an agent note, so the record keeps which ones were the user's.
-        self.assertEqual(pr_reviews.records()[KEY]["user_notes"],
-                         [{"filePath": "b.py", "oldLine": 9, "summary": "Why?"}])
+        self.assertEqual(
+            pr_reviews.records()[KEY]["user_notes"], [{"filePath": "b.py", "oldLine": 9, "summary": "Why?"}]
+        )
 
     def test_refresh_is_refused_while_the_reviewer_works(self):
         self.record(status="reviewing")
@@ -740,9 +941,18 @@ class RefreshTests(PrReviewTestCase):
 
     def test_a_hunk_error_keeps_the_notes_that_did_not_apply(self):
         self.record(status="reviewed", user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
-        self.fake.on("hunk", "session", "comment", "list", out={"comments": [
-            {"noteId": "1", "source": "user", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"},
-            {"noteId": "2", "source": "agent", "filePath": "gone.py", "newRange": [1, 1], "body": "Old"}]})
+        self.fake.on(
+            "hunk",
+            "session",
+            "comment",
+            "list",
+            out={
+                "comments": [
+                    {"noteId": "1", "source": "user", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"},
+                    {"noteId": "2", "source": "agent", "filePath": "gone.py", "newRange": [1, 1], "body": "Old"},
+                ]
+            },
+        )
         self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p3"}})
         self.new_session("s-two")
         busy = "hunk: The targeted session could not receive the command.\n"
@@ -808,8 +1018,13 @@ class RefreshFailureTests(PrReviewTestCase):
         self.record(status="reviewed")
         self.fake.on("hunk", "session", "comment", "list", out={"comments": self.notes})
         saved_at_close = []
-        self.fake.on("herdr", "pane", "close", result={"type": "ok"},
-                     then=lambda argv, options: saved_at_close.append(pr_reviews._saved_notes(KEY)))
+        self.fake.on(
+            "herdr",
+            "pane",
+            "close",
+            result={"type": "ok"},
+            then=lambda argv, options: saved_at_close.append(pr_reviews._saved_notes(KEY)),
+        )
         self.fake.on("herdr", "pane", "split", result={"pane": {"pane_id": "w9:p3"}})
         self.new_session("s-two")
         pr_reviews.refresh(KEY)
@@ -859,10 +1074,25 @@ class FinishTests(PrReviewTestCase):
 
     def test_user_notes_that_a_refresh_restored_stop_finish(self):
         self.record(user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
-        self.fake.on("hunk", "session", "comment", "list", out={"comments": [
-            {"noteId": "9", "source": "agent", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"},
-            {"noteId": "8", "source": "agent", "filePath": "a.py", "newRange": [5, 5], "body": "Agent note",
-             "author": "Claude"}]})
+        self.fake.on(
+            "hunk",
+            "session",
+            "comment",
+            "list",
+            out={
+                "comments": [
+                    {"noteId": "9", "source": "agent", "filePath": "a.py", "newRange": [3, 3], "body": "Mine"},
+                    {
+                        "noteId": "8",
+                        "source": "agent",
+                        "filePath": "a.py",
+                        "newRange": [5, 5],
+                        "body": "Agent note",
+                        "author": "Claude",
+                    },
+                ]
+            },
+        )
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
             pr_reviews.finish(KEY)
         self.assertEqual(raised.exception.code, "unsent_notes")
@@ -871,10 +1101,16 @@ class FinishTests(PrReviewTestCase):
 
     def test_user_notes_saved_by_a_failed_refresh_stop_finish(self):
         # A refresh that failed after it closed Hunk left the notes only in the file.
-        self.record(hunk_pane=None, hunk_session=None,
-                    user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
-        pr_reviews._save_notes(KEY, [{"filePath": "a.py", "newLine": 3, "summary": "Mine"},
-                                     {"filePath": "a.py", "newLine": 5, "summary": "Agent note"}])
+        self.record(
+            hunk_pane=None, hunk_session=None, user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}]
+        )
+        pr_reviews._save_notes(
+            KEY,
+            [
+                {"filePath": "a.py", "newLine": 3, "summary": "Mine"},
+                {"filePath": "a.py", "newLine": 5, "summary": "Agent note"},
+            ],
+        )
         with self.assertRaises(pr_reviews.PrReviewError) as raised:
             pr_reviews.finish(KEY)
         self.assertEqual(raised.exception.code, "unsent_notes")
@@ -900,8 +1136,9 @@ class FinishTests(PrReviewTestCase):
         self.assertIsNone(pr_reviews._saved_notes(KEY))
 
     def test_force_removes_saved_user_notes(self):
-        self.record(hunk_pane=None, hunk_session=None,
-                    user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
+        self.record(
+            hunk_pane=None, hunk_session=None, user_notes=[{"filePath": "a.py", "newLine": 3, "summary": "Mine"}]
+        )
         pr_reviews._save_notes(KEY, [{"filePath": "a.py", "newLine": 3, "summary": "Mine"}])
         pr_reviews.finish(KEY, force=True)
         self.assertNotIn(KEY, pr_reviews.records())
@@ -959,8 +1196,9 @@ class FinishTests(PrReviewTestCase):
         self.fake.on("hunk", "session", "comment", "list", out={"comments": []})
         self.fake.on("herdr", "worktree", "remove", error="workspace_not_found")
         pr_reviews.finish(KEY)
-        self.assertIn(["git", "-C", str(self.checkout), "worktree", "remove", str(self.worktree)],
-                      self.fake.made("git"))
+        self.assertIn(
+            ["git", "-C", str(self.checkout), "worktree", "remove", str(self.worktree)], self.fake.made("git")
+        )
 
     def test_an_unknown_review(self):
         with self.assertRaises(pr_reviews.PrReviewError) as raised:

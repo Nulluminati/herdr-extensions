@@ -56,8 +56,9 @@ def thinking_levels(agent: str) -> tuple[str, ...]:
 def _run_key_command(argv: list[str]) -> str:
     name = shlex.join(argv)
     try:
-        result = subprocess.run(argv, capture_output=True, text=True,
-                                timeout=KEY_COMMAND_TIMEOUT, stdin=subprocess.DEVNULL)
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=KEY_COMMAND_TIMEOUT, stdin=subprocess.DEVNULL
+        )
     except subprocess.TimeoutExpired:
         raise LinearAuthError(f"Linear key command {name} timed out after {KEY_COMMAND_TIMEOUT} seconds") from None
     except UnicodeDecodeError:
@@ -183,11 +184,19 @@ def default_config_path() -> Path:
     return base / "herdboard" / "config.toml"
 
 
-def save_display_config(path: Path | None = None, *, icon_style: str | None = None,
-                        tag_style: str | None = None, card_style: str | None = None) -> None:
+def save_display_config(
+    path: Path | None = None,
+    *,
+    icon_style: str | None = None,
+    tag_style: str | None = None,
+    card_style: str | None = None,
+) -> None:
     """Save only changed display settings, with comments, permissions and other values intact."""
-    changes = {key: value for key, value in (("icon_style", icon_style), ("tag_style", tag_style),
-                                             ("card_style", card_style)) if value is not None}
+    changes = {
+        key: value
+        for key, value in (("icon_style", icon_style), ("tag_style", tag_style), ("card_style", card_style))
+        if value is not None
+    }
     save_global_config(path, **changes)
 
 
@@ -259,8 +268,14 @@ def _check_global(key: str, value) -> None:
     if key == "details_pane_ratio":
         _check_details_ratio(value, "details_pane_ratio")
         return
-    choices = {"start_agent": AGENTS, "start_thinking": THINKING_LEVELS, "merge": MERGE_MODES,
-               "icon_style": ("plain", "nerd"), "tag_style": TAG_STYLES, "card_style": CARD_STYLES}.get(key)
+    choices = {
+        "start_agent": AGENTS,
+        "start_thinking": THINKING_LEVELS,
+        "merge": MERGE_MODES,
+        "icon_style": ("plain", "nerd"),
+        "tag_style": TAG_STYLES,
+        "card_style": CARD_STYLES,
+    }.get(key)
     if choices is not None:
         if value not in choices:
             raise HerdboardError(f"{key} must be {', '.join(choices[:-1])} or {choices[-1]}")
@@ -282,19 +297,40 @@ def check_global_config(**settings) -> None:
         _check_global(key, value)
 
 
-def save_global_config(path: Path | None = None, *, theme=UNCHANGED, start_agent=UNCHANGED,
-                       start_model=UNCHANGED, start_thinking=UNCHANGED, merge=UNCHANGED,
-                       icon_style=UNCHANGED, tag_style=UNCHANGED, card_style=UNCHANGED,
-                       details_pane=UNCHANGED, details_pane_ratio=UNCHANGED) -> None:
+def save_global_config(
+    path: Path | None = None,
+    *,
+    theme=UNCHANGED,
+    start_agent=UNCHANGED,
+    start_model=UNCHANGED,
+    start_thinking=UNCHANGED,
+    merge=UNCHANGED,
+    icon_style=UNCHANGED,
+    tag_style=UNCHANGED,
+    card_style=UNCHANGED,
+    details_pane=UNCHANGED,
+    details_pane_ratio=UNCHANGED,
+) -> None:
     """Save only the given settings, with comments, permissions and other values intact.
 
     None removes `start_model` or `start_thinking`. Every value is checked before any write.
     """
-    changes = {key: value for key, value in (
-        ("theme", theme), ("start_agent", start_agent), ("start_model", start_model),
-        ("start_thinking", start_thinking), ("merge", merge), ("icon_style", icon_style),
-        ("tag_style", tag_style), ("card_style", card_style), ("details_pane", details_pane),
-        ("details_pane_ratio", details_pane_ratio)) if value is not UNCHANGED}
+    changes = {
+        key: value
+        for key, value in (
+            ("theme", theme),
+            ("start_agent", start_agent),
+            ("start_model", start_model),
+            ("start_thinking", start_thinking),
+            ("merge", merge),
+            ("icon_style", icon_style),
+            ("tag_style", tag_style),
+            ("card_style", card_style),
+            ("details_pane", details_pane),
+            ("details_pane_ratio", details_pane_ratio),
+        )
+        if value is not UNCHANGED
+    }
     check_global_config(**changes)
     if not changes:
         return
@@ -433,8 +469,7 @@ def _load_thinking(path: Path, data: dict) -> dict[str, str]:
         if not isinstance(model, str) or not model:
             raise HerdboardError(f"{path}: thinking must be a table of model names and thinking levels")
         if level not in THINKING_LEVELS:
-            raise HerdboardError(f"{path}: the thinking level of {model} must be one of "
-                                 f"{', '.join(THINKING_LEVELS)}")
+            raise HerdboardError(f"{path}: the thinking level of {model} must be one of {', '.join(THINKING_LEVELS)}")
     return dict(table)
 
 

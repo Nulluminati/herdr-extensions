@@ -48,8 +48,14 @@ def start_worker(arguments: list[str], log: Path) -> None:
     source = str(Path(__file__).resolve().parent.parent)
     environment["PYTHONPATH"] = os.pathsep.join(filter(None, (source, environment.get("PYTHONPATH"))))
     with log.open("a") as output:
-        subprocess.Popen([sys.executable, "-m", "herdboard", *arguments], stdin=subprocess.DEVNULL,
-                         stdout=output, stderr=subprocess.STDOUT, start_new_session=True, env=environment)
+        subprocess.Popen(
+            [sys.executable, "-m", "herdboard", *arguments],
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=environment,
+        )
 
 
 def _git(worktree: Path, *args: str) -> str:
@@ -59,8 +65,15 @@ def _git(worktree: Path, *args: str) -> str:
     return result.stdout
 
 
-def reviewer_arguments(kind: str, prompt: str, folder: Path, repository: Path, model: str | None,
-                       thinking: str | None, browser: bool = False) -> list[str]:
+def reviewer_arguments(
+    kind: str,
+    prompt: str,
+    folder: Path,
+    repository: Path,
+    model: str | None,
+    thinking: str | None,
+    browser: bool = False,
+) -> list[str]:
     """The reviewer's arguments after Herdr's `--`: any shell command in a sandbox that writes only `folder`,
     never `repository`, and reaches only GitHub.
 
@@ -72,16 +85,23 @@ def reviewer_arguments(kind: str, prompt: str, folder: Path, repository: Path, m
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
         return [*sandbox.pi_reviewer_options(folder, repository, browser, hunk=False), *options, "--", prompt]
     if kind == "codex":
-        return [*sandbox.codex_reviewer_options("hb-review", folder, hunk=False),
-                *start_module.agent_arguments(kind, prompt, model, thinking)]
+        return [
+            *sandbox.codex_reviewer_options("hb-review", folder, hunk=False),
+            *start_module.agent_arguments(kind, prompt, model, thinking),
+        ]
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
-    return [prompt, *sandbox.claude_reviewer_options(folder, repository, browser, hunk=False),
-            *(["--model", model] if model else []), *(["--effort", thinking] if thinking else []),
-            *sandbox.claude_reviewer_tools(folder)]
+    return [
+        prompt,
+        *sandbox.claude_reviewer_options(folder, repository, browser, hunk=False),
+        *(["--model", model] if model else []),
+        *(["--effort", thinking] if thinking else []),
+        *sandbox.claude_reviewer_tools(folder),
+    ]
 
 
-def request_text(card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = (),
-                 browser: bool = True) -> str:
+def request_text(
+    card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = (), browser: bool = True
+) -> str:
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
     plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
     others = [entry for entry in files if entry is not plan]
@@ -95,14 +115,14 @@ def request_text(card, record, base: str, folder: Path, untracked: list[str], fi
     body = "\n".join(card.body).strip() if card is not None else ""
     return f"""# Review request
 
-Card {record['ref']}: {card.title if card is not None else record['ref']}
+Card {record["ref"]}: {card.title if card is not None else record["ref"]}
 
 {body or "(no description)"}
 
-- Repository: `{record['worktree_path']}`
-- Branch `{record['branch']}`, based on `{base}`
-- Commits since the base: `{folder / 'branch.patch'}`
-- Uncommitted changes: `{folder / 'uncommitted.patch'}`
+- Repository: `{record["worktree_path"]}`
+- Branch `{record["branch"]}`, based on `{base}`
+- Commits since the base: `{folder / "branch.patch"}`
+- Uncommitted changes: `{folder / "uncommitted.patch"}`
 - New untracked files (read them from the repository):
 {untracked_list}
 
@@ -111,7 +131,7 @@ Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
 {REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}
-Write your findings to `{folder / 'findings.md'}` in this format:
+Write your findings to `{folder / "findings.md"}` in this format:
 
     ## Confirmed problems
     - [high|medium|low] path:line: problem. Suggested fix.
@@ -130,24 +150,27 @@ Do not report that you cannot run tests or inspect live screens.
 def repoless_request_text(card, record, folder: Path, files: list[dict], browser: bool = True) -> str:
     plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
     others = [entry for entry in files if entry is not plan]
-    plan_line = (f"Check the attachments against the plan that the user agreed on: `{plan['path']}`\n"
-                 if plan else "The card has no plan. Check that the attachments answer the card.\n")
+    plan_line = (
+        f"Check the attachments against the plan that the user agreed on: `{plan['path']}`\n"
+        if plan
+        else "The card has no plan. Check that the attachments answer the card.\n"
+    )
     body = "\n".join(card.body).strip() if card is not None else ""
     listing = "".join(f"- `{entry['path']}` ({entry['size']} B)\n" for entry in others)
     return f"""# Review request
 
-Card {record['ref']}: {card.title if card is not None else record['ref']}
+Card {record["ref"]}: {card.title if card is not None else record["ref"]}
 
 {body or "(no description)"}
 
-- Working folder: `{record['worktree_path']}`
+- Working folder: `{record["worktree_path"]}`
 - This card has no repository: there is no branch and no diff.
 - Attachments to review:
 {listing}{plan_line}Look for correctness, gaps, unsupported claims and missing steps.
 Read the files in the working folder when you need context.
 Do not change any file.
 {REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}
-Write your findings to `{folder / 'findings.md'}` in this format:
+Write your findings to `{folder / "findings.md"}` in this format:
 
     ## Confirmed problems
     - [high|medium|low] path:line: problem. Suggested fix.
@@ -176,11 +199,14 @@ class AgentReviewer(Reviewer):
             raise ReviewError(f"Thinking must be one of {', '.join(THINKING_LEVELS)}", "usage")
         card, ref, key, record = self._started(ref)
         if record.get("mode") == NEW_REPO:
-            raise ReviewError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
-                              "Start the card, then review it.", "not_started")
+            raise ReviewError(
+                f"{ref} has no repository yet: `herdboard start {ref}` creates it. Start the card, then review it.",
+                "not_started",
+            )
         if then_hunk and record.get("mode") == REPOLESS:
-            raise ReviewError(f"{ref} has no repository, so Hunk cannot open. "
-                              f"Use `herdboard review {ref} --agent`.", "no_repository")
+            raise ReviewError(
+                f"{ref} has no repository, so Hunk cannot open. Use `herdboard review {ref} --agent`.", "no_repository"
+            )
         kind = reviewer or REVIEWERS[record.get("agent") or self.config.start_agent]
         levels = thinking_levels(kind)
         if thinking is not None and thinking not in levels:
@@ -196,16 +222,18 @@ class AgentReviewer(Reviewer):
             running = record.get("agent_review")
             # A review whose reviewer is gone, after a worker that died, does not block a new one.
             if running and _reviewer_status(running["pane_id"]) is not None:
-                raise ReviewError(f"An agent review of {ref} still runs in pane {running['pane_id']}",
-                                  "review_running")
+                raise ReviewError(f"An agent review of {ref} still runs in pane {running['pane_id']}", "review_running")
             worktree = Path(record["worktree_path"])
             # Read before the review folder exists, so a failure leaves no folder behind.
             files = attachments.listing(self.config, ref)
             if record.get("mode") == REPOLESS:
                 reviewed = [entry for entry in files if entry["name"] != attachments.PLAN_NAME]
                 if not reviewed:
-                    raise ReviewError(f"{ref} has no attachments to review; ask its agent to write its "
-                                      "result to the attachments first", "nothing_to_review")
+                    raise ReviewError(
+                        f"{ref} has no attachments to review; ask its agent to write its "
+                        "result to the attachments first",
+                        "nothing_to_review",
+                    )
                 branch_diff = uncommitted = ""
                 untracked = []
                 head = None
@@ -216,8 +244,9 @@ class AgentReviewer(Reviewer):
                 uncommitted = _git(worktree, "diff", "HEAD")
                 untracked = _git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
                 if not (branch_diff or uncommitted or untracked):
-                    raise ReviewError(f"{ref} has no commits since {base} and no uncommitted changes",
-                                      "nothing_to_review")
+                    raise ReviewError(
+                        f"{ref} has no commits since {base} and no uncommitted changes", "nothing_to_review"
+                    )
                 head = _git(worktree, "rev-parse", "HEAD").strip()
             # The review runs in the background: the user stays where they are.
             self._ready_agent(card, ref, key, record, persist, focus=False)
@@ -227,8 +256,9 @@ class AgentReviewer(Reviewer):
             reviews = state_dir() / "reviews"
             try:
                 reviews.mkdir(parents=True, exist_ok=True)
-                folder = Path(tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-",
-                                               dir=reviews))
+                folder = Path(
+                    tempfile.mkdtemp(prefix=f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}-", dir=reviews)
+                )
                 if record.get("mode") == REPOLESS:
                     request = repoless_request_text(card, record, folder, files, browser=True)
                 else:
@@ -238,25 +268,42 @@ class AgentReviewer(Reviewer):
                 (folder / "request.md").write_text(request, encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
-            pane = herdr("pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree),
-                         "--no-focus")["pane"]["pane_id"]
-            prompt = (f"Read {folder / 'request.md'} and do the review it asks for. "
-                      f"Write your findings to {folder / 'findings.md'} and nowhere else.")
+            pane = herdr(
+                "pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree), "--no-focus"
+            )["pane"]["pane_id"]
+            prompt = (
+                f"Read {folder / 'request.md'} and do the review it asks for. "
+                f"Write your findings to {folder / 'findings.md'} and nowhere else."
+            )
             # A startup prompt (such as Claude's folder trust check) waits for the user,
             # and a reviewer busy with its first message never looks ready: the worker watches it.
-            herdr("agent", "start", f"hb-{ref.lower()}-review", "--kind", kind, "--pane", pane, "--",
-                  *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
-                  tolerated=("timeout", "agent_not_ready"))
+            herdr(
+                "agent",
+                "start",
+                f"hb-{ref.lower()}-review",
+                "--kind",
+                kind,
+                "--pane",
+                pane,
+                "--",
+                *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
+                tolerated=("timeout", "agent_not_ready"),
+            )
             activity.record_pane_agent(pane, kind)
-            record["agent_review"] = {"folder": str(folder), "pane_id": pane, "kind": kind, "model": model,
-                                      "then_hunk": then_hunk, "head": head}
+            record["agent_review"] = {
+                "folder": str(folder),
+                "pane_id": pane,
+                "kind": kind,
+                "model": model,
+                "then_hunk": then_hunk,
+                "head": head,
+            }
             # A new review replaces the last one, also when it fails.
             record.pop("agent_reviewed", None)
             persist()
             # The worker reads the review from here: the start record is gone once the card is finished.
             (folder / "review.json").write_text(json.dumps(record["agent_review"]), encoding="utf-8")
-        activity.append(self.store, ref, f"Agent review started: {kind}{f' ({model})' if model else ''}.",
-                        "herdboard")
+        activity.append(self.store, ref, f"Agent review started: {kind}{f' ({model})' if model else ''}.", "herdboard")
         config = ["--config", str(self.config_file)] if self.config_file else []
         try:
             start_worker([*config, "review-wait", ref, "--folder", str(folder)], folder / "worker.log")
@@ -266,8 +313,14 @@ class AgentReviewer(Reviewer):
             _forget(ref, folder)
             activity.append(self.store, ref, f"Agent review failed: the worker did not start: {error}", "herdboard")
             raise ReviewError(f"The agent review worker did not start: {error}", "worker_failed") from error
-        return {"ref": ref, "reviewer": kind, "model": model, "pane_id": pane, "folder": str(folder),
-                "then_hunk": then_hunk}
+        return {
+            "ref": ref,
+            "reviewer": kind,
+            "model": model,
+            "pane_id": pane,
+            "folder": str(folder),
+            "then_hunk": then_hunk,
+        }
 
 
 def _reviewer_status(pane: str) -> str | None:
@@ -287,8 +340,9 @@ def _wait_for_findings(findings: Path, pane: str, kind: str) -> None:
         if seen and status is None:
             raise ReviewError(f"The {kind} reviewer stopped before it wrote {findings}", "review_failed")
         if time.monotonic() >= deadline:
-            raise ReviewError(f"The {kind} review did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes",
-                              "review_failed")
+            raise ReviewError(
+                f"The {kind} review did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes", "review_failed"
+            )
         time.sleep(POLL_SECONDS)
 
 
@@ -345,26 +399,41 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         return 0  # The card was finished during the review.
     delivery_error = None
     if error is None:
-        activity.append(store, ref, f"Agent review by {kind} done: {_count_findings(findings)} findings. {findings}",
-                        "herdboard")
-        message = (f"An agent review of this card by {kind} is ready: {findings}. Read it. "
-                   "Answer with one table: | # | Description | Severity | Agree/Disagree | Reasoning |. "
-                   "Give one row for each finding. "
-                   "In Description, describe the finding briefly in your own words: say what the problem is. "
-                   "Do not give only the finding's name or number. "
-                   "In Severity, give the reviewer's severity, or question for a risk or question. "
-                   "In Reasoning, say why you agree or disagree. "
-                   f"Record your answer with {start_module.herdboard_command(config_file)} log {ref}. "
-                   "Do not change any code. Wait for the user to decide what to fix.")
+        activity.append(
+            store, ref, f"Agent review by {kind} done: {_count_findings(findings)} findings. {findings}", "herdboard"
+        )
+        message = (
+            f"An agent review of this card by {kind} is ready: {findings}. Read it. "
+            "Answer with one table: | # | Description | Severity | Agree/Disagree | Reasoning |. "
+            "Give one row for each finding. "
+            "In Description, describe the finding briefly in your own words: say what the problem is. "
+            "Do not give only the finding's name or number. "
+            "In Severity, give the reviewer's severity, or question for a risk or question. "
+            "In Reasoning, say why you agree or disagree. "
+            f"Record your answer with {start_module.herdboard_command(config_file)} log {ref}. "
+            "Do not change any code. Wait for the user to decide what to fix."
+        )
         timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000
         try:
             result = start_module.command(
-                [os.environ.get("HERDR_BIN_PATH") or "herdr", "agent", "wait", record["pane_id"],
-                 "--until", "idle", "--until", "done", "--timeout", str(timeout_ms)],
-                timeout=REVIEW_TIMEOUT_SECONDS + 60)
+                [
+                    os.environ.get("HERDR_BIN_PATH") or "herdr",
+                    "agent",
+                    "wait",
+                    record["pane_id"],
+                    "--until",
+                    "idle",
+                    "--until",
+                    "done",
+                    "--timeout",
+                    str(timeout_ms),
+                ],
+                timeout=REVIEW_TIMEOUT_SECONDS + 60,
+            )
             if result.returncode:
-                raise ReviewError(f"Waiting for the card's agent failed: {result.stderr or result.stdout}",
-                                  "delivery_failed")
+                raise ReviewError(
+                    f"Waiting for the card's agent failed: {result.stderr or result.stdout}", "delivery_failed"
+                )
             herdr("agent", "prompt", record["pane_id"], message)
         except (HerdboardError, OSError, subprocess.TimeoutExpired) as failure:
             print(f"herdboard: cannot prompt the card's agent: {failure}", file=sys.stderr)

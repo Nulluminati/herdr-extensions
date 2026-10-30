@@ -1,4 +1,5 @@
 """Start actions run through a thread worker, not the event loop."""
+
 import asyncio
 import json
 import os
@@ -34,24 +35,77 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.config_file = root / "config.toml"
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Start test")
-        self.merge = Mock(return_value={"ref": self.card.ref, "mode": "local", "base": "main", "commit": "abcdef12",
-                                        "worktree_removed": True, "branch_deleted": True})
+        self.merge = Mock(
+            return_value={
+                "ref": self.card.ref,
+                "mode": "local",
+                "base": "main",
+                "commit": "abcdef12",
+                "worktree_removed": True,
+                "branch_deleted": True,
+            }
+        )
         self.finish = Mock(return_value={"ref": self.card.ref, "worktree_removed": True, "branch_deleted": False})
-        self.review = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1",
-                                         "review_pane": "w1:p2", "agent_restarted": False})
-        self.agent_review = Mock(return_value={"ref": self.card.ref, "reviewer": "claude", "model": "opus",
-                                               "pane_id": "w1:p3", "folder": "/f", "then_hunk": False})
-        self.plan = Mock(return_value={"ref": self.card.ref, "agent": "claude", "model": "opus", "pane_id": "w1:p7",
-                                       "checkout": "/repo", "plan": "/plan.md"})
+        self.review = Mock(
+            return_value={
+                "ref": self.card.ref,
+                "workspace_id": "w1",
+                "pane_id": "w1:p1",
+                "review_pane": "w1:p2",
+                "agent_restarted": False,
+            }
+        )
+        self.agent_review = Mock(
+            return_value={
+                "ref": self.card.ref,
+                "reviewer": "claude",
+                "model": "opus",
+                "pane_id": "w1:p3",
+                "folder": "/f",
+                "then_hunk": False,
+            }
+        )
+        self.plan = Mock(
+            return_value={
+                "ref": self.card.ref,
+                "agent": "claude",
+                "model": "opus",
+                "pane_id": "w1:p7",
+                "checkout": "/repo",
+                "plan": "/plan.md",
+            }
+        )
         self.go = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1"})
-        self.callback = Mock(return_value={"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1", "worktree_path": "/tmp/work", "branch": "test", "agent_name": "hb-test", "steps_done": []})
+        self.callback = Mock(
+            return_value={
+                "ref": self.card.ref,
+                "workspace_id": "w1",
+                "pane_id": "w1:p1",
+                "worktree_path": "/tmp/work",
+                "branch": "test",
+                "agent_name": "hb-test",
+                "steps_done": [],
+            }
+        )
+
     def app(self):
-        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback,
-                           review_card=self.review, merge_card=self.merge, finish_card=self.finish,
-                           agent_review_card=self.agent_review, plan_card=self.plan, go_card=self.go,
-                           config_file=self.config_file)
+        app = HerdboardApp(
+            self.store,
+            "inbox",
+            lambda _: [self.path],
+            reload_interval=60,
+            start_card=self.callback,
+            review_card=self.review,
+            merge_card=self.merge,
+            finish_card=self.finish,
+            agent_review_card=self.agent_review,
+            plan_card=self.plan,
+            go_card=self.go,
+            config_file=self.config_file,
+        )
         app.animation_level = "none"
         return app
+
     async def test_default_and_agent_dialog(self):
         app = self.app()
         async with app.run_test() as pilot:
@@ -73,8 +127,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     async def test_pi_model_dialog_ignores_codex_only_saved_levels(self):
         self.store.config.thinking = {"pi/default": "ultra"}
         app = self.app()
-        with patch("herdboard.board.pi_model_choices", return_value=(None, ["pi/default"])), \
-                patch("herdboard.start.pi_default_model", return_value="pi/default"):
+        with (
+            patch("herdboard.board.pi_model_choices", return_value=(None, ["pi/default"])),
+            patch("herdboard.start.pi_default_model", return_value="pi/default"),
+        ):
             async with app.run_test() as pilot:
                 app._chosen_agent(self.card.ref, "pi")
                 await pilot.pause()
@@ -86,10 +142,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
 
         from herdboard.board import AGENT_LOGOS
         from herdboard.config import CODEX_THINKING_LEVELS
+
         self.assertEqual(AGENT_LOGOS.get("codex"), "\ue1a1")
         for action in ("start", "plan", "review"):
-            with self.subTest(action=action), patch("herdboard.board.codex_model_choices",
-                    return_value=("gpt-6.1, high", ["gpt-6.1"])):
+            with (
+                self.subTest(action=action),
+                patch("herdboard.board.codex_model_choices", return_value=("gpt-6.1, high", ["gpt-6.1"])),
+            ):
                 app = self.app()
                 async with app.run_test() as pilot:
                     if action == "start":
@@ -117,12 +176,16 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 elif action == "plan":
                     self.plan.assert_called_with(self.card.ref, agent="codex", model="gpt-6.1", thinking="ultra")
                 else:
-                    self.agent_review.assert_called_with(self.card.ref, reviewer="codex", model="gpt-6.1",
-                                                         thinking="ultra", then_hunk=False)
+                    self.agent_review.assert_called_with(
+                        self.card.ref, reviewer="codex", model="gpt-6.1", thinking="ultra", then_hunk=False
+                    )
 
     async def test_choose_a_pi_model_and_thinking_level(self):
         app = self.app()
-        with patch("herdboard.board.pi_model_choices", return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3", "openai-codex/gpt-6-sol"])):
+        with patch(
+            "herdboard.board.pi_model_choices",
+            return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3", "openai-codex/gpt-6-sol"]),
+        ):
             async with app.run_test() as pilot:
                 await pilot.press("S")
                 await pilot.pause()
@@ -130,7 +193,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 self.assertIsInstance(screen, ModelScreen)
-                self.assertEqual(screen.labels, ["pi default (openai-codex/gpt-6.1-sol, high)", "zai/glm-5.3", "openai-codex/gpt-6-sol"])
+                self.assertEqual(
+                    screen.labels,
+                    ["pi default (openai-codex/gpt-6.1-sol, high)", "zai/glm-5.3", "openai-codex/gpt-6-sol"],
+                )
                 # The level belongs to the highlighted model, so it is chosen after the cursor moves.
                 await pilot.press("down")
                 await pilot.pause()
@@ -173,9 +239,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         notices = []
         app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
         app.config_file = self.root / "missing-folder" / "config.toml"
-        with patch("herdboard.board.save_thinking_levels",
-                   side_effect=HerdboardError("read-only directory")), \
-                patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])):
+        with (
+            patch("herdboard.board.save_thinking_levels", side_effect=HerdboardError("read-only directory")),
+            patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3"])),
+        ):
             async with app.run_test() as pilot:
                 await pilot.press("S")
                 await pilot.pause()
@@ -214,8 +281,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_thinking_level_follows_the_model_under_the_cursor(self):
         self.store.config.thinking = {"zai/glm-5.3": "xhigh", "openai-codex/gpt-6-sol": "minimal"}
         app = self.app()
-        with patch("herdboard.board.pi_model_choices",
-                   return_value=(None, ["zai/glm-5.3", "openai-codex/gpt-6-sol"])):
+        with patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm-5.3", "openai-codex/gpt-6-sol"])):
             async with app.run_test() as pilot:
                 await pilot.press("S")
                 await pilot.pause()
@@ -239,8 +305,9 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.store.config.start_model = "start/one"
         self.store.config.thinking = {"start/one": "xhigh", "openai-codex/gpt-6.1-sol": "max"}
         app = self.app()
-        with patch("herdboard.board.pi_model_choices",
-                   return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3"])):
+        with patch(
+            "herdboard.board.pi_model_choices", return_value=("openai-codex/gpt-6.1-sol, high", ["zai/glm-5.3"])
+        ):
             async with app.run_test() as pilot:
                 await pilot.press("S")
                 await pilot.pause()
@@ -314,9 +381,16 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         # No start_model, so the unnamed row is pi's own default model, which pi names in its settings.
         settings = self.root / "home" / ".pi" / "agent"
         settings.mkdir(parents=True)
-        (settings / "settings.json").write_text(json.dumps({
-            "defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol",
-            "defaultThinkingLevel": "high", "enabledModels": ["zai/glm-5.3"]}))
+        (settings / "settings.json").write_text(
+            json.dumps(
+                {
+                    "defaultProvider": "openai-codex",
+                    "defaultModel": "gpt-6.1-sol",
+                    "defaultThinkingLevel": "high",
+                    "enabledModels": ["zai/glm-5.3"],
+                }
+            )
+        )
         self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "max"}
         app = self.app()
         with patch.dict(os.environ, {"HOME": str(self.root / "home")}):
@@ -364,8 +438,9 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("down", "enter")
             await app.workers.wait_for_complete()
             await pilot.pause()
-        self.agent_review.assert_called_once_with(self.card.ref, reviewer="claude", model="opus", thinking=None,
-                                                  then_hunk=False)
+        self.agent_review.assert_called_once_with(
+            self.card.ref, reviewer="claude", model="opus", thinking=None, then_hunk=False
+        )
         self.review.assert_not_called()
         self.assertIn((f"Agent review of {self.card.ref} by claude (opus) started in w1:p3", None), notices)
 
@@ -386,8 +461,9 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("enter")
                 await app.workers.wait_for_complete()
                 await pilot.pause()
-        self.agent_review.assert_called_once_with(self.card.ref, reviewer="pi", model="zai/glm-5.3",
-                                                  thinking="high", then_hunk=True)
+        self.agent_review.assert_called_once_with(
+            self.card.ref, reviewer="pi", model="zai/glm-5.3", thinking="high", then_hunk=True
+        )
 
     async def test_shift_p_plans_with_a_chosen_claude_model(self):
         app = self.app()
@@ -438,10 +514,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_running_agent_review_shows_on_the_card(self):
         from herdboard import start
+
         path = self.path.parent / "worktree"
         path.mkdir()
-        start._write(start.state_dir() / "starts.json", {self.card.ref: {
-            "worktree_path": str(path), "agent_review": {"kind": "pi", "pane_id": "w1:p3"}}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {self.card.ref: {"worktree_path": str(path), "agent_review": {"kind": "pi", "pane_id": "w1:p3"}}},
+        )
         app = self.app()
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -470,29 +549,49 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
 
     def open_pr(self, **extra):
         from herdboard import start
+
         path = self.path.parent / "worktree"
         path.mkdir(exist_ok=True)
-        start._write(start.state_dir() / "starts.json", {self.card.ref: {
-            "worktree_path": str(path), "pr_url": "https://github.com/acme/api/pull/7", "pr_state": "open",
-            "pr_checked": time.time(), **extra}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                self.card.ref: {
+                    "worktree_path": str(path),
+                    "pr_url": "https://github.com/acme/api/pull/7",
+                    "pr_state": "open",
+                    "pr_checked": time.time(),
+                    **extra,
+                }
+            },
+        )
 
     async def test_m_on_an_open_pr_asks_before_it_rewrites_the_description(self):
         self.open_pr()
-        self.merge.return_value = {"ref": self.card.ref, "mode": "pr", "base": "main",
-                                   "pr_url": "https://github.com/acme/api/pull/7", "pr_action": "writing",
-                                   "writer": "the card's agent", "folder": "/f"}
+        self.merge.return_value = {
+            "ref": self.card.ref,
+            "mode": "pr",
+            "base": "main",
+            "pr_url": "https://github.com/acme/api/pull/7",
+            "pr_action": "writing",
+            "writer": "the card's agent",
+            "folder": "/f",
+        }
         notices = await self.run_keys("m", "y", "y")
         self.merge.assert_called_once_with(self.card.ref, rewrite=True)
         self.assertIn((f"The card's agent writes the pull request description of {self.card.ref}", None), notices)
 
     async def test_m_on_an_open_pr_can_only_push(self):
         self.open_pr()
-        self.merge.return_value = {"ref": self.card.ref, "mode": "pr", "base": "main",
-                                   "pr_url": "https://github.com/acme/api/pull/7", "pr_action": "pushed"}
+        self.merge.return_value = {
+            "ref": self.card.ref,
+            "mode": "pr",
+            "base": "main",
+            "pr_url": "https://github.com/acme/api/pull/7",
+            "pr_action": "pushed",
+        }
         notices = await self.run_keys("m", "y", "n")
         self.merge.assert_called_once_with(self.card.ref, rewrite=False)
-        self.assertIn((f"Pushed {self.card.ref} to its pull request https://github.com/acme/api/pull/7", None),
-                      notices)
+        self.assertIn((f"Pushed {self.card.ref} to its pull request https://github.com/acme/api/pull/7", None), notices)
 
     async def test_a_written_pr_description_shows_on_the_card(self):
         self.open_pr(pr_write={"folder": "/f", "pane_id": "w1:p1", "own_pane": False})
@@ -547,8 +646,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await app.workers.wait_for_complete()
             await pilot.pause()
         self.callback.assert_called_with(self.card.ref, "claude")
+
     async def test_refresh_marks_removed_worktree_without_board_change(self):
         from herdboard import start
+
         path = self.path.parent / "worktree"
         path.mkdir()
         start._write(start.state_dir() / "starts.json", {self.card.ref: {"worktree_path": str(path)}})
@@ -564,10 +665,19 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refresh_reads_pr_states_and_shows_the_markers(self):
         from herdboard import merge, start
+
         path = self.path.parent / "worktree"
         path.mkdir()
-        start._write(start.state_dir() / "starts.json", {self.card.ref: {
-            "worktree_path": str(path), "pr_url": "https://github.com/acme/api/pull/7", "pr_state": "open"}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                self.card.ref: {
+                    "worktree_path": str(path),
+                    "pr_url": "https://github.com/acme/api/pull/7",
+                    "pr_state": "open",
+                }
+            },
+        )
         app = self.app()
 
         def merged():
@@ -597,9 +707,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         from herdboard import start
         from herdboard.identity import repo_identity
         from support.herdboard_start import FakeHerdr
+
         repo = self.path.parent / "repo"
         repo.mkdir()
-        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         board = self.store.init_board(repo_identity(repo))
         card = self.store.add(board, "Real start")
@@ -607,16 +721,20 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         fake = FakeHerdr(repo.parent)
         threads = []
         event_thread = threading.get_ident()
+
         def runner(argv, timeout=120):
             threads.append(threading.get_ident())
             return fake(argv, timeout)
+
         app = HerdboardApp(self.store, view, lambda _: [board], directory=repo, repo_board=board, reload_interval=60)
         app.animation_level = "none"
         original_start = start.Starter.start
         repositories = []
+
         def started(starter, *args, **kwargs):
             repositories.append(kwargs.get("repo"))
             return original_start(starter, *args, **kwargs)
+
         with patch.object(start, "command", runner), patch.object(start.Starter, "start", started):
             async with app.run_test() as pilot:
                 await pilot.press("s")
@@ -627,15 +745,21 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(threads)
         self.assertTrue(all(t != event_thread for t in threads))
         self.assertEqual(self.store.show(card.ref).column, "In progress")
-        self.assertEqual(start._read(start.state_dir() / "starts.json")[card.ref]["repository"], repo_identity(repo).identity)
+        self.assertEqual(
+            start._read(start.state_dir() / "starts.json")[card.ref]["repository"], repo_identity(repo).identity
+        )
 
     async def test_real_starts_of_two_cards_run_at_the_same_time(self):
         from herdboard import start
         from herdboard.identity import repo_identity
         from support.herdboard_start import FakeHerdr
+
         repo = self.path.parent / "repo"
         repo.mkdir()
-        for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"]):
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         board = self.store.init_board(repo_identity(repo))
         first = self.store.add(board, "First start")
@@ -645,11 +769,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         # Each start waits at its worktree until the other start reaches its own: they must overlap.
         both = threading.Barrier(2, timeout=10)
         lock = threading.Lock()
+
         def runner(argv, timeout=120):
             if argv[1:3] == ["worktree", "create"]:
                 both.wait()
             with lock:
                 return fake(argv, timeout)
+
         app = HerdboardApp(self.store, "repo", lambda _: [board], directory=repo, repo_board=board, reload_interval=60)
         app.animation_level = "none"
         notices = []
@@ -670,12 +796,15 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mark_removed_runs_off_event_loop(self):
         from herdboard import board
+
         threads = []
         event_thread = threading.get_ident()
         original = board.mark_removed
+
         def marked(cards):
             threads.append(threading.get_ident())
             return original(cards)
+
         app = self.app()
         with patch.object(board, "mark_removed", marked):
             async with app.run_test() as pilot:
@@ -710,14 +839,23 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Research corvid memory")
         self.other = self.store.init_board(RepoIdentity("github.com/acme/web", "github.com", ("acme", "web")))
-        self.started = {"ref": self.card.ref, "workspace_id": "w1", "pane_id": "w1:p1",
-                        "worktree_path": "/tmp/work", "branch": None, "base": None,
-                        "agent_name": None, "steps_done": [], "mode": "repoless"}
+        self.started = {
+            "ref": self.card.ref,
+            "workspace_id": "w1",
+            "pane_id": "w1:p1",
+            "worktree_path": "/tmp/work",
+            "branch": None,
+            "base": None,
+            "agent_name": None,
+            "steps_done": [],
+            "mode": "repoless",
+        }
         self.callback = Mock(side_effect=[StartError("Choose a repository.", "repo_required"), self.started])
 
     def app(self, **kwargs):
-        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60,
-                           start_card=self.callback, **kwargs)
+        app = HerdboardApp(
+            self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.callback, **kwargs
+        )
         app.animation_level = "none"
         return app
 
@@ -768,15 +906,15 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("down", "enter")
             await pilot.pause()
             field = app.screen.query_one("#target-path", Input)
-            self.assertEqual(field.value,
-                             str(Path(self.temp.name) / "Projects" / "research-corvid-memory"))
+            self.assertEqual(field.value, str(Path(self.temp.name) / "Projects" / "research-corvid-memory"))
             field.value = str(Path(self.temp.name) / "scratch" / "corvid")
             await pilot.press("enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-        self.assertEqual(self.callback.call_args_list[1].kwargs,
-                         {"new_repo": Path(self.temp.name) / "scratch" / "corvid"})
+        self.assertEqual(
+            self.callback.call_args_list[1].kwargs, {"new_repo": Path(self.temp.name) / "scratch" / "corvid"}
+        )
 
     async def test_the_new_repository_choice_is_hidden_for_a_linear_card(self):
         screen = TargetScreen("ENG-5", [("inbox", self.other)], None, linear=True)
@@ -785,10 +923,19 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([kind for kind, _ in screen.choices], ["repo", "repoless"])
 
     async def test_a_plan_without_a_repository_asks_where_it_runs(self):
-        planned = {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
-                   "checkout": None, "plan": "/plan.md", "workspace_id": "x1",
-                   "worktree_path": "/todos/.herdboard/work/t000", "branch": None,
-                   "base": None, "mode": "repoless"}
+        planned = {
+            "ref": self.card.ref,
+            "agent": "claude",
+            "model": None,
+            "pane_id": "w1:p7",
+            "checkout": None,
+            "plan": "/plan.md",
+            "workspace_id": "x1",
+            "worktree_path": "/todos/.herdboard/work/t000",
+            "branch": None,
+            "base": None,
+            "mode": "repoless",
+        }
         plan = Mock(side_effect=[StartError("Choose a repository.", "repo_required"), planned])
         app = self.app(plan_card=plan)
         notices = []
@@ -806,15 +953,25 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-        self.assertEqual(plan.call_args_list[1].kwargs,
-                         {"agent": "claude", "model": None, "thinking": None, "no_repo": True})
+        self.assertEqual(
+            plan.call_args_list[1].kwargs, {"agent": "claude", "model": None, "thinking": None, "no_repo": True}
+        )
         self.assertIn((f"claude plans {self.card.ref} in its work folder", None), notices)
 
     async def test_a_new_repo_plan_says_it_plans_in_the_card_folder(self):
-        planned = {"ref": self.card.ref, "agent": "claude", "model": None, "pane_id": "w1:p7",
-                   "checkout": None, "plan": "/plan.md", "workspace_id": "x1",
-                   "worktree_path": "/todos/.herdboard/work/t000", "branch": None,
-                   "base": None, "mode": "new_repo"}
+        planned = {
+            "ref": self.card.ref,
+            "agent": "claude",
+            "model": None,
+            "pane_id": "w1:p7",
+            "checkout": None,
+            "plan": "/plan.md",
+            "workspace_id": "x1",
+            "worktree_path": "/todos/.herdboard/work/t000",
+            "branch": None,
+            "base": None,
+            "mode": "new_repo",
+        }
         app = self.app(plan_card=Mock(return_value=planned))
         notices = []
         app.notify = lambda message, **kwargs: notices.append((message, kwargs.get("severity")))
@@ -830,11 +987,21 @@ class TargetBoardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_r_on_a_repoless_card_goes_to_the_agent_choice(self):
         from herdboard import start
+
         folder = start.work_folder(self.store.config, self.card.ref)
         folder.mkdir(parents=True)
-        start._write(start.state_dir() / "starts.json", {self.card.ref: {
-            "ref": self.card.ref, "mode": "repoless", "workspace_id": "x1", "pane_id": "x1:p1",
-            "worktree_path": str(folder)}})
+        start._write(
+            start.state_dir() / "starts.json",
+            {
+                self.card.ref: {
+                    "ref": self.card.ref,
+                    "mode": "repoless",
+                    "workspace_id": "x1",
+                    "pane_id": "x1:p1",
+                    "worktree_path": str(folder),
+                }
+            },
+        )
         app = self.app()
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -870,12 +1037,20 @@ class ParallelBoardTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"{ref} was not released")
         if ref in self.failures:
             raise self.failures[ref]
-        return {"ref": ref, "workspace_id": f"w-{ref}", "pane_id": "p", "worktree_path": f"/tmp/{ref}",
-                "branch": ref, "agent_name": None, "steps_done": []}
+        return {
+            "ref": ref,
+            "workspace_id": f"w-{ref}",
+            "pane_id": "p",
+            "worktree_path": f"/tmp/{ref}",
+            "branch": ref,
+            "agent_name": None,
+            "steps_done": [],
+        }
 
     def app(self, **kwargs):
-        app = HerdboardApp(self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.start,
-                           **kwargs)
+        app = HerdboardApp(
+            self.store, "inbox", lambda _: [self.path], reload_interval=60, start_card=self.start, **kwargs
+        )
         app.animation_level = "none"
         app.notify = lambda message, **kw: self.notices.append(message)
         return app

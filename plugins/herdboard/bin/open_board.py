@@ -16,8 +16,16 @@ def main(args: list[str] | None = None) -> int:
     context = json.loads(os.environ.get("HERDR_PLUGIN_CONTEXT_JSON") or "{}")
     directory = context.get("focused_pane_cwd") or context.get("workspace_cwd")
     argv = [
-        os.environ.get("HERDR_BIN_PATH", "herdr"), "plugin", "pane", "open",
-        "--plugin", "nulluminati.herdboard", "--entrypoint", entrypoint, "--placement", "tab",
+        os.environ.get("HERDR_BIN_PATH", "herdr"),
+        "plugin",
+        "pane",
+        "open",
+        "--plugin",
+        "nulluminati.herdboard",
+        "--entrypoint",
+        entrypoint,
+        "--placement",
+        "tab",
     ]
     if directory:
         argv += ["--cwd", directory]

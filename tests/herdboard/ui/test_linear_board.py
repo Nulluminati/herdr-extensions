@@ -83,8 +83,9 @@ class LinearBoardTests(LinearBoardCase):
             self.select(app, "ENG-1")
             await pilot.press("b")
             await pilot.pause()
-            self.assertIn(("Linear issues stay in Linear; only todos change board.", "warning"),
-                          self.notifications(app))
+            self.assertIn(
+                ("Linear issues stay in Linear; only todos change board.", "warning"), self.notifications(app)
+            )
 
     async def test_reordering_a_linear_card_says_to_use_linear(self):
         app = self.make_linear_app()
@@ -174,8 +175,16 @@ class LinearBoardTests(LinearBoardCase):
             screen = app.screen
             self.assertEqual(screen.query_one("#detail-title").plain, "Issue 2")
             meta = screen.query_one("#detail-meta").plain
-            for part in ["Platform", "Review", "ENG-2", "In Review", "ENG",
-                         "https://linear.app/workspace/issue/ENG-2", "Type", "bug"]:
+            for part in [
+                "Platform",
+                "Review",
+                "ENG-2",
+                "In Review",
+                "ENG",
+                "https://linear.app/workspace/issue/ENG-2",
+                "Type",
+                "bug",
+            ]:
                 self.assertIn(part, meta)
             chips = screen.query_one("#detail-chips").plain
             for part in ["repo:api", "Due Oct 20"]:
@@ -193,15 +202,16 @@ class LinearBoardTests(LinearBoardCase):
 
     async def test_the_issue_detail_lists_the_linear_attachments(self):
         issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
-        issue["attachments"]["nodes"] = [attachment(PR_URL, "Fix login", "Open"),
-                                         attachment("https://example.com/spec")]
+        issue["attachments"]["nodes"] = [
+            attachment(PR_URL, "Fix login", "Open"),
+            attachment("https://example.com/spec"),
+        ]
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await self.open_issue(pilot, "ENG-1")
             block = app.screen.query_one("#detail-links")
             self.assertEqual(block.border_title, "Linear attachments")
-            self.assertEqual(block.plain.splitlines(), [
-                "Fix login · Open", f"  {PR_URL}", "https://example.com/spec"])
+            self.assertEqual(block.plain.splitlines(), ["Fix login · Open", f"  {PR_URL}", "https://example.com/spec"])
             self.assertIn("o: open attachment", app.screen.query(".dim").last().render().plain)
 
     async def test_an_issue_without_attachments_has_no_block(self):
@@ -214,8 +224,7 @@ class LinearBoardTests(LinearBoardCase):
     async def test_o_opens_the_only_linear_attachment_in_the_browser(self):
         app = self.make_linear_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "linux"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "linux"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_issue(pilot, "ENG-1")
                 await pilot.press("o")
@@ -229,8 +238,7 @@ class LinearBoardTests(LinearBoardCase):
         issue["attachments"]["nodes"] = [attachment(PR_URL, "Fix login"), attachment("https://example.com/spec")]
         app = self.make_linear_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "linux"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "linux"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_issue(pilot, "ENG-1")
                 await pilot.press("o")
@@ -242,8 +250,10 @@ class LinearBoardTests(LinearBoardCase):
 
     async def test_the_chooser_shows_brackets_in_titles_as_text(self):
         issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
-        issue["attachments"]["nodes"] = [attachment(PR_URL, "Fix [/api] route"),
-                                         attachment("https://example.com/spec", "[b]Spec[/b]")]
+        issue["attachments"]["nodes"] = [
+            attachment(PR_URL, "Fix [/api] route"),
+            attachment("https://example.com/spec", "[b]Spec[/b]"),
+        ]
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await self.open_issue(pilot, "ENG-1")
@@ -251,8 +261,9 @@ class LinearBoardTests(LinearBoardCase):
             await settle(pilot)
             self.assertIsInstance(app.screen, AttachmentChoiceScreen)
             options = app.screen.query_one(OptionList)
-            self.assertEqual([str(options.get_option_at_index(i).prompt) for i in range(2)],
-                             ["Fix [/api] route", "[b]Spec[/b]"])
+            self.assertEqual(
+                [str(options.get_option_at_index(i).prompt) for i in range(2)], ["Fix [/api] route", "[b]Spec[/b]"]
+            )
 
     async def test_a_url_that_is_not_a_web_address_does_not_open(self):
         issue = next(i for i in self.fixtures["issues"] if i["identifier"] == "ENG-1")
@@ -264,15 +275,16 @@ class LinearBoardTests(LinearBoardCase):
                 await self.open_issue(pilot, "ENG-1")
                 await pilot.press("o")
                 await settle(pilot)
-                self.assertIn(("Cannot open file:///etc/passwd: only http and https addresses open", "error"),
-                              self.notifications(app))
+                self.assertIn(
+                    ("Cannot open file:///etc/passwd: only http and https addresses open", "error"),
+                    self.notifications(app),
+                )
         popen.assert_not_called()
 
     async def test_a_click_on_a_linear_attachment_opens_it(self):
         app = self.make_linear_app()
         popen = fake_opener()
-        with mock.patch.object(board.subprocess, "Popen", popen), \
-                mock.patch.object(board.sys, "platform", "darwin"):
+        with mock.patch.object(board.subprocess, "Popen", popen), mock.patch.object(board.sys, "platform", "darwin"):
             async with app.run_test(size=SIZE) as pilot:
                 await self.open_issue(pilot, "ENG-1")
                 app.screen.action_open_link(0)
@@ -330,8 +342,17 @@ class LinearBoardFixTests(LinearBoardCase):
         async with app.run_test(size=SIZE) as pilot:
             await settle(pilot)
             self.assertTrue(any("◆" in c for c in self.cards(app)))
-            self.fake.responses.append((200, {"errors": [{"message": "Authentication required",
-                                       "extensions": {"code": "AUTHENTICATION_ERROR"}}]}, {}))
+            self.fake.responses.append(
+                (
+                    200,
+                    {
+                        "errors": [
+                            {"message": "Authentication required", "extensions": {"code": "AUTHENTICATION_ERROR"}}
+                        ]
+                    },
+                    {},
+                )
+            )
             await pilot.press("r")
             await settle(pilot)
             self.assertIn("Linear: authentication failed", self.title(app))

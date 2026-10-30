@@ -55,8 +55,9 @@ class DetailsApp(App):
     #details { padding: 0 1; height: 1fr; }
     """
 
-    def __init__(self, store, config, ref: str, linear_card: Callable | None = None,
-                 check_seconds: float = CHECK_SECONDS):
+    def __init__(
+        self, store, config, ref: str, linear_card: Callable | None = None, check_seconds: float = CHECK_SECONDS
+    ):
         super().__init__()
         if config.theme in self.available_themes:
             self.theme = config.theme
@@ -80,12 +81,14 @@ class DetailsApp(App):
 
     def paths(self) -> list:
         card = (self.data or {}).get("card")
-        return details.watched_paths(self.config, (self.data or {}).get("ref", self.ref),
-                                     card.path if card is not None else None)
+        return details.watched_paths(
+            self.config, (self.data or {}).get("ref", self.ref), card.path if card is not None else None
+        )
 
     def check(self) -> None:
         linear_due = self.linear_card is not None and (
-            self.linear_card.at is None or self.linear_card.clock() - self.linear_card.at >= self.linear_card.seconds)
+            self.linear_card.at is None or self.linear_card.clock() - self.linear_card.at >= self.linear_card.seconds
+        )
         if linear_due or details.signature(self.paths()) != self.seen:
             self.reload()
 

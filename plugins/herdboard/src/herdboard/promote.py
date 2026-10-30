@@ -82,9 +82,7 @@ class Promoter:
             store = str(self.config.todos_dir.resolve())
             records = PromotionRecords(self.writer.source.account_dir(), store)
             with records.lock():
-                return self._promote(
-                    client, records, ref, team, target, ask, state_name, project, again
-                )
+                return self._promote(client, records, ref, team, target, ask, state_name, project, again)
 
     def _promote(self, client, records, ref, team, target, ask, state_name, project, again) -> Promotion:
         self._refuse_if_marked(records, self.store.show(ref))
@@ -95,7 +93,8 @@ class Promoter:
         if snapshot.view.parent:
             raise ParentNotPromotedError(
                 f"{todo_id} is a sub-card of {snapshot.view.parent}. Promote {snapshot.view.parent}: "
-                "its sub-cards become sub-issues")
+                "its sub-cards become sub-issues"
+            )
         record = records.get(todo_id)
         resuming = record is not None
         warnings = []
@@ -118,9 +117,7 @@ class Promoter:
         try:
             todo = self.store.finish_promotion(snapshot, parent["identifier"])
         except ConflictError as error:
-            error.args = (
-                f"{error}. Linear has {parent['identifier']}. {again} and update the todo",
-            )
+            error.args = (f"{error}. Linear has {parent['identifier']}. {again} and update the todo",)
             raise
         records.delete(todo_id)
         issue = self.writer._full(
@@ -128,10 +125,7 @@ class Promoter:
             parent["identifier"],
             {"title": parent["input"]["title"], "labels": [], "project": None, **found[parent["id"]]},
         )
-        subs = [
-            {"id": c["id"], "identifier": c["identifier"], "title": c["input"]["title"]}
-            for c in children
-        ]
+        subs = [{"id": c["id"], "identifier": c["identifier"], "title": c["input"]["title"]} for c in children]
         return Promotion(issue, subs, todo, warnings)
 
     def _refuse_if_marked(self, records, view: CardView) -> None:
@@ -164,8 +158,7 @@ class Promoter:
         ):
             if given is not None and given.casefold() != (planned or "").casefold():
                 found.append(
-                    f"--{label} {given or 'none'} is ignored: the recorded plan uses "
-                    f"{label} {planned or 'none'}"
+                    f"--{label} {given or 'none'} is ignored: the recorded plan uses {label} {planned or 'none'}"
                 )
         return found
 
@@ -182,7 +175,13 @@ class Promoter:
         column = completed if snapshot.done else snapshot.view.column
         # A todo in the done column becomes a completed issue, whatever the names say.
         parent_state = resolve_state(
-            self.config, choices, team, states, column, ask, state_name,
+            self.config,
+            choices,
+            team,
+            states,
+            column,
+            ask,
+            state_name,
             "completed" if snapshot.done else None,
         )
 
@@ -190,13 +189,9 @@ class Promoter:
             if sub.checked:
                 if parent_state["type"] == "completed":
                     return parent_state
-                return resolve_state(
-                    self.config, choices, team, states, completed, ask, only_type="completed"
-                )
+                return resolve_state(self.config, choices, team, states, completed, ask, only_type="completed")
             if parent_state["type"] in CLOSED:
-                return resolve_state(
-                    self.config, choices, team, states, self.config.columns[0], ask
-                )
+                return resolve_state(self.config, choices, team, states, self.config.columns[0], ask)
             return parent_state
 
         sub_states = [state_of(sub) for sub in converted.subs]
@@ -237,7 +232,13 @@ class Promoter:
         converted = convert(sub_snapshot.located.lines)
         completed = self.config.linear.columns["completed"]
         state = resolve_state(
-            self.config, choices, team, states, completed if sub_snapshot.done else card.column, ask, None,
+            self.config,
+            choices,
+            team,
+            states,
+            completed if sub_snapshot.done else card.column,
+            ask,
+            None,
             "completed" if sub_snapshot.done else None,
         )
         # Sub-issues go one level deep, so a sub-card's checklist stays text in its description.
@@ -271,10 +272,7 @@ class Promoter:
     def _description(self, snapshot: TodoSnapshot, converted: Conversion, unlabeled) -> str | None:
         """Notes first, then the leftover lines, then tags and links with nothing to become."""
         notes = [n for n in self.store.notes_for(snapshot.view) or [] if n["content"] is not None]
-        parts = [
-            n["content"].strip() if len(notes) == 1 else f"## {n['name']}\n{n['content'].strip()}"
-            for n in notes
-        ]
+        parts = [n["content"].strip() if len(notes) == 1 else f"## {n['name']}\n{n['content'].strip()}" for n in notes]
         if converted.leftover:
             parts.append("\n".join(converted.leftover))
         found = {n["name"] for n in notes}
@@ -286,9 +284,7 @@ class Promoter:
 
     # Creating
 
-    def _create_missing(
-        self, client, records, todo_id: str, record: dict, resuming: bool
-    ) -> dict[str, dict]:
+    def _create_missing(self, client, records, todo_id: str, record: dict, resuming: bool) -> dict[str, dict]:
         """Create the issues that Linear lacks, parent first, recording each confirmed one.
 
         A rerun looks every recorded UUID up before it sends a create. Returns the issues

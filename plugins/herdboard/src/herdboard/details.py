@@ -69,8 +69,11 @@ def open_target(ref: str | None, pane: str | None) -> tuple[str, str]:
         raise HerdboardError(f"No herdboard card works in the workspace of pane {pane}")
     found = find_record(ref)
     planner = plans.get(ref)
-    host = ((found[1].get("pane_id") if found else None)
-            or (planner.get("pane_id") if isinstance(planner, dict) else None) or pane)
+    host = (
+        (found[1].get("pane_id") if found else None)
+        or (planner.get("pane_id") if isinstance(planner, dict) else None)
+        or pane
+    )
     if not host:
         raise HerdboardError(f"{ref} has no agent or planner pane: give a Herdr pane with --pane")
     return ref, host
@@ -190,4 +193,4 @@ def details_lines(data: dict, width: int, height: int) -> list[Text]:
     if room > 0:
         entries = data["log"][-room:]
         lines += [_log_rule(width), *_log_lines(entries, width)]
-    return lines[:max(height, 1)]
+    return lines[: max(height, 1)]

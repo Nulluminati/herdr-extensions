@@ -20,13 +20,15 @@ def build_preview(conversion: Conversion, target: ImportTarget) -> dict:
         if target.done_column is not None:
             groups.append((target.done_column, [i for i in items if i.checked]))
     return {
-        "columns": [
-            {"column": title, "cards": [_card_json(i) for i in cards]}
-            for title, cards in groups if cards
-        ],
+        "columns": [{"column": title, "cards": [_card_json(i) for i in cards]} for title, cards in groups if cards],
         "non_list": [
-            {"line": n.number, "text": n.text, "action": n.action, "section": n.section,
-             **({"parent": n.parent} if n.action == "ambiguous" else {})}
+            {
+                "line": n.number,
+                "text": n.text,
+                "action": n.action,
+                "section": n.section,
+                **({"parent": n.parent} if n.action == "ambiguous" else {}),
+            }
             for n in conversion.non_list
         ],
         "dropped_ids": [{"card": i.title, "id": i.dropped_id} for i in items if i.dropped_id],

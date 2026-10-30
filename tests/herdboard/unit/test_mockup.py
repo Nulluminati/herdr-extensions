@@ -1,4 +1,5 @@
 """Mockup drafts: Codex generates UI images during planning, and a pane shows them to the user."""
+
 import base64
 import json
 import os
@@ -15,7 +16,8 @@ from support.herdboard_cli import CliTestCase
 
 # A 1x1 PNG, so the viewer can read a real size from the header.
 PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
 
 
 class FakeCodex:
@@ -65,8 +67,11 @@ class MockupTestCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.codex_home = self.root / "codex"
-        self.enterContext(mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state"),
-                                                       "CODEX_HOME": str(self.codex_home)}))
+        self.enterContext(
+            mock.patch.dict(
+                os.environ, {"XDG_STATE_HOME": str(self.root / "state"), "CODEX_HOME": str(self.codex_home)}
+            )
+        )
         os.environ.pop("HERDR_PANE_ID", None)
         self.codex = FakeCodex(self.codex_home)
         self.enterContext(mock.patch.object(start, "command", self.codex))
@@ -80,12 +85,27 @@ class GenerateTests(MockupTestCase):
         image.write_bytes(PNG)
         self.config.mockup_model = "gpt-7"
         mockup.generate(self.config, "tabc", "Login screen with two fields", images=[image])
-        call, = self.codex.calls
+        (call,) = self.codex.calls
         argv = call["argv"]
         folder = mockup.drafts_dir("tabc")
-        self.assertEqual(argv[:argv.index("--")],
-                         ["codex", "exec", "--json", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
-                          "-m", "gpt-7", "-C", str(folder), "-i", str(image)])
+        self.assertEqual(
+            argv[: argv.index("--")],
+            [
+                "codex",
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "--ephemeral",
+                "-s",
+                "read-only",
+                "-m",
+                "gpt-7",
+                "-C",
+                str(folder),
+                "-i",
+                str(image),
+            ],
+        )
         self.assertEqual(len(argv), argv.index("--") + 2)
         self.assertIn("Login screen with two fields", argv[-1])
         self.assertIn("medium", argv[-1])
@@ -135,8 +155,10 @@ class GenerateTests(MockupTestCase):
         self.assertIn("model_not_found: gpt-6.1-sol", str(caught.exception))
 
     def test_codex_missing(self):
-        with mock.patch.object(mockup.shutil, "which", return_value=None), \
-                self.assertRaises(mockup.MockupError) as caught:
+        with (
+            mock.patch.object(mockup.shutil, "which", return_value=None),
+            self.assertRaises(mockup.MockupError) as caught,
+        ):
             mockup.generate(self.config, "tabc", "Login screen")
         self.assertEqual(caught.exception.code, "codex_missing")
         self.assertEqual(self.codex.calls, [])
@@ -146,10 +168,12 @@ class GenerateTests(MockupTestCase):
         for index in range(6):
             images.append(self.root / f"{index}.png")
             images[-1].write_bytes(PNG)
-        cases = {"empty prompt": dict(prompt="  "),
-                 "six images": dict(prompt="x", images=images),
-                 "missing image": dict(prompt="x", images=[self.root / "gone.png"]),
-                 "bad quality": dict(prompt="x", quality="ultra")}
+        cases = {
+            "empty prompt": dict(prompt="  "),
+            "six images": dict(prompt="x", images=images),
+            "missing image": dict(prompt="x", images=[self.root / "gone.png"]),
+            "bad quality": dict(prompt="x", quality="ultra"),
+        }
         for name, arguments in cases.items():
             with self.subTest(name), self.assertRaises(mockup.MockupError) as caught:
                 mockup.generate(self.config, "tabc", **arguments)
@@ -161,8 +185,9 @@ class GenerateAllTests(MockupTestCase):
     def test_one_draft_per_prompt_in_prompt_order(self):
         drafts, failed = mockup.generate_all(self.config, "tabc", ["Sidebar layout", "Top tabs layout"])
         self.assertEqual(failed, [None, None])
-        self.assertEqual([path.name.split("Z-", 1)[1] for path in drafts],
-                         ["sidebar-layout.png", "top-tabs-layout.png"])
+        self.assertEqual(
+            [path.name.split("Z-", 1)[1] for path in drafts], ["sidebar-layout.png", "top-tabs-layout.png"]
+        )
         self.assertEqual(len(self.codex.calls), 2)
 
     def test_one_failure_keeps_the_other_drafts(self):
@@ -317,7 +342,7 @@ class ViewTests(MockupTestCase):
         self.assertEqual(mockup.view(self.paths, terminal=terminal), 0)
         text = terminal.text()
         self.assertIn("\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\033\\\033[c", text)
-        screen, = terminal.screens()
+        (screen,) = terminal.screens()
         self.assertIn("\033_Ga=d\033\\", screen)
         chunks = [part for part in screen.split("\033_G")[1:] if not part.startswith("a=d")]
         self.assertTrue(chunks[0].startswith("a=T,f=100,"))
@@ -333,7 +358,7 @@ class ViewTests(MockupTestCase):
         big.write_bytes(PNG + os.urandom(9000))
         terminal = FakeTerminal([OK_REPLY, b"\r"])
         mockup.view([big], terminal=terminal)
-        screen, = terminal.screens()
+        (screen,) = terminal.screens()
         chunks = [part for part in screen.split("\033_G")[1:] if not part.startswith("a=d")]
         self.assertGreater(len(chunks), 2)
         payloads = [chunk.split(";", 1)[1].split("\033\\", 1)[0] for chunk in chunks]
@@ -344,10 +369,13 @@ class ViewTests(MockupTestCase):
     def test_arrows_switch_drafts_and_wrap(self):
         terminal = FakeTerminal([OK_REPLY, b"\033[C", b"\033[D", b"\033[D", b"l", b"h", b"\r"])
         mockup.view(self.paths, terminal=terminal)
-        labels = [next(f"Option {i} of 3" for i in (1, 2, 3) if f"Option {i} of 3" in screen)
-                  for screen in terminal.screens()]
-        self.assertEqual(labels, ["Option 1 of 3", "Option 2 of 3", "Option 1 of 3", "Option 3 of 3",
-                                  "Option 1 of 3", "Option 3 of 3"])
+        labels = [
+            next(f"Option {i} of 3" for i in (1, 2, 3) if f"Option {i} of 3" in screen) for screen in terminal.screens()
+        ]
+        self.assertEqual(
+            labels,
+            ["Option 1 of 3", "Option 2 of 3", "Option 1 of 3", "Option 3 of 3", "Option 1 of 3", "Option 3 of 3"],
+        )
 
     def test_labels_use_the_option_numbers_after_a_failed_option(self):
         terminal = FakeTerminal([OK_REPLY, b"\033[C", b"\r"])
@@ -359,7 +387,7 @@ class ViewTests(MockupTestCase):
     def test_one_draft_left_of_several_options_keeps_its_label(self):
         terminal = FakeTerminal([OK_REPLY, b"\r"])
         mockup.view(self.paths[:1], terminal=terminal, numbers=[2], total=2)
-        screen, = terminal.screens()
+        (screen,) = terminal.screens()
         self.assertIn("Option 2 of 2", screen)
         self.assertNotIn("←/→", screen)
 
@@ -397,7 +425,7 @@ class ViewTests(MockupTestCase):
     def test_one_draft_shows_no_option_label(self):
         terminal = FakeTerminal([OK_REPLY, b"\r"])
         mockup.view(self.paths[:1], terminal=terminal)
-        screen, = terminal.screens()
+        (screen,) = terminal.screens()
         self.assertNotIn("Option", screen)
         self.assertNotIn("←/→", screen)
         self.assertIn("Enter close", screen)
@@ -460,10 +488,10 @@ class MockupCliTests(CliTestCase):
         self.codex.behavior["Top tabs"] = "fail"
         data = self.run_json("mockup", self.ref, "Sidebar layout", "Top tabs layout")
         self.assertEqual(data["ref"], self.ref)
-        draft, = data["drafts"]
+        (draft,) = data["drafts"]
         self.assertEqual((draft["option"], draft["prompt"]), (1, "Sidebar layout"))
         self.assertTrue(Path(draft["path"]).is_file())
-        failed, = data["failed"]
+        (failed,) = data["failed"]
         self.assertEqual((failed["option"], failed["prompt"]), (2, "Top tabs layout"))
         self.assertIn("model_not_found", failed["error"])
         self.assertEqual(data["shown"], "xdg-open")

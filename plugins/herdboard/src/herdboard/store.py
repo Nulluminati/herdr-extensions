@@ -281,9 +281,15 @@ class Store:
                 self._create(self.inbox_path, self._new_board_text())
         return self.inbox_path
 
-    def init_board(self, identity: RepoIdentity, merge: str | None = None,
-                   links: list[ProjectLink] = (), *, exist_ok: bool = False,
-                   on_existing: Callable[[Path], None] | None = None) -> Path:
+    def init_board(
+        self,
+        identity: RepoIdentity,
+        merge: str | None = None,
+        links: list[ProjectLink] = (),
+        *,
+        exist_ok: bool = False,
+        on_existing: Callable[[Path], None] | None = None,
+    ) -> Path:
         """Create a configured board in one write. With `exist_ok`, keep an existing board unchanged.
 
         `on_existing` reports that the existing board kept its settings instead of the supplied ones.
@@ -314,14 +320,16 @@ class Store:
         if merge not in (None, *MERGE_MODES):
             return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: merge must be local or pr")
         try:
-            return BoardMeta(board.frontmatter_value("repo"), parse_links(board.frontmatter), merge=merge,
-                             pins=parse_pins(board.frontmatter))
+            return BoardMeta(
+                board.frontmatter_value("repo"),
+                parse_links(board.frontmatter),
+                merge=merge,
+                pins=parse_pins(board.frontmatter),
+            )
         except FormatError as error:
             return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: {error}", merge=merge)
 
-    def update_links(
-        self, path: Path, change: Callable[[list[ProjectLink]], list[ProjectLink]]
-    ) -> list[ProjectLink]:
+    def update_links(self, path: Path, change: Callable[[list[ProjectLink]], list[ProjectLink]]) -> list[ProjectLink]:
         """Rewrite the `linear-projects` frontmatter of a board with `change(links)`."""
         with self._lock():
             try:
@@ -335,9 +343,7 @@ class Store:
             self._write_file(path, replace_links(text, links).encode("utf-8"), mode)
         return links
 
-    def update_pins(
-        self, path: Path, change: Callable[[list[IssuePin]], list[IssuePin]]
-    ) -> list[IssuePin]:
+    def update_pins(self, path: Path, change: Callable[[list[IssuePin]], list[IssuePin]]) -> list[IssuePin]:
         """Rewrite the `linear-issues` frontmatter of a board with `change(pins)`."""
         with self._lock():
             try:
@@ -390,9 +396,7 @@ class Store:
             parse_pins(written)
             self._write_file(path, text.encode("utf-8"), mode)
 
-    def import_target(
-        self, identity: RepoIdentity | None = None, board: str | None = None
-    ) -> ImportTarget:
+    def import_target(self, identity: RepoIdentity | None = None, board: str | None = None) -> ImportTarget:
         """The board that `migrate` writes to: `board`, else the one of `identity`, else the inbox."""
         if board is not None and board != "inbox":
             path, found = self.resolve_board(board), True
@@ -406,8 +410,7 @@ class Store:
         if not found:
             columns = self.config.columns
             done = next((t for t in columns if t.casefold() == "done"), None)
-            return ImportTarget(path, identity if board is None else None, False,
-                                columns[0], done)
+            return ImportTarget(path, identity if board is None else None, False, columns[0], done)
         parsed = self._read(path)
         if not parsed.columns:
             raise HerdboardError(f"{path}: board has no columns")
@@ -415,12 +418,11 @@ class Store:
             done_title, error = self._done_column(parsed, path).title, None
         except HerdboardError as problem:
             done_title, error = None, str(problem)
-        return ImportTarget(path, identity if board is None else None, True,
-                            self._default_column(parsed, path).title, done_title, error)
+        return ImportTarget(
+            path, identity if board is None else None, True, self._default_column(parsed, path).title, done_title, error
+        )
 
-    def import_cards(
-        self, items: list[Item], path: Path | None = None, identity: RepoIdentity | None = None
-    ) -> Path:
+    def import_cards(self, items: list[Item], path: Path | None = None, identity: RepoIdentity | None = None) -> Path:
         """Append converted cards at the bottom of their columns, in one locked write.
 
         With `path`, the board must exist (the inbox is created). With `identity`, the board
@@ -479,8 +481,10 @@ class Store:
         if board.archive is None:
             return []
         name = self.board_name(path)
-        return [self._view(path, board.archive, card, card.block_id or f"{name}:archive-{number}")
-                for number, card in enumerate(board.archive.cards, start=1)]
+        return [
+            self._view(path, board.archive, card, card.block_id or f"{name}:archive-{number}")
+            for number, card in enumerate(board.archive.cards, start=1)
+        ]
 
     def list_cards(self, paths: list[Path] | None = None) -> list[CardView]:
         views = []
@@ -507,9 +511,7 @@ class Store:
             for card in column.cards:
                 number += 1
                 cards.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
-            columns.append(
-                ColumnSnapshot(column.title, column.limit, self._is_completed(column), cards)
-            )
+            columns.append(ColumnSnapshot(column.title, column.limit, self._is_completed(column), cards))
         archive = None
         if board.archive is not None:
             archive = ColumnSnapshot(board.archive.title, None, False, self._archive_views(path, board))
@@ -523,9 +525,7 @@ class Store:
             pairs = board.all_cards()
             if board.archive is not None:
                 pairs += [(board.archive, card) for card in board.archive.cards]
-            places.extend(
-                f"{path} ({column.title})" for column, card in pairs if card.block_id == block_id
-            )
+            places.extend(f"{path} ({column.title})" for column, card in pairs if card.block_id == block_id)
         if len(places) > 1:
             raise DuplicateIdError(f"ID {block_id} is on two cards: {' and '.join(places)}")
 
@@ -631,9 +631,7 @@ class Store:
                     break
                 except BlockingIOError:
                     if time.monotonic() >= deadline:
-                        raise ConflictError(
-                            f"{self.config.todos_dir}: boards are locked by another writer"
-                        ) from None
+                        raise ConflictError(f"{self.config.todos_dir}: boards are locked by another writer") from None
                     time.sleep(0.01)
             yield
         finally:
@@ -671,8 +669,9 @@ class Store:
         while True:
             candidate = "t" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
             # A deleted card keeps its log and attachments, so its ID stays taken.
-            if candidate not in taken and not (log_path(self.config, candidate).exists()
-                                               or attachments.folder(self.config, candidate).exists()):
+            if candidate not in taken and not (
+                log_path(self.config, candidate).exists() or attachments.folder(self.config, candidate).exists()
+            ):
                 taken.add(candidate)
                 return candidate
 
@@ -739,8 +738,7 @@ class Store:
             column = next((c for c in board.columns if c.title.casefold() == "done"), None)
         if column is None:
             raise HerdboardError(
-                f"Board {self.board_name(path)} has no done column: "
-                "add a complete marker or a column named Done"
+                f"Board {self.board_name(path)} has no done column: add a complete marker or a column named Done"
             )
         return column
 
@@ -785,7 +783,7 @@ class Store:
             if match is None:
                 raise HerdboardError(f"Detail line {index + 1} of {card.block_id or ref} is not a checklist item")
             mark = " " if match.group("mark") != " " else "x"
-            card.lines[index + 1] = f"{match.group('start')}{mark}{line[match.end('mark'):]}"
+            card.lines[index + 1] = f"{match.group('start')}{mark}{line[match.end('mark') :]}"
             return column
 
         return self._modify(ref, change)
@@ -877,8 +875,10 @@ class Store:
 
         def change(board, path, column, card):
             if expected is not None and (
-                card.title != expected.title or card.body != expected.body
-                or card.checked != expected.checked or column.title != expected.column
+                card.title != expected.title
+                or card.body != expected.body
+                or card.checked != expected.checked
+                or column.title != expected.column
             ):
                 raise ConflictError(f"{path}: card changed on disk since you opened it; open it again")
             if title is not None:
@@ -924,8 +924,10 @@ class Store:
 
         def change(board, path, column, card):
             if card.block_id and any(parent_of(other.title) == card.block_id for _, other in board.all_cards()):
-                raise ParentError(f"Cannot archive {card.block_id}: it has sub-cards on the board. "
-                                  "Archive them first", "has_sub_cards")
+                raise ParentError(
+                    f"Cannot archive {card.block_id}: it has sub-cards on the board. Archive them first",
+                    "has_sub_cards",
+                )
             kanban_md.remove_card(column, card)
             archive = self._archive_column(board)
             kanban_md.insert_card(archive, card, "bottom")
@@ -940,7 +942,9 @@ class Store:
         return [view for view in self.list_cards([path]) if view.column == done.title]
 
     def archive_done(
-        self, path: Path, blocked: Callable[[str], str | None] | None = None,
+        self,
+        path: Path,
+        blocked: Callable[[str], str | None] | None = None,
     ) -> tuple[list[CardView], list[tuple[CardView, str]]]:
         """Archive every card in the board's done column, in one write.
 
@@ -975,8 +979,9 @@ class Store:
             done = self._done_column(board, path)
             pairs: list[tuple[CardView, Card]] = []
             for view, card in chosen:
-                match = next((c for c in done.cards if c.lines == card.lines
-                              and not any(c is m for _, m in pairs)), None)
+                match = next(
+                    (c for c in done.cards if c.lines == card.lines and not any(c is m for _, m in pairs)), None
+                )
                 if match is None:
                     raise ConflictError(f"{path}: {view.ref} changed on disk; retry")
                 pairs.append((view, match))
@@ -1073,8 +1078,9 @@ class Store:
             parent_id = parent_of(card.title)
             parent = next((c for c in board.archive.cards if c.block_id == parent_id), None) if parent_id else None
             if parent is not None and not with_parent:
-                raise ParentError(f"The parent {parent_id} of {ref} is archived too. "
-                                  "Unarchive the parent with it", "parent_archived")
+                raise ParentError(
+                    f"The parent {parent_id} of {ref} is archived too. Unarchive the parent with it", "parent_archived"
+                )
             done = self._done_column(board, path)
             if parent is not None:
                 self._move_card(board.archive, parent, done, "bottom", check=True)
@@ -1090,8 +1096,10 @@ class Store:
         cards = [card for _, card in board.all_cards()]
         found = next((card for card in cards if card.block_id == parent), None)
         if found is None:
-            raise ParentError(f"No card {parent} on board {self.board_name(path)}; "
-                              "a parent must be on the same board", "parent_missing")
+            raise ParentError(
+                f"No card {parent} on board {self.board_name(path)}; a parent must be on the same board",
+                "parent_missing",
+            )
         if parent_of(found.title):
             raise ParentError(f"{parent} is a sub-card; sub-cards go one level deep", "parent_nested")
         if child is not None and any(parent_of(card.title) == child for card in cards):
@@ -1099,6 +1107,7 @@ class Store:
 
     def set_parent(self, ref: str, parent: str | None) -> CardView:
         """Set or remove a todo's parent link."""
+
         def change(board, path, column, card):
             if parent is not None:
                 self._check_parent(board, path, parent, card.block_id)
@@ -1131,9 +1140,7 @@ class Store:
         board = self._read(located.path)
         column, card = self._find(board, located)
         done = self._done_column(board, located.path)
-        return TodoSnapshot(
-            located, self._view(located.path, column, card, card.block_id or ref), column is done
-        )
+        return TodoSnapshot(located, self._view(located.path, column, card, card.block_id or ref), column is done)
 
     def finish_promotion(self, snapshot: TodoSnapshot, identifier: str) -> CardView:
         """Add `→ identifier` before the block ID and move the todo to the done column.
@@ -1142,9 +1149,7 @@ class Store:
         """
 
         def change(board, path, source, card):
-            card.lines[0] = BLOCK_ID.sub(
-                lambda match: f" → {identifier}{match.group(0)}", card.first_line
-            )
+            card.lines[0] = BLOCK_ID.sub(lambda match: f" → {identifier}{match.group(0)}", card.first_line)
             target = self._done_column(board, path)
             if target is source:
                 card.set_checked(True)

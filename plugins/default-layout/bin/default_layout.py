@@ -4,9 +4,9 @@
 # ///
 """Start Herdr with the projects, tabs and panes listed in layout.toml.
 
-    default_layout.py startup   build missing projects in a fresh session, or
-                                relaunch programs in a restored one
-    default_layout.py apply     rebuild the focused workspace from its project
+default_layout.py startup   build missing projects in a fresh session, or
+                            relaunch programs in a restored one
+default_layout.py apply     rebuild the focused workspace from its project
 """
 
 import json
@@ -273,9 +273,13 @@ def tab_tree(tab: dict, project_path) -> dict:
     panes = tab.get("panes") or [tab]
     node = pane_node(panes[0], project_path)
     for pane in panes[1:]:
-        node = {"type": "split", "direction": pane.get("split", "down"),
-                "ratio": pane.get("ratio", 0.5), "first": node,
-                "second": pane_node(pane, project_path)}
+        node = {
+            "type": "split",
+            "direction": pane.get("split", "down"),
+            "ratio": pane.get("ratio", 0.5),
+            "first": node,
+            "second": pane_node(pane, project_path),
+        }
     return node
 
 
@@ -443,8 +447,9 @@ def build_into(project: dict, tab_id: str, index: int, workspace_id: str) -> Non
 
 
 def create_project(project: dict) -> None:
-    created = herdr("workspace", "create", "--cwd", str(project_dir(project)),
-                    "--label", project["label"], "--no-focus")
+    created = herdr(
+        "workspace", "create", "--cwd", str(project_dir(project)), "--label", project["label"], "--no-focus"
+    )
     # Build into the workspace's own tab, so it keeps no extra empty tab.
     build_into(project, created["tab"]["tab_id"], 0, created["workspace"]["workspace_id"])
     print(f"default-layout: built {project['label']} ({len(project['tabs'])} tabs)")
@@ -524,6 +529,7 @@ def rehydrate_open(spec: dict, open_workspaces: list[dict], snap: dict) -> None:
         if workspace is not None:
             count = rehydrate(project, workspace["workspace_id"], snap)
             print(f"default-layout: rehydrated {count} tab(s) in {project['label']}")
+
     each_project(spec, work)
 
 
@@ -557,8 +563,14 @@ def cmd_apply(spec: dict) -> int:
         print(f"default-layout: skip {project['label']}: no such directory {project_dir(project)}")
         return 1
     tab_ids = [tab["tab_id"] for tab in workspace_tabs(snap, workspace_id)]
-    focused = next((tab_id for tab_id in (os.environ.get("HERDR_TAB_ID"), context().get("tab_id"),
-                                          workspace.get("active_tab_id")) if tab_id in tab_ids), tab_ids[0])
+    focused = next(
+        (
+            tab_id
+            for tab_id in (os.environ.get("HERDR_TAB_ID"), context().get("tab_id"), workspace.get("active_tab_id"))
+            if tab_id in tab_ids
+        ),
+        tab_ids[0],
+    )
     build_into(project, focused, tab_ids.index(focused), workspace_id)
     print(f"default-layout: applied {project['label']} ({len(project['tabs'])} tabs)")
     return 0

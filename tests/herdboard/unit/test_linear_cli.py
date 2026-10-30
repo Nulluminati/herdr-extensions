@@ -40,8 +40,9 @@ class ViewTests(LinearCliCase):
     def test_pinned_canceled_issue_is_hidden_but_stays_pinned(self):
         self.repin(IssuePin("i4", "ENG-4"))
         self.assertEqual(self.refs(self.listing())[1:], [])
-        self.assertEqual(self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").pins,
-                         [IssuePin("i4", "ENG-4")])
+        self.assertEqual(
+            self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").pins, [IssuePin("i4", "ENG-4")]
+        )
 
     def test_project_view_has_no_pins(self):
         self.link("Mobile")
@@ -61,8 +62,9 @@ class ViewTests(LinearCliCase):
         self.assertEqual(self.refs(self.listing())[1:], ["ENG-1", "ENG-2", "ENG-3"])
 
     def test_issue_shown_once_across_queries(self):
-        self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]),
-                    ProjectLink("p-plat", "Platform"))
+        self.relink(
+            ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]), ProjectLink("p-plat", "Platform")
+        )
         refs = self.refs(self.listing())
         self.assertEqual(sorted(refs[1:]), ["ENG-1", "ENG-2", "ENG-3"])
 
@@ -107,8 +109,7 @@ class ViewTests(LinearCliCase):
         self.link("Platform")
         data = self.listing("--view", "all")
         self.assertEqual(self.refs(data)[2:], ["ENG-1", "ENG-2", "ENG-5", "ENG-6"])
-        self.assertEqual({c["title"] for c in data["cards"] if c["source"] == "todo"},
-                         {"local todo", "in inbox"})
+        self.assertEqual({c["title"] for c in data["cards"] if c["source"] == "todo"}, {"local todo", "in inbox"})
 
     def test_inbox_view_has_no_linear(self):
         self.run_cli("add", "in inbox", directory=self.plain)
@@ -128,8 +129,7 @@ class ViewTests(LinearCliCase):
         other = store.init_board(RepoIdentity("github.com/acme/other", "github.com", ("acme", "other")))
         store.add(other, "other todo", "Todo")
         data = self.listing("--project", "platform", directory=self.plain)
-        self.assertEqual(sorted(c["title"] for c in data["cards"] if c["source"] == "todo"),
-                         ["local todo", "web todo"])
+        self.assertEqual(sorted(c["title"] for c in data["cards"] if c["source"] == "todo"), ["local todo", "web todo"])
         self.assertEqual(self.refs(data)[2:], ["ENG-1", "ENG-2", "ENG-3"])
         same = self.listing("--view", "project", "--project", "Platform", directory=self.plain)
         self.assertEqual(self.refs(same), self.refs(data))
@@ -205,8 +205,11 @@ class ViewTests(LinearCliCase):
 
 
 class ReviewFixTests(LinearCliCase):
-    AUTH_FAILED = (200, {"errors": [{"message": "Authentication required",
-                                     "extensions": {"code": "AUTHENTICATION_ERROR"}}]}, {})
+    AUTH_FAILED = (
+        200,
+        {"errors": [{"message": "Authentication required", "extensions": {"code": "AUTHENTICATION_ERROR"}}]},
+        {},
+    )
 
     def setUp(self):
         super().setUp()
@@ -229,8 +232,7 @@ class ReviewFixTests(LinearCliCase):
         self.assertEqual(len(self.requests("Projects")) - before, 1)
 
     def test_missing_label_is_a_link_error_and_valid_labels_still_filter(self):
-        self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-web", "repo:web"),
-                                                        LabelLink("gone", "Deleted")]))
+        self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-web", "repo:web"), LabelLink("gone", "Deleted")]))
         data = self.listing()
         self.assertEqual(self.refs(data)[1:], ["ENG-3"])
         self.assertEqual(len(data["errors"]), 1)
@@ -263,8 +265,7 @@ class ReviewFixTests(LinearCliCase):
         self.assertEqual(self.requests("MyIssues"), [])
 
     def test_show_unknown_issue_is_not_found(self):
-        self.assertEqual(self.run_json("show", "ENG-99", directory=self.plain, expect=1)["error"]["code"],
-                         "not_found")
+        self.assertEqual(self.run_json("show", "ENG-99", directory=self.plain, expect=1)["error"]["code"], "not_found")
 
     def test_show_uses_any_cached_view_when_the_network_is_down(self):
         self.listing()  # caches the Platform project, not "mine"
@@ -281,8 +282,9 @@ class ReviewFixTests(LinearCliCase):
         data = self.run_json("show", "ENG-3", "--offline", directory=self.plain)
         self.assertTrue(data["linear"]["stale"])
         self.assertEqual(len(self.fake.requests), count)
-        self.assertEqual(self.run_json("show", "ENG-99", "--offline", directory=self.plain,
-                                       expect=3)["error"]["code"], "linear")
+        self.assertEqual(
+            self.run_json("show", "ENG-99", "--offline", directory=self.plain, expect=3)["error"]["code"], "linear"
+        )
 
 
 class TextTests(LinearCliCase):
@@ -303,13 +305,44 @@ class TextTests(LinearCliCase):
     def test_list_json_fields(self):
         card = self.listing("--source", "linear")["cards"][0]
         self.assertEqual(
-            {k: card[k] for k in ("ref", "source", "state", "team", "pr", "read_only", "stale", "path",
-                                  "url", "board", "column", "due", "tags", "body", "checked")},
-            {"ref": "ENG-1", "source": "linear", "state": "Todo", "team": "ENG", "pr": True,
-             "read_only": True, "stale": False, "path": None,
-             "url": "https://linear.app/workspace/issue/ENG-1", "board": "Platform", "column": "Todo",
-             "due": "2026-10-20", "tags": ["repo:api"], "body": ["Line one", "Line two"],
-             "checked": False})
+            {
+                k: card[k]
+                for k in (
+                    "ref",
+                    "source",
+                    "state",
+                    "team",
+                    "pr",
+                    "read_only",
+                    "stale",
+                    "path",
+                    "url",
+                    "board",
+                    "column",
+                    "due",
+                    "tags",
+                    "body",
+                    "checked",
+                )
+            },
+            {
+                "ref": "ENG-1",
+                "source": "linear",
+                "state": "Todo",
+                "team": "ENG",
+                "pr": True,
+                "read_only": True,
+                "stale": False,
+                "path": None,
+                "url": "https://linear.app/workspace/issue/ENG-1",
+                "board": "Platform",
+                "column": "Todo",
+                "due": "2026-10-20",
+                "tags": ["repo:api"],
+                "body": ["Line one", "Line two"],
+                "checked": False,
+            },
+        )
         self.assertIsNotNone(card["fetched_at"])
         # The issue ID is board-only, so the CLI card schema stays as it is.
         self.assertNotIn("issue_id", card)
@@ -320,17 +353,31 @@ class TextTests(LinearCliCase):
         cards = {c["ref"]: c["pr"] for c in self.listing()["cards"]}
         self.assertEqual(cards, {"ENG-1": True, "ENG-2": False, "ENG-3": False})
         self.fixtures["issues"][1]["attachments"]["nodes"] = [
-            attachment("https://github.com/acme/other/pull/1"), attachment(PR_URL.replace("API", "api"))]
+            attachment("https://github.com/acme/other/pull/1"),
+            attachment(PR_URL.replace("API", "api")),
+        ]
         self.assertTrue({c["ref"]: c["pr"] for c in self.listing()["cards"]}["ENG-2"])
         self.fixtures["issues"][1]["attachments"]["nodes"] = [attachment("https://github.com/acme/other/pull/1")]
         self.assertFalse({c["ref"]: c["pr"] for c in self.listing()["cards"]}["ENG-2"])
 
     def test_show_text(self):
         out, _ = self.run_cli("show", "ENG-2", directory=self.repo)
-        self.assertEqual(out.splitlines(), [
-            "Issue 2", "Platform / Review", "ref: ENG-2", "state: In Review", "team: ENG",
-            "url: https://linear.app/workspace/issue/ENG-2", "type: bug", "labels: repo:api", "due: 2026-10-20",
-            "Line one", "Line two"])
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "Issue 2",
+                "Platform / Review",
+                "ref: ENG-2",
+                "state: In Review",
+                "team: ENG",
+                "url: https://linear.app/workspace/issue/ENG-2",
+                "type: bug",
+                "labels: repo:api",
+                "due: 2026-10-20",
+                "Line one",
+                "Line two",
+            ],
+        )
 
     def test_show_json_and_other_places(self):
         data = self.run_json("show", "ENG-1", directory=self.repo)
@@ -347,8 +394,9 @@ class TextTests(LinearCliCase):
 
     def test_show_with_linear_off(self):
         del os.environ["LINEAR_API_KEY"]
-        self.assertEqual(self.run_json("show", "ENG-1", directory=self.repo, expect=1)["error"]["code"],
-                         "linear_disabled")
+        self.assertEqual(
+            self.run_json("show", "ENG-1", directory=self.repo, expect=1)["error"]["code"], "linear_disabled"
+        )
 
     def test_move_of_todo_still_works(self):
         card = self.run_json("add", "todo", directory=self.repo)["card"]
@@ -373,9 +421,10 @@ class LinkTests(LinearCliCase):
         self.assertEqual(self.links(), [ProjectLink("p-plat", "Platform")])
         self.link("Mobile")
         self.link("Platform", "--label", "repo:api")
-        self.assertEqual(self.links(), [
-            ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]),
-            ProjectLink("p-mob", "Mobile")])
+        self.assertEqual(
+            self.links(),
+            [ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]), ProjectLink("p-mob", "Mobile")],
+        )
         out, _ = self.run_cli("link", "Platform", "--remove", directory=self.repo)
         self.assertIn("Mobile", out)
         self.assertEqual(self.links(), [ProjectLink("p-mob", "Mobile")])
@@ -404,8 +453,10 @@ class LinkTests(LinearCliCase):
         self.assertIn("OPS", error["message"])
         self.assertEqual(self.links(), [])
         self.link("Platform", "--label", "OPS/bug", "--label", "repo:web")
-        self.assertEqual(self.links(), [ProjectLink("p-plat", "Platform", [
-            LabelLink("l-bug-ops", "bug"), LabelLink("l-web", "repo:web")])])
+        self.assertEqual(
+            self.links(),
+            [ProjectLink("p-plat", "Platform", [LabelLink("l-bug-ops", "bug"), LabelLink("l-web", "repo:web")])],
+        )
 
     def test_unknown_label(self):
         self.board()
@@ -478,16 +529,17 @@ class PinTests(LinearCliCase):
     def test_creates_board_but_needs_a_repository(self):
         self.run_json("pin", "ENG-1", directory=self.repo)
         self.assertEqual([p.identifier for p in self.pins()], ["ENG-1"])
-        self.assertIn("Not in a Git repository",
-                      self.run_json("pin", "ENG-1", directory=self.plain, expect=1)["error"]["message"])
+        self.assertIn(
+            "Not in a Git repository", self.run_json("pin", "ENG-1", directory=self.plain, expect=1)["error"]["message"]
+        )
 
     def test_unknown_issue_and_linear_off(self):
         self.board()
-        self.assertEqual(self.run_json("pin", "ENG-404", directory=self.repo, expect=1)["error"]["code"],
-                         "not_found")
+        self.assertEqual(self.run_json("pin", "ENG-404", directory=self.repo, expect=1)["error"]["code"], "not_found")
         del os.environ["LINEAR_API_KEY"]
-        self.assertEqual(self.run_json("pin", "ENG-1", directory=self.repo, expect=1)["error"]["code"],
-                         "linear_disabled")
+        self.assertEqual(
+            self.run_json("pin", "ENG-1", directory=self.repo, expect=1)["error"]["code"], "linear_disabled"
+        )
         self.assertEqual(self.pins(), [])
 
     def test_network_failure_exits_3(self):
@@ -499,22 +551,34 @@ class PinTests(LinearCliCase):
 class SearchTests(LinearCliCase):
     def test_search_json_and_text(self):
         data = self.run_json("search", "issue 2", directory=self.plain)
-        self.assertEqual(data["issues"], [{"id": "i2", "identifier": "ENG-2", "title": "Issue 2",
-                                           "state": {"name": "In Review", "type": "started"},
-                                           "team": {"key": "ENG"}, "project": {"name": "Platform"}}])
+        self.assertEqual(
+            data["issues"],
+            [
+                {
+                    "id": "i2",
+                    "identifier": "ENG-2",
+                    "title": "Issue 2",
+                    "state": {"name": "In Review", "type": "started"},
+                    "team": {"key": "ENG"},
+                    "project": {"name": "Platform"},
+                }
+            ],
+        )
         out, _ = self.run_cli("search", "issue 2", directory=self.plain)
         self.assertEqual(out, "ENG-2\tIn Review\tENG\tIssue 2\n")
         out, _ = self.run_cli("search", "nothing like it", directory=self.plain)
         self.assertEqual(out, "No open issues match.\n")
 
     def test_search_by_identifier(self):
-        self.assertEqual([i["identifier"] for i in self.run_json("search", "ENG-4", directory=self.plain)["issues"]],
-                         ["ENG-4"])
+        self.assertEqual(
+            [i["identifier"] for i in self.run_json("search", "ENG-4", directory=self.plain)["issues"]], ["ENG-4"]
+        )
 
     def test_linear_off(self):
         del os.environ["LINEAR_API_KEY"]
-        self.assertEqual(self.run_json("search", "x", directory=self.plain, expect=1)["error"]["code"],
-                         "linear_disabled")
+        self.assertEqual(
+            self.run_json("search", "x", directory=self.plain, expect=1)["error"]["code"], "linear_disabled"
+        )
 
 
 if __name__ == "__main__":

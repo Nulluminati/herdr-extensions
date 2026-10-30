@@ -25,14 +25,26 @@ class LazyYamlTests(unittest.TestCase):
             root = Path(tmp)
             config = root / "config.toml"
             config.write_text(f'todos_dir = "{root / "todos"}"\n')
-            env = {**os.environ, "HOME": str(root), "XDG_STATE_HOME": str(root / "state"),
-                   "LINEAR_API_KEY": ""}
+            env = {**os.environ, "HOME": str(root), "XDG_STATE_HOME": str(root / "state"), "LINEAR_API_KEY": ""}
             runs = []
             for command in (["add", "buy milk"], list(args)):
-                runs.append(subprocess.run(
-                    [sys.executable, "-c", RUN.format(src=str(SRC)), "--config", str(config),
-                     "-C", str(root), *command],
-                    capture_output=True, text=True, env=env))
+                runs.append(
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            "-c",
+                            RUN.format(src=str(SRC)),
+                            "--config",
+                            str(config),
+                            "-C",
+                            str(root),
+                            *command,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                    )
+                )
             return runs
 
     def test_local_commands_work_without_pyyaml(self):

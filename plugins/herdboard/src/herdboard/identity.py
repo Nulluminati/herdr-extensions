@@ -81,9 +81,7 @@ def _split_remote(url: str) -> tuple[str, tuple[str, ...]]:
 
 def _git(directory: Path, *args: str) -> str | None:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(directory), *args], capture_output=True, text=True
-        )
+        result = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True)
     except FileNotFoundError as error:
         raise IdentityError("git is not installed") from error
     except OSError:

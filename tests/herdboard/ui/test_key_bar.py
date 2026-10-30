@@ -1,4 +1,5 @@
 """The key bar at the bottom: the keys of the top screen, dimmed when they do not apply to the selection."""
+
 import asyncio
 import os
 import tempfile
@@ -13,8 +14,17 @@ from herdboard.store import Store
 
 
 def pull_request(number, **changes):
-    pr = PullRequest(number, f"PR {number}", f"https://github.com/acme/api/pull/{number}", "octo", False,
-                     "a" * 40, "branch", False, False)
+    pr = PullRequest(
+        number,
+        f"PR {number}",
+        f"https://github.com/acme/api/pull/{number}",
+        "octo",
+        False,
+        "a" * 40,
+        "branch",
+        False,
+        False,
+    )
     for name, value in changes.items():
         setattr(pr, name, value)
     return pr
@@ -35,15 +45,16 @@ class KeyBarTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
-        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state"),
-                                      "HERDR_BIN_PATH": str(root / "no-herdr")})
+        env = patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state"), "HERDR_BIN_PATH": str(root / "no-herdr")})
         env.start()
         self.addCleanup(env.stop)
         self.store = Store(Config(todos_dir=root / "todos"))
         self.path = self.store.ensure_inbox()
         self.service = Mock()
-        self.service.page.return_value = ("acme/api", Page([
-            pull_request(7), pull_request(8, status="reviewed", review={"workspace_id": "w9"})], 2, "next"))
+        self.service.page.return_value = (
+            "acme/api",
+            Page([pull_request(7), pull_request(8, status="reviewed", review={"workspace_id": "w9"})], 2, "next"),
+        )
         self.service.details.return_value = {"body": "", "issues": [], "reviews": [], "checks": []}
 
     def app(self):

@@ -1,4 +1,5 @@
 """The scratchpad notes: one Markdown file per board in `<todos_dir>/notes`."""
+
 import os
 import tempfile
 import unittest
@@ -103,12 +104,10 @@ class PreviewTests(unittest.TestCase):
     """The preview shows each blank line of the note as an empty row."""
 
     def test_each_blank_line_becomes_an_empty_paragraph(self):
-        self.assertEqual(notes.preview_markdown("one\n\n\ntwo"),
-                         "one\n\n&nbsp;\n\n&nbsp;\n\ntwo")
+        self.assertEqual(notes.preview_markdown("one\n\n\ntwo"), "one\n\n&nbsp;\n\n&nbsp;\n\ntwo")
 
     def test_leading_and_trailing_blank_lines_stay(self):
-        self.assertEqual(notes.preview_markdown("\n# Head\n\n- 1\n"),
-                         "\n&nbsp;\n\n# Head\n\n&nbsp;\n\n- 1\n")
+        self.assertEqual(notes.preview_markdown("\n# Head\n\n- 1\n"), "\n&nbsp;\n\n# Head\n\n&nbsp;\n\n- 1\n")
 
     def test_lines_without_a_blank_line_between_stay_as_they_are(self):
         self.assertEqual(notes.preview_markdown("# Head\n- 1\n- 2"), "# Head\n- 1\n- 2")

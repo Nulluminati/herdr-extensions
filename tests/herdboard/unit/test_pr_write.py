@@ -1,4 +1,5 @@
 """Agent-written pull requests: an agent writes the title and description, then a draft PR opens."""
+
 import contextlib
 import io
 import json
@@ -98,14 +99,16 @@ class RequestTests(PrWriteTestCase):
         call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
         self.assertIn('model_reasoning_effort="ultra"', call)
         options = sandbox.codex_reviewer_options("hb-review", self.folder, hunk=False)
-        self.assertEqual(call[call.index("--") + 1:][:len(options)], options)
+        self.assertEqual(call[call.index("--") + 1 :][: len(options)], options)
 
     def test_the_card_agent_is_asked_by_the_worker(self):
         result = self.request()
         self.assertEqual(result["writer"], "the card's agent")
         stored = self.records()[self.card.ref]["pr_write"]
-        self.assertEqual((stored["folder"], stored["pane_id"], stored["own_pane"], stored["rewrite_url"]),
-                         (result["folder"], "w9:p1", False, None))
+        self.assertEqual(
+            (stored["folder"], stored["pane_id"], stored["own_pane"], stored["rewrite_url"]),
+            (result["folder"], "w9:p1", False, None),
+        )
         self.assertEqual(json.loads((self.folder / "pr_write.json").read_text()), stored)
         self.assertEqual(self.log(), ["PR description requested from the card's agent."])
         arguments, log = self.workers[0]
@@ -120,21 +123,47 @@ class RequestTests(PrWriteTestCase):
         self.request()
         self.assertIn("+a", (self.folder / "branch.patch").read_text())
         text = (self.folder / "request.md").read_text()
-        for part in ("Fix login timeout", "Use a 30 minute session.", self.branch, self.main_branch(),
-                     str(self.worktree), str(self.folder / "branch.patch"), str(self.folder / "pr.md"),
-                     "Chose a fixed timeout over a setting.",
-                     "## Why", "## What changed", "## Trade-offs", "## Testing", "humanizer",
-                     "Do not name the tools", "Do not add a Linear link", "Do not run `gh`",
-                     "Describe only the testing that the notes or the change show", "you did not run",
-                     "Do not run the project's code, tests or builds", "Do not start a server",
-                     "Do not use `terminal-browser`"):
+        for part in (
+            "Fix login timeout",
+            "Use a 30 minute session.",
+            self.branch,
+            self.main_branch(),
+            str(self.worktree),
+            str(self.folder / "branch.patch"),
+            str(self.folder / "pr.md"),
+            "Chose a fixed timeout over a setting.",
+            "## Why",
+            "## What changed",
+            "## Trade-offs",
+            "## Testing",
+            "humanizer",
+            "Do not name the tools",
+            "Do not add a Linear link",
+            "Do not run `gh`",
+            "Describe only the testing that the notes or the change show",
+            "you did not run",
+            "Do not run the project's code, tests or builds",
+            "Do not start a server",
+            "Do not use `terminal-browser`",
+        ):
             self.assertIn(part, text)
 
     def test_the_title_always_follows_one_conventional_commit_guide(self):
         self.request()
         text = (self.folder / "request.md").read_text()
-        for part in ("<type>(<scope>): <summary>", "`feat`", "`fix`", "`docs`", "`refactor`", "`test`",
-                     "`chore`", "imperative mood", "lower case", "72 characters", "no period"):
+        for part in (
+            "<type>(<scope>): <summary>",
+            "`feat`",
+            "`fix`",
+            "`docs`",
+            "`refactor`",
+            "`test`",
+            "`chore`",
+            "imperative mood",
+            "lower case",
+            "72 characters",
+            "no period",
+        ):
             self.assertIn(part, text)
         self.assertNotIn("git log", text)
 
@@ -149,8 +178,12 @@ class RequestTests(PrWriteTestCase):
         self.assertNotIn("The card is a", (self.folder / "request.md").read_text())
 
     def test_templates_replace_the_default_format(self):
-        for name in (".github/pull_request_template.md", "docs/PULL_REQUEST_TEMPLATE.md",
-                     ".github/PULL_REQUEST_TEMPLATE/bug.md", "notes.md"):
+        for name in (
+            ".github/pull_request_template.md",
+            "docs/PULL_REQUEST_TEMPLATE.md",
+            ".github/PULL_REQUEST_TEMPLATE/bug.md",
+            "notes.md",
+        ):
             path = self.worktree / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("## Summary\n")
@@ -158,8 +191,11 @@ class RequestTests(PrWriteTestCase):
         self.git(self.worktree, "commit", "-qm", "docs: templates")
         self.request()
         text = (self.folder / "request.md").read_text()
-        for name in (".github/pull_request_template.md", "docs/PULL_REQUEST_TEMPLATE.md",
-                     ".github/PULL_REQUEST_TEMPLATE/bug.md"):
+        for name in (
+            ".github/pull_request_template.md",
+            "docs/PULL_REQUEST_TEMPLATE.md",
+            ".github/PULL_REQUEST_TEMPLATE/bug.md",
+        ):
             self.assertIn(str(self.worktree / name), text)
         self.assertNotIn("notes.md", text)
         self.assertNotIn("## Why", text)
@@ -172,9 +208,9 @@ class RequestTests(PrWriteTestCase):
         start_call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
         self.assertEqual(start_call[2], f"hb-{self.card.ref}-pr")
         self.assertEqual(start_call[start_call.index("--kind") + 1], "pi")
-        args = start_call[start_call.index("--") + 1:]
+        args = start_call[start_call.index("--") + 1 :]
         options = sandbox.pi_reviewer_options(self.folder, self.worktree, browser=False, hunk=False)
-        self.assertEqual(args[:len(options)], options)
+        self.assertEqual(args[: len(options)], options)
         self.assertIn(str(self.folder / "request.md"), args[-1])
         stored = self.records()[self.card.ref]["pr_write"]
         self.assertEqual((stored["pane_id"], stored["own_pane"]), (result["pane_id"], True))
@@ -189,11 +225,12 @@ class RequestTests(PrWriteTestCase):
         self.request()
         start_call = next(c for c in self.calls("agent", "start") if c[2].endswith("-pr"))
         self.assertEqual(start_call[start_call.index("--kind") + 1], "claude")
-        args = start_call[start_call.index("--") + 1:]
+        args = start_call[start_call.index("--") + 1 :]
         options = sandbox.claude_reviewer_options(self.folder, self.worktree, browser=False, hunk=False)
-        self.assertEqual(args[1:1 + len(options)], options)
-        self.assertEqual(args[-len(sandbox.claude_reviewer_tools(self.folder)):],
-                         sandbox.claude_reviewer_tools(self.folder))
+        self.assertEqual(args[1 : 1 + len(options)], options)
+        self.assertEqual(
+            args[-len(sandbox.claude_reviewer_tools(self.folder)) :], sandbox.claude_reviewer_tools(self.folder)
+        )
 
     def test_a_writer_gets_no_browser_by_default(self):
         for kind in ("claude", "pi"):
@@ -296,8 +333,9 @@ class WaitTests(PrWriteTestCase):
         stored["linear_url"] = "https://linear.app/acme/issue/ENG-7"
         (self.folder / "pr_write.json").write_text(json.dumps(stored))
         self.wait()
-        self.assertEqual(self.gh.bodies,
-                         ["## Why\nSessions ended too soon.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
+        self.assertEqual(
+            self.gh.bodies, ["## Why\nSessions ended too soon.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"]
+        )
 
     def test_an_empty_title_opens_no_pull_request(self):
         self.fake.findings = "\n\n"
@@ -415,8 +453,7 @@ class SyncTests(PrWriteTestCase):
         self.assertEqual(edit[edit.index("--title") + 1], "feat: new title")
         self.assertEqual(self.gh.bodies, ["New body.\n"])
         self.assertEqual(self.git(self.origin, "rev-parse", self.branch), head)
-        self.assertEqual(self.git(self.repo, "rev-parse", "--abbrev-ref", self.branch + "@{u}"),
-                         self.main_branch())
+        self.assertEqual(self.git(self.repo, "rev-parse", "--abbrev-ref", self.branch + "@{u}"), self.main_branch())
         self.assertEqual(self.log()[-1], f"PR description updated: {self.gh.url}")
         record = self.records()[self.card.ref]
         self.assertEqual((record["pr_url"], record["pr_state"]), (self.gh.url, "open"))
@@ -427,8 +464,7 @@ class SyncTests(PrWriteTestCase):
         (self.folder / "pr.md").write_text("feat: x\n\nBody.\n")
         with self.linear():
             self.sync()
-        self.assertEqual(self.gh.bodies,
-                         ["Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
+        self.assertEqual(self.gh.bodies, ["Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
 
     def linear(self):
         """`sync` sees a Linear card with the issue URL, as a real ENG- ref does."""
@@ -447,9 +483,10 @@ class SyncTests(PrWriteTestCase):
         self.opened()
         self.gh.body = "First.\n\nLinear: https://linear.app/acme/issue/ENG-1\n\nLast.\n"
         result = self.sync(fetch=True)
-        self.assertEqual(Path(result["path"]).read_text(),
-                         "fix: keep sessions for 30 minutes\n\nFirst.\n\n"
-                         "Linear: https://linear.app/acme/issue/ENG-1\n\nLast.\n")
+        self.assertEqual(
+            Path(result["path"]).read_text(),
+            "fix: keep sessions for 30 minutes\n\nFirst.\n\nLinear: https://linear.app/acme/issue/ENG-1\n\nLast.\n",
+        )
 
     def test_the_pull_request_is_found_by_its_branch(self):
         self.opened()
@@ -480,8 +517,7 @@ class SyncTests(PrWriteTestCase):
         self.assertEqual(result["ref"], self.card.ref)
         written = Path(result["path"])
         self.assertEqual(written.parent.parent, start.state_dir() / "prs")
-        self.assertEqual(written.read_text(),
-                         "fix: old title\n\n## Why\nSessions ended too soon.\n")
+        self.assertEqual(written.read_text(), "fix: old title\n\n## Why\nSessions ended too soon.\n")
         self.assertEqual(self.records()[self.card.ref]["pr_folder"], str(written.parent))
         self.assertFalse(any(c[:2] == ["pr", "edit"] for c in self.gh.calls))
         self.assertEqual(self.git(self.origin, "rev-parse", self.branch), head)
@@ -494,8 +530,7 @@ class SyncTests(PrWriteTestCase):
             self.gh.calls.clear()
             self.gh.bodies.clear()
             self.sync()
-        self.assertEqual(self.gh.bodies,
-                         ["Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
+        self.assertEqual(self.gh.bodies, ["Body.\n\nLinear: https://linear.app/acme/issue/ENG-7\n"])
         self.assertNotIn("Linear:", Path(result["path"]).read_text())
 
     def test_without_an_open_pull_request_the_sync_stops(self):

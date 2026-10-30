@@ -1,4 +1,5 @@
 """The board with the mouse: click, double-click, the card menu, drag between columns, and detail clicks."""
+
 import dataclasses
 import unittest
 from unittest import mock
@@ -17,8 +18,11 @@ SIZE = (160, 40)
 
 def clicks(text):
     """The `@click` actions in a Rich text's spans."""
-    return [span.style.meta.get("@click") for span in text.spans
-            if not isinstance(span.style, str) and span.style.meta.get("@click")]
+    return [
+        span.style.meta.get("@click")
+        for span in text.spans
+        if not isinstance(span.style, str) and span.style.meta.get("@click")
+    ]
 
 
 class ClickTests(MouseTestCase):
@@ -26,7 +30,9 @@ class ClickTests(MouseTestCase):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
-            await pilot.click(self.widget(app, self.second.ref), offset=content_offset(self.widget(app, self.second.ref)))
+            await pilot.click(
+                self.widget(app, self.second.ref), offset=content_offset(self.widget(app, self.second.ref))
+            )
             await pilot.pause()
             todo = [c.name for c in app.columns].index("Todo")
             self.assertEqual((app.col, app.row), (todo, 1))
@@ -65,14 +71,18 @@ class DetailClickTests(MouseTestCase):
         self.assertIsInstance(app.screen, DetailScreen)
 
     async def test_a_click_on_a_checklist_line_checks_it(self):
-        card = self.store.add(self.repo_path, "list card", "Backlog", body=["Intro", "- [ ] step one", "- [ ] step two"])
+        card = self.store.add(
+            self.repo_path, "list card", "Backlog", body=["Intro", "- [ ] step one", "- [ ] step two"]
+        )
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await self.open_detail(pilot, card.ref)
             block = app.screen.query_one("#detail-body")
             await pilot.click(block, offset=content_offset(block, 2, 2))
             await settle(pilot)
-            self.assertEqual([line.strip() for line in self.store.show(card.ref).body], ["Intro", "- [ ] step one", "- [x] step two"])
+            self.assertEqual(
+                [line.strip() for line in self.store.show(card.ref).body], ["Intro", "- [ ] step one", "- [x] step two"]
+            )
             self.assertIsInstance(app.screen, DetailScreen)
 
     async def test_the_checklist_block_selects_no_text(self):
@@ -96,13 +106,13 @@ class DetailClickTests(MouseTestCase):
 
     def test_checklist_lines_have_a_click_action_only_when_they_can_change(self):
         lines = ["Intro", "- [ ] step one", "- [x] step two"]
-        self.assertEqual(set(clicks(detail_lines(lines, checks=True))),
-                         {"screen.toggle_line(1)", "screen.toggle_line(2)"})
+        self.assertEqual(
+            set(clicks(detail_lines(lines, checks=True))), {"screen.toggle_line(1)", "screen.toggle_line(2)"}
+        )
         self.assertEqual(clicks(detail_lines(lines)), [])
 
     async def test_a_linear_description_has_no_click_action(self):
-        linear = dataclasses.replace(self.first, ref="ENG-1", source="linear", path=None,
-                                     body=["- [ ] step one"])
+        linear = dataclasses.replace(self.first, ref="ENG-1", source="linear", path=None, body=["- [ ] step one"])
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -244,8 +254,7 @@ class DragTests(MouseTestCase):
             await pilot.press("z")
             await settle(pilot)
             await self.drag(pilot, done.ref, "Done")
-            self.assertIn("Press A to move the card back to the done column.",
-                          [n.message for n in app._notifications])
+            self.assertIn("Press A to move the card back to the done column.", [n.message for n in app._notifications])
             self.assertEqual([c.title for c in self.store.archived_cards([self.repo_path])], ["old card"])
 
     async def test_a_drop_on_the_archive_column_archives_the_todo(self):

@@ -39,8 +39,9 @@ class LinuxSamplingTests(unittest.TestCase):
     def test_parses_parent_cpu_start_and_resident_size(self):
         text = stat_line(42, "python3", 7, utime=250, stime=50, start=10000, rss=3)
         process = resource_usage.parse_linux_stat(42, text, clock_ticks=100, page_size=4096, uptime=150.0)
-        self.assertEqual(process, Process(pid=42, ppid=7, start="10000", cpu_seconds=3.0, rss_bytes=3 * 4096,
-                                          age_seconds=50.0))
+        self.assertEqual(
+            process, Process(pid=42, ppid=7, start="10000", cpu_seconds=3.0, rss_bytes=3 * 4096, age_seconds=50.0)
+        )
 
     def test_age_is_unknown_without_uptime(self):
         text = stat_line(42, "python3", 7, utime=250, stime=50, start=9999, rss=3)
@@ -103,8 +104,17 @@ class MacSamplingTests(unittest.TestCase):
     def test_parses_fixture_with_start_identity_and_kib(self):
         processes = resource_usage.collect_macos_processes()
         self.assertEqual(sorted(processes), [1, 501, 502, 503])
-        self.assertEqual(processes[502], Process(pid=502, ppid=501, start="Tue Oct 27 09:10:12 2026",
-                                                 cpu_seconds=0.25, rss_bytes=1024 * 1024, age_seconds=59.0))
+        self.assertEqual(
+            processes[502],
+            Process(
+                pid=502,
+                ppid=501,
+                start="Tue Oct 27 09:10:12 2026",
+                cpu_seconds=0.25,
+                rss_bytes=1024 * 1024,
+                age_seconds=59.0,
+            ),
+        )
         self.assertEqual(processes[1].age_seconds, 90611.0)
         self.assertEqual(processes[503].cpu_seconds, 93784.0)
 
@@ -152,7 +162,9 @@ class UsageTests(unittest.TestCase):
         processes = table(proc(1, 0, cpu=4.0))
         previous = {(1, "s1"): 2.0}
         self.assertIsNone(resource_usage.measure_usage({1}, processes, previous, elapsed=0.0, cpu_count=8).cpu_percent)
-        self.assertIsNone(resource_usage.measure_usage({1}, processes, previous, elapsed=2.0, cpu_count=None).cpu_percent)
+        self.assertIsNone(
+            resource_usage.measure_usage({1}, processes, previous, elapsed=2.0, cpu_count=None).cpu_percent
+        )
 
     def test_reused_pid_counts_new_process_from_zero(self):
         processes = table(proc(1, 0, cpu=0.5, start="new", age=0.8))
@@ -189,7 +201,13 @@ class UsageTests(unittest.TestCase):
 class ProcessSetTests(unittest.TestCase):
     def setUp(self):
         self.processes = table(
-            proc(1, 0), proc(10, 1), proc(11, 10), proc(12, 11), proc(20, 1), proc(21, 20), proc(30, 1),
+            proc(1, 0),
+            proc(10, 1),
+            proc(11, 10),
+            proc(12, 11),
+            proc(20, 1),
+            proc(21, 20),
+            proc(30, 1),
         )
 
     def test_descendants_include_roots_and_all_children(self):
@@ -252,8 +270,12 @@ class FamilyTests(unittest.TestCase):
         self.assertEqual(self.lookups, [])
 
     def test_equal_labels_in_unrelated_repositories_stay_apart(self):
-        workspaces = [workspace("m1", "/one/.git"), workspace("c1", "/one/.git", True),
-                      workspace("m2", "/two/.git"), workspace("c2", "/two/.git", True)]
+        workspaces = [
+            workspace("m1", "/one/.git"),
+            workspace("c1", "/one/.git", True),
+            workspace("m2", "/two/.git"),
+            workspace("c2", "/two/.git", True),
+        ]
         for entry in workspaces:
             entry["label"] = "same"
         self.assertEqual(self.parents(workspaces), {"c1": "m1", "c2": "m2"})
@@ -308,8 +330,9 @@ class FormatTests(unittest.TestCase):
     def test_nerd_icons_replace_labels(self):
         usage = resource_usage.Usage(cpu_percent=12.4, rss_bytes=int(1.1 * GIB))
         self.assertEqual(resource_usage.format_usage(usage, icon_style="nerd"), "\uf4bc 12%  \U000f035b 1.1 GiB")
-        self.assertEqual(resource_usage.format_usage(None, total=True, icon_style="nerd"),
-                         "\uf4bc --  \U000f035b --  total")
+        self.assertEqual(
+            resource_usage.format_usage(None, total=True, icon_style="nerd"), "\uf4bc --  \U000f035b --  total"
+        )
 
 
 class ConfigTests(unittest.TestCase):
@@ -347,7 +370,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("icon_style", error)
 
     def test_file_that_is_not_utf8_is_plain_with_error(self):
-        (Path(self.directory.name) / "config.toml").write_bytes(b"icon_style = \"\xff\"\n")
+        (Path(self.directory.name) / "config.toml").write_bytes(b'icon_style = "\xff"\n')
         style, error = resource_usage.load_icon_style()
         self.assertEqual(style, "plain")
         self.assertIn("config.toml", error)
@@ -423,7 +446,9 @@ class CollectorTests(HerdrTestCase):
         self.tables = []
         self.clock = [100.0]
         self.collector = resource_usage.Collector(
-            collect=self.next_table, clock=lambda: self.clock[0], cpu_count=lambda: 2,
+            collect=self.next_table,
+            clock=lambda: self.clock[0],
+            cpu_count=lambda: 2,
         )
 
     def next_table(self):
@@ -434,17 +459,24 @@ class CollectorTests(HerdrTestCase):
 
     def sample(self, cpu_10=0.0, cpu_20=0.0, cpu_30=0.0, shell_20_start="s"):
         return table(
-            proc(1, 0), proc(10, 1, cpu=cpu_10, rss=100 * MIB), proc(20, 1, cpu=cpu_20, rss=200 * MIB, start=shell_20_start),
-            proc(21, 20, rss=MIB), proc(30, 1, cpu=cpu_30, rss=GIB), proc(40, 1, cpu=999.0, rss=GIB),
+            proc(1, 0),
+            proc(10, 1, cpu=cpu_10, rss=100 * MIB),
+            proc(20, 1, cpu=cpu_20, rss=200 * MIB, start=shell_20_start),
+            proc(21, 20, rss=MIB),
+            proc(30, 1, cpu=cpu_30, rss=GIB),
+            proc(40, 1, cpu=999.0, rss=GIB),
         )
 
     def test_first_cycle_reports_memory_and_baseline(self):
         self.tables = [self.sample()]
-        self.assertEqual(self.collector.cycle(), {
-            "w1": "CPU --  MEM 301 MiB  total",
-            "w2": "CPU --  MEM 201 MiB",
-            "w3": "CPU --  MEM 1.0 GiB",
-        })
+        self.assertEqual(
+            self.collector.cycle(),
+            {
+                "w1": "CPU --  MEM 301 MiB  total",
+                "w2": "CPU --  MEM 201 MiB",
+                "w3": "CPU --  MEM 1.0 GiB",
+            },
+        )
 
     def test_second_cycle_reports_cpu_and_family_total(self):
         self.tables = [self.sample(), self.sample(cpu_10=1.0, cpu_20=2.0, cpu_30=0.5)]
@@ -744,12 +776,17 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest["platforms"], ["linux", "macos"])
         ensure = ["python3", "bin/resource_usage.py", "--ensure-running"]
         self.assertEqual([hook["command"] for hook in manifest["startup"]], [ensure])
-        self.assertEqual([(hook["on"], hook["command"]) for hook in manifest["events"]], [("workspace.focused", ensure)])
+        self.assertEqual(
+            [(hook["on"], hook["command"]) for hook in manifest["events"]], [("workspace.focused", ensure)]
+        )
         actions = {action["id"]: action["command"] for action in manifest["actions"]}
-        self.assertEqual(actions, {
-            "enable": ["python3", "bin/resource_usage.py", "--enable"],
-            "disable": ["python3", "bin/resource_usage.py", "--disable"],
-        })
+        self.assertEqual(
+            actions,
+            {
+                "enable": ["python3", "bin/resource_usage.py", "--enable"],
+                "disable": ["python3", "bin/resource_usage.py", "--disable"],
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -102,8 +102,12 @@ def refresh_pr_states(now: float | None = None) -> None:
         return
     states = {}
     for key, record in records.items():
-        if not (isinstance(record, dict) and record.get("pr_url") and record.get("pr_state") == "open"
-                and now - record.get("pr_checked", 0) >= PR_CHECK_SECONDS):
+        if not (
+            isinstance(record, dict)
+            and record.get("pr_url")
+            and record.get("pr_state") == "open"
+            and now - record.get("pr_checked", 0) >= PR_CHECK_SECONDS
+        ):
             continue
         try:
             result = _gh(record["checkout"], "pr", "view", record["pr_url"], "--json", "state")
@@ -173,8 +177,11 @@ class Merger:
             upstream = _git(record["checkout"], "rev-parse", "--abbrev-ref", f"{record['branch']}@{{u}}")
             name = upstream.stdout.strip()
             if upstream.returncode or _commit(record["checkout"], f"refs/heads/{name}") is None:
-                raise MergeError(f"The start record of {ref} has no base, and its branch has no local upstream; "
-                                 f"run `herdboard start {ref} --base BRANCH`", "base_unknown")
+                raise MergeError(
+                    f"The start record of {ref} has no base, and its branch has no local upstream; "
+                    f"run `herdboard start {ref} --base BRANCH`",
+                    "base_unknown",
+                )
             record["base"] = name
         return card, ref, key, record
 
@@ -203,8 +210,10 @@ class Merger:
 
     def _send_conflict(self, card, ref, key, record, base, files):
         names = ", ".join(files) or "unknown files"
-        text = (f"herdboard could not merge {ref}: a rebase onto `{base}` conflicts in {names}. "
-                f"Run `git rebase {base}` in this worktree, fix the conflicts, commit, and move the card to Review.")
+        text = (
+            f"herdboard could not merge {ref}: a rebase onto `{base}` conflicts in {names}. "
+            f"Run `git rebase {base}` in this worktree, fix the conflicts, commit, and move the card to Review."
+        )
         card = self._move(card, ref, self.config.start_column)
         if agent_live(record):
             herdr("agent", "prompt", record["pane_id"], text)
@@ -212,34 +221,54 @@ class Merger:
             kind = record.get("agent") or self.config.start_agent
             model = self.config.start_model if kind == self.config.start_agent else None
             Starter(self.store, self.directory, writer=self.writer, config_file=self.config_file).launch_agent(
-                card, record, kind, model,
-                self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None, safe_key(key),
-                lambda: self._persist(key, record), linear=card.source == "linear", note=text,
-                log=activity.read(self.config, ref))
+                card,
+                record,
+                kind,
+                model,
+                self.config.start_thinking if self.config.start_thinking in thinking_levels(kind) else None,
+                safe_key(key),
+                lambda: self._persist(key, record),
+                linear=card.source == "linear",
+                note=text,
+                log=activity.read(self.config, ref),
+            )
         activity.append(self.store, ref, f"Rebase conflict in {names}. Sent to the agent.", "herdboard")
         return text
 
     def mode(self, card, record):
         """The merge mode: the board's `merge:` frontmatter, else `merge` in the config."""
-        path = card.path if card is not None else next(
-            (p for p in self.store.board_paths() if self.store.board_meta(p).repo == record.get("repository")), None)
+        path = (
+            card.path
+            if card is not None
+            else next(
+                (p for p in self.store.board_paths() if self.store.board_meta(p).repo == record.get("repository")), None
+            )
+        )
         meta = self.store.board_meta(path) if path is not None else None
         return (meta.merge if meta else None) or self.config.merge
 
     def merge(self, ref, mode=None, force=False, rewrite=False):
         card, ref, key, record = self._started(ref)
         if record.get("mode") == REPOLESS:
-            raise MergeError(f"{ref} has no repository, so there is no branch to merge. "
-                             f"Review its attachments with `herdboard review {ref} --agent`, "
-                             f"then run `herdboard finish {ref}`.", "no_repository")
+            raise MergeError(
+                f"{ref} has no repository, so there is no branch to merge. "
+                f"Review its attachments with `herdboard review {ref} --agent`, "
+                f"then run `herdboard finish {ref}`.",
+                "no_repository",
+            )
         if record.get("mode") == NEW_REPO:
-            raise MergeError(f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
-                             f"Run `herdboard finish {ref}` to drop the card instead.", "no_repository")
+            raise MergeError(
+                f"{ref} has no repository yet: `herdboard start {ref}` creates it. "
+                f"Run `herdboard finish {ref}` to drop the card instead.",
+                "no_repository",
+            )
         if card is not None and not force:
             open_children = [child.ref for child in self.store.children(ref) if not child.checked]
             if open_children:
-                raise MergeError(f"Sub-cards of {ref} are not done: {', '.join(open_children)}. "
-                                 "Finish them first, or use --force.", "children_open")
+                raise MergeError(
+                    f"Sub-cards of {ref} are not done: {', '.join(open_children)}. Finish them first, or use --force.",
+                    "children_open",
+                )
         mode = mode or self.mode(card, record)
         if rewrite and mode != "pr":
             raise MergeError("--rewrite works only for a pull request", "usage")
@@ -249,14 +278,19 @@ class Merger:
         branch, base, checkout = record["branch"], record["base"], Path(record["checkout"])
         with _lock(".start-" + safe_key(key) + ".lock"):
             if _dirty(worktree):
-                raise MergeError(f"{worktree} has uncommitted changes. The agent must commit them first.",
-                                 "worktree_dirty")
+                raise MergeError(
+                    f"{worktree} has uncommitted changes. The agent must commit them first.", "worktree_dirty"
+                )
             ahead = _git(checkout, "rev-list", "--count", f"{base}..{branch}").stdout.strip()
             if ahead == "0":
                 raise MergeError(f"{branch} has no commits ahead of {base}", "nothing_to_merge")
             if mode == "pr":
-                return {"ref": ref, "mode": "pr", "base": base,
-                        **self._merge_pr(card, ref, key, record, worktree, branch, base, rewrite)}
+                return {
+                    "ref": ref,
+                    "mode": "pr",
+                    "base": base,
+                    **self._merge_pr(card, ref, key, record, worktree, branch, base, rewrite),
+                }
             commit = self._merge_local(card, ref, key, record, worktree, checkout, branch, base)
             finished = self._finish(card, ref, key, record, force=False)
         return {"ref": ref, "mode": "local", "base": base, "commit": commit, **finished}
@@ -276,8 +310,9 @@ class Merger:
             self._persist(key, record)
             activity.append(self.store, ref, f"PR updated: {url}", "herdboard")
             return {"pr_url": url, "pr_action": "pushed"}
-        written = pr_write.request(self, self._card(card, ref), ref, key, record, worktree, base, url,
-                                   lambda: self._persist(key, record))
+        written = pr_write.request(
+            self, self._card(card, ref), ref, key, record, worktree, base, url, lambda: self._persist(key, record)
+        )
         return {"pr_url": url, "pr_action": "writing", **written}
 
     def _merge_local(self, card, ref, key, record, worktree, checkout, branch, base):
@@ -286,15 +321,20 @@ class Merger:
         with _lock(".merge-" + safe_key(str(Path(checkout).resolve())) + ".lock", wait=MERGE_WAIT_SECONDS):
             target = checkout_of(checkout, base)
             if target is not None and _dirty(target, untracked=False):
-                raise MergeError(f"{target} has uncommitted changes on {base}. Commit or stash them first.",
-                                 "base_dirty")
+                raise MergeError(
+                    f"{target} has uncommitted changes on {base}. Commit or stash them first.", "base_dirty"
+                )
             old = _commit(checkout, base)
             if _git(worktree, "rebase", base).returncode:
                 conflicted = _git(worktree, "diff", "--name-only", "--diff-filter=U").stdout.split()
                 _git(worktree, "rebase", "--abort")
                 self._send_conflict(card, ref, key, record, base, conflicted)
-                raise MergeError(f"Rebase of {branch} onto {base} conflicts in {', '.join(conflicted)}. "
-                                 "The card's agent has the conflict.", "rebase_conflict", exit_code=2)
+                raise MergeError(
+                    f"Rebase of {branch} onto {base} conflicts in {', '.join(conflicted)}. "
+                    "The card's agent has the conflict.",
+                    "rebase_conflict",
+                    exit_code=2,
+                )
             head = _commit(worktree, "HEAD")
             if target is not None:
                 result = _git(target, "merge", "--ff-only", "--quiet", branch)
@@ -361,8 +401,11 @@ class Merger:
         expected = work_folder(self.config, ref)
         if folder is not None and folder.resolve() != expected.resolve():
             # The record is the user's file: delete only the folder that belongs to this card.
-            raise MergeError(f"{ref}: the start record names {folder}, not its card folder {expected}. "
-                             "Check the folder, then remove the record by hand.", "io")
+            raise MergeError(
+                f"{ref}: the start record names {folder}, not its card folder {expected}. "
+                "Check the folder, then remove the record by hand.",
+                "io",
+            )
         close_review_pane(ref)
         if record.get("workspace_id"):
             herdr("workspace", "close", record["workspace_id"], tolerated=("workspace_not_found",))
@@ -384,12 +427,12 @@ class Merger:
 
     def _remove_worktree(self, record, worktree):
         try:
-            herdr("worktree", "remove", "--workspace", record["workspace_id"],
-                  tolerated=("workspace_not_found",))
+            herdr("worktree", "remove", "--workspace", record["workspace_id"], tolerated=("workspace_not_found",))
         except StartError as error:
             if error.code == "dirty_worktree_requires_force":
-                raise MergeError(f"{worktree} has uncommitted changes. Commit or remove them first.",
-                                 "worktree_dirty") from error
+                raise MergeError(
+                    f"{worktree} has uncommitted changes. Commit or remove them first.", "worktree_dirty"
+                ) from error
             raise
         if worktree.exists():
             # Herdr no longer has the workspace open: remove the worktree with Git.
