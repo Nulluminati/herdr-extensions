@@ -8,10 +8,10 @@ import tempfile
 import tomllib
 import unittest
 from unittest.mock import patch
+from support.paths import ROOT
 from support.scripts import load_script
 
 
-ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/resource-usage"
 FIXTURES = ROOT / "tests/fixtures/resource-usage"
 resource_usage = load_script("resource-usage", "resource_usage")

@@ -9,10 +9,10 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from support.paths import ROOT
 from support.scripts import load_script
 
 
-ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/auto-title"
 auto_title = load_script("auto-title", "auto_title")
 

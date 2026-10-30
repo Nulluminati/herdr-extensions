@@ -8,10 +8,10 @@ import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
+from support.paths import ROOT
 from support.scripts import load_script
 
 
-ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "plugins/default-layout/examples/layout.toml"
 default_layout = load_script("default-layout", "default_layout")
 

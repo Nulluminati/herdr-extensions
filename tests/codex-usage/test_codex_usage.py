@@ -2,14 +2,13 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import unittest
 from unittest.mock import patch
+from support.paths import ROOT
 from support.scripts import load_script
 
 
-ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/codex-usage"
 codex_usage = load_script("codex-usage", "codex_usage")
 

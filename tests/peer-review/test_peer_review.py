@@ -4,18 +4,15 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+from herdboard import sandbox
 from support.scripts import load_script
 
 
-ROOT = Path(__file__).resolve().parents[1]
 peer_review = load_script("peer-review", "peer_review")
-sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
-
-from herdboard import sandbox  # noqa: E402
 
 
 def git(repository, *arguments):

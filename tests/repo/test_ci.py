@@ -1,10 +1,11 @@
-from pathlib import Path
 import unittest
 
 import yaml
 
+from support.paths import ROOT
 
-WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
+
+WORKFLOW = ROOT / ".github/workflows/ci.yml"
 
 
 class CiTests(unittest.TestCase):

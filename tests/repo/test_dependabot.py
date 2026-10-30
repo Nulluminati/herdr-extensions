@@ -1,10 +1,10 @@
-from pathlib import Path
 import unittest
 
 import yaml
 
+from support.paths import ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
+
 CONFIG = ROOT / ".github/dependabot.yml"
 
 
