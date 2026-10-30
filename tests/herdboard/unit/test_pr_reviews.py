@@ -529,7 +529,8 @@ class ReviewerTests(PrReviewTestCase):
         pr_reviews.start_reviewer(KEY, record, self.pr(), "pi", None, None)
         agent = self.fake.made("herdr", "agent", "start")[0]
         policy = json.loads(agent[agent.index("--sandbox") + 1])
-        self.assertEqual(policy["filesystem"], {"denyWrite": [str(self.worktree)]})
+        self.assertEqual(policy["filesystem"], {"denyWrite": [str(self.worktree)],
+                                                "denyRead": sandbox.secret_paths()})
 
     def test_the_prompt_names_the_session_and_forbids_a_submit(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())

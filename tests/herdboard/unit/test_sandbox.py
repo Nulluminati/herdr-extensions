@@ -12,6 +12,7 @@ from unittest.mock import patch
 from herdboard import sandbox
 
 FOLDER = Path("/state/reviews/r1")
+SECRETS_DENIED = {path: "deny" for path in sandbox.secret_paths()}
 REPO = Path("/work/repo")
 
 
@@ -27,6 +28,35 @@ def codex_value(args, key):
     """The TOML value of one `-c key=value` option."""
     found = [arg for arg in args if arg.startswith(key + "=")]
     return tomllib.loads(found[0])
+
+
+class SecretTests(unittest.TestCase):
+    def test_secret_paths_are_credential_files_and_folders_in_the_home_folder(self):
+        with patch.object(Path, "home", return_value=Path("/home/u")):
+            paths = sandbox.secret_paths()
+        for path in (
+            "/home/u/.ssh",
+            "/home/u/.gnupg",
+            "/home/u/.aws",
+            "/home/u/.netrc",
+            "/home/u/.docker/config.json",
+            "/home/u/.local/share/keyrings",
+            "/home/u/.password-store",
+            "/home/u/.claude/.credentials.json",
+            "/home/u/.codex/auth.json",
+            "/home/u/.pi/agent/auth.json",
+        ):
+            self.assertIn(path, paths)
+        # gh reads private pull requests with its token.
+        self.assertFalse(any(path.startswith("/home/u/.config/gh") for path in paths))
+
+    def test_claude_file_tools_are_denied_the_secrets(self):
+        # Read, Grep and Glob run outside the sandbox, so only a permission rule stops them.
+        args = sandbox.claude_reviewer_options(None, REPO, browser=False, hunk=False)
+        deny = json.loads(args[args.index("--settings") + 1])["permissions"]["deny"]
+        for path in sandbox.secret_paths():
+            self.assertIn(f"Read(/{path})", deny)
+            self.assertIn(f"Read(/{path}/**)", deny)
 
 
 class PortTests(unittest.TestCase):
@@ -77,12 +107,15 @@ class ClaudeTests(unittest.TestCase):
         self.assertEqual(
             settings["network"]["allowedDomains"], ["github.com", "*.github.com", "*.githubusercontent.com"]
         )
-        self.assertEqual(settings["filesystem"], {"allowWrite": [str(FOLDER)], "denyWrite": [str(REPO)]})
+        self.assertEqual(
+            settings["filesystem"],
+            {"allowWrite": [str(FOLDER)], "denyWrite": [str(REPO)], "denyRead": sandbox.secret_paths()},
+        )
         self.assertNotIn("excludedCommands", settings)
 
     def test_no_writable_folder_means_no_allow_write(self):
         settings = claude_settings(sandbox.claude_reviewer_options(None, REPO, browser=False, hunk=False))
-        self.assertEqual(settings["filesystem"], {"denyWrite": [str(REPO)]})
+        self.assertEqual(settings["filesystem"], {"denyWrite": [str(REPO)], "denyRead": sandbox.secret_paths()})
 
     def test_browser_and_hunk_are_excluded_from_the_sandbox(self):
         settings = claude_settings(sandbox.claude_reviewer_options(None, REPO, browser=True, hunk=False))
@@ -120,7 +153,10 @@ class PiTests(unittest.TestCase):
         args = sandbox.pi_reviewer_options(FOLDER, REPO, browser=False, hunk=False)
         self.assertEqual(args[:2], ["--approval-mode", "off"])
         policy = pi_policy(args)
-        self.assertEqual(policy["filesystem"], {"allowWrite": [str(FOLDER)], "denyWrite": [str(REPO)]})
+        self.assertEqual(
+            policy["filesystem"],
+            {"allowWrite": [str(FOLDER)], "denyWrite": [str(REPO)], "denyRead": sandbox.secret_paths()},
+        )
         self.assertEqual(policy["network"]["allowedDomains"], ["github.com", "*.github.com", "*.githubusercontent.com"])
         self.assertNotIn("excludedCommands", policy)
 
@@ -163,7 +199,7 @@ class CodexTests(unittest.TestCase):
         for option in ("features.network_proxy=true", 'web_search="live"', 'default_permissions="hb-review"'):
             self.assertIn(option, args)
         filesystem = codex_value(args, "permissions.hb-review.filesystem")["permissions"]["hb-review"]["filesystem"]
-        self.assertEqual(filesystem, {":root": "read", str(FOLDER): "write"})
+        self.assertEqual(filesystem, {":root": "read", str(FOLDER): "write", **SECRETS_DENIED})
         network = codex_value(args, "permissions.hb-review.network")["permissions"]["hb-review"]["network"]
         self.assertEqual(
             network, {"enabled": True, "domains": {"**.github.com": "allow", "**.githubusercontent.com": "allow"}}
@@ -172,13 +208,13 @@ class CodexTests(unittest.TestCase):
     def test_profile_without_a_folder_writes_nothing(self):
         args = sandbox.codex_reviewer_options("hb-pr-review", None, hunk=False)
         filesystem = codex_value(args, "permissions.hb-pr-review.filesystem")
-        self.assertEqual(filesystem["permissions"]["hb-pr-review"]["filesystem"], {":root": "read"})
+        self.assertEqual(filesystem["permissions"]["hb-pr-review"]["filesystem"], {":root": "read", **SECRETS_DENIED})
 
     def test_profile_quotes_the_folder(self):
         folder = Path('/reviews/a"b\\c')
         args = sandbox.codex_reviewer_options("hb-review", folder, hunk=False)
         filesystem = codex_value(args, "permissions.hb-review.filesystem")["permissions"]["hb-review"]["filesystem"]
-        self.assertEqual(filesystem, {":root": "read", str(folder): "write"})
+        self.assertEqual(filesystem, {":root": "read", str(folder): "write", **SECRETS_DENIED})
 
     def test_hunk_adds_its_local_port(self):
         with patch.dict(os.environ, {"HUNK_MCP_PORT": "5000"}):

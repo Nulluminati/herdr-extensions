@@ -23,6 +23,19 @@ POLL_SECONDS = 5
 # Claude's and pi's sandbox reject "*", so the shell reaches GitHub only. Codex matches them.
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
 CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
+# Credential files and folders in the home folder that the reviewer may not read. gh keeps its token.
+SECRETS = (
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".netrc",
+    ".docker/config.json",
+    ".local/share/keyrings",
+    ".password-store",
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+    ".pi/agent/auth.json",
+)
 # Tools outside pi's sandbox that only read remote documentation and search results.
 PI_READ_TOOLS = (
     "read",
@@ -98,6 +111,10 @@ def review_root() -> Path:
     return Path(state) / "peer-review"
 
 
+def secret_paths() -> list[str]:
+    return [str(Path.home() / secret) for secret in SECRETS]
+
+
 def shared_git_folder(path: Path) -> list[Path]:
     """The Git folder that a linked worktree shares with its main checkout, when it lies outside `path`."""
     try:
@@ -124,6 +141,7 @@ def sandbox_policy(review: Path, repository: Path) -> dict:
         "filesystem": {
             "allowWrite": [str(review)],
             "denyWrite": [str(repository), *map(str, shared_git_folder(repository))],
+            "denyRead": secret_paths(),
         },
     }
 
@@ -135,7 +153,7 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
         f"Read {review / 'request.md'} and do the review it asks for. "
         f"Write your findings to {review / 'findings.md'} and nowhere else."
     )
-    # The reviewer may run any shell command in an OS sandbox: it reads the whole disk, writes only
+    # The reviewer may run any shell command in an OS sandbox: it reads the disk except SECRETS, writes only
     # the review folder and reaches only GitHub. Nobody answers prompts, so no approval judge runs.
     if reviewer == "pi":
         tools = ",".join((*PI_READ_TOOLS, "write"))
@@ -151,6 +169,7 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
         ]
     if reviewer == "codex":
         path = json.dumps(str(review), ensure_ascii=False)
+        secrets = "".join(f',{json.dumps(secret, ensure_ascii=False)}="deny"' for secret in secret_paths())
         domains = ",".join(f'{json.dumps(domain)}="allow"' for domain in CODEX_GITHUB_DOMAINS)
         return [
             "-a",
@@ -162,18 +181,21 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
             "-c",
             'default_permissions="hb-review"',
             "-c",
-            f'permissions.hb-review.filesystem={{":root"="read",{path}="write"}}',
+            f'permissions.hb-review.filesystem={{":root"="read",{path}="write"{secrets}}}',
             "-c",
             f"permissions.hb-review.network={{enabled=true,domains={{{domains}}}}}",
             prompt,
         ]
+    # Read, Grep and Glob run outside the sandbox, so a permission rule keeps them from SECRETS too.
+    deny = [rule for secret in secret_paths() for rule in (f"Read(/{secret})", f"Read(/{secret}/**)")]
     settings = {
+        "permissions": {"deny": deny},
         "sandbox": {
             "enabled": True,
             "failIfUnavailable": True,
             "allowUnsandboxedCommands": False,
             **sandbox_policy(review, repository),
-        }
+        },
     }
     # The prompt goes first because --allowedTools takes every value after it.
     return [

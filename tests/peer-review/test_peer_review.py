@@ -255,7 +255,10 @@ class PeerReviewTests(unittest.TestCase):
             start[start.index("--") + 2 :], peer_review.reviewer_arguments("claude", review, self.repository)[1:]
         )
         settings = json.loads(start[start.index("--settings") + 1])["sandbox"]
-        self.assertEqual(settings["filesystem"], {"allowWrite": [str(review)], "denyWrite": [str(self.repository)]})
+        self.assertEqual(
+            settings["filesystem"],
+            {"allowWrite": [str(review)], "denyWrite": [str(self.repository)], "denyRead": sandbox.secret_paths()},
+        )
         self.assertIn(f"Edit(/{review}/**)", start)
 
     def test_two_requests_in_one_second_get_two_review_folders(self):

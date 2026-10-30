@@ -1,7 +1,7 @@
 """Command-line options that put an unattended reviewer agent in an OS sandbox.
 
-A reviewer may run any shell command. The sandbox lets it read the whole disk, write only its own
-folder (or nothing), and reach only GitHub over the shell network. No approval judge runs: nobody
+A reviewer may run any shell command. The sandbox lets it read the whole disk except credentials, write
+only its own folder (or nothing), and reach only GitHub over the shell network. No approval judge runs: nobody
 answers a prompt in a reviewer pane. Web tools (Claude WebFetch, pi web_fetch, Codex live web
 search) and documentation MCP servers run outside the sandbox and only read.
 """
@@ -17,6 +17,20 @@ from pathlib import Path
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
 CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
 HUNK_DEFAULT_PORT = 47657
+# Credential files and folders in the home folder. A prompt in a PR must not make a reviewer read them.
+# ~/.config/gh stays readable: gh needs its token to read a private pull request.
+SECRETS = (
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".netrc",
+    ".docker/config.json",
+    ".local/share/keyrings",
+    ".password-store",
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+    ".pi/agent/auth.json",
+)
 # Tools outside pi's sandbox that only read remote documentation and search results.
 PI_READ_TOOLS = (
     "read",
@@ -31,6 +45,11 @@ PI_READ_TOOLS = (
     "context7_get_cached_doc_raw",
     "code_search",
 )
+
+
+def secret_paths() -> list[str]:
+    """The absolute paths of SECRETS. The sandbox skips a path that does not exist."""
+    return [str(Path.home() / secret) for secret in SECRETS]
 
 
 def hunk_port() -> int:
@@ -64,6 +83,7 @@ def _policy(writable: Path | None, read_only: Path, domains: list[str], excluded
     filesystem = {"allowWrite": [str(writable)]} if writable else {}
     # The sandbox writes the working directory unless denyWrite names it.
     filesystem["denyWrite"] = [str(read_only), *map(str, shared_git_folder(read_only))]
+    filesystem["denyRead"] = secret_paths()
     policy = {"network": {"allowedDomains": domains}, "filesystem": filesystem}
     if excluded:
         # terminal-browser splits panes through the Herdr socket, which the sandbox blocks.
@@ -76,7 +96,12 @@ def claude_reviewer_options(writable: Path | None, read_only: Path, browser: boo
     # Claude's sandbox sends 127.0.0.1 past its proxy, so Hunk runs outside the sandbox instead.
     excluded = ["terminal-browser *"] * browser + ["hunk session *"] * hunk
     policy = _policy(writable, read_only, list(GITHUB_DOMAINS), excluded)
-    settings = {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, **policy}}
+    # Read, Grep and Glob run outside the sandbox, so a permission rule keeps them from the secrets too.
+    deny = [rule for path in secret_paths() for rule in (f"Read(/{path})", f"Read(/{path}/**)")]
+    settings = {
+        "permissions": {"deny": deny},
+        "sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, **policy},
+    }
     return ["--permission-mode", "dontAsk", "--settings", json.dumps(settings)]
 
 
@@ -111,6 +136,7 @@ def codex_reviewer_options(name: str, writable: Path | None, hunk: bool) -> list
     filesystem = '":root"="read"'
     if writable:
         filesystem += f',{json.dumps(str(writable), ensure_ascii=False)}="write"'
+    filesystem += "".join(f',{json.dumps(path, ensure_ascii=False)}="deny"' for path in secret_paths())
     domains = list(CODEX_GITHUB_DOMAINS) + [f"127.0.0.1:{hunk_port()}"] * hunk
     allowed = ",".join(f'{json.dumps(domain)}="allow"' for domain in domains)
     return [
