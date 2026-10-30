@@ -17,6 +17,7 @@ from herdboard.config import Config  # noqa: E402
 from herdboard.store import CardView, Store  # noqa: E402
 
 from test_herdboard_cli import CliTestCase  # noqa: E402
+from test_herdboard_linear_cli import LinearCliCase  # noqa: E402
 
 
 def card(**fields):
@@ -171,6 +172,27 @@ class CachedLookupTests(unittest.TestCase):
         now[0] = 60
         self.assertEqual(lookup("ENG-1"), 2)
 
+    def test_a_failed_lookup_waits_for_the_interval_too(self):
+        from herdboard.details_view import CachedLookup
+        from herdboard.model import NotFoundError
+        now = [0.0]
+        calls = []
+
+        def missing(ref):
+            calls.append(ref)
+            raise NotFoundError(f"No card {ref}")
+        lookup = CachedLookup(missing, seconds=60, clock=lambda: now[0])
+        for _ in range(3):
+            with self.assertRaises(NotFoundError):
+                lookup("ENG-1")
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(lookup.at is not None and lookup.clock() - lookup.at < lookup.seconds,
+                        "the view's check finds the failed lookup not due")
+        now[0] = 60
+        with self.assertRaises(NotFoundError):
+            lookup("ENG-1")
+        self.assertEqual(len(calls), 2)
+
 
 class DetailsAppTests(StoreCase, unittest.IsolatedAsyncioTestCase):
     async def test_draws_the_card_and_redraws_after_a_log_entry(self):
@@ -203,6 +225,29 @@ class DetailsCliTests(CliTestCase):
         run.assert_called_once_with()
         self.assertEqual(made.call_args.args[2], ref)
         self.assertFalse(list(self.todos.glob("acme*.md")))
+
+
+class DetailsLinearCliTests(LinearCliCase):
+    def test_a_lookup_after_a_network_failure_asks_linear_again(self):
+        from herdboard.linear import LinearClient, LinearNetworkError
+        from herdboard.model import HerdboardError
+        with mock.patch("herdboard.details_view.DetailsApp.run"), \
+                mock.patch("herdboard.details_view.DetailsApp.__init__", return_value=None) as made:
+            self.run_cli("details", "eng-3", directory=self.plain)
+        linear_card = made.call_args.args[3]
+        issue = LinearClient.issue
+        calls = []
+
+        def down_once(client, identifier):
+            calls.append(identifier)
+            if len(calls) == 1:
+                raise LinearNetworkError("down")
+            return issue(client, identifier)
+        with mock.patch.object(LinearClient, "issue", autospec=True, side_effect=down_once):
+            with self.assertRaises(HerdboardError):
+                linear_card("ENG-3")
+            self.assertEqual(linear_card("ENG-3").ref, "ENG-3")
+        self.assertEqual(calls, ["ENG-3", "ENG-3"])
 
 
 class PaneHerdr:

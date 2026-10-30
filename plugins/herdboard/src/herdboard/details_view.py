@@ -24,19 +24,28 @@ LINEAR_SECONDS = 60.0
 
 
 class CachedLookup:
-    """`lookup(ref)`, kept for `seconds`, so the redraws after file changes do not ask Linear each time."""
+    """`lookup(ref)`, kept for `seconds`, so the redraws after file changes do not ask Linear each time.
+
+    A failed lookup is kept too: its error is raised again until `seconds` pass.
+    """
 
     def __init__(self, lookup: Callable, seconds: float = LINEAR_SECONDS, clock: Callable[[], float] = time.monotonic):
         self.lookup = lookup
         self.seconds = seconds
         self.clock = clock
         self.found = None
+        self.error: HerdboardError | None = None
         self.at: float | None = None
 
     def __call__(self, ref: str):
         if self.at is None or self.clock() - self.at >= self.seconds:
-            self.found = self.lookup(ref)
+            try:
+                self.found, self.error = self.lookup(ref), None
+            except HerdboardError as error:
+                self.found, self.error = None, error
             self.at = self.clock()
+        if self.error is not None:
+            raise self.error
         return self.found
 
 

@@ -749,6 +749,8 @@ def _cmd_details(ctx: _Context) -> dict:
     linear_card = None
     if LINEAR_REF.match(ref) and ctx.views.source.active:
         def linear_card(found: str) -> CardView:
+            # Each lookup asks Linear again, also after an earlier network failure.
+            ctx.views.source.begin_refresh()
             return _find_linear_card(ctx, found)[0]
     DetailsApp(ctx.store, ctx.config, ref.upper() if LINEAR_REF.match(ref) else ref, linear_card).run()
     return {"exit_code": 0}
