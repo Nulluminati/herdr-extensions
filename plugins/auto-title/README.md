@@ -15,7 +15,9 @@ The plugin picks one pane of the tab, then takes the first of these that is not 
 
 The pane is an agent pane when the tab has one. A pane with a herdboard card comes first, then a pane with a session name, then the focused pane. So a review or pull request split does not take the title from the card's agent. A tab with no agent uses its focused pane, else its first pane.
 
-Titles have at most 40 columns. A longer title ends with `…`.
+A herdboard planner tab gets the prefix `Planning: `, such as `Planning: Codex support plan`. A planner tab is a tab that had a planning label such as `plan tveq`, or a tab in a workspace with that label. herdboard gives a card planner the tab label and an automation planner the workspace label.
+
+Titles have at most 40 columns, with the prefix. A longer title ends with `…`.
 
 ## Your labels stay
 
@@ -99,7 +101,7 @@ The plugin keeps its state in the plugin state folder, `~/.local/state/herdr/plu
 
 | File | Content |
 |---|---|
-| `tabs.json` | The label the plugin wrote to each tab, and the tabs marked for reset |
+| `tabs.json` | The label the plugin wrote to each tab, the planner tabs, and the tabs marked for reset |
 | `paused` | Present while the plugin is paused |
 | `poller.lock`, `poller.pid` | The running poller |
 | `state.lock` | Held while the poller or an action changes `tabs.json` |

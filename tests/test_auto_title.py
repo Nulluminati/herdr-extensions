@@ -177,6 +177,7 @@ class FakeHerdr:
     def __init__(self):
         self.tabs = fixture("tab_list.json")
         self.panes = fixture("pane_list.json")
+        self.workspaces = fixture("workspace_list.json")
         self.programs = {"w1:p2": "fish", "w1:p3": "nvim", "w1:p5": "herdboard"}
         self.calls = []
         self.error = None
@@ -201,6 +202,8 @@ class FakeHerdr:
             return reply(self.tabs)
         if arguments == ["pane", "list"]:
             return reply(self.panes)
+        if arguments == ["workspace", "list"]:
+            return reply(self.workspaces)
         if arguments[:3] == ["pane", "process-info", "--pane"]:
             program = self.programs.get(arguments[3])
             if program is None:
@@ -247,7 +250,7 @@ class ReconcileTests(HerdrTestCase):
         self.assertEqual(self.herdr.renames(), [
             ["w1:t1", "Herdboard tveq auto tab titles"],
             ["w1:t2", "nvim"],
-            ["w1:t3", "Codex support plan"],
+            ["w1:t3", "Planning: Codex support plan"],
         ])
         self.assertEqual(state["tabs"]["w1:t2"], {"written": "nvim"})
         self.assertEqual(self.herdr.tab("w1:t4")["label"], "board")
@@ -296,6 +299,36 @@ class ReconcileTests(HerdrTestCase):
         self.assertEqual(self.herdr.tab("w1:t4")["label"], "herdboard")
         self.assertEqual(state["reset"], [])
         self.assertEqual(state["tabs"]["w1:t4"], {"written": "herdboard"})
+
+    def test_planner_tab_keeps_its_prefix_after_the_plan_label_is_gone(self):
+        state = {"tabs": {}, "reset": []}
+        auto_title.reconcile(state, CONFIG)
+        self.assertEqual(state["tabs"]["w1:t3"], {"written": "Planning: Codex support plan", "planning": True})
+        pane = next(pane for pane in self.herdr.panes["result"]["panes"] if pane["tab_id"] == "w1:t3")
+        pane["tokens"]["pi_session_name"] = "Renamed plan"
+        auto_title.reconcile(state, CONFIG)
+        self.assertEqual(self.herdr.tab("w1:t3")["label"], "Planning: Renamed plan")
+
+    def test_tab_in_a_planner_workspace_gets_the_prefix(self):
+        self.herdr.workspaces["result"]["workspaces"].append({"label": "plan tauto", "workspace_id": "w2"})
+        self.herdr.tabs["result"]["tabs"].append({"label": "1", "tab_id": "w2:t1", "workspace_id": "w2"})
+        self.herdr.panes["result"]["panes"].append(agent_pane(
+            "w2:p1", tab_id="w2:t1", tokens={"claude_session_name": "Weekly cleanup"}))
+        state = {"tabs": {}, "reset": []}
+        auto_title.reconcile(state, CONFIG)
+        self.assertEqual(self.herdr.tab("w2:t1")["label"], "Planning: Weekly cleanup")
+
+    def test_prefix_counts_toward_max_length(self):
+        auto_title.reconcile({"tabs": {}, "reset": []}, {"max_length": 15, "poll_seconds": 2.0})
+        self.assertEqual(self.herdr.tab("w1:t3")["label"], "Planning: Code…")
+
+    def test_manual_rename_of_a_planner_tab_stops_updates(self):
+        state = {"tabs": {}, "reset": []}
+        auto_title.reconcile(state, CONFIG)
+        self.herdr.tab("w1:t3")["label"] = "mine"
+        self.herdr.calls.clear()
+        auto_title.reconcile(state, CONFIG)
+        self.assertEqual(self.herdr.renames(), [])
 
     def test_stale_tab_ids_are_removed(self):
         state = {"tabs": {"w9:t1": {"written": "gone"}}, "reset": ["w9:t2"]}

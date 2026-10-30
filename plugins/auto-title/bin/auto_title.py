@@ -5,9 +5,10 @@
 """Give each Herdr tab a title from its panes.
 
 The title is the agent's session name, else other agent context, else the name
-of the program in the pane. The plugin renames only tabs it owns: a default
-number label, a herdboard `plan <ref>` label, the label it wrote last, or a tab
-that the reset action handed back. Any other label is the user's.
+of the program in the pane. A herdboard planner tab gets the `Planning: `
+prefix. The plugin renames only tabs it owns: a default number label, a
+herdboard `plan <ref>` label, the label it wrote last, or a tab that the reset
+action handed back. Any other label is the user's.
 
 Herdr sends no event when a pane is renamed or a token changes, so a background
 poller (one per Herdr server) runs a pass every few seconds.
@@ -34,6 +35,7 @@ DEFAULTS = {"max_length": 40, "poll_seconds": 2.0}
 SESSION_TOKENS = ("claude_session_name", "pi_session_name")
 CARD_TOKEN = "herdboard_card"
 PLAN_LABEL = re.compile(r"plan [0-9a-z]+")
+PLANNING_PREFIX = "Planning: "
 # Error text of a Herdr call when the server is gone, not just one failed call.
 SERVER_GONE = ("server_not_running", "server_unavailable", "Required program not found")
 SERVER_GONE_SECONDS = 30
@@ -239,14 +241,27 @@ def owned(tab: dict, state: dict) -> str | None:
     return None
 
 
+def planning(tab: dict, state: dict, workspaces: dict[str, str]) -> bool:
+    """A herdboard planner tab: a card planner has a `plan <ref>` tab label, which the plugin
+    replaces, so the state remembers it; an automation planner has a `plan <ref>` workspace."""
+    if PLAN_LABEL.fullmatch(tab.get("label") or ""):
+        return True
+    if PLAN_LABEL.fullmatch(workspaces.get(tab.get("workspace_id"), "")):
+        return True
+    return bool((state["tabs"].get(tab["tab_id"]) or {}).get("planning"))
+
+
 # Herdr passes
 
-def snapshot() -> tuple[list[dict], dict[str, list[dict]]]:
+def snapshot() -> tuple[list[dict], dict[str, list[dict]], dict[str, str]]:
+    """The tabs, the panes of each tab and the label of each workspace."""
     tabs = herdr("tab", "list").get("tabs", [])
     panes: dict[str, list[dict]] = {}
     for pane in herdr("pane", "list").get("panes", []):
         panes.setdefault(pane["tab_id"], []).append(pane)
-    return tabs, panes
+    workspaces = {workspace["workspace_id"]: workspace.get("label") or ""
+                  for workspace in herdr("workspace", "list").get("workspaces", [])}
+    return tabs, panes, workspaces
 
 
 def program_name(pane_id: str) -> str | None:
@@ -258,7 +273,7 @@ def program_name(pane_id: str) -> str | None:
     return processes[0].get("name") if processes else None
 
 
-def choose_title(panes: list[dict], config: dict) -> dict | None:
+def choose_title(panes: list[dict], config: dict, prefix: str = "") -> dict | None:
     """The source pane, the source used and the title for a tab, or None without a source."""
     pane = source_pane(panes)
     if pane is None:
@@ -269,12 +284,12 @@ def choose_title(panes: list[dict], config: dict) -> dict | None:
         found = 4, "program", program_name(pane["pane_id"]) or ""
     number, name, text = found
     return {"pane": pane["pane_id"], "number": number, "name": name,
-            "title": clean(text, config["max_length"])}
+            "title": clean(prefix + text if text else "", config["max_length"])}
 
 
 def reconcile(state: dict, config: dict) -> bool:
     """Rename every tab the plugin owns. Return True when the state changed."""
-    tabs, panes = snapshot()
+    tabs, panes, workspaces = snapshot()
     changed = False
     # Herdr can reuse a tab ID, so forget tabs that are gone.
     live = {tab["tab_id"] for tab in tabs}
@@ -290,14 +305,16 @@ def reconcile(state: dict, config: dict) -> bool:
         tab_id = tab["tab_id"]
         if not owned(tab, state):
             continue
-        choice = choose_title(panes.get(tab_id, []), config)
+        planner = planning(tab, state, workspaces)
+        choice = choose_title(panes.get(tab_id, []), config, PLANNING_PREFIX if planner else "")
         if not choice or not choice["title"]:
             continue
         title = choice["title"]
         if title != tab.get("label"):
             herdr("tab", "rename", tab_id, title)
-        if state["tabs"].get(tab_id) != {"written": title} or tab_id in state["reset"]:
-            state["tabs"][tab_id] = {"written": title}
+        record = {"written": title, "planning": True} if planner else {"written": title}
+        if state["tabs"].get(tab_id) != record or tab_id in state["reset"]:
+            state["tabs"][tab_id] = record
             state["reset"] = [other for other in state["reset"] if other != tab_id]
             changed = True
     return changed
@@ -426,12 +443,14 @@ def reset(state_dir: Path, config: dict) -> None:
 
 def doctor(state_dir: Path, config: dict) -> str:
     tab_id = focused_tab_id()
-    tabs, panes = snapshot()
+    tabs, panes, workspaces = snapshot()
     tab = next((tab for tab in tabs if tab["tab_id"] == tab_id), None)
     if tab is None:
         raise TitleError(f"Tab {tab_id} not found")
-    reason = owned(tab, load_state(state_dir))
-    choice = choose_title(panes.get(tab_id, []), config)
+    state = load_state(state_dir)
+    reason = owned(tab, state)
+    prefix = PLANNING_PREFIX if planning(tab, state, workspaces) else ""
+    choice = choose_title(panes.get(tab_id, []), config, prefix)
     poller = "running" if poller_running(state_dir) else "not running"
     if (state_dir / "paused").exists():
         poller += ", paused"

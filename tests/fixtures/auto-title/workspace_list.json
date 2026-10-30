@@ -1,0 +1,3 @@
+{"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[
+{"active_tab_id":"w1:t1","agent_status":"working","focused":true,"label":"herdr-extensions","number":1,"pane_count":5,"tab_count":4,"workspace_id":"w1"}
+]}}
