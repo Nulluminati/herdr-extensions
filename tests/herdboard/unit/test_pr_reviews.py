@@ -502,10 +502,11 @@ class ReviewerTests(PrReviewTestCase):
             pr_reviews._validate("codex", None, "off")
         self.assertEqual(raised.exception.code, "usage")
 
-    def test_claude_gets_the_sandbox_with_browser_and_hunk(self):
+    def test_claude_gets_the_sandbox_with_hunk_and_no_browser(self):
         arguments = pr_reviews.reviewer_arguments("claude", "Read it", Path("/pr"), "sonnet", None)
         self.assertEqual(arguments[0], "Read it")
-        options = sandbox.claude_reviewer_options(None, Path("/pr"), browser=True, hunk=True)
+        # terminal-browser runs outside the sandbox and reads any file, and a PR can ask for that.
+        options = sandbox.claude_reviewer_options(None, Path("/pr"), browser=False, hunk=True)
         self.assertEqual(arguments[1 : 1 + len(options)], options)
         self.assertLess(arguments.index("--model"), arguments.index("--allowedTools"))
         self.assertEqual(arguments[arguments.index("--allowedTools") :], sandbox.claude_reviewer_tools(None))
@@ -518,7 +519,7 @@ class ReviewerTests(PrReviewTestCase):
 
     def test_pi_gets_the_sandbox_and_its_thinking_level(self):
         arguments = pr_reviews.reviewer_arguments("pi", "Read it", Path("/pr"), "zai/glm-5.3", "high")
-        options = sandbox.pi_reviewer_options(None, Path("/pr"), browser=True, hunk=True)
+        options = sandbox.pi_reviewer_options(None, Path("/pr"), browser=False, hunk=True)
         self.assertEqual(arguments[: len(options)], options)
         self.assertNotIn("--bash-allow", arguments)
         self.assertEqual(arguments[-2:], ["--", "Read it"])
@@ -529,8 +530,7 @@ class ReviewerTests(PrReviewTestCase):
         pr_reviews.start_reviewer(KEY, record, self.pr(), "pi", None, None)
         agent = self.fake.made("herdr", "agent", "start")[0]
         policy = json.loads(agent[agent.index("--sandbox") + 1])
-        self.assertEqual(policy["filesystem"], {"denyWrite": [str(self.worktree)],
-                                                "denyRead": sandbox.secret_paths()})
+        self.assertEqual(policy["filesystem"], {"denyWrite": [str(self.worktree)], "denyRead": sandbox.secret_paths()})
 
     def test_the_prompt_names_the_session_and_forbids_a_submit(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
@@ -542,14 +542,11 @@ class ReviewerTests(PrReviewTestCase):
             str(self.worktree),
             "--author Claude",
             "Do not submit",
-            "terminal-browser open --no-merge --split right",
-            "terminal-browser action",
             "do not start a server",
-            "Do not open a file from the PR checkout",
-            "Never run `terminal-browser shutdown`",
             "You may run any read-only command",
         ):
             self.assertIn(part, text)
+        self.assertNotIn("terminal-browser", text)
         self.assertNotIn("Run no command other than", text)
 
     def test_start_reviewer_starts_the_agent_and_its_worker(self):

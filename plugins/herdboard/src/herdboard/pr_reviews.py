@@ -585,10 +585,11 @@ def _comments(session_id: str, kind: str) -> list[dict]:
 
 def reviewer_arguments(kind: str, prompt: str, checkout: Path, model: str | None, thinking: str | None) -> list[str]:
     """The reviewer's arguments after Herdr's `--`: any shell command in a sandbox that writes nothing, keeps
-    `checkout` read-only and reaches only GitHub and the Hunk daemon. terminal-browser runs outside it."""
+    `checkout` read-only and reaches only GitHub and the Hunk daemon. A PR is untrusted, so the reviewer gets no
+    terminal-browser: it runs outside the sandbox and can read any file."""
     if kind == "pi":
         options = (["--model", model] if model else []) + (["--thinking", thinking] if thinking else [])
-        return [*sandbox.pi_reviewer_options(None, checkout, browser=True, hunk=True), *options, "--", prompt]
+        return [*sandbox.pi_reviewer_options(None, checkout, browser=False, hunk=True), *options, "--", prompt]
     if kind == "codex":
         return [
             *sandbox.codex_reviewer_options("hb-pr-review", None, hunk=True),
@@ -597,7 +598,7 @@ def reviewer_arguments(kind: str, prompt: str, checkout: Path, model: str | None
     # The prompt goes first, and --allowedTools last, because --allowedTools takes every value after it.
     return [
         prompt,
-        *sandbox.claude_reviewer_options(None, checkout, browser=True, hunk=True),
+        *sandbox.claude_reviewer_options(None, checkout, browser=False, hunk=True),
         *(["--model", model] if model else []),
         *(["--effort", thinking] if thinking else []),
         *sandbox.claude_reviewer_tools(None),
@@ -622,20 +623,17 @@ Review the GitHub pull request {repo}#{number}: {pr.title}
 2. Read the PR: `gh pr view {number} --repo {repo} --json title,body,author,files,commits,comments,reviews`,
    `gh pr diff {number} --repo {repo}` and `gh pr checks {number} --repo {repo}`.
 3. Read the surrounding code in the checkout when you need context.
-4. To check the PR page or a server that already runs, use `terminal-browser open --no-merge --split right <url>`
-   and `terminal-browser action -- <command>`. Do not open a file from the PR checkout: that runs the PR's code.
-5. Review the change for bugs, security problems, missing tests and unclear code.
-6. Add each finding as one note on the diff line it is about:
+4. Review the change for bugs, security problems, missing tests and unclear code.
+5. Add each finding as one note on the diff line it is about:
    `hunk session comment add {session} --file PATH --new-line N --summary "..." --rationale "..." --author {author}`
    Use `--old-line N` for a removed line. Put the severity (high, medium or low) at the start of the summary.
-7. End with a short summary in this chat: the verdict, and the notes you added.
+6. End with a short summary in this chat: the verdict, and the notes you added.
 
 ## Rules
 
 - Do not edit, create or delete files.
 - You may run any read-only command, such as `git log`, `grep` or other `gh` reads.
 - Do not run tests, builds or any code of the PR, and do not start a server.
-- Never run `terminal-browser shutdown`: it closes every browser on the machine.
 - Do not change Git state: no checkout, commit, fetch, reset or push.
 - Do not submit, approve or comment on GitHub. Do not run `gh pr review` or `gh pr comment`.
   The user reads your notes and submits the review.

@@ -478,14 +478,15 @@ Each role gets the same permissions in Claude, pi and Codex. The work agent and 
 | Planner (`plan`) | as the work agent, plus `--add-dir` for the attachments folder | as the work agent, with all its tools | as the work agent, plus `--add-dir` for the attachments folder |
 | Card reviewer (`review --agent`) | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser |
 | PR writer (`merge --pr`) | sandbox, writes the description folder | sandbox, writes the description folder | sandbox, writes the description folder |
-| PR reviewer (`pr-review`) | sandbox, writes nothing, browser, Hunk | sandbox, writes nothing, browser, Hunk | sandbox, writes nothing, browser, Hunk |
+| PR reviewer (`pr-review`) | sandbox, writes nothing, Hunk | sandbox, writes nothing, Hunk | sandbox, writes nothing, Hunk (the global `terminal-browser` rule still applies) |
 
 The reviewer sandbox:
 
-- The reviewer may run any shell command. The sandbox reads the whole disk and writes only the role's folder. The repository or PR checkout stays read-only.
+- The reviewer may run any shell command. The sandbox reads the whole disk except credentials and writes only the role's folder. The repository or PR checkout stays read-only.
+- The credentials are `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.netrc`, `~/.docker/config.json`, `~/.local/share/keyrings`, `~/.password-store` and the Claude, Codex and pi auth files. Claude also gets `Read` deny rules for them, because its `Read`, `Grep` and `Glob` tools run outside the sandbox. `~/.config/gh` stays readable: `gh` needs its token for private PRs.
 - The shell reaches only GitHub: `github.com`, its subdomains and `*.githubusercontent.com`. `gh` uses your token. Claude's and pi's sandboxes do not accept all hosts, so Codex gets the same list.
 - Web tools run outside the sandbox and read other pages: Claude `WebFetch` and `WebSearch`, pi `web_fetch` and `web_search`, Codex live web search. The context7 and grep_app documentation tools (pi: the context7 tools and `code_search`) also run outside it.
-- With the browser, `terminal-browser` runs outside the sandbox, because it splits panes through the Herdr socket.
+- With the browser, `terminal-browser` runs outside the sandbox, because it splits panes through the Herdr socket. It can open `file://` addresses, so it reads any file. The PR reviewer gets no browser for this reason.
 - The PR reviewer reaches the Hunk daemon on `127.0.0.1` (port `HUNK_MCP_PORT`, default 47657). Claude runs `hunk session` outside its sandbox instead, because its sandbox does not send `127.0.0.1` through its proxy.
 - Claude runs in `dontAsk` mode with a `--settings` sandbox that fails when the sandbox is not available. Its allowed tools are `Read`, `Grep`, `Glob`, `Bash`, `WebFetch`, `WebSearch`, `Skill`, the `context7` and `grep_app` MCP servers, and `Edit` and `Write` in the role's folder.
 - pi runs with `--approval-mode off` and a `--sandbox` policy. Its tools are `read`, `grep`, `find`, `ls`, `bash`, `web_fetch`, `web_search`, the context7 tools, `code_search`, and `write` when the role has a folder.
@@ -556,7 +557,7 @@ description = "herdboard: review pull requests"
 What the reviewer can do:
 
 - Every reviewer may run any read-only command in a sandbox that writes no file and keeps the PR checkout read-only. The shell reaches only GitHub and the local Hunk service. See [Agent permissions](#agent-permissions).
-- Every reviewer may use `terminal-browser` to check the PR page or a server that already runs.
+- The reviewer gets no `terminal-browser`: it runs outside the sandbox and can read any file, and a PR can ask for that. Codex is the exception while its global `terminal-browser` rule is in `~/.codex/rules/`.
 - The prompt forbids code execution, Git changes and any submission to GitHub. The sandbox cannot block a submit through `gh`: it uses your token.
 - No reviewer runs the tests or the code of the PR.
 
