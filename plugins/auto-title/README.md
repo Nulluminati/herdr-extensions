@@ -24,7 +24,7 @@ Titles have at most 40 columns, with the prefix. A longer title ends with `…`.
 The plugin renames a tab only when its label is one of these:
 
 - digits only, which is Herdr's default label;
-- a herdboard planning label, such as `plan tveq`;
+- a herdboard planning label, such as `plan tveq` or `plan ENG-123`;
 - the label the plugin wrote last.
 
 Any other label is yours, and the plugin does not change it. To make a tab automatic again, run the reset action, or rename the tab to digits only.

@@ -157,6 +157,9 @@ class OwnedTests(unittest.TestCase):
     def test_herdboard_plan_label_is_owned(self):
         self.assertTrue(auto_title.owned({"tab_id": "w1:t1", "label": "plan tveq"}, self.state()))
 
+    def test_linear_plan_label_is_owned(self):
+        self.assertTrue(auto_title.owned({"tab_id": "w1:t1", "label": "plan ENG-123"}, self.state()))
+
     def test_plan_label_must_match_exactly(self):
         self.assertFalse(auto_title.owned({"tab_id": "w1:t1", "label": "plan tveq now"}, self.state()))
 
@@ -308,6 +311,11 @@ class ReconcileTests(HerdrTestCase):
         pane["tokens"]["pi_session_name"] = "Renamed plan"
         auto_title.reconcile(state, CONFIG)
         self.assertEqual(self.herdr.tab("w1:t3")["label"], "Planning: Renamed plan")
+
+    def test_linear_planner_tab_gets_the_prefix(self):
+        self.herdr.tab("w1:t3")["label"] = "plan ENG-123"
+        auto_title.reconcile({"tabs": {}, "reset": []}, CONFIG)
+        self.assertEqual(self.herdr.tab("w1:t3")["label"], "Planning: Codex support plan")
 
     def test_tab_in_a_planner_workspace_gets_the_prefix(self):
         self.herdr.workspaces["result"]["workspaces"].append({"label": "plan tauto", "workspace_id": "w2"})

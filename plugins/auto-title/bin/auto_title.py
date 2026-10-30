@@ -34,7 +34,8 @@ PLUGIN_ID = "nulluminati.auto-title"
 DEFAULTS = {"max_length": 40, "poll_seconds": 2.0}
 SESSION_TOKENS = ("claude_session_name", "pi_session_name")
 CARD_TOKEN = "herdboard_card"
-PLAN_LABEL = re.compile(r"plan [0-9a-z]+")
+# A herdboard card ref, such as `tveq`, or a Linear issue identifier, such as `ENG-123`.
+PLAN_LABEL = re.compile(r"plan (?:[0-9a-z]+|[A-Za-z][A-Za-z0-9]*-[0-9]+)")
 PLANNING_PREFIX = "Planning: "
 # Error text of a Herdr call when the server is gone, not just one failed call.
 SERVER_GONE = ("server_not_running", "server_unavailable", "Required program not found")
