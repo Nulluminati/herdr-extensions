@@ -13,7 +13,7 @@ from support.paths import ROOT
 from support.scripts import load_script
 
 
-FIXTURES = ROOT / "tests/fixtures/auto-title"
+FIXTURES = ROOT / "tests/auto-title/fixtures"
 auto_title = load_script("auto-title", "auto_title")
 
 CONFIG = {"max_length": 40, "poll_seconds": 2.0}

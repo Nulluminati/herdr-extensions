@@ -23,7 +23,7 @@ from herdboard.model import ConflictError, HerdboardError, IoError, NotFoundErro
 from herdboard.store import Store  # noqa: E402
 from support.herdboard_board import BoardTestCase, SIZE, fill, settle  # noqa: E402
 
-FIXTURE = ROOT / "tests/fixtures/herdboard/kanban-2.0.51-full.md"
+FIXTURE = ROOT / "tests/herdboard/fixtures/kanban-2.0.51-full.md"
 NARROW = (80, 24)
 
 

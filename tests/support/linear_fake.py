@@ -9,12 +9,13 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 import graphql
 from graphql.execution.values import get_variable_values
 
-SCHEMA_PATH = Path(__file__).resolve().parents[1] / "fixtures/linear/schema.graphql.gz"
+from support.paths import ROOT
+
+SCHEMA_PATH = ROOT / "tests/herdboard/fixtures/linear/schema.graphql.gz"
 
 
 @functools.lru_cache(maxsize=1)

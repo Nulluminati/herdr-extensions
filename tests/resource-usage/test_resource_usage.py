@@ -13,7 +13,7 @@ from support.scripts import load_script
 
 
 PLUGIN = ROOT / "plugins/resource-usage"
-FIXTURES = ROOT / "tests/fixtures/resource-usage"
+FIXTURES = ROOT / "tests/resource-usage/fixtures"
 resource_usage = load_script("resource-usage", "resource_usage")
 
 Process = resource_usage.Process

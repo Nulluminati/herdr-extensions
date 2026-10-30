@@ -8,8 +8,8 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 from herdboard import kanban_md  # noqa: E402
 from herdboard.promote_convert import SubItem, convert, promoted_identifier  # noqa: E402
 
-FIXTURE = ROOT / "tests/fixtures/herdboard/kanban-promote.md"
-FULL = ROOT / "tests/fixtures/herdboard/kanban-2.0.51-full.md"
+FIXTURE = ROOT / "tests/herdboard/fixtures/kanban-promote.md"
+FULL = ROOT / "tests/herdboard/fixtures/kanban-2.0.51-full.md"
 
 
 def card_lines(path, block_id=None, text=None):

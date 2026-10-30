@@ -16,6 +16,7 @@ from herdboard import start
 from support.herdboard_cli import CliTestCase
 from support.git_env import isolated
 from support.herdboard_start import FakeHerdr  # noqa: E402
+from support.paths import ROOT  # noqa: E402
 
 
 class StartTests(unittest.TestCase):
@@ -727,7 +728,7 @@ class StartTests(unittest.TestCase):
         home = self.root / "codex-home"
         folder = home / ".codex"
         folder.mkdir(parents=True)
-        fixtures = Path(__file__).parent / "fixtures/herdboard/codex"
+        fixtures = ROOT / "tests/herdboard/fixtures/codex"
         for name in ("config.toml", "models_cache.json"):
             (folder / name).write_bytes((fixtures / name).read_bytes())
         with patch.dict(os.environ, {"HOME": str(home)}):

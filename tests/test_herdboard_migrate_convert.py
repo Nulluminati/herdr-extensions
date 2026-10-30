@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard.migrate_convert import convert, slug  # noqa: E402
 
-FIXTURES = ROOT / "tests/fixtures/herdboard/migrate"
+FIXTURES = ROOT / "tests/herdboard/fixtures/migrate"
 
 
 def load(name):

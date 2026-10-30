@@ -9,7 +9,7 @@ from support.paths import ROOT
 from support.scripts import load_script
 
 
-FIXTURES = ROOT / "tests/fixtures/codex-usage"
+FIXTURES = ROOT / "tests/codex-usage/fixtures"
 codex_usage = load_script("codex-usage", "codex_usage")
 
 

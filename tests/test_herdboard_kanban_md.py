@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 from herdboard import kanban_md  # noqa: E402
 from herdboard.model import Card, NotFoundError  # noqa: E402
 
-FIXTURES = ROOT / "tests/fixtures/herdboard"
+FIXTURES = ROOT / "tests/herdboard/fixtures"
 FULL = (FIXTURES / "kanban-2.0.51-full.md").read_text()
 EMPTY = (FIXTURES / "kanban-2.0.51-empty.md").read_text()
 
