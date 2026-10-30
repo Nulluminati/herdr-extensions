@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import start  # noqa: E402
 from herdboard.board import AddScreen, ConfirmScreen, HelpScreen  # noqa: E402
-from test_herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
+from support.herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
 
 
 class ArchiveBoardTests(BoardTestCase):

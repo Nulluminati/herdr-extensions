@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard import linear  # noqa: E402
-from linear_fake import FakeLinear, linear_schema, validation_errors  # noqa: E402
+from support.linear_fake import FakeLinear, linear_schema, validation_errors  # noqa: E402
 
 
 class SchemaTests(unittest.TestCase):
@@ -17,7 +17,7 @@ class SchemaTests(unittest.TestCase):
         self.assertIn("Issue", linear_schema().type_map)
 
     def test_fake_loads_schema_before_requests(self):
-        with patch("linear_fake.linear_schema", wraps=linear_schema) as load_schema:
+        with patch("support.linear_fake.linear_schema", wraps=linear_schema) as load_schema:
             with FakeLinear({}) as fake:
                 load_schema.assert_called_once_with()
                 self.assertEqual(fake.requests, [])
@@ -64,7 +64,7 @@ class SchemaTests(unittest.TestCase):
         self.assertNotEqual(validation_errors(linear.ISSUES_QUERY, bad), [])
 
     def test_invalid_query_gets_a_graphql_error_from_the_fake(self):
-        from linear_fake import FakeLinear
+        from support.linear_fake import FakeLinear
         with FakeLinear({}) as fake:
             client = linear.LinearClient("test-key", endpoint=fake.endpoint)
             with self.assertRaisesRegex(linear.LinearError, "noSuchField"):

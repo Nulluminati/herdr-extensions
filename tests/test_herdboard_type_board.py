@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard.board import AddScreen, DetailScreen, EditScreen, card_matches  # noqa: E402
 from herdboard.store import CardView  # noqa: E402
-from test_herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
+from support.herdboard_board import SIZE, BoardTestCase, settle  # noqa: E402
 
 
 class TypeLookTests(BoardTestCase):

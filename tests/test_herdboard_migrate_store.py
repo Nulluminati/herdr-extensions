@@ -11,7 +11,7 @@ from herdboard import kanban_md  # noqa: E402
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.migrate_convert import convert  # noqa: E402
 from herdboard.model import ConflictError, FormatError, HerdboardError, NotFoundError  # noqa: E402
-from test_herdboard_store import BASIC, HEAD, SETTINGS, StoreTestCase, board_text, col  # noqa: E402
+from support.herdboard_store import BASIC, HEAD, SETTINGS, StoreTestCase, board_text, col  # noqa: E402
 
 IDENTITY = RepoIdentity("github.com/acme/api", "github.com", ("acme", "api"))
 TODO = "# Garden\n- water ferns\n\t- weekly\n- [x] prune roses\n# Shed\n- oil hinges\n"

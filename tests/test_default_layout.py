@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -9,16 +8,12 @@ import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "plugins/default-layout/bin/default_layout.py"
 EXAMPLE = ROOT / "plugins/default-layout/examples/layout.toml"
-spec = importlib.util.spec_from_file_location("default_layout", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load default layout script")
-default_layout = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(default_layout)
+default_layout = load_script("default-layout", "default_layout")
 
 def wrapped(program):
     return ["sh", "-c", program + "; exec ${SHELL:-/bin/sh}"]

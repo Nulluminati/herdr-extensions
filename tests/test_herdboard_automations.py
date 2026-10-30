@@ -20,9 +20,9 @@ from herdboard.config import Config  # noqa: E402
 from herdboard.identity import repo_identity  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
-from test_herdboard_brief import todo  # noqa: E402
-from test_herdboard_cli import CliTestCase  # noqa: E402
-from test_herdboard_start import FakeHerdr  # noqa: E402
+from support.herdboard_brief import todo  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_start import FakeHerdr  # noqa: E402
 
 
 class LocalTime(unittest.TestCase):
@@ -775,7 +775,7 @@ class PlanAutomationTests(LocalTime):
     def setUp(self):
         super().setUp()
         from herdboard import automation_plan, plan
-        from test_herdboard_plan import PlanHerdr
+        from support.herdboard_plan import PlanHerdr
 
         self.automation_plan = automation_plan
         temp = tempfile.TemporaryDirectory()

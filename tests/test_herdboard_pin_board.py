@@ -12,8 +12,8 @@ from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear import LinearError  # noqa: E402
 from herdboard.linear_pins import IssuePin  # noqa: E402
 from herdboard.start import StartError  # noqa: E402
-from test_herdboard_board import SIZE, settle  # noqa: E402
-from test_herdboard_linear_board import LinearBoardCase  # noqa: E402
+from support.herdboard_board import SIZE, settle  # noqa: E402
+from support.herdboard_linear_board import LinearBoardCase  # noqa: E402
 
 
 class PinBoardCase(LinearBoardCase):

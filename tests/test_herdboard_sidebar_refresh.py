@@ -1,18 +1,13 @@
 """The Herdr startup hook starts the sidebar refresh in the background and returns at once."""
-import importlib.util
 import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "plugins/herdboard/bin/sidebar_refresh.py"
-spec = importlib.util.spec_from_file_location("sidebar_refresh", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load the sidebar refresh script")
-sidebar_refresh = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(sidebar_refresh)
+sidebar_refresh = load_script("herdboard", "sidebar_refresh")
 
 
 class SidebarRefreshHookTests(unittest.TestCase):

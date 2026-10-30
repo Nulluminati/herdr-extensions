@@ -13,16 +13,10 @@ from textual.widgets import Markdown, OptionList  # noqa: E402
 
 from herdboard import attachments, board  # noqa: E402
 from herdboard.board import AttachmentChoiceScreen, AttachmentScreen, DetailScreen  # noqa: E402
-from test_herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_attachment_board import fake_opener  # noqa: E402
 
 SIZE = (120, 40)
-
-
-def fake_opener(returncode=0, stderr=b""):
-    """A Popen fake for xdg-open or open: the process exits with `returncode` and writes `stderr`."""
-    process = mock.Mock(returncode=returncode)
-    process.communicate.return_value = (None, stderr)
-    return mock.Mock(return_value=process)
 
 
 async def wait_for_notice(pilot, start):

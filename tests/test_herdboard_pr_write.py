@@ -14,8 +14,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import activity, merge, pr_write, sandbox, start  # noqa: E402
 from herdboard.agent_review import reviewer_arguments  # noqa: E402
-from test_herdboard_agent_review import ReviewerHerdr  # noqa: E402
-from test_herdboard_merge import PullRequestTestCase  # noqa: E402
+from support.herdboard_agent_review import ReviewerHerdr  # noqa: E402
+from support.herdboard_merge import PullRequestTestCase  # noqa: E402
 
 PR_TEXT = "fix: keep sessions for 30 minutes\n\n## Why\nSessions ended too soon.\n"
 

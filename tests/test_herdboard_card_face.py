@@ -15,7 +15,7 @@ from rich.console import Console  # noqa: E402
 from herdboard import board  # noqa: E402
 from herdboard.board import ColumnData  # noqa: E402
 from herdboard.store import CardView  # noqa: E402
-from test_herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_board import BoardTestCase, settle  # noqa: E402
 
 
 def card(**kwargs):

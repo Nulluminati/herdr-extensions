@@ -6,33 +6,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import linear_data  # noqa: E402
+from support import linear_data  # noqa: E402
 from herdboard.board import StateScreen  # noqa: E402
 from textual.widgets import OptionList  # noqa: E402
-from test_herdboard_board import SIZE, settle  # noqa: E402
-from test_herdboard_linear_board import LinearBoardCase  # noqa: E402
-from test_herdboard_linear_source import DEAD  # noqa: E402
+from support.herdboard_board import SIZE, settle  # noqa: E402
+from support.herdboard_linear_source import DEAD  # noqa: E402
+from support.herdboard_linear_write_board import LinearWriteBoardCase  # noqa: E402
 
 OFFLINE = "Linear cards are read only offline"
-
-
-class LinearWriteBoardCase(LinearBoardCase):
-    def setUp(self):
-        super().setUp()
-        linear_data.with_workflow(self.fixtures)
-
-    def issue(self, identifier):
-        return next(i for i in self.fixtures["issues"] if i["identifier"] == identifier)
-
-    def column_of(self, app, ref):
-        return next(d.name for d in app.columns for c in d.cards if c.ref == ref)
-
-    async def wait_for_dialog(self, pilot):
-        for _ in range(100):
-            await pilot.pause(0.05)
-            if isinstance(pilot.app.screen, StateScreen):
-                return pilot.app.screen
-        self.fail("The state dialog did not open")
 
 
 class WriteKeyTests(LinearWriteBoardCase):

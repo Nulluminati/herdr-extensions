@@ -18,7 +18,7 @@ from herdboard.config import load_config  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
-from test_herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
 
 NOON = datetime(2026, 10, 12, 12, 0)
 

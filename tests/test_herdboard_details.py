@@ -16,8 +16,8 @@ from herdboard import activity, details, start  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.store import CardView, Store  # noqa: E402
 
-from test_herdboard_cli import CliTestCase  # noqa: E402
-from test_herdboard_linear_cli import LinearCliCase  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_linear_cli import LinearCliCase  # noqa: E402
 
 
 def card(**fields):

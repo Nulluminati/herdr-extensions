@@ -15,8 +15,8 @@ from rich.cells import cell_len  # noqa: E402
 from rich.console import Console  # noqa: E402
 from herdboard import attachments, board  # noqa: E402
 from herdboard.store import CardView  # noqa: E402
-from test_herdboard_board import BoardTestCase, settle  # noqa: E402
-from test_herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
 
 
 TYPE_ICONS = {"bug": "\uf188", "feature": "\uf0eb", "chore": "\uf0ad", "docs": "\uf02d", "refactor": "\uf021"}

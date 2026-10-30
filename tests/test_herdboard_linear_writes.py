@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import linear_data  # noqa: E402
+from support import linear_data  # noqa: E402
 from herdboard.config import Config  # noqa: E402
-from herdboard.linear import LinearClient, LinearNetworkError, LinearWriteUnknownError  # noqa: E402
+from herdboard.linear import LinearNetworkError, LinearWriteUnknownError  # noqa: E402
 from herdboard.linear_states import (  # noqa: E402
     AmbiguousStateError, NoStateError, StateChoices, candidates, resolve_state, refuse,
 )
@@ -19,7 +19,8 @@ from herdboard.linear_writes import (  # noqa: E402
     LinearOfflineError, LinearWriter, TeamRequiredError,
 )
 from herdboard.model import NotFoundError  # noqa: E402
-from test_herdboard_linear_source import DEAD, LinearEnvTestCase  # noqa: E402
+from support.herdboard_linear_source import DEAD  # noqa: E402
+from support.herdboard_linear_writes import WriterCase  # noqa: E402
 
 ENG = {"id": "t-eng", "key": "ENG"}
 
@@ -179,39 +180,6 @@ class ResolveTests(unittest.TestCase):
         self.folder.mkdir(parents=True)
         (self.folder / "state-choices.json").write_text("not json")
         self.assertEqual(self.resolve(ask=self.ask("Doing"))["name"], "Doing")
-
-
-class WriterCase(LinearEnvTestCase):
-    def setUp(self):
-        super().setUp()
-        linear_data.with_workflow(self.fixtures)
-
-    timeout = 2.0
-
-    def build_client(self, key):
-        return LinearClient(key, endpoint=self.endpoint, timeout=self.timeout, sleep=lambda _: None)
-
-    def slow_mutation(self, failure="timeout_after"):
-        """Make the next write answer after the client gave up. A first request builds the
-        schema, so it runs before the client timeout gets short."""
-        self.writer().client().viewer()
-        self.timeout = 0.3
-        self.fake.mutation_failure, self.fake.mutation_delay = failure, 0.8
-
-    def writer(self, **kwargs):
-        self.source_in_use = self.source(**kwargs)
-        writer = LinearWriter(Config(todos_dir=self.root / "todos"), self.source_in_use)
-        writer.wait = lambda _: None
-        return writer
-
-    def issue(self, identifier):
-        return next(i for i in self.fixtures["issues"] if i["identifier"] == identifier)
-
-    def inputs(self, operation):
-        return [r["variables"]["input"] for r in self.requests(operation)]
-
-    def choices_file(self):
-        return self.state / "herdboard" / "o1" / "u1" / "state-choices.json"
 
 
 class MoveTests(WriterCase):

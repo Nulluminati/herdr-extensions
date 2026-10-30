@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 from herdboard import mockup, start  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 
-from test_herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
 
 # A 1x1 PNG, so the viewer can read a real size from the header.
 PNG = base64.b64decode(

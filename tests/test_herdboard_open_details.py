@@ -1,20 +1,15 @@
-import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/herdboard"
-SCRIPT = PLUGIN / "bin/open_details.py"
-spec = importlib.util.spec_from_file_location("open_details", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load open_details script")
-open_details = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(open_details)
+open_details = load_script("herdboard", "open_details")
 
 
 class OpenDetailsTests(unittest.TestCase):

@@ -11,42 +11,9 @@ sys.path.insert(0, str(ROOT / "tests"))
 from herdboard.identity import RepoIdentity  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink  # noqa: E402
 from herdboard.linear_pins import IssuePin  # noqa: E402
-from herdboard.store import Store  # noqa: E402
-from linear_data import PR_URL, attachment  # noqa: E402
-from test_herdboard_cli import CliTestCase  # noqa: E402
-from test_herdboard_linear_source import DEAD, LinearEnvTestCase  # noqa: E402
-
-
-class LinearCliCase(CliTestCase, LinearEnvTestCase):
-    def setUp(self):
-        CliTestCase.setUp(self)
-        cli_root = self.tmp
-        LinearEnvTestCase.setUp(self)
-        self.cli_tmp = cli_root
-
-    def refs(self, data):
-        return [card["ref"] for card in data["cards"]]
-
-    def board(self):
-        return Path(self.init_repo_board())
-
-    def link(self, *args, expect=0):
-        return self.run_json("link", *args, directory=self.repo, expect=expect)
-
-    def store_for(self):
-        from herdboard.config import load_config
-        return Store(load_config(self.config))
-
-    def relink(self, *links):
-        store = self.store_for()
-        store.update_links(store.projects_dir / "acme-api.md", lambda _: list(links))
-
-    def repin(self, *pins):
-        store = self.store_for()
-        store.update_pins(store.projects_dir / "acme-api.md", lambda _: list(pins))
-
-    def listing(self, *args, directory=None, expect=0):
-        return self.run_json("list", *args, directory=directory or self.repo, expect=expect)
+from support.linear_data import PR_URL, attachment  # noqa: E402
+from support.herdboard_linear_source import DEAD  # noqa: E402
+from support.herdboard_linear_cli import LinearCliCase  # noqa: E402
 
 
 class ViewTests(LinearCliCase):

@@ -14,7 +14,7 @@ from herdboard.linear import (LinearAuthError, LinearClient, LinearError,  # noq
                               LinearNetworkError)
 from herdboard.linear import LABELS_PAGE_QUERY  # noqa: E402
 from herdboard.model import HerdboardError  # noqa: E402
-from linear_fake import FakeLinear  # noqa: E402
+from support.linear_fake import FakeLinear  # noqa: E402
 
 
 VIEWER = {"id": "u1", "name": "Nate", "email": "nate@example.com",

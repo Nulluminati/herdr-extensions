@@ -1,6 +1,5 @@
 import contextlib
 import fcntl
-import importlib.util
 import io
 import json
 import os
@@ -10,16 +9,12 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "plugins/auto-title/bin/auto_title.py"
 FIXTURES = ROOT / "tests/fixtures/auto-title"
-spec = importlib.util.spec_from_file_location("auto_title", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load auto title script")
-auto_title = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(auto_title)
+auto_title = load_script("auto-title", "auto_title")
 
 CONFIG = {"max_length": 40, "poll_seconds": 2.0}
 

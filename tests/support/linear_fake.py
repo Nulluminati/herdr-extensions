@@ -14,7 +14,7 @@ from pathlib import Path
 import graphql
 from graphql.execution.values import get_variable_values
 
-SCHEMA_PATH = Path(__file__).resolve().parent / "fixtures/linear/schema.graphql.gz"
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "fixtures/linear/schema.graphql.gz"
 
 
 @functools.lru_cache(maxsize=1)

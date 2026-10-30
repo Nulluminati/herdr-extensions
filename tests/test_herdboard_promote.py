@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import linear_data  # noqa: E402
+from support import linear_data  # noqa: E402
 from herdboard.config import Config, LinearConfig  # noqa: E402
 from herdboard.linear import LinearClient, LinearWriteRejectedError, LinearWriteUnknownError  # noqa: E402
 from herdboard.linear_source import LinearSource  # noqa: E402
@@ -19,7 +19,7 @@ from herdboard.linear_writes import LinearOfflineError, LinearWriter  # noqa: E4
 from herdboard.model import ConflictError, HerdboardError, NotFoundError  # noqa: E402
 from herdboard.promote import AlreadyPromotedError, NotATodoError, Promoter  # noqa: E402
 from herdboard.store import Store  # noqa: E402
-from test_herdboard_linear_writes import WriterCase  # noqa: E402
+from support.herdboard_linear_writes import WriterCase  # noqa: E402
 
 FIXTURE = ROOT / "tests/fixtures/herdboard/kanban-promote.md"
 HEADER = "---\n\nkanban-plugin: board\n\n---\n\n"

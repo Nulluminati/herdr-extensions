@@ -17,9 +17,9 @@ from herdboard.linear_pins import IssuePin  # noqa: E402
 from herdboard.model import FormatError, HerdboardError  # noqa: E402
 from herdboard.start import Starter  # noqa: E402
 from textual.widgets import Input, Tab, TabbedContent  # noqa: E402
-from test_herdboard_board import BoardTestCase, settle  # noqa: E402
-from test_herdboard_cli import CliTestCase  # noqa: E402
-from test_herdboard_linear_cli import LinearCliCase  # noqa: E402
+from support.herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_linear_cli import LinearCliCase  # noqa: E402
 
 FRONT = "---\n\nkanban-plugin: board\nrepo: github.com/acme/api\n\n---\n\n## Todo\n"
 

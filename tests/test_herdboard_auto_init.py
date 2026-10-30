@@ -4,7 +4,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_herdboard_cli import CliTestCase
+from support.herdboard_cli import CliTestCase
 from herdboard.config import load_config
 from herdboard.identity import repo_identity
 from herdboard.linear_links import ProjectLink

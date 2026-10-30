@@ -17,8 +17,8 @@ from herdboard.board import card_matches, mark_family  # noqa: E402
 from herdboard.config import Config  # noqa: E402
 from herdboard.model import HerdboardError, parent_of, split_title, with_parent  # noqa: E402
 from herdboard.store import CardView, Store  # noqa: E402
-from test_herdboard_cli import CliTestCase  # noqa: E402
-from test_herdboard_merge import MergeTestCase  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_merge import MergeTestCase  # noqa: E402
 
 
 class ParentLinkTests(unittest.TestCase):

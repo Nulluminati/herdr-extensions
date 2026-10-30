@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -9,15 +8,11 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "plugins/peer-review/bin/peer_review.py"
-spec = importlib.util.spec_from_file_location("peer_review", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load peer review script")
-peer_review = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(peer_review)
+peer_review = load_script("peer-review", "peer_review")
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard import sandbox  # noqa: E402

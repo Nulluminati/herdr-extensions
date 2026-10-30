@@ -5,9 +5,9 @@ from pathlib import Path
 import subprocess
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_herdboard_linear_write_cli import WriteCliCase
-from test_herdboard_start import FakeHerdr
-from test_herdboard_cli import git
+from support.herdboard_linear_write_cli import WriteCliCase
+from support.herdboard_start import FakeHerdr
+from support.herdboard_cli import git
 from herdboard import start
 from herdboard.linear_pins import IssuePin
 

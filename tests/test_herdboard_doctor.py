@@ -20,8 +20,8 @@ from herdboard.model import IoError
 from herdboard.identity import IdentityError
 from herdboard.store import Store
 from herdboard.config import load_config
-from linear_fake import FakeLinear
-from linear_data import fixtures
+from support.linear_fake import FakeLinear
+from support.linear_data import fixtures
 
 
 class DoctorTests(unittest.TestCase):

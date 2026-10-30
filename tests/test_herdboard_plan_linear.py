@@ -5,9 +5,9 @@ import sys
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_herdboard_linear_write_cli import WriteCliCase  # noqa: E402
-from test_herdboard_plan import PlanHerdr  # noqa: E402
-from test_herdboard_cli import git  # noqa: E402
+from support.herdboard_linear_write_cli import WriteCliCase  # noqa: E402
+from support.herdboard_plan import PlanHerdr  # noqa: E402
+from support.herdboard_cli import git  # noqa: E402
 from herdboard import plan, start  # noqa: E402
 
 
@@ -58,7 +58,7 @@ class PlanLinearTests(WriteCliCase):
     def test_an_ambiguous_start_column_still_plans(self):
         # Two started states match "In progress" and no choice is stored. Planning moves no card,
         # so it must not fail on the column that a later start would need an answer for.
-        import linear_data
+        from support import linear_data
         linear_data.add_state(self.fixtures, "ENG", "Coding", "started")
         result = self.run_json("plan", "ENG-1", directory=self.repo)
         self.assertEqual(result["ref"], "ENG-1")

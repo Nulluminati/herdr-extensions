@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 from herdboard import cli, plan, start  # noqa: E402
 from herdboard.board import RELOAD_SECONDS, card_text  # noqa: E402
 from herdboard.model import IoError  # noqa: E402
-from test_herdboard_board import BoardTestCase, SIZE  # noqa: E402
+from support.herdboard_board import BoardTestCase, SIZE  # noqa: E402
 
 
 class PlanningBoardTests(BoardTestCase):

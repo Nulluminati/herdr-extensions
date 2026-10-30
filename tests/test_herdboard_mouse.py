@@ -17,15 +17,11 @@ from herdboard import attachments  # noqa: E402
 from herdboard.board import (  # noqa: E402
     CardMenuScreen, CardWidget, DetailScreen, EditScreen, HELP_KEYS, card_actions, detail_lines,
 )
-from test_herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_mouse import content_offset  # noqa: E402
 
 # Wide enough that every default column shows.
 SIZE = (160, 40)
-
-
-def content_offset(widget, x=0, y=0):
-    """An offset inside the widget's content, past its border and padding."""
-    return (widget.content_region.x - widget.region.x + x, widget.content_region.y - widget.region.y + y)
 
 
 def clicks(text):

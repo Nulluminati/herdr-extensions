@@ -8,16 +8,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import linear_data  # noqa: E402
+from support import linear_data  # noqa: E402
 from herdboard.board import (HELP_KEYS, CardMenuScreen, PromoteScreen, StateScreen,  # noqa: E402
                              card_actions, promote_refusal)
 from herdboard.linear_links import LabelLink, ProjectLink  # noqa: E402
 from herdboard.linear_source import state_dir  # noqa: E402
 from herdboard.store import CardView  # noqa: E402
 from textual.widgets import OptionList  # noqa: E402
-from test_herdboard_board import SIZE, settle  # noqa: E402
-from test_herdboard_linear_write_board import LinearWriteBoardCase  # noqa: E402
-from test_herdboard_mouse import content_offset  # noqa: E402
+from support.herdboard_board import SIZE, settle  # noqa: E402
+from support.herdboard_linear_write_board import LinearWriteBoardCase  # noqa: E402
+from support.herdboard_mouse import content_offset  # noqa: E402
 
 TITLE = "Renovate the bathroom #home 📅 2026-11-02"
 

@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -7,15 +6,11 @@ from pathlib import Path
 import subprocess
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "plugins/agent-icons/bin/agent_icons.py"
-spec = importlib.util.spec_from_file_location("agent_icons", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load agent icons script")
-agent_icons = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(agent_icons)
+agent_icons = load_script("agent-icons", "agent_icons")
 
 
 class AgentIconsTests(unittest.TestCase):

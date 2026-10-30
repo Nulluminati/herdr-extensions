@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -9,17 +8,13 @@ import tempfile
 import tomllib
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/resource-usage"
-SCRIPT = PLUGIN / "bin/resource_usage.py"
 FIXTURES = ROOT / "tests/fixtures/resource-usage"
-spec = importlib.util.spec_from_file_location("resource_usage", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load resource usage script")
-resource_usage = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(resource_usage)
+resource_usage = load_script("resource-usage", "resource_usage")
 
 Process = resource_usage.Process
 MIB = 1024 * 1024

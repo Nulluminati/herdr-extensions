@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import linear_data  # noqa: E402
+from support import linear_data  # noqa: E402
 from herdboard.store import Store  # noqa: E402
-from test_herdboard_linear_write_cli import WriteCliCase  # noqa: E402
+from support.herdboard_linear_write_cli import WriteCliCase  # noqa: E402
 
 
 class PromoteCliCase(WriteCliCase):

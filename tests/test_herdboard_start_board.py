@@ -594,7 +594,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     async def _real_starter(self, view):
         from herdboard import start
         from herdboard.identity import repo_identity
-        from test_herdboard_start import FakeHerdr
+        from support.herdboard_start import FakeHerdr
         repo = self.path.parent / "repo"
         repo.mkdir()
         for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"]):
@@ -630,7 +630,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_starts_of_two_cards_run_at_the_same_time(self):
         from herdboard import start
         from herdboard.identity import repo_identity
-        from test_herdboard_start import FakeHerdr
+        from support.herdboard_start import FakeHerdr
         repo = self.path.parent / "repo"
         repo.mkdir()
         for args in (["init", "-q"], ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"]):

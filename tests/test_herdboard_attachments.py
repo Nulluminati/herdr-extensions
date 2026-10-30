@@ -13,7 +13,7 @@ from herdboard.config import load_config  # noqa: E402
 from herdboard.model import HerdboardError, NotFoundError  # noqa: E402
 from herdboard.store import Store  # noqa: E402
 
-from test_herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
 
 
 class AttachmentTests(unittest.TestCase):

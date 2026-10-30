@@ -11,8 +11,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from herdboard import attachments, board, start  # noqa: E402
 from herdboard.board import AttachmentChoiceScreen, DetailScreen  # noqa: E402
-from test_herdboard_attachment_board import fake_opener  # noqa: E402
-from test_herdboard_board import BoardTestCase, settle  # noqa: E402
+from support.herdboard_attachment_board import fake_opener  # noqa: E402
+from support.herdboard_board import BoardTestCase, settle  # noqa: E402
 
 SIZE = (120, 40)
 PR = "https://github.com/acme/api/pull/7"

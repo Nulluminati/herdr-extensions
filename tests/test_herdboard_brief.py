@@ -7,16 +7,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard.brief import agent_message, brief_text, card_token  # noqa: E402
 from herdboard.store import CardView  # noqa: E402
-
-
-def todo(**changes):
-    fields = dict(
-        ref="t83k", board="nulluminati-dotfiles-ansible", path=Path("/todos/projects/x.md"),
-        column="In progress", title="Move to shared [[Stow notes]] #dots-todo 📅 2026-11-01",
-        checked=False, due="2026-11-01", tags=["dots-todo"], body=["\t- bat", "\t- [ ] fish", "\t\t- nested"],
-    )
-    fields.update(changes)
-    return CardView(**fields)
+from support.herdboard_brief import todo  # noqa: E402
 
 
 def issue(**changes):

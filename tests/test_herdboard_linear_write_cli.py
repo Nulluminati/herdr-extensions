@@ -10,26 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import linear_data  # noqa: E402
+from support import linear_data  # noqa: E402
 from herdboard import cli  # noqa: E402
 from herdboard.linear import LinearClient, LinearNetworkError, LinearWriteUnknownError  # noqa: E402
 from herdboard.linear_links import LabelLink, ProjectLink  # noqa: E402
-from test_herdboard_linear_cli import LinearCliCase  # noqa: E402
-
-
-class WriteCliCase(LinearCliCase):
-    def setUp(self):
-        super().setUp()
-        linear_data.with_workflow(self.fixtures)
-
-    def issue(self, identifier):
-        return next(i for i in self.fixtures["issues"] if i["identifier"] == identifier)
-
-    def inputs(self, operation):
-        return [r["variables"]["input"] for r in self.requests(operation)]
-
-    def error(self, *args, expect=1, directory=None):
-        return self.run_json(*args, directory=directory or self.repo, expect=expect)["error"]
+from support.herdboard_linear_write_cli import WriteCliCase  # noqa: E402
 
 
 class MoveCommandTests(WriteCliCase):

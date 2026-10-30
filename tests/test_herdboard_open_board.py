@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -6,16 +5,12 @@ import subprocess
 import tomllib
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/herdboard"
-SCRIPT = PLUGIN / "bin/open_board.py"
-spec = importlib.util.spec_from_file_location("open_board", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load open_board script")
-open_board = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(open_board)
+open_board = load_script("herdboard", "open_board")
 
 
 class OpenBoardTests(unittest.TestCase):

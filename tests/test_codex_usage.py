@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -7,16 +6,12 @@ from pathlib import Path
 import subprocess
 import unittest
 from unittest.mock import patch
+from support.scripts import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "plugins/codex-usage/bin/codex_usage.py"
 FIXTURES = ROOT / "tests/fixtures/codex-usage"
-spec = importlib.util.spec_from_file_location("codex_usage", SCRIPT)
-if spec is None or spec.loader is None:
-    raise RuntimeError("Cannot load codex usage script")
-codex_usage = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(codex_usage)
+codex_usage = load_script("codex-usage", "codex_usage")
 
 
 def codex(pane_id, session="s-1"):

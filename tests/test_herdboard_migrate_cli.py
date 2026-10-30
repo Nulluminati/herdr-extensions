@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "plugins/herdboard/src"))
 
 from herdboard import cli, kanban_md  # noqa: E402
 from herdboard.store import Store  # noqa: E402
-from test_herdboard_cli import CliTestCase  # noqa: E402
+from support.herdboard_cli import CliTestCase  # noqa: E402
 
 FIXTURES = ROOT / "tests/fixtures/herdboard/migrate"
 ID = re.compile(r" \^t[0-9a-z]{3}$", re.M)
