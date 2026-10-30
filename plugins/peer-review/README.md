@@ -73,7 +73,7 @@ Web tools and MCP servers run outside the sandbox. They only read.
 ## Tests
 
 ```bash
-uv run python -m unittest tests/test_peer_review.py
+uv run pytest tests/peer-review
 ```
 
 Run it from the repository root.

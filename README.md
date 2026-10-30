@@ -31,10 +31,18 @@ Each plugin's README gives the other steps: its agent skill, its key binding and
 
 ## Development
 
-Run the tests from the repository root:
+Run the tests, the linter and the formatter from the repository root:
 
 ```bash
-uv run python -m unittest discover -s tests
+uv run pytest -n auto
+uv run ruff check .
+uv run ruff format .
+```
+
+Install the pre-commit hook once per clone. It runs ruff before each commit:
+
+```bash
+uv run pre-commit install
 ```
 
 Make `git blame` skip the commit that formatted all code:
@@ -43,6 +51,6 @@ Make `git blame` skip the commit that formatted all code:
 git config blame.ignoreRevsFile .git-blame-ignore-revs
 ```
 
-Dependabot keeps the GitHub Actions pins and the two uv lock files current. It checks weekly and groups the minor and patch updates per ecosystem. See [.github/dependabot.yml](.github/dependabot.yml). `tests/test_dependabot.py` holds the settings that matter.
+Dependabot keeps the GitHub Actions pins and the two uv lock files current. It checks weekly and groups the minor and patch updates per ecosystem. See [.github/dependabot.yml](.github/dependabot.yml). `tests/repo/test_dependabot.py` holds the settings that matter.
 
 [AGENTS.md](AGENTS.md) describes the layout and the rules for plugin code.

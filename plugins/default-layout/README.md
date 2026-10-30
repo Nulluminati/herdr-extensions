@@ -150,7 +150,7 @@ description = "default layout: apply to this workspace"
 ## Tests
 
 ```bash
-uv run python -m unittest tests/test_default_layout.py
+uv run pytest tests/default-layout
 ```
 
 Run it from the repository root.

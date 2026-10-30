@@ -138,7 +138,7 @@ The plugin keeps its state in the plugin state folder, `~/.local/state/herdr/plu
 ## Tests
 
 ```bash
-uv run python -m unittest tests/test_resource_usage.py
+uv run pytest tests/resource-usage
 ```
 
 Run it from the repository root.

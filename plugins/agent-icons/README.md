@@ -97,7 +97,7 @@ Run the `Agent icons: refresh` action (`nulluminati.agent-icons.refresh`) after 
 ## Tests
 
 ```bash
-uv run python -m unittest tests/test_agent_icons.py
+uv run pytest tests/agent-icons
 ```
 
 Run it from the repository root.

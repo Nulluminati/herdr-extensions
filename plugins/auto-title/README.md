@@ -117,7 +117,7 @@ The plugin keeps its state in the plugin state folder, `~/.local/state/herdr/plu
 ## Tests
 
 ```bash
-uv run python -m unittest tests/test_auto_title.py
+uv run pytest tests/auto-title
 ```
 
 Run it from the repository root.

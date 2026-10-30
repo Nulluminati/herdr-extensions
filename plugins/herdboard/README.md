@@ -1113,7 +1113,7 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 ## Tests
 
 ```bash
-uv run python -m unittest discover -s tests
+uv run pytest -n auto tests/herdboard
 ```
 
-Run it from the repository root. The tests use fake `herdr`, `gh` and Linear servers. Behavior that depends on Herdr, the agents or GitHub needs a live test with a throwaway repository. [docs/linear-live-test.md](docs/linear-live-test.md) is the checklist for the real Linear API.
+Run it from the repository root. `tests/herdboard/unit` holds the fast tests and `tests/herdboard/ui` the Textual pilot tests; run `uv run pytest -n auto tests/herdboard/unit` for the fast ones only. The tests use fake `herdr`, `gh` and Linear servers. Behavior that depends on Herdr, the agents or GitHub needs a live test with a throwaway repository. [docs/linear-live-test.md](docs/linear-live-test.md) is the checklist for the real Linear API.
