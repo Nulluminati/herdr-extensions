@@ -87,6 +87,21 @@ class CodexUsageTests(unittest.TestCase):
         self.run_main()
         self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.300"])
 
+    def test_a_torn_utf8_line_costs_one_line_not_the_run(self):
+        # A Codex process killed mid-write leaves a last line that stops inside a multi-byte character.
+        self.agents = [codex("w1:p1", session="s-torn"), codex("w1:p3", session="s-1")]
+        self.run_main()
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p1": ["--token", "codex_context=ctx 60%", "--token", "codex_cost=$0.457"],
+                "w1:p3": ["--token", "codex_context=ctx 60%", "--token", "codex_cost=$0.457"],
+            },
+        )
+        self.assertNotIn("UnicodeDecodeError", self.stderr.getvalue())
+        self.assertIn("s-torn.jsonl", self.stderr.getvalue())
+        self.assertIn("skipped 1 line(s) that are not valid UTF-8", self.stderr.getvalue())
+
     def test_missing_session_log_clears_both_tokens(self):
         self.agents = [codex("w1:p1", session="unknown")]
         self.run_main()

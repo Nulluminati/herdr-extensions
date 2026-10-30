@@ -98,8 +98,16 @@ def read_usage(path: Path) -> tuple[list[tuple[str | None, dict]], dict | None]:
     calls = []
     last = None
     seen_total = None
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
+    torn = 0
+    # Codex writes the log as it runs, so a killed or crashed Codex can leave a torn last line.
+    # Decode each line apart: one unreadable line costs that line, not the whole run.
+    with path.open("rb") as handle:
+        for raw in handle:
+            try:
+                line = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                torn += 1
+                continue
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
@@ -118,6 +126,8 @@ def read_usage(path: Path) -> tuple[list[tuple[str | None, dict]], dict | None]:
             seen_total = info.get("total_token_usage")
             calls.append((model, info["last_token_usage"]))
             last = info
+    if torn:
+        print(f"codex-usage: {path}: skipped {torn} line(s) that are not valid UTF-8", file=sys.stderr)
     return calls, last
 
 
