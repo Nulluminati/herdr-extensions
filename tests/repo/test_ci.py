@@ -33,7 +33,18 @@ class CiTests(unittest.TestCase):
         setup_python = next(step for step in steps if step.get("uses", "").startswith("actions/setup-python@"))
         self.assertEqual(setup_python["with"]["python-version"], "3.x")
         self.assertTrue(any(step.get("uses", "").startswith("astral-sh/setup-uv@") for step in steps))
-        self.assertIn("uv run --locked python -m unittest discover -s tests", [step.get("run") for step in steps])
+        self.assertIn(
+            "uv run --locked pytest -n auto --cov=plugins --cov-report=term-missing",
+            [step.get("run") for step in steps],
+        )
+
+    def test_lints_and_checks_the_format_before_the_tests(self):
+        job = self.workflow["jobs"]["test"]
+        self.assertEqual(job["timeout-minutes"], 10)
+        commands = [step.get("run") for step in job["steps"]]
+        tests = commands.index("uv run --locked pytest -n auto --cov=plugins --cov-report=term-missing")
+        self.assertLess(commands.index("uv run --locked ruff check ."), tests)
+        self.assertLess(commands.index("uv run --locked ruff format --check ."), tests)
 
     def test_checks_the_herdboard_lock_that_the_root_run_never_resolves(self):
         commands = [step.get("run") for step in self.workflow["jobs"]["test"]["steps"]]
