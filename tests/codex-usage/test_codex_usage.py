@@ -31,7 +31,7 @@ class CodexUsageTests(unittest.TestCase):
         os.environ.pop("HERDR_BIN_PATH", None)
         os.environ.pop("HERDR_PLUGIN_EVENT_JSON", None)
         self.calls = []
-        self.agents = [codex("w1:p1"), {"pane_id": "w1:p2", "agent": "claude"}]
+        self.panes = [codex("w1:p1"), {"pane_id": "w1:p2", "agent": "claude"}]
         self.failing_pane = None
         self.stderr = io.StringIO()
         replacement = patch.object(codex_usage, "command", self.fake_command)
@@ -40,8 +40,8 @@ class CodexUsageTests(unittest.TestCase):
 
     def fake_command(self, argv):
         self.calls.append(argv)
-        if argv[1:3] == ["agent", "list"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"agents": self.agents}}), "")
+        if argv[1:3] == ["pane", "list"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"panes": self.panes}}), "")
         if argv[1:3] == ["pane", "report-metadata"]:
             if argv[3] == self.failing_pane:
                 raise subprocess.CalledProcessError(1, argv, "", "pane not found")
@@ -77,13 +77,13 @@ class CodexUsageTests(unittest.TestCase):
         self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 60%", "--clear-token", "codex_cost"])
 
     def test_a_model_change_prices_each_call_at_its_own_model(self):
-        self.agents = [codex("w1:p1", session="s-model-change")]
+        self.panes = [codex("w1:p1", session="s-model-change")]
         self.run_main()
         # 100000 input and 10000 output tokens at gpt-6.1-sol ($0.300), then at gpt-6.1-mini ($0.140).
         self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.440"])
 
     def test_calls_of_an_unpriced_model_do_not_hide_the_cost_of_priced_calls(self):
-        self.agents = [codex("w1:p1", session="s-unknown-model")]
+        self.panes = [codex("w1:p1", session="s-unknown-model")]
         self.run_main()
         self.assertEqual(self.reports()["w1:p1"], ["--token", "codex_context=ctx 22%", "--token", "codex_cost=$0.300"])
 
@@ -103,17 +103,17 @@ class CodexUsageTests(unittest.TestCase):
         self.assertIn("skipped 1 line(s) that are not valid UTF-8", self.stderr.getvalue())
 
     def test_missing_session_log_clears_both_tokens(self):
-        self.agents = [codex("w1:p1", session="unknown")]
+        self.panes = [codex("w1:p1", session="unknown")]
         self.run_main()
         self.assertEqual(self.reports()["w1:p1"], ["--clear-token", "codex_context", "--clear-token", "codex_cost"])
 
     def test_codex_without_a_session_clears_both_tokens(self):
-        self.agents = [{"pane_id": "w1:p1", "agent": "codex"}]
+        self.panes = [{"pane_id": "w1:p1", "agent": "codex"}]
         self.run_main()
         self.assertEqual(self.reports()["w1:p1"], ["--clear-token", "codex_context", "--clear-token", "codex_cost"])
 
     def test_a_pane_that_no_longer_runs_codex_loses_its_codex_values(self):
-        self.agents = [
+        self.panes = [
             {
                 "pane_id": "w1:p2",
                 "agent": "claude",
@@ -128,8 +128,28 @@ class CodexUsageTests(unittest.TestCase):
             },
         )
 
+    def test_a_pane_with_no_agent_loses_its_codex_values(self):
+        # After Codex exits the pane runs a shell: it is in `pane list` with no agent.
+        self.panes = [{"pane_id": "w1:p2", "tokens": {"codex_context": "ctx 60%", "codex_cost": "$0.457"}}]
+        self.run_main()
+        self.assertEqual(
+            self.reports(),
+            {
+                "w1:p2": ["--clear-token", "codex_context", "--clear-token", "codex_cost"],
+            },
+        )
+
+    def test_a_pane_with_no_codex_work_is_left_alone(self):
+        self.panes = [
+            {"pane_id": "w1:p2", "agent": "claude", "tokens": {"claude_cost": "$1.000"}},
+            {"pane_id": "w1:p3", "tokens": {"herdboard_card": "card"}},
+            {"pane_id": "w1:p4"},
+        ]
+        self.run_main()
+        self.assertEqual(self.reports(), {})
+
     def test_an_event_clears_the_codex_values_of_its_pane_after_an_agent_change(self):
-        self.agents = [codex("w1:p1"), {"pane_id": "w1:p2", "agent": "pi", "tokens": {"codex_cost": "$0.457"}}]
+        self.panes = [codex("w1:p1"), {"pane_id": "w1:p2", "agent": "pi", "tokens": {"codex_cost": "$0.457"}}]
         os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps(
             {"event": "pane.agent_detected", "data": {"pane_id": "w1:p2"}}
         )
@@ -141,8 +161,16 @@ class CodexUsageTests(unittest.TestCase):
             },
         )
 
+    def test_an_event_clears_the_codex_values_of_its_pane_when_the_agent_is_gone(self):
+        self.panes = [codex("w1:p1"), {"pane_id": "w1:p2", "tokens": {"codex_cost": "$0.457"}}]
+        os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps(
+            {"event": "pane.agent_detected", "data": {"pane_id": "w1:p2"}}
+        )
+        self.run_main()
+        self.assertEqual(self.reports(), {"w1:p2": ["--clear-token", "codex_context", "--clear-token", "codex_cost"]})
+
     def test_event_reports_only_the_event_pane(self):
-        self.agents.append(codex("w1:p3"))
+        self.panes.append(codex("w1:p3"))
         os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps(
             {"event": "pane.agent_status_changed", "data": {"pane_id": "w1:p3"}}
         )
@@ -160,7 +188,7 @@ class CodexUsageTests(unittest.TestCase):
         self.assertTrue(all(argv[0] == "/opt/herdr" for argv in self.calls))
 
     def test_failed_report_does_not_stop_other_panes(self):
-        self.agents = [codex("w1:p1"), codex("w1:p3")]
+        self.panes = [codex("w1:p1"), codex("w1:p3")]
         self.failing_pane = "w1:p1"
         self.run_main()
         self.assertIn("w1:p3", self.reports())

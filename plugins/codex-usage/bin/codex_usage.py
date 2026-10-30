@@ -61,7 +61,7 @@ def find_pane_id(value) -> str | None:
     return None
 
 
-def agents_in_scope() -> list[dict]:
+def panes_in_scope() -> list[dict]:
     event = os.environ.get("HERDR_PLUGIN_EVENT_JSON")
     wanted = None
     if event:
@@ -71,12 +71,20 @@ def agents_in_scope() -> list[dict]:
             wanted = None
         if not wanted:
             return []
-    agents = herdr_json("agent", "list").get("result", {}).get("agents") or []
-    return [agent for agent in agents if isinstance(agent.get("pane_id"), str) and wanted in (None, agent["pane_id"])]
+    # A pane that no longer runs Codex is not in `agent list`, but it keeps the Codex tokens.
+    # So work from `pane list`, which holds every pane, and keep the ones with Codex work.
+    panes = herdr_json("pane", "list").get("result", {}).get("panes") or []
+    return [
+        pane
+        for pane in panes
+        if isinstance(pane.get("pane_id"), str)
+        and wanted in (None, pane["pane_id"])
+        and (pane.get("agent") == "codex" or shows_codex_values(pane))
+    ]
 
 
-def shows_codex_values(agent: dict) -> bool:
-    tokens = agent.get("tokens")
+def shows_codex_values(pane: dict) -> bool:
+    tokens = pane.get("tokens")
     return isinstance(tokens, dict) and (CONTEXT_TOKEN in tokens or COST_TOKEN in tokens)
 
 
@@ -170,8 +178,8 @@ def call_cost(usage: dict, price: dict) -> float:
     ) / 1_000_000
 
 
-def tokens(agent: dict) -> tuple[str | None, str | None]:
-    path = session_log(agent)
+def tokens(pane: dict) -> tuple[str | None, str | None]:
+    path = session_log(pane)
     if path is None:
         return None, None
     calls, last = read_usage(path)
@@ -206,17 +214,18 @@ def failure(error: Exception) -> str:
 def main() -> None:
     # A startup or event hook has no one to show an error to, so log it and go on.
     try:
-        agents = agents_in_scope()
+        panes = panes_in_scope()
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
-        print(f"codex-usage: cannot list agents: {failure(error)}", file=sys.stderr)
+        print(f"codex-usage: cannot list panes: {failure(error)}", file=sys.stderr)
         return
-    for agent in agents:
-        pane_id = agent["pane_id"]
+    for pane in panes:
+        pane_id = pane["pane_id"]
         try:
-            if agent.get("agent") == "codex":
-                report(pane_id, *tokens(agent))
-            # Another agent can start in a pane where Codex ran. Its old Codex values must go.
-            elif shows_codex_values(agent):
+            if pane.get("agent") == "codex":
+                report(pane_id, *tokens(pane))
+            # A pane keeps its Codex values after Codex exits or another agent starts there.
+            # Both leave stale values, so they must go.
+            else:
                 report(pane_id, None, None)
         except (OSError, subprocess.SubprocessError) as error:
             print(f"codex-usage: {pane_id}: {failure(error)}", file=sys.stderr)

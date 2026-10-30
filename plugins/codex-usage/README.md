@@ -52,6 +52,7 @@ Then run `herdr server reload-config`.
 - When a Codex agent changes state, such as from working to idle, for that pane.
 - When you run the action "Codex usage: refresh", for every Codex pane.
 - When another agent starts in a pane where Codex ran. The plugin clears the old Codex values of that pane.
+- When a Codex agent exits and leaves a shell in its pane. The plugin clears the old Codex values of that pane.
 
 The values do not change while a turn runs. They catch up when the agent changes state.
 
