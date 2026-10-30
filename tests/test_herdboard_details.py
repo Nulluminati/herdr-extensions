@@ -181,7 +181,10 @@ class DetailsAppTests(StoreCase, unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(60, 8)) as pilot:
             await pilot.pause()
             box = app.query_one("#details", Static)
-            self.assertEqual(box.border_title, f"{ref} details")
+            # Herdr draws the pane border and its `details - <ref>` label, so the view draws none.
+            self.assertFalse(box.border_title)
+            self.assertEqual(box.styles.border_top[0], "")
+            self.assertEqual(box.content_size.width, 58, "one column of padding at each side")
             shown = str(box.render())
             self.assertIn("Fix login timeout", shown)
             self.assertIn(f"no start record for {ref}", shown)
@@ -256,7 +259,7 @@ class OpenDetailsPaneTests(unittest.TestCase):
             ["tab", "list"],
             ["pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.25", "--no-focus"],
             ["pane", "swap", "--source-pane", "w1:p1", "--target-pane", "w1:p2"],
-            ["pane", "rename", "w1:p2", "details t123"],
+            ["pane", "rename", "w1:p2", "details - t123"],
             ["pane", "run", "w1:p2", "herdboard details t123"],
         ])
 
@@ -276,7 +279,7 @@ class OpenDetailsPaneTests(unittest.TestCase):
         self.assertEqual(self.fake.calls, [])
 
     def test_no_second_pane_in_the_tab(self):
-        self.fake.labels = {"w1:p5": "details t123"}
+        self.fake.labels = {"w1:p5": "details - t123"}
         self.assertIsNone(start.open_details_pane("t123", "w1:p1", self.config))
         self.assertNotIn("pane split", self.fake.operations())
 

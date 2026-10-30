@@ -1,4 +1,6 @@
-"""The Textual app of `herdboard details`: the card details lines in a bordered box.
+"""The Textual app of `herdboard details`: the card details lines.
+
+Herdr draws the pane border and its `details - <ref>` label, so the app draws no border.
 
 The app has no keys of its own. It checks the watched files every two seconds and draws
 again when one changes or the pane changes size.
@@ -41,8 +43,7 @@ class CachedLookup:
 class DetailsApp(App):
     CSS = """
     Screen { background: $background; }
-    #details { border: round $panel-lighten-2; border-title-color: $text-muted; padding: 0 1;
-               height: 1fr; }
+    #details { padding: 0 1; height: 1fr; }
     """
 
     def __init__(self, store, config, ref: str, linear_card: Callable | None = None,
@@ -59,9 +60,7 @@ class DetailsApp(App):
         self.seen: tuple | None = None
 
     def compose(self) -> ComposeResult:
-        box = Static(id="details")
-        box.border_title = f"{self.ref} details"
-        yield box
+        yield Static(id="details")
 
     def on_mount(self) -> None:
         self.reload()
@@ -95,7 +94,7 @@ class DetailsApp(App):
         if self.data is None:
             return
         box = self.query_one("#details", Static)
-        # The border takes two columns and two rows, the padding two more columns.
-        width = max(self.size.width - 4, 1)
-        height = max(self.size.height - 2, 1)
+        # The padding takes two columns.
+        width = max(self.size.width - 2, 1)
+        height = max(self.size.height, 1)
         box.update(Text("\n").join(details.details_lines(self.data, width, height)))

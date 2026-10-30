@@ -369,17 +369,15 @@ Agents record progress in the log, not in the card. `edit` fails with `agent_edi
 
 ### Details pane
 
-Each card agent and each planner gets a small read-only pane on top, labeled `details <id>`. It shows the card without going back to the board:
+Each card agent and each planner gets a small read-only pane on top, labeled `details - <id>`. Herdr draws its border and label, so the pane draws none of its own. It shows the card without going back to the board:
 
 ```text
-╭─ tr88 details ───────────────────────────────────────────────────────────╮
-│ tr88 │ Some kind of details pane in workspaces  In progress      feature │
-│ claude opus (high) · tr88-details-pane → main · PR #12 open              │
-│ ☑ 2/5  mockup-details-pane.png  plan.md                                  │
-│ ── log ───────────────────────────────────────────────────────────────── │
-│ 10-29 14:02  herdboard  Plan saved: …/attachments/tr88/plan.md           │
-│ 10-29 15:10  claude     Moved to Review                                  │
-╰──────────────────────────────────────────────────────────────────────────╯
+tr88 │ Some kind of details pane in workspaces  In progress      feature
+claude opus (high) · tr88-details-pane → main · PR #12 open
+☑ 2/5  mockup-details-pane.png  plan.md
+── log ─────────────────────────────────────────────────────────────────
+10-29 14:02  herdboard  Plan saved: …/attachments/tr88/plan.md
+10-29 15:10  claude     Moved to Review
 ```
 
 - The first line has the card ID, the title without tags, the column (a Linear card's state) and the type.

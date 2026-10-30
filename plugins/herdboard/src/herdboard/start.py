@@ -268,7 +268,7 @@ def export_config(pane_id: str, config_file: Path | None) -> None:
 
 def details_label(ref: str) -> str:
     """The Herdr label of a card's details pane, which tells an open pane from a missing one."""
-    return f"details {ref}"
+    return f"details - {ref}"
 
 
 def _focused_tab() -> str | None:

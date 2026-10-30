@@ -630,7 +630,7 @@ class WaitTests(PlanTestCase):
         self.planner.plan(self.card.ref)
         self.assertEqual(self.fake.find("pane", "split"),
                          [["pane", "split", "w1:p7", "--direction", "down", "--ratio", "0.25", "--no-focus"]])
-        self.assertEqual(self.fake.labels, {"w1:p8": f"details {self.card.ref}"})
+        self.assertEqual(self.fake.labels, {"w1:p8": f"details - {self.card.ref}"})
         self.assertEqual(json.loads((start.state_dir() / "plans.json").read_text())[self.card.ref]["tab_id"], "w1:t4")
         self.assertEqual(self.fake.find("pane", "close"), [])
         self.fake.states = ["working", None]
