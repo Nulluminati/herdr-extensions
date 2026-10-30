@@ -2,7 +2,6 @@
 import dataclasses
 import unittest
 
-
 from herdboard.board import card_actions
 from support.herdboard_mouse import MouseTestCase
 

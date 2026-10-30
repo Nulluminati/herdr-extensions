@@ -1,14 +1,13 @@
 from pathlib import Path
 from unittest import mock
 
-
-from support.herdboard_cli import CliTestCase
+from herdboard import cli
 from herdboard.config import load_config
 from herdboard.identity import repo_identity
 from herdboard.linear_links import ProjectLink
 from herdboard.model import HerdboardError
 from herdboard.store import Store
-from herdboard import cli
+from support.herdboard_cli import CliTestCase
 
 
 class AutoInitTests(CliTestCase):

@@ -1,17 +1,13 @@
 import copy
-import unittest
-from unittest import mock
 import http.client
-from datetime import datetime, timedelta, timezone
+import unittest
+from datetime import UTC, datetime, timedelta
+from unittest import mock
 from urllib.error import URLError
 
-
-from herdboard.linear import (LinearAuthError, LinearClient, LinearError,
-                              LinearNetworkError)
-from herdboard.linear import LABELS_PAGE_QUERY
+from herdboard.linear import LABELS_PAGE_QUERY, LinearAuthError, LinearClient, LinearError, LinearNetworkError
 from herdboard.model import HerdboardError
 from support.linear_fake import FakeLinear
-
 
 VIEWER = {"id": "u1", "name": "Nate", "email": "nate@example.com",
           "organization": {"id": "o1", "name": "Workspace", "urlKey": "workspace"}}
@@ -468,10 +464,14 @@ class LinearTests(unittest.TestCase):
         self.assertEqual({r["operationName"] for r in self.fake.requests}, {"Teams", "Projects"})
 
     def test_done_days_filter(self):
-        now = datetime.now(timezone.utc)
-        ago = lambda days: (now - timedelta(days=days)).isoformat()
-        done = lambda i, days, project="p0": {**issue(i), "completedAt": ago(days),
-                                              "state": {"id": "s9", "name": "Done", "type": "completed"}}
+        now = datetime.now(UTC)
+
+        def ago(days):
+            return (now - timedelta(days=days)).isoformat()
+
+        def done(i, days, project="p0"):
+            return {**issue(i), "completedAt": ago(days), "state": {"id": "s9", "name": "Done", "type": "completed"}}
+
         self.fixtures["issues"] = [issue(0), done(1, 3), done(2, 40), done(3, 20)]
         self.assertEqual([i["id"] for i in self.client.project_issues("p0")], ["i0", "i1"])
         self.assertEqual(self.fake.requests[0]["variables"]["filter"]["or"], RECENT_OR)
@@ -484,7 +484,7 @@ class LinearTests(unittest.TestCase):
         self.assertNotIn("or", self.fake.requests[0]["variables"]["filter"])
 
     def test_done_days_filter_for_my_issues(self):
-        old = {**issue(1), "completedAt": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()}
+        old = {**issue(1), "completedAt": (datetime.now(UTC) - timedelta(days=40)).isoformat()}
         self.fixtures["issues"] = [issue(0), old]
         self.assertEqual([i["id"] for i in self.client.my_issues()], ["i0"])
         self.assertEqual(self.fake.requests[0]["variables"]["filter"], {"or": RECENT_OR})
@@ -499,7 +499,7 @@ class LinearTests(unittest.TestCase):
                     self.client.project_issues("p0", done_days=value)
 
     def test_issues_by_ids(self):
-        old = {**issue(3), "completedAt": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()}
+        old = {**issue(3), "completedAt": (datetime.now(UTC) - timedelta(days=40)).isoformat()}
         self.fixtures["issues"][3] = old
         found = self.client.issues_by_ids(["i1", "i3", "i4", "missing"])
         self.assertEqual([i["id"] for i in found], ["i1", "i4"])
@@ -582,7 +582,7 @@ class LinearWriteTests(unittest.TestCase):
         self.assertNotIn("title", self.fake.requests[0]["query"])
         self.assertNotIn("or", self.fake.requests[0]["variables"]["filter"])
         self.fixtures["issues"][0]["completedAt"] = (
-            datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+            datetime.now(UTC) - timedelta(days=40)).isoformat()
         self.fixtures["issues"][1]["team"] = {"id": "other", "key": "OTHER"}
         self.fixtures["issues"][2]["state"]["id"] = "other"
         self.assertEqual(self.client.state_sort_orders("t0", "s1", 14), [3.0, 4.0])

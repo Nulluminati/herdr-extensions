@@ -7,9 +7,9 @@ a Herdr notification, because Herdr does not show the output of an action.
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main() -> int:

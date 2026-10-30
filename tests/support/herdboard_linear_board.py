@@ -1,4 +1,5 @@
 import threading
+
 from herdboard.board import HerdboardApp
 from herdboard.linear_links import ProjectLink
 from herdboard.linear_source import LinearSource

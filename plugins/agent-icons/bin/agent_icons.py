@@ -14,7 +14,6 @@ import subprocess
 import sys
 import time
 
-
 TOKEN = "agent_icon"
 SOURCE = "nulluminati.agent-icons"
 FONT_FAMILY = "Herdr Agent Icons Max"

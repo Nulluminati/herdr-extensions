@@ -2,17 +2,15 @@
 import base64
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
-
 
 from herdboard import mockup, start
 from herdboard.config import Config
-
 from support.herdboard_cli import CliTestCase
 
 # A 1x1 PNG, so the viewer can read a real size from the header.

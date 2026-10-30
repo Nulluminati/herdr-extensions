@@ -6,9 +6,9 @@ in its own session and returns at once, so Herdr does not wait for uv or the boa
 """
 
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main() -> int:

@@ -9,15 +9,15 @@ A background worker waits for the agent to go idle, counts its notes and shows a
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import activity, agent_review, sandbox, start
 from .model import HerdboardError
@@ -143,7 +143,7 @@ class PullRequest:
     review: dict | None = None
 
     @classmethod
-    def from_json(cls, data: dict, login: str) -> "PullRequest":
+    def from_json(cls, data: dict, login: str) -> PullRequest:
         me = login.casefold()
         author = (data.get("author") or {}).get("login") or ""
         requests = data.get("reviewRequests") or []
@@ -525,7 +525,8 @@ def _agent_name(repo: str, number: int) -> str:
 
 
 def _agent_status(record: dict) -> str | None:
-    """The reviewer's Herdr status, None when it no longer runs. Herdr can drop a pi or Codex agent's name, so its pane counts too."""
+    """The reviewer's Herdr status, None when it no longer runs. Herdr can drop a pi or Codex agent's name,
+    so its pane counts too."""
     for target in (record.get("agent_name"), record.get("pane_id")):
         if not target:
             continue
@@ -829,7 +830,10 @@ def refresh(key: str) -> dict:
             save(key, record)
         if failed:
             raise _refused_notes(key, failed, error)
-        line = lambda e: f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary'].splitlines()[0][:80]}"
+
+        def line(e):
+            return f"{e['filePath']}:{e.get('newLine', e.get('oldLine'))}: {e['summary'].splitlines()[0][:80]}"
+
         return {"key": key, "number": record["number"], "hunk_pane": record["hunk_pane"],
                 "hunk_session": record["hunk_session"], "kept": kept,
                 "dropped": [line(e) for e in dropped], "agent": record.get("agent"), "model": record.get("model"),

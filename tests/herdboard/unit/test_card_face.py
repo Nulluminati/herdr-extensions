@@ -1,12 +1,12 @@
 """Card rows, column colors and card styles on the board."""
 
-from io import StringIO
 import subprocess
 import unittest
+from io import StringIO
 from unittest.mock import patch
 
-
 from rich.console import Console
+
 from herdboard import board
 from herdboard.board import ColumnData
 from herdboard.store import CardView

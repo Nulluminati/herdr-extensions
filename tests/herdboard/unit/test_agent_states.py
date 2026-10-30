@@ -1,10 +1,10 @@
 """Agent states: the Herdr status of each agent pane that works on a card, for the board's glyphs."""
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from herdboard import agent_states, start

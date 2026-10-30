@@ -7,7 +7,7 @@ import json
 import re
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import graphql
@@ -23,7 +23,7 @@ def linear_schema():
     return graphql.build_schema(gzip.decompress(SCHEMA_PATH.read_bytes()).decode("utf-8"))
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def parse_query(query):
     """Parse a query; return (document, error messages from schema validation)."""
     document = graphql.parse(query)
@@ -55,7 +55,7 @@ def connection(nodes, variables, page_size):
 
 class FakeLinear:
     def __init__(self, fixtures=None, api_key="test-key", page_size=2, now=None):
-        self.now = now or datetime.now(timezone.utc)
+        self.now = now or datetime.now(UTC)
         self.fixtures = fixtures or {}
         self.api_key = api_key
         self.page_size = page_size
@@ -194,7 +194,10 @@ class FakeLinear:
     def answer(self, request):
         op, variables = request["operationName"], request["variables"]
         fixtures = self.fixtures
-        page = lambda nodes: connection(nodes, variables, self.page_size)
+
+        def page(nodes):
+            return connection(nodes, variables, self.page_size)
+
         if op == "Viewer":
             return {"viewer": copy.deepcopy(fixtures["viewer"])}
         if op == "Teams":

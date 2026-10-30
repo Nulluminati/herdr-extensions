@@ -4,17 +4,23 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-
-from support import linear_data
 from herdboard.config import Config
-from herdboard.linear import LinearNetworkError, LinearWriteUnknownError
+from herdboard.linear import LinearNetworkError, LinearWriteRejectedError, LinearWriteUnknownError
 from herdboard.linear_states import (
-    AmbiguousStateError, NoStateError, StateChoices, candidates, resolve_state, refuse,
+    AmbiguousStateError,
+    NoStateError,
+    StateChoices,
+    candidates,
+    refuse,
+    resolve_state,
 )
 from herdboard.linear_writes import (
-    LinearOfflineError, LinearWriter, TeamRequiredError,
+    LinearOfflineError,
+    LinearWriter,
+    TeamRequiredError,
 )
 from herdboard.model import NotFoundError
+from support import linear_data
 from support.herdboard_linear_source import DEAD
 from support.herdboard_linear_writes import WriterCase
 
@@ -590,7 +596,7 @@ class CacheTests(WriterCase):
         writer = self.writer()
         writer.source.my_issues()
         self.fake.mutation_failure = "graphql_error"
-        with self.assertRaises(Exception):
+        with self.assertRaises(LinearWriteRejectedError):
             writer.move("ENG-1", "In progress")
         self.assertEqual(self.cached(writer.source), ["mine.json"])
 

@@ -1,7 +1,6 @@
 import unittest
 from unittest import mock
 
-
 from herdboard import kanban_md
 from herdboard.board import HerdboardApp
 from herdboard.linear_links import LabelLink, ProjectLink, with_link

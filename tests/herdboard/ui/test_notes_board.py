@@ -1,15 +1,23 @@
 """The Notes tab: the scratchpad of the shown board, or the global note, next to the board."""
 import asyncio
 import os
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from herdboard import notes
-from herdboard.board import (AutomationsScreen, ConfirmScreen, HerdboardApp, KeyBar, NoteChangedScreen, NotesScreen,
-                             PullRequestsScreen, TabBar)
+from herdboard.board import (
+    AutomationsScreen,
+    ConfirmScreen,
+    HerdboardApp,
+    KeyBar,
+    NoteChangedScreen,
+    NotesScreen,
+    PullRequestsScreen,
+    TabBar,
+)
 from herdboard.config import Config
 from herdboard.pr_reviews import Page
 from herdboard.store import Store
@@ -262,7 +270,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
     async def test_quit_saves_the_edit(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
-            screen = await self.open_notes(app, pilot)
+            await self.open_notes(app, pilot)
             await pilot.press("e", "a")
             await app.action_quit()
         self.assertEqual(self.note("acme-api").read_text(), "a")

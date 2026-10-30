@@ -3,14 +3,16 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
 from herdboard import cli
 from herdboard.config import load_config
 from herdboard.model import HerdboardError
 from herdboard.start import StartError
+
 
 class StartCliTests(unittest.TestCase):
     def setUp(self):
@@ -71,6 +73,7 @@ class StartCliTests(unittest.TestCase):
 
     def test_pr_review_filters_config_thinking_for_the_agent(self):
         from types import SimpleNamespace
+
         from herdboard.config import Config
         config = Config()
         for kind, level, expected in (("codex", "ultra", "ultra"), ("codex", "off", None),

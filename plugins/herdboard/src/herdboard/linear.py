@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 import http.client
 import json
 import math
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import (HTTPDefaultErrorHandler, HTTPErrorProcessor, HTTPHandler,
-                            HTTPSHandler, OpenerDirector, ProxyHandler, Request)
+from urllib.request import (
+    HTTPDefaultErrorHandler,
+    HTTPErrorProcessor,
+    HTTPHandler,
+    HTTPSHandler,
+    OpenerDirector,
+    ProxyHandler,
+    Request,
+)
 
 from .model import HerdboardError
 
@@ -305,7 +312,7 @@ class LinearClient:
                     if any(headers.get(name) is not None for name in (
                             "X-RateLimit-Requests-Reset", "X-RateLimit-Complexity-Reset", "Retry-After")):
                         allowed = datetime.fromtimestamp(
-                            time.time() + rate_limit_wait(headers, attempt), timezone.utc)
+                            time.time() + rate_limit_wait(headers, attempt), UTC)
                         message += "; requests are allowed again at " + allowed.strftime("%Y-%m-%dT%H:%M:%SZ")
                     # This is a known non-write, not an unknown transport result.
                     raise _LinearWriteRateLimitError(message)
@@ -313,7 +320,7 @@ class LinearClient:
                     raise LinearError(f"Linear rate limit exceeded after {attempt} retries")
                 delay = rate_limit_wait(headers, attempt)
                 if delay > MAX_RATE_LIMIT_WAIT:
-                    allowed = datetime.fromtimestamp(time.time() + delay, timezone.utc)
+                    allowed = datetime.fromtimestamp(time.time() + delay, UTC)
                     raise LinearError("Linear rate limit exceeded; requests are allowed again at "
                                       + allowed.strftime("%Y-%m-%dT%H:%M:%SZ"))
                 self.sleep(delay)

@@ -2,9 +2,9 @@
 tab at the bottom."""
 import asyncio
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from textual.widgets import Footer
@@ -119,6 +119,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_read_in_the_background_shows_no_loading_spinner(self):
         import threading
+
         from textual.widgets import LoadingIndicator
         release = threading.Event()
 
@@ -174,6 +175,7 @@ class TabBarTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_header_leaves_out_a_missing_version(self):
         from importlib.metadata import PackageNotFoundError
+
         from herdboard import board
         with patch("importlib.metadata.version", side_effect=PackageNotFoundError("herdboard")):
             self.assertEqual(board.herdboard_version(), "")

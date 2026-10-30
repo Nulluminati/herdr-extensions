@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import threading
-from typing import Callable
+from collections.abc import Callable
+from pathlib import Path
 
 from .config import Config
 from .linear_cards import column_for

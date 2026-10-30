@@ -1,17 +1,32 @@
 """The board's pull request list: G opens it, and its keys start, refresh and finish PR reviews."""
 import asyncio
-from io import StringIO
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from datetime import UTC
+from io import StringIO
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from rich.console import Console
 
-from herdboard.board import (AGENT_LOGOS, PR_FIELDS, AgentScreen, AutomationsScreen, ClaudeModelScreen, ConfirmScreen, HerdboardApp,
-                             ModelScreen, NotesScreen, PullRequestDetailScreen, PullRequestRow, PullRequestsScreen, ago,
-                             pr_fields, pr_row_content)
+from herdboard.board import (
+    AGENT_LOGOS,
+    PR_FIELDS,
+    AgentScreen,
+    AutomationsScreen,
+    ClaudeModelScreen,
+    ConfirmScreen,
+    HerdboardApp,
+    ModelScreen,
+    NotesScreen,
+    PullRequestDetailScreen,
+    PullRequestRow,
+    PullRequestsScreen,
+    ago,
+    pr_fields,
+    pr_row_content,
+)
 from herdboard.config import Config, load_config
 from herdboard.pr_reviews import Page, PrReviewError, PullRequest
 from herdboard.store import Store
@@ -200,8 +215,8 @@ class PullRequestBoardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Fix login", first)
 
     def test_ago_says_how_long_ago_in_one_unit(self):
-        from datetime import datetime, timezone
-        now = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
+        from datetime import datetime
+        now = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
         for stamp, expected in (("2026-10-18T11:59:30Z", "just now"), ("2026-10-18T11:55:00Z", "5 min ago"),
                                 ("2026-10-18T09:00:00Z", "3 hours ago"), ("2026-10-17T11:00:00Z", "1 day ago"),
                                 ("2026-10-01T12:00:00Z", "2 weeks ago"), ("", ""), ("soon", "")):

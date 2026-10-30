@@ -11,11 +11,10 @@ on the branch since its upstream, so committed agent work can be reviewed too.
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
-
+from pathlib import Path
 
 REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large diff can take a long time; the worker runs in the background.
@@ -59,7 +58,7 @@ def herdr(*arguments: str, timeout: int = 120):
             found = herdr("agent", "get", pane)
             data = json.loads(found.stdout)
         except (ReviewError, ValueError, TypeError):
-            raise error
+            raise error from None
         result = data.get("result") if isinstance(data, dict) else None
         agent = result.get("agent") if isinstance(result, dict) else None
         if isinstance(agent, dict) and agent.get("agent") == kind:

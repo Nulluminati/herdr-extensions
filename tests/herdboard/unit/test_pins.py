@@ -2,11 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
-from herdboard.linear_links import ProjectLink, parse_links, replace_links
 from herdboard.linear import LinearError
+from herdboard.linear_links import ProjectLink, parse_links, replace_links
 from herdboard.linear_pins import IssuePin, add_pin, parse_pins, pin_issue, replace_pins, unpin_issue
 from herdboard.model import FormatError, NotFoundError
 from herdboard.store import Store

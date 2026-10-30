@@ -1,9 +1,9 @@
 """The key bar at the bottom: the keys of the top screen, dimmed when they do not apply to the selection."""
 import asyncio
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from herdboard.board import DetailScreen, HerdboardApp, KeyBar, PullRequestDetailScreen, PullRequestsScreen

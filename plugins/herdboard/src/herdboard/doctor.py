@@ -1,19 +1,19 @@
 """Read-only store diagnostics, with an explicit locked duplicate-ID repair."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 
+from . import linear_links, linear_source
 from .config import Config, config_path, load_config
 from .identity import IdentityError, _canonical_identity, repo_identity
-from . import linear_links, linear_source
 from .linear import LinearAuthError, LinearError, LinearNetworkError
 from .linear_links import parse_links
 from .linear_pins import parse_pins
-from .model import BLOCK_ID, Board, Card, Column, ConflictError, FormatError, HerdboardError, parent_of
+from .model import BLOCK_ID, Card, Column, ConflictError, FormatError, HerdboardError, parent_of
 from .promotions import PromotionRecords
 from .start import _entries, _read
 from .store import Store
@@ -193,7 +193,7 @@ def fix_ids(store, before):
         for place in current_duplicates:
             old_id = place.card.block_id
             new_id = store._new_id(taken)
-            place.card.lines[0] = BLOCK_ID.sub(lambda match: f" ^{new_id}", place.card.first_line)
+            place.card.lines[0] = BLOCK_ID.sub(lambda match: f" ^{new_id}", place.card.first_line)  # noqa: B023  used in this iteration
             changed.setdefault(place.path, []).append({"old_id": old_id, "new_id": new_id,
                                                        "path": str(place.path), "line": place.line})
         for path in sorted(changed):
@@ -246,7 +246,7 @@ def check_linear(config, boards, offline):
                 if not link.labels:
                     continue
                 try:
-                    found = {label["id"] for label in client.labels([l.id for l in link.labels])}
+                    found = {label["id"] for label in client.labels([link_label.id for link_label in link.labels])}
                 except (LinearAuthError, LinearNetworkError):
                     raise
                 except LinearError as error:

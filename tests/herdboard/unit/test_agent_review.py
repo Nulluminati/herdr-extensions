@@ -8,11 +8,10 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-
 from herdboard import agent_review, attachments, review, sandbox, start
+from support.herdboard_agent_review import ReviewerHerdr
 from support.herdboard_cli import CliTestCase
 from support.herdboard_merge import MergeTestCase
-from support.herdboard_agent_review import ReviewerHerdr
 
 
 class AgentReviewTestCase(MergeTestCase):

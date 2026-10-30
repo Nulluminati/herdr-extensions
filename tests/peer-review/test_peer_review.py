@@ -2,15 +2,14 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from herdboard import sandbox
 from support.scripts import load_script
-
 
 peer_review = load_script("peer-review", "peer_review")
 

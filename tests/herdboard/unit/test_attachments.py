@@ -4,12 +4,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 from herdboard import activity, attachments
 from herdboard.config import load_config
 from herdboard.model import HerdboardError, NotFoundError
 from herdboard.store import Store
-
 from support.herdboard_cli import CliTestCase
 
 

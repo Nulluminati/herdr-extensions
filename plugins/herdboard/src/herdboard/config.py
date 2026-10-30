@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import fcntl
 import os
 import re
 import shlex
 import subprocess
-from pathlib import Path
 import tempfile
 import threading
 import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from .linear import LinearAuthError
 from .model import HerdboardError, IoError, UnknownTypeError

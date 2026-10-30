@@ -15,11 +15,10 @@ A pane that no longer runs Codex has its Codex values cleared.
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
-
+from pathlib import Path
 
 SOURCE = "nulluminati.codex-usage"
 CONTEXT_TOKEN = "codex_context"

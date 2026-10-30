@@ -2,15 +2,15 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import textwrap
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
 from support.paths import ROOT
 from support.scripts import load_script
-
 
 EXAMPLE = ROOT / "plugins/default-layout/examples/layout.toml"
 default_layout = load_script("default-layout", "default_layout")

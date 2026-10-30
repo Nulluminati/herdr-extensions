@@ -3,9 +3,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 from herdboard import cli
-from herdboard.board import HELP_SECTIONS, DetailScreen, HerdboardApp, NotesScreen, PullRequestDetailScreen, PullRequestsScreen
+from herdboard.board import (
+    HELP_SECTIONS,
+    DetailScreen,
+    HerdboardApp,
+    NotesScreen,
+    PullRequestDetailScreen,
+    PullRequestsScreen,
+)
 from herdboard.config import Config
 from herdboard.store import Store
 
@@ -76,10 +82,10 @@ class TerminalModeTests(unittest.TestCase):
         return driver
 
     def test_the_app_uses_the_cell_mouse_driver(self):
-        from herdboard.board import CellMouseDriver
-
         from textual.app import App
         from textual.drivers.linux_driver import LinuxDriver
+
+        from herdboard.board import CellMouseDriver
 
         app = HerdboardApp.__new__(HerdboardApp)
         with mock.patch.object(App, "get_driver_class", return_value=LinuxDriver):

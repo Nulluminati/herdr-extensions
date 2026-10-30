@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from .model import HerdboardError, frontmatter_scalars
@@ -69,7 +69,7 @@ def _split_remote(url: str) -> tuple[str, tuple[str, ...]]:
         if parts.scheme == "file" or not parts.hostname:
             raise IdentityError(f"Remote URL is a local path: {url!r}")
         try:
-            parts.port
+            parts.port  # noqa: B018  reading the port raises ValueError for a bad one
         except ValueError as error:
             raise IdentityError(f"Cannot parse remote URL: {url!r}") from error
         return parts.hostname.lower(), _segments(parts.path, url)

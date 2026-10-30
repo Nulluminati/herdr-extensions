@@ -1,17 +1,16 @@
-from datetime import datetime, timezone
 import json
 import os
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
-
-from support import linear_data
 from herdboard import linear_source
 from herdboard.config import Config
 from herdboard.linear import LinearError
 from herdboard.linear_cards import column_for, has_pull_request, issue_card
 from herdboard.linear_source import CacheMiss, LinearDisabledError, LinearSource, ProjectNotFound
+from support import linear_data
 from support.herdboard_linear_source import DEAD, LinearEnvTestCase
 
 
@@ -30,6 +29,7 @@ class SourceTests(LinearEnvTestCase):
 
     def test_paused_fetch_cannot_restore_cache_after_concurrent_write(self):
         import threading
+
         from herdboard.linear_writes import LinearWriter
         linear_data.with_workflow(self.fixtures)
         source = self.source()
@@ -229,8 +229,8 @@ class RefreshTests(LinearEnvTestCase):
 
     def test_older_result_never_replaces_a_newer_cache_file(self):
         path = self.root / "cache.json"
-        newer = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
-        older = datetime(2026, 10, 10, 11, 0, tzinfo=timezone.utc)
+        newer = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
+        older = datetime(2026, 10, 10, 11, 0, tzinfo=UTC)
         linear_source.write_cache(path, newer, {"v": "new"})
         linear_source.write_cache(path, older, {"v": "old"})
         self.assertEqual(json.loads(path.read_text())["data"], {"v": "new"})
@@ -240,7 +240,7 @@ class RefreshTests(LinearEnvTestCase):
     def test_fetched_time_is_the_time_the_request_started(self):
         self.fake.delay = 0.3
         fetched = self.source().my_issues()
-        waited = datetime.now(timezone.utc) - fetched.fetched_at
+        waited = datetime.now(UTC) - fetched.fetched_at
         self.assertGreaterEqual(waited.total_seconds(), 0.3)
 
     def test_issue_is_looked_up_directly_and_cached(self):
@@ -319,7 +319,7 @@ class PinnedSourceTests(LinearEnvTestCase):
 class CardTests(unittest.TestCase):
     def setUp(self):
         self.config = Config()
-        self.when = datetime(2026, 10, 10, 12, 3, tzinfo=timezone.utc)
+        self.when = datetime(2026, 10, 10, 12, 3, tzinfo=UTC)
 
     def card(self, issue, identities=()):
         return issue_card(self.config, issue, set(identities), self.when, False)

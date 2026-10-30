@@ -7,7 +7,6 @@ import sys
 import unittest
 from unittest import mock
 
-
 from herdboard import cli, kanban_md
 from herdboard.store import Store
 from support.herdboard_cli import CliTestCase

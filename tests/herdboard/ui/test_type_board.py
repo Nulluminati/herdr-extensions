@@ -1,6 +1,5 @@
 import unittest
 
-
 from herdboard.board import AddScreen, DetailScreen, EditScreen
 from support.herdboard_board import SIZE, BoardTestCase, settle
 

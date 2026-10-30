@@ -1,7 +1,6 @@
 import unittest
 from unittest import mock
 
-
 from herdboard import start
 from herdboard.board import AddScreen, ConfirmScreen, HelpScreen
 from support.herdboard_board import SIZE, BoardTestCase, settle

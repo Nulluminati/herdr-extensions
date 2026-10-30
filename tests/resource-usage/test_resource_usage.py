@@ -2,15 +2,15 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import tomllib
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
 from support.paths import ROOT
 from support.scripts import load_script
-
 
 PLUGIN = ROOT / "plugins/resource-usage"
 FIXTURES = ROOT / "tests/resource-usage/fixtures"
@@ -563,11 +563,11 @@ class ReportTests(HerdrTestCase):
         resource_usage.report_usage("w1", "CPU 1%  MEM 2 MiB")
         first, second = self.reports()
         self.assertEqual(first[:4], ["herdr", "workspace", "report-metadata", "w1"])
-        options = dict(zip(first[4::2], first[5::2]))
+        options = dict(zip(first[4::2], first[5::2], strict=True))
         self.assertEqual(options["--source"], "nulluminati.resource-usage")
         self.assertEqual(options["--token"], "resource_usage=CPU 1%  MEM 2 MiB")
         self.assertEqual(options["--ttl-ms"], "8000")
-        self.assertLess(int(options["--seq"]), int(dict(zip(second[4::2], second[5::2]))["--seq"]))
+        self.assertLess(int(options["--seq"]), int(dict(zip(second[4::2], second[5::2], strict=True))["--seq"]))
 
     def test_clear_touches_only_this_token(self):
         resource_usage.clear_usage("w1")

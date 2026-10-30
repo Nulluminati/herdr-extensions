@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 from herdboard import activity, review, start
 from support.herdboard_cli import CliTestCase
 from support.herdboard_review import ReviewTestCase

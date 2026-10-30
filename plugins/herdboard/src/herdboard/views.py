@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from .config import Config
 from .identity import RepoIdentity
@@ -87,7 +87,7 @@ class Views:
             project_id = self._project_id(ask_linear=False)
             if project_id is None:
                 return []
-            return [p for p, links in self._linked() if any(l.id == project_id for l in links)]
+            return [p for p, links in self._linked() if any(link.id == project_id for link in links)]
         raise HerdboardError(f"Unknown view {view!r}")
 
     # Linear
@@ -141,9 +141,9 @@ class Views:
         errors: list[str] = []
 
         def add_project(link: ProjectLink, use_labels: bool) -> None:
-            label_ids = [l.id for l in link.labels] if use_labels and link.labels else None
+            label_ids = [label.id for label in link.labels] if use_labels and link.labels else None
             where = f"Linear project {link.name!r}"
-            names = {l.id: l.name for l in link.labels}
+            names = {label.id: label.name for label in link.labels}
 
             def fetch() -> Fetched:
                 fetched = source.project_issues(link.id, label_ids)
@@ -173,7 +173,7 @@ class Views:
                 meta = self.store.board_meta(path)
                 if meta.repo:
                     identities.add(meta.repo)
-                names.update({l.id: l.name for l in meta.links})
+                names.update({link.id: link.name for link in meta.links})
             jobs.append(
                 (
                     f"Linear project {names.get(project_id, self.project)!r}",

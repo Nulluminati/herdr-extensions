@@ -3,7 +3,6 @@ import json
 import unittest
 from unittest import mock
 
-
 from herdboard import attachments, board, start
 from herdboard.board import AttachmentChoiceScreen, DetailScreen
 from support.herdboard_attachment_board import fake_opener

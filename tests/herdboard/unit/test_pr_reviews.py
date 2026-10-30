@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 from herdboard import agent_review, pr_reviews, sandbox, start
 
 REPO = "acme/api"
@@ -562,7 +561,10 @@ class WaitTests(PrReviewTestCase):
 
     def test_a_replaced_request_ends_the_worker_quietly(self):
         self.record(review_id=1)
-        replace = lambda argv, options: pr_reviews.save(KEY, {**pr_reviews.records()[KEY], "review_id": 2})
+
+        def replace(argv, options):
+            return pr_reviews.save(KEY, {**pr_reviews.records()[KEY], "review_id": 2})
+
         self.fake.on("herdr", "agent", "get", result={"agent": {"agent_status": "working"}}, then=replace)
         self.assertEqual(self.wait(), 0)
         self.assertEqual(pr_reviews.records()[KEY]["status"], "reviewing")

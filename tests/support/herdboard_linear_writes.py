@@ -1,7 +1,7 @@
-from support import linear_data
 from herdboard.config import Config
 from herdboard.linear import LinearClient
 from herdboard.linear_writes import LinearWriter
+from support import linear_data
 from support.herdboard_linear_source import LinearEnvTestCase
 
 

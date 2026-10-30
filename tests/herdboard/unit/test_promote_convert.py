@@ -1,6 +1,5 @@
 import unittest
 
-
 from herdboard import kanban_md
 from herdboard.promote_convert import SubItem, convert, promoted_identifier
 from support.paths import ROOT

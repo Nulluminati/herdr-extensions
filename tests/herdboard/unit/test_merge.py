@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 from herdboard import merge, mockup, pr_write, start
 from support.herdboard_cli import CliTestCase
 from support.herdboard_merge import MergeTestCase, PullRequestTestCase

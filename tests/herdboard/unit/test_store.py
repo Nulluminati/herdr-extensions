@@ -6,7 +6,6 @@ import time
 import unittest
 from unittest import mock
 
-
 from herdboard import kanban_md
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
@@ -534,7 +533,7 @@ class ValidBoardTest(StoreTestCase):
             for call in (
                 lambda: self.store.move("taaa", "Done"),
                 lambda: self.store.done("taaa"),
-                lambda: self.store.add(path, "x"),
+                lambda: self.store.add(path, "x"),  # noqa: B023  called only in this iteration
             ):
                 with self.subTest(board=name), self.assertRaises(FormatError) as caught:
                     call()

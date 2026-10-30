@@ -2,8 +2,8 @@
 
 import unittest
 
-
 from rich.cells import cell_len
+
 from herdboard import attachments, board
 from support.herdboard_board import BoardTestCase, settle
 from support.herdboard_icons import ATTACHMENT, CALENDAR, TYPE_ICONS

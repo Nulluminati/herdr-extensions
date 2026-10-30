@@ -1,6 +1,5 @@
 import unittest
 
-
 from herdboard import kanban_md
 from herdboard.model import Card, NotFoundError
 from support.paths import ROOT

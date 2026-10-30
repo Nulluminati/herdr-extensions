@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 from herdboard import cli, kanban_md, mockup, plan, start
 from herdboard.config import Config
 from herdboard.model import ConflictError, HerdboardError, NotFoundError

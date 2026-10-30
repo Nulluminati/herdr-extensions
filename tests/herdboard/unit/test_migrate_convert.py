@@ -1,6 +1,5 @@
 import unittest
 
-
 from herdboard.migrate_convert import convert, slug
 from support.paths import ROOT
 

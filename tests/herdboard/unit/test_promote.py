@@ -4,8 +4,6 @@ import unittest
 import uuid
 from unittest import mock
 
-
-from support import linear_data
 from herdboard.config import Config, LinearConfig
 from herdboard.linear import LinearClient, LinearWriteRejectedError, LinearWriteUnknownError
 from herdboard.linear_source import LinearSource
@@ -14,6 +12,7 @@ from herdboard.linear_writes import LinearOfflineError, LinearWriter
 from herdboard.model import ConflictError, HerdboardError, NotFoundError
 from herdboard.promote import AlreadyPromotedError, NotATodoError, Promoter
 from herdboard.store import Store
+from support import linear_data
 from support.herdboard_linear_writes import WriterCase
 from support.paths import ROOT
 

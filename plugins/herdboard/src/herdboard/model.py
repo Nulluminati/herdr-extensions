@@ -7,10 +7,9 @@ only the elements they touch.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
-import re
-
 
 CARD_START = re.compile(r"^- \[(?P<check>.)\] ")
 # The column that a new report lands in, before it is sorted: created on first use, on any board.

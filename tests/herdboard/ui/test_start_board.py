@@ -1,21 +1,24 @@
 """Start actions run through a thread worker, not the event loop."""
 import asyncio
 import json
+import os
 import subprocess
+import tempfile
 import threading
 import time
-import os
-from pathlib import Path
-import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
-from herdboard.board import AgentScreen, ClaudeModelScreen, ModelScreen, HerdboardApp, ReviewKindScreen, TargetScreen
-from herdboard.config import Config, load_config
-from herdboard.model import HerdboardError
-from herdboard.identity import RepoIdentity
-from herdboard.store import Store
-from herdboard.start import StartError
+
 from textual.widgets import Input
+
+from herdboard.board import AgentScreen, ClaudeModelScreen, HerdboardApp, ModelScreen, ReviewKindScreen, TargetScreen
+from herdboard.config import Config, load_config
+from herdboard.identity import RepoIdentity
+from herdboard.model import HerdboardError
+from herdboard.start import StartError
+from herdboard.store import Store
+
 
 class StartBoardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -79,9 +82,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(app.screen.query_one("#thinking").value, "default")
 
     async def test_codex_start_plan_and_review_use_codex_models(self):
-        from herdboard.config import CODEX_THINKING_LEVELS
         from textual.widgets import OptionList, Select
+
         from herdboard.board import AGENT_LOGOS
+        from herdboard.config import CODEX_THINKING_LEVELS
         self.assertEqual(AGENT_LOGOS.get("codex"), "\ue1a1")
         for action in ("start", "plan", "review"):
             with self.subTest(action=action), patch("herdboard.board.codex_model_choices",

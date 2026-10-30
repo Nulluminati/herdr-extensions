@@ -6,11 +6,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
-from support import linear_data
 from herdboard import cli
 from herdboard.linear import LinearClient, LinearNetworkError, LinearWriteUnknownError
 from herdboard.linear_links import LabelLink, ProjectLink
+from support import linear_data
 from support.herdboard_linear_write_cli import WriteCliCase
 
 
@@ -216,7 +215,7 @@ class AddLinearTests(WriteCliCase):
                 with self.subTest(reconciled=reconciled, missing=missing):
                     def create(client, **kwargs):
                         issue = create_issue(client, **kwargs)
-                        if reconciled:
+                        if reconciled:  # noqa: B023  called only in this iteration
                             raise LinearWriteUnknownError("Response lost after creation")
                         return issue
 

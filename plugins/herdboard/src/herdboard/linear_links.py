@@ -11,8 +11,8 @@ The links live under `linear-projects` as YAML:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 
 from .model import FormatError
 
@@ -41,8 +41,8 @@ class ProjectLink:
 
 def with_link(links: list[ProjectLink], link: ProjectLink) -> list[ProjectLink]:
     """`links` with `link` added last, or in the place of the link to the same project."""
-    kept = [l for l in links if l.id != link.id]
-    position = next((i for i, l in enumerate(links) if l.id == link.id), len(kept))
+    kept = [other for other in links if other.id != link.id]
+    position = next((i for i, other in enumerate(links) if other.id == link.id), len(kept))
     return kept[:position] + [link] + kept[position:]
 
 

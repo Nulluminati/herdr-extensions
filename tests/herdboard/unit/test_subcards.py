@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 from herdboard import cli, merge
 from herdboard.board import card_matches, mark_family
 from herdboard.config import Config

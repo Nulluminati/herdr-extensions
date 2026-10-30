@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
-from . import activity, merge, start as start_module
+from . import activity, merge
+from . import start as start_module
 from .agent_review import _notify, _reviewer_status, reviewer_arguments, start_worker
 from .brief import _unindent
 from .config import thinking_levels

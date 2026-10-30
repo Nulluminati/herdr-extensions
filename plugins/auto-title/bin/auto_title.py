@@ -19,7 +19,6 @@ import contextlib
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import signal
 import subprocess
@@ -28,7 +27,7 @@ import time
 import tomllib
 import traceback
 import unicodedata
-
+from pathlib import Path
 
 PLUGIN_ID = "nulluminati.auto-title"
 DEFAULTS = {"max_length": 40, "poll_seconds": 2.0}

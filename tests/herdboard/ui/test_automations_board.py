@@ -1,17 +1,26 @@
 """The Automations tab: G goes there after the Notes tab, the list of automations, and its keys."""
 import asyncio
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Select, TextArea
 
 from herdboard import automations, board
-from herdboard.board import (AutomationFormScreen, AutomationsScreen, ConfirmScreen, HerdboardApp,
-                             KeyBar, ModelScreen, NotesScreen, PullRequestsScreen, TabBar)
+from herdboard.board import (
+    AutomationFormScreen,
+    AutomationsScreen,
+    ConfirmScreen,
+    HerdboardApp,
+    KeyBar,
+    ModelScreen,
+    NotesScreen,
+    PullRequestsScreen,
+    TabBar,
+)
 from herdboard.config import Config
 from herdboard.pr_reviews import Page
 from herdboard.store import Store

@@ -3,15 +3,13 @@ import dataclasses
 import unittest
 from unittest import mock
 
-
 from textual import events
 from textual.widgets import OptionList
 
 from herdboard import attachments
-from herdboard.board import CardMenuScreen, CardWidget, DetailScreen, EditScreen, HELP_KEYS, detail_lines
+from herdboard.board import HELP_KEYS, CardMenuScreen, CardWidget, DetailScreen, EditScreen, detail_lines
 from support.herdboard_board import settle
-from support.herdboard_mouse import content_offset
-from support.herdboard_mouse import MouseTestCase
+from support.herdboard_mouse import MouseTestCase, content_offset
 
 # Wide enough that every default column shows.
 SIZE = (160, 40)

@@ -3,20 +3,18 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
-
 
 from herdboard import activity, agent_review, attachments, merge, plan, review, start
 from herdboard.config import Config
 from herdboard.identity import repo_identity
 from herdboard.store import Store
-
-from support.herdboard_cli import CliTestCase
 from support.git_env import isolated
+from support.herdboard_cli import CliTestCase
 from support.herdboard_plan import PlanHerdr
 
 

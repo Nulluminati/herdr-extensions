@@ -7,15 +7,28 @@ the agent. herdboard therefore focuses the agent pane first, then invokes the ac
 
 from __future__ import annotations
 
-from pathlib import Path
 import time
+from pathlib import Path
 
 from . import activity
 from .config import thinking_levels
 from .linear_cards import LINEAR_REF
 from .model import HerdboardError
-from .start import (NEW_REPO, REPOLESS, Starter, StartError, _lock, _read, _write, agent_live,
-                    fetch_linear_card, find_record, herdr, safe_key, state_dir)
+from .start import (
+    NEW_REPO,
+    REPOLESS,
+    Starter,
+    StartError,
+    _lock,
+    _read,
+    _write,
+    agent_live,
+    fetch_linear_card,
+    find_record,
+    herdr,
+    safe_key,
+    state_dir,
+)
 
 HUNK_PLUGIN = "jhochenbaum.hunkdiff"
 REVIEW_NOTE = "The card is in review. Review feedback follows. Wait for it."

@@ -5,20 +5,20 @@ import io
 import json
 import os
 import shutil
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from herdboard import cli, doctor, linear_source
+from herdboard.config import load_config
+from herdboard.identity import IdentityError
 from herdboard.linear import LinearClient, LinearError
 from herdboard.model import IoError
-from herdboard.identity import IdentityError
 from herdboard.store import Store
-from herdboard.config import load_config
-from support.linear_fake import FakeLinear
 from support.linear_data import fixtures
+from support.linear_fake import FakeLinear
 
 
 class DoctorTests(unittest.TestCase):
@@ -291,7 +291,8 @@ class DoctorTests(unittest.TestCase):
         with patch("herdboard.doctor.shutil.which", side_effect=lambda name: None if name == "gh" else real(name)):
             found = self.findings("gh_missing")
         self.assertEqual([(f["level"], f["message"]) for f in found],
-                         [("info", "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request and pull request reviews need it.")])
+                         [("info", "No GitHub CLI `gh` found. Only merge --pr, finish of a pull request"
+                                   " and pull request reviews need it.")])
 
     def test_missing_hunk_is_a_warning(self):
         real = shutil.which

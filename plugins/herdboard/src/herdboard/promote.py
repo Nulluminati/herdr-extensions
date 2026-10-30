@@ -7,9 +7,9 @@ confirmed every issue.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import uuid
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from .config import Config
 from .linear import LinearClient, LinearError
@@ -216,7 +216,7 @@ class Promoter:
             if value:
                 parent[key] = value
         issues = [{"id": parent_id, "input": parent, "identifier": None}]
-        for sub, state in zip(converted.subs, sub_states):
+        for sub, state in zip(converted.subs, sub_states, strict=False):
             child = {**base, "title": sub.title, "state_id": state["id"], "parent_id": parent_id}
             issues.append({"id": str(uuid.uuid4()), "input": child, "identifier": None})
         for card in self.store.children(snapshot.view.ref):

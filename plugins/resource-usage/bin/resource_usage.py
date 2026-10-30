@@ -17,18 +17,17 @@ Entry points:
 """
 
 import argparse
-from contextlib import contextmanager
-from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
 import tomllib
-
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
 TOKEN = "resource_usage"
 SOURCE = "nulluminati.resource-usage"

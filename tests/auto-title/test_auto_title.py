@@ -3,15 +3,15 @@ import fcntl
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
 from support.paths import ROOT
 from support.scripts import load_script
-
 
 FIXTURES = ROOT / "tests/auto-title/fixtures"
 auto_title = load_script("auto-title", "auto_title")

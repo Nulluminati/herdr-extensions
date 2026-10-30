@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 from herdboard import sandbox
 
 FOLDER = Path("/state/reviews/r1")

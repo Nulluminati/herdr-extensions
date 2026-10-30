@@ -1,19 +1,18 @@
 """Display icons stay optional, keep labels, and fit narrow card layouts."""
 
+import unittest
 from dataclasses import asdict
 from datetime import date
 from io import StringIO
 from pathlib import Path
-import unittest
-
 
 from rich.cells import cell_len
 from rich.console import Console
+
 from herdboard import board
 from herdboard.store import CardView
 from support.herdboard_cli import CliTestCase
 from support.herdboard_icons import ATTACHMENT, CALENDAR, TYPE_ICONS
-
 
 BRANCH = "\ue0a0"
 PULL_REQUEST = "\uf407"
@@ -146,7 +145,7 @@ class IconCliTests(CliTestCase):
         for style in ("plain", "nerd"):
             with self.subTest(style=style):
                 self.config.write_text(f'todos_dir = "{self.todos}"\nicon_style = "{style}"\n')
-                for args, expected in zip(commands, baseline):
+                for args, expected in zip(commands, baseline, strict=True):
                     output, errors = self.run_cli(*args)
                     self.assertEqual((output, errors), expected)
                     self.assertEqual(errors, "")

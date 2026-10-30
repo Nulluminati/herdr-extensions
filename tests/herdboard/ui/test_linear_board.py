@@ -3,16 +3,16 @@ import threading
 import unittest
 from unittest import mock
 
+from textual.widgets import OptionList
 
 from herdboard import board
 from herdboard.board import AttachmentChoiceScreen, DetailScreen
 from herdboard.linear_links import ProjectLink
-from textual.widgets import OptionList
-from support.linear_data import PR_URL, attachment
 from support.herdboard_attachment_board import fake_opener
 from support.herdboard_board import SIZE, fill, settle
-from support.herdboard_linear_source import DEAD
 from support.herdboard_linear_board import LinearBoardCase
+from support.herdboard_linear_source import DEAD
+from support.linear_data import PR_URL, attachment
 
 
 class LinearBoardTests(LinearBoardCase):

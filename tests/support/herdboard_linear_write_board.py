@@ -1,5 +1,5 @@
-from support import linear_data
 from herdboard.board import StateScreen
+from support import linear_data
 from support.herdboard_linear_board import LinearBoardCase
 
 

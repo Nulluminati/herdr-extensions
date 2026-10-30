@@ -9,7 +9,7 @@ again when one changes or the pane changes size.
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult

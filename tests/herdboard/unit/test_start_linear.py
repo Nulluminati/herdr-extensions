@@ -1,19 +1,20 @@
 """Linear start uses the server branch and the normal write path."""
 import json
-from unittest.mock import patch
 import subprocess
-from support.herdboard_linear_write_cli import WriteCliCase
-from support.herdboard_start import FakeHerdr
-from support.herdboard_cli import git
+from unittest.mock import patch
+
 from herdboard import start
 from herdboard.linear_pins import IssuePin
+from support.herdboard_cli import git
+from support.herdboard_linear_write_cli import WriteCliCase
+from support.herdboard_start import FakeHerdr
 
 
 class StartLinearTests(WriteCliCase):
     def setUp(self):
         super().setUp()
         self.board()
-        from herdboard.linear_links import ProjectLink, LabelLink
+        from herdboard.linear_links import LabelLink, ProjectLink
         self.relink(ProjectLink("p-plat", "Platform", [LabelLink("l-api", "repo:api")]))
         # A worktree starts from a commit, so the repository needs one.
         git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
@@ -56,9 +57,9 @@ class StartLinearTests(WriteCliCase):
 
     def test_non_repository_board_view_does_not_infer_checkout_repository(self):
         from herdboard.config import load_config
-        from herdboard.store import Store
         from herdboard.linear_source import LinearSource
         from herdboard.linear_writes import LinearWriter
+        from herdboard.store import Store
         config = load_config(self.config)
         starter = start.Starter(Store(config), self.repo,
                                 writer=LinearWriter(config, LinearSource(config)),
@@ -81,7 +82,7 @@ class StartLinearTests(WriteCliCase):
         self.assertEqual(self.inputs("IssueUpdate"), [])
 
     def test_wrong_project_or_label_requires_repository(self):
-        from herdboard.linear_links import ProjectLink, LabelLink
+        from herdboard.linear_links import LabelLink, ProjectLink
         for issue in ("ENG-3", "ENG-5"):
             error = self.run_json("start", issue, "--no-agent", directory=self.repo, expect=1)["error"]
             self.assertEqual(error["code"], "repo_required")
@@ -91,9 +92,9 @@ class StartLinearTests(WriteCliCase):
 
     def test_wrong_repository_lists_all_matching_boards(self):
         from herdboard.config import load_config
-        from herdboard.store import Store
         from herdboard.identity import RepoIdentity
         from herdboard.linear_links import ProjectLink
+        from herdboard.store import Store
         store = Store(load_config(self.config))
         for name in ("web", "frontend"):
             path = store.init_board(RepoIdentity("github.com/acme/" + name, "github.com", ("acme", name)))

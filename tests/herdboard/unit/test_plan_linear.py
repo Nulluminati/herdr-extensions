@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from herdboard import plan, start
+from support.herdboard_cli import git
 from support.herdboard_linear_write_cli import WriteCliCase
 from support.herdboard_plan import PlanHerdr
-from support.herdboard_cli import git
-from herdboard import plan, start
 
 
 class PlanLinearTests(WriteCliCase):

@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import fcntl
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import tempfile
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from .config import Config
 from .linear import LinearClient, LinearError, LinearNetworkError
@@ -190,7 +191,7 @@ class LinearSource:
             self._account = (known["org"], known["user"])
         except (OSError, ValueError, KeyError, TypeError):
             if failure is not None:
-                raise failure
+                raise failure from None
             raise CacheMiss("No cached Linear data for this API key") from None
         return self._account
 
@@ -207,7 +208,7 @@ class LinearSource:
         try:
             folder = self.account_dir()
             with _account_cache_lock(folder):
-                stamp = {"fetched_at": datetime.now(timezone.utc).isoformat()}
+                stamp = {"fetched_at": datetime.now(UTC).isoformat()}
                 if not _write_json(folder / INVALIDATION_FILE, stamp):
                     print("herdboard: warning: cannot record Linear cache invalidation", file=sys.stderr)
                 for path in folder.glob("*.json"):
@@ -227,7 +228,7 @@ class LinearSource:
         path = self._cache_file(query)
         if not (self.offline or self._network_down):
             # The request start is the data's time: a slow older fetch never looks newer.
-            started = datetime.now(timezone.utc)
+            started = datetime.now(UTC)
             try:
                 data = load(self.client)
             except LinearNetworkError:

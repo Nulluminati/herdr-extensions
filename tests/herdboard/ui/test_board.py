@@ -6,15 +6,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from textual.widgets import Markdown
 
 from herdboard import cli
 from herdboard.board import HELP_SECTIONS, AddScreen, ConfirmScreen, DetailScreen, EditScreen, HelpScreen, HerdboardApp
-from textual.widgets import Markdown
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
 from herdboard.model import ConflictError, HerdboardError, IoError, NotFoundError
 from herdboard.store import Store
-from support.herdboard_board import BoardTestCase, SIZE, fill, settle
+from support.herdboard_board import SIZE, BoardTestCase, fill, settle
 from support.paths import ROOT
 
 FIXTURE = ROOT / "tests/herdboard/fixtures/kanban-2.0.51-full.md"
@@ -25,7 +25,7 @@ def help_rows(screen):
     """The key and description of every help entry, in the order the screen shows them."""
     keys = [w.plain for w in screen.query(".help-key")]
     whats = [w.plain for w in screen.query(".help-what")]
-    return list(zip(keys, whats))
+    return list(zip(keys, whats, strict=True))
 
 
 class RenderTests(BoardTestCase):
@@ -596,6 +596,7 @@ class ActionTests(BoardTestCase):
 
     async def test_detail_shows_the_last_log_entries(self):
         from datetime import datetime
+
         from herdboard import activity
 
         card = self.store.add(self.repo_path, "Ship it", "Todo")
@@ -623,8 +624,8 @@ class ActionTests(BoardTestCase):
             self.assertEqual(list(app.screen.query("#detail-log")), [])
 
     async def test_detail_shows_details_in_their_own_block(self):
-        card = self.store.add(self.repo_path, "Ship it", "Todo",
-                              body=["- [ ] write notes", "- [x] tag release", "plain line", "  - nested"])
+        self.store.add(self.repo_path, "Ship it", "Todo",
+                       body=["- [ ] write notes", "- [x] tag release", "plain line", "  - nested"])
         app = self.make_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -1017,7 +1018,7 @@ class AddDialogTests(BoardTestCase):
             self.assertIsInstance(app.screen, AddScreen)
             self.assertIn("acme-api / Todo", app.screen.query_one("#card-target").plain)
             # Delete the repository card, then reload under the open dialog.
-            lines = [l for l in self.repo_path.read_text().splitlines() if "] r " not in l + " "]
+            lines = [line for line in self.repo_path.read_text().splitlines() if "] r " not in line + " "]
             self.repo_path.write_text("\n".join(lines) + "\n")
             await app.check_files()
             await pilot.pause()

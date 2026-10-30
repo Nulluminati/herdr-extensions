@@ -2,12 +2,12 @@ import json
 import threading
 import unittest
 
+from textual.widgets import OptionList
 
-from support import linear_data
 from herdboard.board import CardMenuScreen, PromoteScreen, StateScreen
 from herdboard.linear_links import LabelLink, ProjectLink
 from herdboard.linear_source import state_dir
-from textual.widgets import OptionList
+from support import linear_data
 from support.herdboard_board import SIZE, settle
 from support.herdboard_linear_write_board import LinearWriteBoardCase
 from support.herdboard_mouse import content_offset

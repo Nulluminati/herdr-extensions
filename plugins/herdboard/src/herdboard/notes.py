@@ -6,11 +6,11 @@ user's own text: no agent or command writes it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import re
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 
 from .config import Config
 from .model import HerdboardError, IoError

@@ -2,13 +2,12 @@ import json
 import os
 import unittest
 
-
 from herdboard.identity import RepoIdentity
 from herdboard.linear_links import LabelLink, ProjectLink
 from herdboard.linear_pins import IssuePin
-from support.linear_data import PR_URL, attachment
-from support.herdboard_linear_source import DEAD
 from support.herdboard_linear_cli import LinearCliCase
+from support.herdboard_linear_source import DEAD
+from support.linear_data import PR_URL, attachment
 
 
 class ViewTests(LinearCliCase):

@@ -8,13 +8,13 @@ import importlib.metadata
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field, replace
-from datetime import date, datetime
-from pathlib import Path
 import threading
 import time
 import zlib
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from rich.console import Group
@@ -22,41 +22,58 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 from textual import events
+from textual._context import NoActiveAppError
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, HorizontalScroll, Vertical, VerticalScroll
-from textual._context import NoActiveAppError
 from textual.driver import Driver
+from textual.drivers.linux_driver import LinuxDriver
 from textual.errors import NoWidget
 from textual.message import Message
 from textual.reactive import reactive
-from textual.drivers.linux_driver import LinuxDriver
 from textual.screen import ModalScreen, Screen
-from textual.widgets import (Checkbox, DataTable, Input, Label, Markdown, OptionList, Select, Static,
-                             TabbedContent, TabPane, TextArea)
+from textual.widgets import (
+    Checkbox,
+    DataTable,
+    Input,
+    Label,
+    Markdown,
+    OptionList,
+    Select,
+    Static,
+    TabbedContent,
+    TabPane,
+    TextArea,
+)
 from textual.worker import Worker, WorkerState
 
-from . import activity, attachments, automations, notes, pr_reviews
+from . import activity, agent_states, attachments, automations, notes, pr_reviews
+from . import merge as merge_module
+from . import start as start_module
+from .agent_review import AgentReviewer
+from .config import (
+    AGENTS,
+    THINKING_LEVELS,
+    check_global_config,
+    check_thinking_levels,
+    save_global_config,
+    save_thinking_levels,
+    thinking_levels,
+)
 from .linear import LinearAuthError
 from .linear_cards import LINEAR_REF
 from .linear_links import ProjectLink, with_link
 from .linear_pins import IssuePin, add_pin, unpin_issue
-from .linear_writes import LinearWriter
-from .model import HerdboardError, is_automation_title, is_triage, join_title, parse_tags, plain_tags, split_title
-from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
-from . import agent_states
-from . import start as start_module
-from .config import (AGENTS, THINKING_LEVELS, check_global_config, check_thinking_levels, save_global_config,
-                     save_thinking_levels, thinking_levels)
-from . import merge as merge_module
-from .merge import Merger
-from .agent_review import AgentReviewer
-from .plan import Planner, mark_planning
 from .linear_states import StateCancelledError
+from .linear_writes import LinearWriter
+from .merge import Merger
+from .model import HerdboardError, is_automation_title, is_triage, join_title, parse_tags, plain_tags, split_title
+from .plan import Planner, mark_planning
 from .promote import Promoter
 from .promote_convert import promoted_identifier
 from .review import Reviewer
 from .start import Starter, codex_model_choices, mark_removed, pi_model_choices
+from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
 from .views import LinearResult
 
 VIEWS = ["repo", "inbox", "all", "mine"]
@@ -173,7 +190,8 @@ HELP_SECTIONS = [
         ("e", "edit the todo: title, type, tags, due date and details (ctrl+s saves)"),
         ("b", "move the todo to another board, for example from the inbox to this repository"),
         ("x", "delete the todo, after you confirm"),
-        ("A", "archive the todo; in the archive column, move it back to the done column (an archived parent too, after you confirm)"),
+        ("A", "archive the todo; in the archive column, move it back to the done column"
+              " (an archived parent too, after you confirm)"),
         ("D", "archive every card in the done column, after you confirm"),
         ("T", "promote the todo to a Linear issue: choose its team and project; its checklist and sub-cards "
               "become sub-issues, and the todo moves to Done"),
@@ -324,7 +342,7 @@ def chip_color(tag: str) -> str:
 def chip_tint(color: str, dark: bool = True) -> str:
     """A faint tint of a chip color on a dark or a light background, as a hex color."""
     base = (24, 24, 24) if dark else (250, 250, 250)
-    red, green, blue = (round(b + (c - b) * 0.22) for c, b in zip(CHIP_RGB[color], base))
+    red, green, blue = (round(b + (c - b) * 0.22) for c, b in zip(CHIP_RGB[color], base, strict=True))
     return f"#{red:02x}{green:02x}{blue:02x}"
 
 
@@ -2377,7 +2395,7 @@ class ConfigScreen(ModalBase):
         values = {}
         for key, widget in zip(self.GLOBAL_KEYS, ("theme", "agent", "model", "thinking", "default-merge",
                                                   "icon-style", "tag-style", "card-style",
-                                                  "details-pane", "details-ratio")):
+                                                  "details-pane", "details-ratio"), strict=True):
             value = self.query_one(f"#config-{widget}", Select).value
             values[key] = None if value == "default" else value
         return values
@@ -2534,7 +2552,7 @@ class TabBar(Vertical):
     def show_texts(self) -> None:
         """Write every tab's text and the hint, after a count read or a change of icon style. Then
         place the rows again: a count that adds cells widens every tab."""
-        for (tab, label), box in zip(TABS, self.query(".tab")):
+        for (tab, label), box in zip(TABS, self.query(".tab"), strict=False):
             text = self._tab_text(tab, label)
             box.plain = text.plain
             box.query_one(".tab-label", Static).update(text)
@@ -2922,12 +2940,12 @@ class PullRequestList(VerticalScroll, can_focus=True):
         """Show the rows. Rows for the same pull requests are updated in place, so the scroll stays."""
         widgets = list(self.query(PullRequestRow))
         if len(widgets) == len(prs):
-            for widget, pr, fields in zip(widgets, prs, rows):
+            for widget, pr, fields in zip(widgets, prs, rows, strict=False):
                 widget.show(pr, fields)
         else:
             await self.remove_children()
             await self.mount_all([PullRequestRow(index, pr, fields)
-                                  for index, (pr, fields) in enumerate(zip(prs, rows))])
+                                  for index, (pr, fields) in enumerate(zip(prs, rows, strict=False))])
 
     def move_cursor(self, row: int, scroll: bool = True) -> None:
         widgets = list(self.query(PullRequestRow))
@@ -4964,7 +4982,7 @@ class HerdboardApp(App):
         # of columns whose cards changed, in one screen update.
         with self.batch_update():
             if [getattr(w, "column_name", None) for w in existing] == [c.name for c in self.columns]:
-                for index, (widget, column) in enumerate(zip(existing, self.columns)):
+                for index, (widget, column) in enumerate(zip(existing, self.columns, strict=True)):
                     await self._update_column(widget, index, column, show_board)
             else:
                 await container.remove_children()
@@ -4999,7 +5017,7 @@ class HerdboardApp(App):
         old = list(holder.query(CardWidget))
         new = self._card_widgets(column, show_board)
         if [w.key for w in old] == [w.key for w in new]:
-            for widget_, card in zip(old, column.cards):
+            for widget_, card in zip(old, column.cards, strict=True):
                 widget_.card = card
             return
         await holder.remove_children()
@@ -6126,7 +6144,7 @@ class HerdboardApp(App):
             link = resolve(project, labels) if project and resolve else None
 
             def change(links: list[ProjectLink]) -> list[ProjectLink]:
-                kept = [l for l in links if l.id not in removed]
+                kept = [link for link in links if link.id not in removed]
                 return with_link(kept, link) if link else kept
 
             board_changed = path is not None and (merge != before or removed or link or removed_pins)

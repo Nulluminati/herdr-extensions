@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
 from herdboard import activity, merge, pr_write, sandbox, start
 from herdboard.agent_review import reviewer_arguments
 from support.herdboard_agent_review import ReviewerHerdr

@@ -9,22 +9,36 @@ then pushes the branch and opens a draft GitHub pull request with `gh` (see `pr_
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 
 from . import activity, mockup, pr_write
 from .config import thinking_levels
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_states import refuse
 from .model import HerdboardError
-from .start import (NEW_REPO, REPOLESS, Starter, StartError, _lock, _read, _write, agent_live,
-                    card_changed, close_review_pane, fetch_linear_card, find_record, herdr, safe_key,
-                    state_dir, work_folder)
-
+from .start import (
+    NEW_REPO,
+    REPOLESS,
+    Starter,
+    StartError,
+    _lock,
+    _read,
+    _write,
+    agent_live,
+    card_changed,
+    close_review_pane,
+    fetch_linear_card,
+    find_record,
+    herdr,
+    safe_key,
+    state_dir,
+    work_folder,
+)
 
 # The board reads the state of an open pull request at most this often.
 PR_CHECK_SECONDS = 60
@@ -120,7 +134,7 @@ def checkout_of(repository, branch) -> Path | None:
     for block in output.split("\n\n"):
         lines = block.splitlines()
         if f"branch refs/heads/{branch}" in lines:
-            path = next((l.removeprefix("worktree ") for l in lines if l.startswith("worktree ")), None)
+            path = next((line.removeprefix("worktree ") for line in lines if line.startswith("worktree ")), None)
             if path and Path(path).exists():
                 return Path(path)
     return None
@@ -183,7 +197,7 @@ class Merger:
             card = self._card(None, ref)
             if card.column.casefold() != column.casefold():
                 issue = self.writer.move(ref, column, ask=self.ask_state)
-                card = issue_card(self.config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True)
+                card = issue_card(self.config, issue, set(), datetime.now(UTC), False, show_canceled=True)
         card_changed(card)
         return card
 

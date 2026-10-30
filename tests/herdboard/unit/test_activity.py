@@ -8,13 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-
 from herdboard import activity
-from herdboard.linear_source import state_dir
 from herdboard.config import load_config
+from herdboard.linear_source import state_dir
 from herdboard.model import HerdboardError
 from herdboard.store import Store
-
 from support.herdboard_cli import CliTestCase
 
 NOON = datetime(2026, 10, 12, 12, 0)

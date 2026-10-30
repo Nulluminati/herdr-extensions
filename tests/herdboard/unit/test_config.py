@@ -5,9 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
-from herdboard.linear import LinearAuthError
 from herdboard.config import LinearConfig, config_path, load_config
+from herdboard.linear import LinearAuthError
 from herdboard.model import HerdboardError
 
 
@@ -27,7 +26,7 @@ class ConfigTest(unittest.TestCase):
         return path
 
     def test_codex_settings_and_agent_thinking_levels(self):
-        from herdboard.config import AGENTS, thinking_levels, save_global_config
+        from herdboard.config import AGENTS, save_global_config, thinking_levels
         self.assertEqual(AGENTS, ("claude", "pi", "codex"))
         self.assertEqual(thinking_levels("claude"), ("low", "medium", "high", "xhigh", "max"))
         self.assertIn("off", thinking_levels("pi"))
@@ -220,6 +219,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_concurrent_display_saves_keep_both_changes(self):
         from concurrent.futures import ThreadPoolExecutor
+
         from herdboard.config import save_display_config
         path = self.write(self.dir / "a.toml", '# Keep\n[linear]\nenabled = false\n')
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -315,6 +315,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_concurrent_thinking_saves_keep_both_models(self):
         from concurrent.futures import ThreadPoolExecutor
+
         from herdboard.config import save_thinking_levels
         path = self.write(self.dir / "a.toml", 'icon_style = "nerd"\n')
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -376,6 +377,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_concurrent_global_saves_keep_both_changes(self):
         from concurrent.futures import ThreadPoolExecutor
+
         from herdboard.config import save_global_config
         path = self.write(self.dir / "a.toml", '# Keep\n[linear]\nenabled = false\n')
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -664,8 +666,8 @@ started = "Doing"
         self.assertEqual(linear, LinearConfig(api_key_command=["key", "lookup"]))
 
     def test_concurrent_command_reads_share_one_lookup(self):
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError
         import threading
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
         linear = LinearConfig(api_key_command=["key"])
         first_started = threading.Event()

@@ -1,9 +1,9 @@
 import unittest
 
-
-from support import linear_data
-from herdboard.board import StateScreen
 from textual.widgets import OptionList
+
+from herdboard.board import StateScreen
+from support import linear_data
 from support.herdboard_board import SIZE, settle
 from support.herdboard_linear_source import DEAD
 from support.herdboard_linear_write_board import LinearWriteBoardCase

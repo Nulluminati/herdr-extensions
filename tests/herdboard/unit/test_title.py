@@ -1,8 +1,14 @@
 import unittest
 
-
 from herdboard.model import (
-    HerdboardError, card_type, commit_type, join_title, parse_tags, plain_tags, split_title, with_type,
+    HerdboardError,
+    card_type,
+    commit_type,
+    join_title,
+    parse_tags,
+    plain_tags,
+    split_title,
+    with_type,
 )
 
 

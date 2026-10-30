@@ -8,12 +8,8 @@ A spawned card is an ordinary todo: the user reviews, merges and finishes it as 
 from __future__ import annotations
 
 import calendar
-from contextlib import ExitStack
-from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time as clock, timedelta
 import json
 import os
-from pathlib import Path
 import plistlib
 import re
 import secrets
@@ -23,11 +19,16 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from contextlib import ExitStack
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
+from datetime import time as clock
+from pathlib import Path
 
-from . import activity, attachments, start as start_module
+from . import activity, attachments
+from . import start as start_module
 from .config import AGENTS, Config, thinking_levels
-from .model import (ConflictError, HerdboardError, IoError, NotFoundError, automation_title, join_title,
-                    with_type)
+from .model import ConflictError, HerdboardError, IoError, NotFoundError, automation_title, join_title, with_type
 from .start import Starter, _lock, _read, _write, notify, state_dir
 from .store import ID_ALPHABET, CardView
 

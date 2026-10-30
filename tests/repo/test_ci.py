@@ -4,7 +4,6 @@ import yaml
 
 from support.paths import ROOT
 
-
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
 
 
@@ -40,7 +39,8 @@ class CiTests(unittest.TestCase):
         commands = [step.get("run") for step in self.workflow["jobs"]["test"]["steps"]]
         self.assertIn("uv lock --check --project plugins/herdboard", commands)
         self.assertIn(
-            'uv run --locked --project plugins/herdboard python -c "import textual, yaml, tomlkit, herdboard.board, herdboard.cli"',
+            "uv run --locked --project plugins/herdboard python -c"
+            ' "import textual, yaml, tomlkit, herdboard.board, herdboard.cli"',
             commands)
 
 

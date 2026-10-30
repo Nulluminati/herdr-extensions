@@ -1,6 +1,5 @@
 import unittest
 
-
 from herdboard.board import card_matches
 from herdboard.store import CardView
 

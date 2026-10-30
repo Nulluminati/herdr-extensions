@@ -3,8 +3,8 @@ import os
 import subprocess
 import unittest
 from unittest.mock import patch
-from support.scripts import load_script
 
+from support.scripts import load_script
 
 open_details = load_script("herdboard", "open_details")
 

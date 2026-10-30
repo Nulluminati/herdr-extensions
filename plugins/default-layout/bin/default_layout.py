@@ -11,14 +11,13 @@
 
 import json
 import os
-from pathlib import Path
 import re
 import socket
 import subprocess
 import sys
 import time
 import tomllib
-
+from pathlib import Path
 
 PLUGIN_ID = "nulluminati.default-layout"
 SHELL_NAMES = {"bash", "zsh", "fish", "sh", "dash", "ksh", "nu", "elvish"}

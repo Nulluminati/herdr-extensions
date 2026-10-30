@@ -9,11 +9,8 @@ archived.
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import re
 import select
 import shlex
@@ -22,6 +19,9 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from pathlib import Path
 
 from . import start
 from .model import HerdboardError
@@ -72,7 +72,7 @@ def _slug(prompt: str) -> str:
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _instruction(prompt: str, quality: str, images) -> str:
@@ -433,7 +433,7 @@ def view(paths, terminal=None, numbers=None, total=None) -> int:
             for path in paths:
                 open_file(path)
             lines = ["This terminal shows no images. The drafts open in the default viewer:",
-                     *(f"{number}. {path}" for number, path in zip(numbers, paths)), "", "Enter close"]
+                     *(f"{number}. {path}" for number, path in zip(numbers, paths, strict=False)), "", "Enter close"]
             screen.write("\r\n".join(lines).encode())
             for key in _read_keys(screen):
                 if key in CLOSE_KEYS:

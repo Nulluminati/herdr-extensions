@@ -1,19 +1,19 @@
 """Start work with an isolated store and fake Herdr."""
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+from herdboard import start
 from herdboard.config import Config, config_path
 from herdboard.identity import repo_identity
 from herdboard.store import Store
-from herdboard import start
-from support.herdboard_cli import CliTestCase
 from support.git_env import isolated
+from support.herdboard_cli import CliTestCase
 from support.herdboard_start import FakeHerdr
 from support.paths import ROOT
 
@@ -418,6 +418,7 @@ class StartTests(unittest.TestCase):
 
     def test_one_start_lock(self):
         import fcntl
+
         from herdboard.model import ConflictError
         with (start.state_dir() / (".start-" + self.card.ref + ".lock")).open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
@@ -466,7 +467,7 @@ class StartTests(unittest.TestCase):
                 card = self.store.add(self.board, code)
                 def runner(argv, timeout=120):
                     if argv[1:3] == ["agent", "start"]:
-                        return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": code}}))
+                        return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": code}}))  # noqa: B023  called only in this iteration
                     return normal(argv, timeout)
                 with patch.object(start, "command", runner):
                     result = self.starter.start(card.ref)
@@ -972,7 +973,7 @@ class StartTests(unittest.TestCase):
                     if argv[1:3] == ["workspace", "get"]:
                         return subprocess.CompletedProcess(argv, 0, '{"result":{"root_pane":{"pane_id":"w9:p2"}}}', "")
                     if argv[1:3] == ["agent", "get"]:
-                        if argv[3] == target:
+                        if argv[3] == target:  # noqa: B023  called only in this iteration
                             return subprocess.CompletedProcess(argv, 0, '{"result":{"agent":{"pane_id":"w9:p2"}}}', "")
                         return subprocess.CompletedProcess(argv, 1, '', '{"error":{"code":"agent_not_found"}}')
                     return normal(argv, timeout)
@@ -993,8 +994,8 @@ class StartTests(unittest.TestCase):
         for operation, value in cases:
             with self.subTest(operation=operation):
                 def runner(argv, timeout=120):
-                    if argv[1:3] == operation:
-                        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": value}), "")
+                    if argv[1:3] == operation:  # noqa: B023  called only in this iteration
+                        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": value}), "")  # noqa: B023  called only in this iteration
                     return normal(argv, timeout)
                 with patch.object(start, "command", runner):
                     with self.assertRaises(start.HerdboardError) as raised:

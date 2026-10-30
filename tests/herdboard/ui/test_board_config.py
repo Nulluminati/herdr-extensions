@@ -3,6 +3,7 @@ import threading
 import unittest
 from unittest import mock
 
+from textual.widgets import Input, Tab, TabbedContent
 
 from herdboard.board import ConfigScreen
 from herdboard.config import load_config, save_global_config
@@ -10,7 +11,6 @@ from herdboard.linear_links import LabelLink, ProjectLink
 from herdboard.linear_pins import IssuePin
 from herdboard.model import HerdboardError
 from herdboard.start import Starter
-from textual.widgets import Input, Tab, TabbedContent
 from support.herdboard_board import BoardTestCase, settle
 
 

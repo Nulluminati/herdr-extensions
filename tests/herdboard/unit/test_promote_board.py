@@ -1,6 +1,5 @@
 import unittest
 
-
 from herdboard.board import HELP_KEYS, card_actions, promote_refusal
 from herdboard.store import CardView
 

@@ -1,14 +1,14 @@
 """Automations: schedules, storage, spawned cards, runs and the tick, with fake Herdr."""
-from datetime import date, datetime, timedelta
 import json
 import os
-from pathlib import Path
+import plistlib
 import subprocess
 import tempfile
 import time
-import plistlib
 import tomllib
 import unittest
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from herdboard import activity, attachments, automations, start
@@ -470,19 +470,17 @@ class TickTests(AutomationTestCase):
             moment += timedelta(minutes=10)
 
     def test_a_due_time_in_the_skipped_spring_hour_runs_once_an_hour_later(self):
-        from datetime import timezone
         self.add(schedule="every day at 02:30", created=local(2026, 3, 28, 12, 0))
         # Berlin skips 02:00 to 03:00 on 2026-03-29.
-        self.ticks_over(datetime(2026, 3, 28, 22, 0, tzinfo=timezone.utc), 6)
+        self.ticks_over(datetime(2026, 3, 28, 22, 0, tzinfo=UTC), 6)
         cards = self.cards()
         self.assertEqual(len(cards), 1)
         self.assertIn("2026-03-29 03:30", activity.read(self.config, cards[0].ref)[0]["message"])
 
     def test_a_due_time_in_the_repeated_autumn_hour_runs_once(self):
-        from datetime import timezone
         self.add(schedule="every day at 02:30", created=local(2026, 10, 24, 12, 0))
         # Berlin repeats 02:00 to 03:00 on 2026-10-25.
-        self.ticks_over(datetime(2026, 10, 24, 22, 0, tzinfo=timezone.utc), 6)
+        self.ticks_over(datetime(2026, 10, 24, 22, 0, tzinfo=UTC), 6)
         self.assertEqual(len(self.cards()), 1)
 
     def test_listing_has_the_next_due_and_the_last_run(self):

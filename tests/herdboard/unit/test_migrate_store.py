@@ -2,7 +2,6 @@ import fcntl
 import re
 import unittest
 
-
 from herdboard import kanban_md
 from herdboard.identity import RepoIdentity
 from herdboard.migrate_convert import convert

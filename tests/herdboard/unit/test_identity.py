@@ -1,8 +1,7 @@
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 from herdboard.identity import (
     IdentityError,

@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import fcntl
 import os
-from pathlib import Path
 import re
 import secrets
-import shutil
 import tempfile
 import time
-from typing import Callable, Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import attachments, kanban_md
 from .activity import log_path
-from .migrate_convert import Item
-from .linear_links import ProjectLink, parse_links, replace_links
-from .linear_pins import IssuePin, parse_pins, replace_pins
 from .config import MERGE_MODES, Config
 from .identity import RepoIdentity, find_board, new_board_path, same_repo
+from .linear_links import ProjectLink, parse_links, replace_links
+from .linear_pins import IssuePin, parse_pins, replace_pins
+from .migrate_convert import Item
 from .model import (
     BLOCK_ID,
     PARENT_LINK,
@@ -609,7 +608,7 @@ class Store:
             # The card can leave the archive between the reads.
             view = next((view for view in views if view.ref == ref), None)
             if view is None:
-                raise NotFoundError(f"No card {ref}")
+                raise NotFoundError(f"No card {ref}") from None
             return view
         column, card = self._find(self._read(located.path), located)
         return self._view(located.path, column, card, card.block_id or ref)

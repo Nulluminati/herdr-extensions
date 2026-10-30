@@ -5,8 +5,8 @@ import os
 import subprocess
 import unittest
 from unittest.mock import patch
-from support.scripts import load_script
 
+from support.scripts import load_script
 
 agent_icons = load_script("agent-icons", "agent_icons")
 

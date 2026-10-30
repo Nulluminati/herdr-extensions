@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import codecs
 import os
-from pathlib import Path
 import re
 import tempfile
+from pathlib import Path
 
 from . import activity
 from .activity import LogUsageError, log_path

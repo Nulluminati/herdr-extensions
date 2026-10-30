@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 # Claude's and pi's sandbox reject "*", so the shell reaches GitHub only. Codex matches them.
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")

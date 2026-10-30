@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import graphql
 
-
 from herdboard import linear
 from support.linear_fake import FakeLinear, linear_schema, validation_errors
 

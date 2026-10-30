@@ -6,9 +6,9 @@ its result is unknown, the issue is fetched again to learn what happened.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import time
 import uuid
+from contextlib import contextmanager
 
 from .config import Config
 from .linear import (
@@ -33,8 +33,8 @@ class TeamRequiredError(HerdboardError):
 def pick_label(client, name: str, team: dict) -> dict | None:
     """The label `name` (any letter case) of `team`, else the workspace label; None when neither exists."""
     found = client.find_labels(name)
-    mine = [l for l in found if l.get("team") and l["team"]["id"] == team["id"]]
-    workspace = [l for l in found if not l.get("team")]
+    mine = [label for label in found if label.get("team") and label["team"]["id"] == team["id"]]
+    workspace = [label for label in found if not label.get("team")]
     return (mine or workspace or [None])[0]
 
 

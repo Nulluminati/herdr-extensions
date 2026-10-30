@@ -6,14 +6,12 @@ import unittest
 from datetime import datetime
 from unittest import mock
 
-
 from herdboard import activity, details, start
 from herdboard.config import Config
 from herdboard.store import CardView
-
 from support.herdboard_cli import CliTestCase
-from support.herdboard_linear_cli import LinearCliCase
 from support.herdboard_details import StoreCase
+from support.herdboard_linear_cli import LinearCliCase
 
 
 def card(**fields):

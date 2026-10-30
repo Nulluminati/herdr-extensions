@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
 from support.paths import ROOT
 
 SRC = ROOT / "plugins/herdboard/src"

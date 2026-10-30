@@ -1,9 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+
 from herdboard.config import Config
 from herdboard.store import Store
-
 
 SETTINGS = '%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%'
 

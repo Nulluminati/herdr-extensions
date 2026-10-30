@@ -6,12 +6,12 @@ mean something only in that workspace. A cache drop keeps it.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import fcntl
 import json
 import os
-from pathlib import Path
 import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 
 from .linear_source import PROMOTIONS_FILE
 from .model import ConflictError, IoError

@@ -1,7 +1,6 @@
 """The board shows a planner without moving its card to another column."""
 from unittest.mock import patch
 
-
 from herdboard import cli, plan, start
 from herdboard.board import card_text
 from herdboard.model import IoError

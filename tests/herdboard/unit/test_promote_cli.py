@@ -3,9 +3,8 @@ import os
 import unittest
 from unittest import mock
 
-
-from support import linear_data
 from herdboard.store import Store
+from support import linear_data
 from support.herdboard_linear_write_cli import WriteCliCase
 
 

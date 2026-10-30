@@ -9,21 +9,36 @@ its brief. A background worker logs each save of the plan.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 
-from . import activity, attachments, start as start_module
+from . import activity, attachments
+from . import start as start_module
 from .agent_review import _reviewer_status, start_worker
 from .brief import _one_line, _title, _unindent
 from .config import AGENTS, thinking_levels
 from .linear_cards import LINEAR_REF, issue_card
 from .model import HerdboardError, NotFoundError
-from .start import (Starter, StartError, _git, _lock, _read, _write, agent_live, export_config,
-                    find_record, herdboard_command, herdr, safe_key, state_dir, write_brief)
+from .start import (
+    Starter,
+    StartError,
+    _git,
+    _lock,
+    _read,
+    _write,
+    agent_live,
+    export_config,
+    find_record,
+    herdboard_command,
+    herdr,
+    safe_key,
+    state_dir,
+    write_brief,
+)
 from .store import TEMP_REF
 
 # A planning talk with the user can take hours; the worker stops watching after this.
@@ -208,7 +223,7 @@ class Planner:
                 issue = client.issue(ref.upper())
             if issue is None:
                 raise NotFoundError(f"No card {ref}")
-            return issue_card(self.config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True), issue
+            return issue_card(self.config, issue, set(), datetime.now(UTC), False, show_canceled=True), issue
         card = self.store.show(ref)
         if TEMP_REF.match(card.ref):
             card = self.store.ensure_id(card.ref)

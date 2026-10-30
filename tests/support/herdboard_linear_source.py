@@ -3,13 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from support import linear_data
+
 from herdboard import linear_source
 from herdboard.config import Config
 from herdboard.linear import LinearClient
 from herdboard.linear_source import LinearSource
+from support import linear_data
 from support.linear_fake import FakeLinear
-
 
 DEAD = "http://127.0.0.1:1/graphql"
 

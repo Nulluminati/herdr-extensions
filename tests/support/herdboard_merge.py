@@ -3,9 +3,10 @@ import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
+
 from herdboard import activity, merge, pr_write, start
-from support.herdboard_review import PaneHerdr, ReviewTestCase
 from support.git_env import isolated
+from support.herdboard_review import PaneHerdr, ReviewTestCase
 
 
 class GitHerdr(PaneHerdr):

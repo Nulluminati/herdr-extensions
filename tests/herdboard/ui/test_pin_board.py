@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import Mock
 
-
 from herdboard.board import BoardChoiceScreen, ConfigScreen, IssueSearchScreen, TargetScreen
 from herdboard.identity import RepoIdentity
 from herdboard.linear import LinearError

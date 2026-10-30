@@ -4,7 +4,6 @@ import yaml
 
 from support.paths import ROOT
 
-
 CONFIG = ROOT / ".github/dependabot.yml"
 
 

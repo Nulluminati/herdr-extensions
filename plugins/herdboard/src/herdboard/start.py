@@ -1,14 +1,10 @@
 """Resume card starts through Herdr without importing the board UI."""
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import replace
-from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import shutil
@@ -17,6 +13,10 @@ import sys
 import tempfile
 import time
 import tomllib
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
 
 from . import attachments
 from .activity import LOG_REF, record_pane_agent
@@ -520,7 +520,7 @@ def fetch_linear_card(writer, config, ref) -> CardView:
         issue = client.issue(ref)
     if issue is None:
         raise NotFoundError(f"No card {ref}")
-    return issue_card(config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True)
+    return issue_card(config, issue, set(), datetime.now(UTC), False, show_canceled=True)
 
 
 def agent_live(record) -> bool:
@@ -748,9 +748,9 @@ def validate_branch(branch):
 
 
 def mark_removed(cards):
-    """Set the board-only start status of cards: a removed or existing worktree and its agent, a worktree left after Done,
-    the PR state and URL, a running agent review, a pull request description that an agent writes, and the last agent
-    review."""
+    """Set the board-only start status of cards: a removed or existing worktree and its agent, a worktree left
+    after Done, the PR state and URL, a running agent review, a pull request description that an agent writes,
+    and the last agent review."""
     records = _read(state_dir() / "starts.json")
     for card in cards:
         record = records.get(card.ref)
@@ -1015,8 +1015,8 @@ class Starter:
             output = _git(checkout, "worktree", "list", "--porcelain") or ""
             for block in output.split("\n\n"):
                 lines = block.splitlines()
-                if f"branch refs/heads/{branch}" in lines and not any(l.startswith("prunable") for l in lines):
-                    candidate = next((l.removeprefix("worktree ") for l in lines if l.startswith("worktree ")), None)
+                if f"branch refs/heads/{branch}" in lines and not any(line.startswith("prunable") for line in lines):
+                    candidate = next((line.removeprefix("worktree ") for line in lines if line.startswith("worktree ")), None)
                     if candidate and Path(candidate).exists():
                         path = candidate
                         break
@@ -1383,7 +1383,7 @@ class Starter:
                 issue = client.issue(ref.upper())
             if issue is None:
                 raise NotFoundError(f"No card {ref}")
-            card = issue_card(self.config, issue, set(), datetime.now(timezone.utc), False, show_canceled=True)
+            card = issue_card(self.config, issue, set(), datetime.now(UTC), False, show_canceled=True)
             key = issue["id"]
         else:
             card = self.store.show(ref)

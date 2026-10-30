@@ -3,11 +3,10 @@ import fcntl
 import threading
 from unittest.mock import patch
 
-
 from herdboard import plan, start
 from herdboard.board import RELOAD_SECONDS
 from herdboard.model import IoError
-from support.herdboard_board import BoardTestCase, SIZE
+from support.herdboard_board import SIZE, BoardTestCase
 
 
 class PlanningBoardTests(BoardTestCase):

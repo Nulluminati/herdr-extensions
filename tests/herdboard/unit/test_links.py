@@ -2,7 +2,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
 from herdboard.linear_links import LabelLink, ProjectLink, parse_links, replace_links

@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import sys
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import asdict
+from datetime import UTC, datetime
+from pathlib import Path
 
 from . import activity, agent_review, attachments, automations, mockup, plan, pr_reviews, pr_write
+from . import start as start_module
 from .agent_review import AgentReviewer
-from .plan import Planner
 from .config import AGENTS, THINKING_LEVELS, config_path, load_config, thinking_levels
 from .identity import repo_identity
 from .linear_cards import LINEAR_REF, issue_card
@@ -22,15 +22,15 @@ from .linear_pins import pin_issue, unpin_issue
 from .linear_source import LinearSource
 from .linear_states import refuse
 from .linear_writes import LinearWriter
+from .merge import Merger
 from .migrate import build_preview, preview_text
 from .migrate_convert import convert
 from .model import HerdboardError, IoError, NotFoundError, with_parent, with_type
-from .merge import Merger
+from .plan import Planner
 from .promote import Promoter
 from .review import Reviewer
-from .store import CardView, Store
-from . import start as start_module
 from .start import Starter, _main_checkout, card_agent_panes, register_checkout
+from .store import CardView, Store
 from .views import INIT_MESSAGE, VIEW_NAMES, LinearResult, Views
 
 
@@ -537,7 +537,7 @@ class _Context:
 
     def linear_card(self, issue: dict) -> CardView:
         identities = {self.identity.identity} if self.identity else set()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return issue_card(self.config, issue, identities, now, False, show_canceled=True)
 
     def default_link(self) -> ProjectLink | None:
@@ -714,9 +714,9 @@ def _cmd_mockup(ctx: _Context) -> dict:
     images = [image if image.is_absolute() else ctx.directory / image for image in args.image]
     drafts, errors = mockup.generate_all(ctx.config, ref, args.prompt, images, args.quality)
     made = [{"option": number, "prompt": prompt, "path": str(draft)}
-            for number, (prompt, draft) in enumerate(zip(args.prompt, drafts), 1) if draft is not None]
+            for number, (prompt, draft) in enumerate(zip(args.prompt, drafts, strict=False), 1) if draft is not None]
     failed = [{"option": number, "prompt": prompt, "error": error}
-              for number, (prompt, error) in enumerate(zip(args.prompt, errors), 1) if error is not None]
+              for number, (prompt, error) in enumerate(zip(args.prompt, errors, strict=False), 1) if error is not None]
     shown = None if args.no_show else mockup.show([entry["path"] for entry in made], config_path(args.config),
                                                   numbers=[entry["option"] for entry in made],
                                                   total=len(args.prompt))
@@ -1138,7 +1138,7 @@ def _pr_text(command: str, result: dict) -> str:
                 return f"No open pull requests in {result['repo']} match {result['search']!r}."
             return f"No open pull requests in {result['repo']}."
         lines = [f"#{pr['number']}\t{pr['title']}\t{pr['author']}\t{', '.join(marks)}".rstrip()
-                 for pr, marks in zip(result["prs"], result["marks"])]
+                 for pr, marks in zip(result["prs"], result["marks"], strict=True)]
         if result["pages"] > 1:
             page = f"Page {result['page']} of {result['pages']} ({result['total']} open)."
             if result["page"] < result["pages"]:
@@ -1364,7 +1364,7 @@ def _cmd_link(ctx: _Context) -> dict:
         wanted = args.project.casefold()
 
         def remove(links: list[ProjectLink]) -> list[ProjectLink]:
-            kept = [l for l in links if l.name.casefold() != wanted and l.id != args.project]
+            kept = [link for link in links if link.name.casefold() != wanted and link.id != args.project]
             if len(kept) == len(links):
                 raise NotFoundError(f"{args.project!r} is not linked to this repository")
             return kept
@@ -1420,7 +1420,7 @@ def _project_link(ctx: _Context, name: str, labels: list[str]) -> ProjectLink:
     """The link to the Linear project `name`, with the labels that `labels` name."""
     client = ctx.views.source.client
     project = _resolve_project(client, name)
-    return ProjectLink(project["id"], project["name"], [_resolve_label(client, l) for l in labels])
+    return ProjectLink(project["id"], project["name"], [_resolve_label(client, label) for label in labels])
 
 
 def _init_for_board(ctx: _Context) -> Callable[[], Path] | None:

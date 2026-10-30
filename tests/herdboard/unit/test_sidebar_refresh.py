@@ -2,8 +2,8 @@
 import os
 import unittest
 from unittest.mock import patch
-from support.scripts import load_script
 
+from support.scripts import load_script
 
 sidebar_refresh = load_script("herdboard", "sidebar_refresh")
 

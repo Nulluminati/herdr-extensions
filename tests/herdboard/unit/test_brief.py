@@ -1,7 +1,6 @@
 import unittest
 from pathlib import Path
 
-
 from herdboard.brief import agent_message, brief_text, card_token
 from herdboard.store import CardView
 from support.herdboard_brief import todo

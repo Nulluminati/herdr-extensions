@@ -5,9 +5,9 @@ import os
 import subprocess
 import unittest
 from unittest.mock import patch
+
 from support.paths import ROOT
 from support.scripts import load_script
-
 
 FIXTURES = ROOT / "tests/codex-usage/fixtures"
 codex_usage = load_script("codex-usage", "codex_usage")

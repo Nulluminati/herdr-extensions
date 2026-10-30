@@ -3,14 +3,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 from rich.cells import cell_len
 from textual.widgets import Markdown, OptionList
 
 from herdboard import attachments, board
 from herdboard.board import AttachmentChoiceScreen, AttachmentScreen, DetailScreen
-from support.herdboard_board import BoardTestCase, settle
 from support.herdboard_attachment_board import fake_opener
+from support.herdboard_board import BoardTestCase, settle
 
 SIZE = (120, 40)
 

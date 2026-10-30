@@ -8,19 +8,33 @@ plan, and removes the temporary worktree and branch when the planner ends and th
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 
-from . import activity, attachments, automations, plan as plan_module
+from . import activity, attachments, automations
+from . import plan as plan_module
 from .agent_review import start_worker
 from .brief import _one_line
 from .config import AGENTS, thinking_levels
 from .model import HerdboardError
-from .plan import PLAN_FORMAT, PlanError, _mtime, _plans_path, _planner_pane, planner_arguments
-from .start import (Starter, StartError, _git, _lock, _read, _write, agent_model, export_config,
-                    herdboard_command, herdr, thinking_level, work_folder, write_brief)
+from .plan import PLAN_FORMAT, PlanError, _mtime, _planner_pane, _plans_path, planner_arguments
+from .start import (
+    Starter,
+    StartError,
+    _git,
+    _lock,
+    _read,
+    _write,
+    agent_model,
+    export_config,
+    herdboard_command,
+    herdr,
+    thinking_level,
+    work_folder,
+    write_brief,
+)
 
 
 def plan_branch(automation_id: str) -> str:
@@ -109,7 +123,7 @@ class AutomationPlanner:
         for block in (_git(checkout, "worktree", "list", "--porcelain") or "").split("\n\n"):
             block_lines = block.splitlines()
             if f"branch refs/heads/{branch}" in block_lines:
-                existing = next((l.removeprefix("worktree ") for l in block_lines if l.startswith("worktree ")), None)
+                existing = next((line.removeprefix("worktree ") for line in block_lines if line.startswith("worktree ")), None)
         if existing:
             # A worktree kept from an earlier plan, because it had changes.
             result = herdr("worktree", "open", "--cwd", str(checkout), "--path", existing, "--label", label,

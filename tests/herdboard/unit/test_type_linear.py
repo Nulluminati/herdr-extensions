@@ -1,6 +1,5 @@
 import unittest
-from datetime import datetime, timezone
-
+from datetime import UTC, datetime
 
 from herdboard.config import Config
 from herdboard.linear_cards import issue_card
@@ -15,7 +14,7 @@ def issue(*labels):
 
 class LinearTypeTests(unittest.TestCase):
     def card(self, *labels, config=None):
-        return issue_card(config or Config(), issue(*labels), set(), datetime.now(timezone.utc), False)
+        return issue_card(config or Config(), issue(*labels), set(), datetime.now(UTC), False)
 
     def test_a_label_that_names_a_type_is_the_type(self):
         card = self.card("auth", "Bug")

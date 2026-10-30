@@ -2,7 +2,6 @@
 
 import unittest
 
-
 from support.herdboard_board import BoardTestCase, settle
 
 

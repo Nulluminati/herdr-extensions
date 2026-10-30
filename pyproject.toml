@@ -24,3 +24,10 @@ pythonpath = ["plugins/herdboard/src", "tests"]
 addopts = ["--import-mode=importlib", "--strict-markers", "--strict-config", "-ra"]
 filterwarnings = ["error"]
 xfail_strict = true
+
+[tool.ruff]
+line-length = 120
+src = ["plugins/herdboard/src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]

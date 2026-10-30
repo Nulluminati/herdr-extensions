@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import unicodedata
 from fnmatch import fnmatch
 from pathlib import Path
-import unicodedata
 
 from .attachments import PLAN_NAME
 from .model import commit_type, split_title

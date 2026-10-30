@@ -4,11 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
 from herdboard.board import HerdboardApp
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
 from herdboard.store import Store
-
 
 SIZE = (80, 24)
 
