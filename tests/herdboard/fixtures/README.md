@@ -1,9 +1,13 @@
 # herdboard fixtures
 
-These boards follow the serializer of the Obsidian Kanban plugin 2.0.51
-(`boardToMd`, `laneToMd`, `itemToMd` and `settingsToCodeblock` in
-`mgmeyers/obsidian-kanban`), with Obsidian's default tab indentation.
-They were written from that source, not saved by Obsidian.
+The `kanban-*.md` boards are in the old Markdown board format, which
+herdboard used before board folders. They follow the serializer of the
+Obsidian Kanban plugin 2.0.51 (`boardToMd`, `laneToMd`, `itemToMd` and
+`settingsToCodeblock` in `mgmeyers/obsidian-kanban`), with Obsidian's default
+tab indentation. They were written from that source, not saved by Obsidian.
+Tests read them with `kanban_md`, the reader of `convert-store`, or convert
+them to board folders with `write_markdown_board` from
+`tests/support/herdboard_store.py`.
 
 - `kanban-2.0.51-full.md`: multi-line card, nested items, card limit
   (`Todo (5)`), block IDs, due date, note link, complete marker, archive,
@@ -12,7 +16,16 @@ They were written from that source, not saved by Obsidian.
 - `kanban-promote.md`: cards for `promote`: tags, due date, checklist with
   checked items, deeper items, plain nested lines, note links, a done card.
 
-Add boards saved by Obsidian next to these when they are available.
+## convert/
+
+Old Markdown boards for `herdboard convert-store`.
+
+- `project.md`: a repository board with `repo`, `merge` and Linear
+  frontmatter, a Triage column, a card limit, type tags, a due date, a nested
+  body, a parent link, a promoted card, a card without an ID, an invalid ID,
+  a complete marker on a column that is not named Done, and an archive.
+- `inbox-crlf.md`: an inbox board with CRLF line endings, a space-indented
+  body, and a done column without a complete marker.
 
 ## migrate/
 

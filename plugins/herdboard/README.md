@@ -1,6 +1,6 @@
 # herdboard
 
-A kanban board inside Herdr for your own todos and your Linear issues. Todos are Markdown files in the Obsidian Kanban format, so Obsidian can open them. Linear issues show on the same board, in the same columns, with the same commands.
+A kanban board inside Herdr for your own todos and your Linear issues. Todos are plain files: one folder for each board, and one folder with a Markdown file for each card. See [Board files](#board-files). Linear issues show on the same board, in the same columns, with the same commands.
 
 A card can also start work: herdboard opens a Git worktree for it and hands the card to Claude Code, pi or Codex. When the agent is done, herdboard opens the work for review, merges it locally or as a draft GitHub pull request, and cleans up.
 
@@ -67,7 +67,7 @@ Each column takes a color in turn: blue, magenta, yellow, cyan and green. The co
 
 A card shows, from top to bottom:
 
-- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), then the plan and review markers, then the card ID at the right. While the work agent's pane lives, the state icon is the agent's Herdr state instead (see [Agent states](#agent-states)). The done column always shows the green `✓`. A Linear card shows `◆` and its identifier. A card without a block ID shows no ID.
+- A state icon (`○` not started, yellow `●` a worktree or an agent works on it, green `✓` in the done column), then the plan and review markers, then the card ID at the right. While the work agent's pane lives, the state icon is the agent's Herdr state instead (see [Agent states](#agent-states)). The done column always shows the green `✓`. A Linear card shows `◆` and its identifier.
 - The title.
 - The first detail line that is not a checklist item, in at most two rows. Cards in the done column strike the title and this line through.
 - The type and the tags.
@@ -138,12 +138,12 @@ The keys stay the main input. Each mouse action runs an action that a key also r
 | View | Shows |
 |---|---|
 | repo (default inside a repository) | The repository's todos, the issues of its linked Linear projects and its pinned Linear issues |
-| inbox (default outside a repository) | `inbox.md`: todos that belong to no repository |
+| inbox (default outside a repository) | The `inbox` board: todos that belong to no repository |
 | all | Every board and your Linear issues |
 | mine | Linear issues assigned to you, from every team |
 | project (`--view project --project NAME`) | One Linear project's issues and the todos of every repository linked to it |
 
-In a view with several boards, columns with the same name merge. Each card keeps its own board, so a move writes to the correct file.
+In a view with several boards, columns with the same name merge. Each card keeps its own board, so a move writes to the correct board.
 
 ### Triage
 
@@ -158,29 +158,29 @@ Triage is the column where a new report lands before you sort it. Agents use it 
 
 ### Card types
 
-A card can have one type, such as bug or feature. The type is an Obsidian nested tag on the first line: `#type/bug`. Obsidian shows it as a tag.
+A card can have one type, such as bug or feature. The type is the `type` field of the card file.
 
-- `herdboard add "Fix login timeout" --type bug` writes `Fix login timeout #type/bug`. `edit <id> --type feature` changes the type, and `--no-type` removes it.
+- `herdboard add "Fix login timeout" --type bug` adds a card with the type bug. `edit <id> --type feature` changes the type, and `--no-type` removes it.
 - On the board, the add and edit forms have a Type field. The card shows the type before its tags. Bug is red, feature green, docs cyan and refactor magenta.
-- The `types` setting lists the allowed types. The default is bug, feature, chore, docs and refactor. herdboard refuses another type with `unknown_type`. A `#type/<name>` tag that you write yourself always counts.
-- JSON output has the type in `type`. `tags` leaves out the `type/` tag.
+- The `types` setting lists the allowed types. The default is bug, feature, chore, docs and refactor. herdboard refuses another type with `unknown_type`. A type that you write in a card file yourself always counts.
+- JSON output has the type in `type`, apart from `tags`.
 - `start` puts the conventional commit type in front of the branch name: `fix/t3m9-fix-login-timeout` for a bug, `feat/` for a feature. Other types use their own name, such as `chore/`. A Linear issue keeps its own branch name.
 - The agent brief names the type and its commit type. The pull request title uses that commit type.
-- A Linear issue's type is its first label that names a type, in any letter case. `Bug` is the type bug. `add --linear --type bug` and `promote` of a `#type/bug` todo add the label `bug` of the issue's team, else the workspace label `bug`. Without such a label, `add --linear` creates no issue.
+- A Linear issue's type is its first label that names a type, in any letter case. `Bug` is the type bug. `add --linear --type bug` and `promote` of a todo with the type bug add the label `bug` of the issue's team, else the workspace label `bug`. Without such a label, `add --linear` creates no issue.
 
 ### Archive
 
-The archive keeps old todos off the board. It is the archive of the Obsidian Kanban plugin: a `***` line and a `## Archive` heading after the last column. Obsidian shows it in its own archive view.
+The archive keeps old todos off the board. An archived card's folder moves from `cards/` to `archive/` in the board folder, and its card file gets an `archived` time.
 
 - `A`, or `herdboard archive <id>`, moves a todo to the archive. `L` on the last column does the same when the archive column shows.
 - `D`, or `herdboard archive --done`, archives every card in the done column. In a view with several boards, `D` archives the done column of each board, and skips a board without one. In a repository without a board, `archive --done` needs `--board inbox` to archive the inbox.
 - `z` shows the archive column at the end of the board. The board hides it again on the next `z`. `a` does not add cards to the archive column.
-- `A` on an archived card, or `herdboard unarchive <id>`, moves it back to the done column. A card that Obsidian archived without an ID takes its archive reference, such as `acme-api:archive-2` from `list --archived`, and gets an ID.
+- `A` on an archived card, or `herdboard unarchive <id>`, moves it back to the done column.
 - A sub-card whose parent is archived too brings its parent back with it. The board asks first. The command asks in a terminal, and needs `--yes` without one.
 
 herdboard does not archive a card whose worktree still exists, or whose agent or planner still runs. `finish` the card, or close the planner tab, first. A parent whose sub-cards stay on the board does not archive either. `archive --done` keeps these cards in the done column and reports why.
 
-An archived card keeps its ID, its log and its attachments. `show` and `log` work on it, also with an archive reference. `log` gives a card without an ID its ID. Other commands, such as `start`, `plan`, `review`, `merge` and `attach`, refuse it with `archived` before they change anything. Linear issues are not archived here.
+An archived card keeps its ID, its log and its attachments. `show` and `log` work on it. Other commands, such as `start`, `plan`, `review`, `merge` and `attach`, refuse it with `archived` before they change anything. Linear issues are not archived here.
 
 ### Card markers
 
@@ -298,7 +298,7 @@ A failed `start` reports the steps that worked. Run `start` again to continue fr
 
 `herdboard plan <id>` starts a planner agent in a `plan <id>` tab in the card's worktree. It creates the worktree and the branch when the card has none, as `start` does, and finds the repository and the checkout the same way. It takes the same `--repo`, `--checkout` and `--base`. The card stays in its column, and the worktree stays open: `herdboard start <id>` later starts the work agent in the same worktree.
 
-The planner gets a brief with the card, its linked notes, its attachments, its log and the current plan. It may change code and run commands in the worktree to test ideas. Before planning ends, it reverts its own changes, so the work agent starts clean; it does not commit. When the worktree is not clean, the brief names the changes that were already there, and when the card's work agent still runs, the brief says so. The planner has the work agent's permissions and can also write the card's attachments. See [Agent permissions](#agent-permissions). The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
+The planner gets a brief with the card, its attachments, its log and the current plan. It may change code and run commands in the worktree to test ideas. Before planning ends, it reverts its own changes, so the work agent starts clean; it does not commit. When the worktree is not clean, the brief names the changes that were already there, and when the card's work agent still runs, the brief says so. The planner has the work agent's permissions and can also write the card's attachments. See [Agent permissions](#agent-permissions). The planner asks you questions until the main unknowns have answers. Then it writes the plan to the `plan.md` attachment, with these sections: Goal, Decisions, Steps, Testing, Out of scope and Open questions.
 
 A background worker watches the plan. Each time the planner saves it and is idle, the worker logs `Plan saved: <path>`. When the tab closes, the worker logs `Planning ended.` It stops watching after 8 hours, but a planner that still runs still blocks a second one.
 
@@ -340,7 +340,7 @@ A repoless card has limits. `review` opens nothing: only `review --agent` works,
 
 ### Attachments
 
-Attachments hold documents that are too large for the card text, such as a specification. They are files in `<todos_dir>/.herdboard/attachments/<id>/`, next to the log. They work for Linear cards too, and herdboard posts nothing to Linear.
+Attachments hold documents that are too large for the card text, such as a specification. They are files in the `attachments/` folder of the card folder, next to the log. A Linear card keeps them in `<todos_dir>/.herdboard/linear/<ENG-123>/attachments/`, and herdboard posts nothing to Linear.
 
 - `herdboard attach <id> FILE [--name NAME]` copies a file into the card's attachments and logs it. An attachment with the same name is replaced.
 - `herdboard attach <id> --remove NAME` removes an attachment.
@@ -356,7 +356,7 @@ When `start` starts the work agent, its brief includes the `plan.md` attachment 
 
 ### Activity log
 
-Each card has a log in `<todos_dir>/.herdboard/log/<id>.md`. Obsidian does not show hidden folders. One entry is one line:
+Each card has a log in `log.md` in its card folder. A Linear card's log is in `<todos_dir>/.herdboard/linear/<ENG-123>/log.md`. One entry is one line:
 
 ```markdown
 - 2026-10-12 14:03 · pi · Ready for review: 3 commits.
@@ -422,7 +422,7 @@ On the board, `R` asks for Human, Agent or Both. For an agent review, it then as
 
 ### merge
 
-The mode comes from `--local` or `--pr`, else from `merge:` in the board's frontmatter, else from `merge` in the config. The default is `local`. On the board, `c` sets the board's mode.
+The mode comes from `--local` or `--pr`, else from `merge` in the board's `board.toml`, else from `merge` in the config. The default is `local`. On the board, `c` sets the board's mode.
 
 Both modes stop when the worktree has uncommitted or untracked files (`worktree_dirty`), or when the branch has no commits ahead of its base (`nothing_to_merge`).
 
@@ -580,10 +580,10 @@ Limits:
 
 The Notes tab is a scratchpad for quick notes and ideas next to the board. Each board has one note, and the inbox's note is the global note. Press `G` twice on the board, or click the Notes tab.
 
-The notes are plain Markdown files in the todos folder, so Obsidian shows them:
+The notes are plain Markdown files, one in each board folder:
 
-- `~/todos/notes/<board>.md` for a board, such as `~/todos/notes/acme-api.md`.
-- `~/todos/notes/inbox.md` for the global note.
+- `~/todos/boards/<board>/notes.md` for a board, such as `~/todos/boards/acme-api/notes.md`.
+- `~/todos/boards/inbox/notes.md` for the global note.
 
 herdboard creates a note file on its first save. It does not delete note files.
 
@@ -601,7 +601,7 @@ The tab shows the note as Markdown. Press `e` to edit it as text. herdboard save
 | `ctrl+s` | In the editor: save now |
 | `G` | Go to the Automations tab |
 
-When you edit a note file in another application, such as Obsidian, the tab shows the change within 2 seconds. In the editor, the tab does not read the file. When the file changed on disk during your edit, a save asks: `o` writes your edit over the file, `r` reads the file and drops your edit, and `escape` keeps editing.
+When you edit a note file in another application, such as a text editor, the tab shows the change within 2 seconds. In the editor, the tab does not read the file. When the file changed on disk during your edit, a save asks: `o` writes your edit over the file, `r` reads the file and drops your edit, and `escape` keeps editing.
 
 When a save fails, for example because the disk is full, the error shows above the note and your edit stays. The tab stays open until the save works. `q` then asks before it quits without the edit.
 
@@ -688,7 +688,7 @@ When at least one automation is on and the timer is not active, the status line 
 
 Limits:
 
-- Automations are herdboard data in `.herdboard/automations.toml`. Obsidian does not show them. The spawned cards are normal board cards.
+- Automations are herdboard data in `.herdboard/automations.toml`. The spawned cards are normal board cards.
 - Spawned cards are todos. An automation cannot target a Linear issue or spawn a sub-card.
 - herdboard does not review, merge or finish a spawned card, and does not limit how many runs of one automation are open.
 - A repository board needs a known checkout (`checkouts.json`). A run without one fails with `checkout_unknown`; run any herdboard command in the repository once.
@@ -701,10 +701,10 @@ Linear is optional. It turns on when `linear.api_key_command` is set or `LINEAR_
 |---|---|
 | Column | The workflow state of the issue's team |
 | Card | Issue |
-| Sub-card or indented checklist item | Sub-issue |
-| `#tag` | Label |
-| `#type/bug` | The label `bug` (any letter case) |
-| `📅` date | Due date |
+| Sub-card or checklist item | Sub-issue |
+| Tag | Label |
+| Type bug | The label `bug` (any letter case) |
+| Due date | Due date |
 | Card ID (`t7k2`) | Identifier (`ENG-123`) |
 
 ### Keep the key in a keyring
@@ -778,7 +778,7 @@ A Linear project can hold issues for many repositories, and a team can hold thou
 - `u` on a pinned card removes its pin. `c` lists the pinned issues: press enter on one to mark it for removal.
 - `start` on a Linear issue pins it to the board of the repository it starts in. It does not pin an issue that a linked project of that board already shows. When the board cannot tell the repository of an issue (for example in the `mine` view), `s` asks where it runs: a repository board, or no repository. A Linear issue cannot create a new repository (`--new-repo` fails with `usage`).
 
-A pinned issue goes off the board like other done issues, after `linear.done_days`. A canceled issue does not show. The pin stays in the board file until you remove it. A pin does not bring the issue's sub-issues: pin each one by itself. The pins live in the `linear-issues:` frontmatter of the board.
+A pinned issue goes off the board like other done issues, after `linear.done_days`. A canceled issue does not show. The pin stays in the board until you remove it. A pin does not bring the issue's sub-issues: pin each one by itself. The pins live in the `[[linear-issues]]` tables of the board's `board.toml`.
 
 When Linear's GitHub integration attaches a pull request from this repository to an issue, the card shows `PR`.
 
@@ -804,12 +804,12 @@ Linear cards follow Linear's manual order, after the local cards of the column. 
 
 `herdboard promote <id> [--team ENG] [--project NAME] [--state NAME]` turns a todo into a Linear issue assigned to you:
 
-- The first line becomes the title. Tags become labels when a label with that name exists. `#type/bug` becomes the label `bug`. The due date stays. A linked note becomes the description when `vault_root` is set.
-- Indented checklist items and sub-cards become sub-issues. A sub-card cannot be promoted alone (`parent_not_promoted`).
+- The title stays. Tags become labels when a label with that name exists. The type bug becomes the label `bug`. The due date stays.
+- Top-level checklist items of the details and sub-cards become sub-issues. A sub-card cannot be promoted alone (`parent_not_promoted`).
 - The issue starts in the state of the todo's column.
 - Anything that herdboard cannot convert goes into the description as text.
 
-After Linear confirms every issue, the todo moves to Done with `→ ENG-123` on its first line. The todo is not deleted. herdboard records each step first, so a second `promote` after a failure creates only the missing issues.
+After Linear confirms every issue, the todo moves to Done, and its card file gets `promoted = "ENG-123"`. The card shows `→ ENG-123`. The todo is not deleted. herdboard records each step first, so a second `promote` after a failure creates only the missing issues.
 
 On the board, press `T` on a todo, or choose "Promote to Linear" in the card menu:
 
@@ -825,21 +825,21 @@ When the column matches more than one workflow state, the state dialog asks, as 
 |---|---|
 | `herdboard board [--view NAME] [--project NAME]` | Open the board |
 | `herdboard list [--view] [--board] [--column] [--source todo\|linear] [--archived]` | List cards. `--archived` lists the archived todos |
-| `herdboard add "text" [--body TEXT \| --body-file PATH] [--type NAME] [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else `inbox.md` |
+| `herdboard add "title" [--body TEXT \| --body-file PATH] [--type NAME] [--tag NAME]... [--due YYYY-MM-DD] [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else the inbox |
 | `herdboard add --linear "title" [--body TEXT \| --body-file PATH] [--type NAME] [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
 | `herdboard show <id> [--log]` | Show a card, its attachments and its last 10 log entries. `--log` shows them all |
 | `herdboard move <id> <column> [--position top\|bottom] [--state]` | Move a card to a column |
 | `herdboard move <id> --up\|--down` | Move a todo up or down in its column |
-| `herdboard move <id> [column] --board NAME` | Move a todo, with its ID and details, to another board |
+| `herdboard move <id> [column] --board NAME` | Move a todo, with its card folder, to another board. A started card cannot move |
 | `herdboard done <id> [--state]` | Move a card to its board's done column |
-| `herdboard edit <id> [--title] [--body \| --body-file] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's first line, its indented lines, its parent or its type. `--body ""` removes the indented lines |
+| `herdboard edit <id> [--title] [--body \| --body-file] [--tag NAME... \| --no-tags] [--due YYYY-MM-DD \| --no-due] [--parent ID \| --no-parent] [--type NAME \| --no-type]` | Change a todo's title, details, tags, due date, parent or type. `--tag` replaces the tags. `--body ""` removes the details |
 | `herdboard log <id> "text"` | Add an entry to the card's activity log |
 | `herdboard attach <id> FILE [--name NAME]` / `attach <id> --remove NAME` | Add a file to the card's attachments, or remove one |
 | `herdboard mockup <id> PROMPT... [--image FILE]... [--quality Q] [--no-show]` | Make UI mockup drafts with Codex, one per prompt (four at most), and show them in a pane |
 | `herdboard details <id>` / `details --open [<id>] [--pane ID]` | Show the card's compact status, the view of the [details pane](#details-pane); or open that pane in Herdr |
 | `herdboard plan <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
 | `herdboard sidebar-refresh` | Report the Herdr sidebar tokens of the started cards again. Herdr runs it at startup and when it finds an agent |
-| `herdboard delete <id> [--yes]` | Delete a todo and its indented lines |
+| `herdboard delete <id> [--yes]` | Delete a todo: its card folder, with its log and attachments |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
 | `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first |
@@ -859,7 +859,8 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard search <term>` | List the open Linear issues of your teams that match, or one issue by identifier |
 | `herdboard init` | Create the board for the current repository |
 | `herdboard migrate <TODO.md> [--board] [--yes]` | Convert a free-form `TODO.md` into cards |
-| `herdboard doctor [--fix-ids] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
+| `herdboard doctor [--fix] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
+| `herdboard convert-store [--dry-run]` | Convert the old Markdown boards to board folders, once. See [Convert old boards](#convert-old-boards) |
 | `herdboard automation list` | List the automations, with the next due time and the last run |
 | `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
 | `herdboard automation edit <aid> [the add options] [--no-merge-prs]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
@@ -871,7 +872,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard automation tick` | Spawn and start the due runs (the timer runs it) |
 | `herdboard automation timer install\|remove\|status` | Set up, remove or check the timer that runs the tick |
 
-- `<id>` is a todo ID (`t7k2`), a temporary reference (`homelab:12`) or a Linear identifier (`ENG-123`). `<aid>` is an automation ID (`a7k2`).
+- `<id>` is a todo ID (`t7k2`) or a Linear identifier (`ENG-123`). `<aid>` is an automation ID (`a7k2`).
 - Every command takes `--json`, `--config FILE` and `-C DIR` (run as if in `DIR`).
 - With `--json`, output goes to standard output as JSON. An error has the form `{"error": {"code": "…", "message": "…"}}`. The skill lists the error codes.
 - Exit codes: 0 success, 1 user error, 2 conflict (the card changed, the lock is held, a rebase conflict), 3 Linear error.
@@ -893,8 +894,8 @@ With `--linear`, the body becomes the issue description. Started agents can crea
 
 `herdboard migrate TODO.md` converts a free-form todo file. It reads Markdown and underlined headings, a plain line that ends with `:`, all common bullets, checkboxes, and tab or space indents.
 
-- Each top-level item of a section becomes a card, with its deeper items indented under it.
-- The section name becomes a tag: `Follow Ups:` becomes `#follow-ups`.
+- Each top-level item of a section becomes a card. Its deeper items become the card details.
+- The section name becomes a tag: `Follow Ups:` becomes the tag `follow-ups`.
 - Open items go into the first column. Checked items go into the done column.
 
 herdboard shows the result and asks before it writes. The original file does not change.
@@ -903,14 +904,16 @@ herdboard shows the result and asks before it writes. The original file does not
 
 `herdboard doctor` reports problems with a level, a code and a fix when there is one. It checks:
 
-- Boards that do not parse, duplicate card IDs, and two boards with the same repository
+- Boards and card files that do not parse, duplicate card IDs, and two boards with the same repository
+- Cards that `board.toml` lists twice or does not list, listed cards without a folder, and the done column
+- Old Markdown boards that `convert-store` did not convert yet, and config keys that herdboard no longer reads
 - The config file, and Linear links, labels, pinned issues and the API key
 - Sub-cards whose parent is missing
 - Unfinished `promote` records, old start records and old checkout paths
 - Whether `herdr` and `gh` are on the path
 - Whether `hunk` is on the path and has the `hunk-gh-review` extension. These are warnings: the board works without them
 
-`--fix-ids` gives a new ID to each duplicate card except the first. `--offline` skips the Linear checks. `doctor` never changes Linear.
+`--fix` repairs the card lists of `board.toml`: it removes a duplicate entry and an entry without a card folder, and adds a card folder that no column lists to the first column. `--offline` skips the Linear checks. `doctor` never changes Linear.
 
 ## Configuration
 
@@ -920,9 +923,6 @@ The config file is `~/.config/herdboard/config.toml`. `HERDBOARD_CONFIG` or `--c
 todos_dir = "~/todos"
 projects_dir = "~/Projects"   # where `start --new-repo` creates a repository
 columns = ["Backlog", "Todo", "In progress", "Review", "Done"]   # for new boards
-complete_markers = []      # added to the English "Complete"
-archive_titles = []        # added to the English "Archive"
-# vault_root = "~/Notes"   # resolves [[note]] links in `show` and `promote`
 start_agent = "claude"     # or "pi" or "codex"
 # start_model = "openai-codex/gpt-6.1-sol"   # default: the agent's own default
 # start_thinking = "medium"                  # pi uses it when the model has no [thinking] row
@@ -930,12 +930,12 @@ mockup_model = "gpt-6.1-sol"                 # the Codex model that `mockup` mak
 # pi_models = ["zai/glm-5.3"]                # the board's pi model list; default: pi's enabledModels
 # codex_models = ["gpt-5.2-codex"]           # default: visible models in ~/.codex/models_cache.json
 # start_column = "In progress"               # default: linear.columns.started
-merge = "local"            # or "pr"; a board's `merge:` frontmatter wins
+merge = "local"            # or "pr"; a board's `merge` in board.toml wins
 theme = "ansi-dark"        # the terminal's own colors; "ansi-light" or any Textual theme name
 tag_style = "outline"      # tag text on a tint of its color; "round" (Nerd Font ends) or "block"
 card_style = "full"        # cards with a border and a detail line; "compact" without both
 icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
-types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the #type/<name> tag
+types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the `type` field of a card
 details_pane = true        # a card details pane on top of each card agent and planner
 details_pane_ratio = 0.25  # its share of the agent pane's height, from 0.1 to 0.6
 
@@ -960,14 +960,16 @@ canceled = "Done"
 "In Review" = "Review"
 ```
 
-To make pull requests the default for one repository, add `merge: pr` to the frontmatter of its board, or press `c` on the board and choose `pr`.
+To make pull requests the default for one repository, add `merge = "pr"` to its board's `board.toml`, or press `c` on the board and choose `pr`.
+
+`doctor` warns about `complete_markers`, `archive_titles` and `vault_root`. They were settings of the old Markdown boards, and herdboard ignores them. Remove them from the file.
 
 ### The configuration dialog
 
 Press `c` to open configuration. It has two tabs. Switch tabs with a click, or focus the tab row with shift+tab and press left or right.
 
 - **Global (all boards)** sets values in the config file: theme, agent, model, thinking level, merge mode, icons, tags, cards and the [details pane](#details-pane). It works outside a repository too.
-- **Current board** shows the board name. It sets the board's merge mode, linked Linear projects and pinned issues in the board's frontmatter. Without a repository board, it tells you how to create one.
+- **Current board** shows the board name. It sets the board's merge mode, linked Linear projects and pinned issues in the board's `board.toml`. Without a repository board, it tells you how to create one.
 
 The model list is the list that a start offers. Claude offers opus, sonnet and haiku. pi offers `pi_models`, else pi's `enabledModels`. Codex offers `codex_models`, else models with `visibility = "list"` in `~/.codex/models_cache.json`. Its default label reads `model` and `model_reasoning_effort` from `~/.codex/config.toml`.
 
@@ -977,7 +979,7 @@ pi accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`. Codex a
 
 The Thinking field follows the selected model. A named model shows its own level, from the `[thinking]` table. With "Agent default" as the model, the field shows `start_thinking`. "Agent default" in the field clears the level of the selected model, so that model uses `start_thinking` again. See [thinking levels](#thinking-levels).
 
-The board's merge option "Global default" shows the global mode. A board without `merge:` follows the global mode; a board with `merge:` keeps it.
+The board's merge option "Global default" shows the global mode. A board without `merge` follows the global mode; a board with `merge` keeps it.
 
 Press `ctrl+s` in either tab to save the changes of both tabs. Press `escape` to cancel without saving. Herdboard saves global changes in the active configuration file, including files selected with `--config` or `HERDBOARD_CONFIG`. They apply at once in this board: the theme, the cards and the next start, plan, review or merge. Other open herdboard processes read the saved values when they start again. A running agent does not change.
 
@@ -1013,80 +1015,117 @@ Use a **Nerd Font Mono** font in your terminal for `nerd` mode. Other Nerd Font 
 
 To disable these icons, select `plain` in the menu. Alternatively, set `icon_style = "plain"` in the file and restart Herdboard. The separate `tag_style` setting still controls tag shapes. The default `outline` and `block` need no Nerd Font; `round` draws Nerd Font tag ends. Existing structural symbols, such as checklist marks, remain in both modes.
 
-These settings affect display only. Stored Markdown, filters and command-line output do not change.
+These settings affect display only. Card files, filters and command-line output do not change.
 
 ## Board files
 
 ```
-~/todos/                       # todos_dir
-  inbox.md                     # todos that belong to no repository
-  projects/
-    nulluminati-homelab.md     # one board per repository
-    acme-api.md
-  .herdboard/log/              # activity logs
-  .herdboard/attachments/      # card attachments, such as plan.md
-  .herdboard/work/<id>/        # the folder of a card without a repository; deleted at `finish`
-  .herdboard/automations.toml  # the automations
+~/todos/                            # todos_dir
+  boards/
+    inbox/                          # todos that belong to no repository
+    acme-api/                       # one board per repository
+      board.toml                    # the settings, the columns and the card order
+      notes.md                      # the board's note
+      cards/
+        t3m9/                       # one folder per card; the folder name is the card ID
+          card.md                   # the title, fields and details
+          log.md                    # the activity log
+          attachments/              # the attachments, such as plan.md
+      archive/
+        t2a6/                       # an archived card, with the same files
+  .herdboard/automations.toml       # the automations
+  .herdboard/automations/<aid>/     # an automation's log.md and attachments/
+  .herdboard/linear/<ENG-123>/      # a Linear card's log.md and attachments/
+  .herdboard/work/<id>/             # the folder of a card without a repository; deleted at `finish`
+  .herdboard.lock                   # the store lock
 ```
 
-An automation's attachments are in `.herdboard/attachments/<aid>/`, and its log in `.herdboard/log/<aid>.md`.
+`board.toml` holds the board settings and the columns. Only `board.toml` says which column holds a card, and in which order:
 
-A board file uses the format of the Obsidian Kanban plugin:
+```toml
+format = 1
+repo = "github.com/acme/api"
+merge = "pr"
 
-````markdown
----
-kanban-plugin: board
-repo: github.com/acme/api
-merge: pr
----
+[[linear-projects]]
+id = "p-plat"
+name = "Platform"
 
-## Backlog
+[[column]]
+name = "Backlog"
+cards = ["t3m9"]
 
-- [ ] Compare tile suppliers #research ^t3m9
-	- [ ] Ask for samples
+[[column]]
+name = "Todo"
+limit = 5
+cards = ["t7k2", "t4b1"]
 
-## Todo
-
-- [ ] Order tiles 📅 2026-10-20 ^t7k2
-- [ ] Add invoice table [[#^t5aa]] ^t4b1
-
-## In progress
-
-- [ ] Billing v2 ^t5aa
-
-## Review
-
-## Done
-
-**Complete**
-- [x] Measure the room ^t2a6
-
-%% kanban:settings
+[[column]]
+name = "Done"
+done = true
+cards = ["t2a6"]
 ```
-{"kanban-plugin":"board"}
-```
-%%
-````
 
-- A `##` heading is a column. A title can end in a card limit, such as `Todo (5)`.
-- A card is a `- [ ]` line and all the indented lines under it.
-- `^t7k2` is the card ID. IDs are unique across all boards. The first write to a board gives an ID to every card that has none. Until then, `list` shows temporary references such as `homelab:12`.
-- `#tag` is a tag. `📅 YYYY-MM-DD` is a due date. Other Obsidian Tasks syntax stays as text.
-- `[[#^t5aa]]` makes the card a sub-card of `t5aa` on the same board. Sub-cards go one level deep.
-- `[[note]]` is a note link. With `vault_root` set, `show` displays the note.
-- `**Complete**` under a heading marks the done column. A move into it checks the box, and a move out clears it.
-- `***` and `## Archive` start the archive. Only `archive` and `unarchive` move cards in and out of it.
-- herdboard keeps every line that it does not understand, the settings block, the line endings and the indent style.
+- `format` is the version of the store format.
+- `repo` and `merge` are optional. `[[linear-projects]]` and `[[linear-issues]]` hold the linked Linear projects and the pinned issues.
+- Each `[[column]]` has a `name`, an optional card `limit`, and the IDs of its cards in order. At most one column has `done = true`. Without it, a column named Done is the done column. A move into the done column checks the card, and a move out clears it.
+
+`card.md` is TOML frontmatter between `+++` lines, then the details as plain Markdown:
+
+```markdown
++++
+title = "Add invoice table"
+type = "feature"
+tags = ["billing"]
+due = 2026-10-20
+parent = "t5aa"
+created = 2026-10-12T14:03:00-07:00
++++
+
+Ask finance for the columns.
+
+- [ ] Draft the schema
+- [ ] Add the migration
+```
+
+- `title` is the only field that a card must have.
+- `type`, `tags` and `due` are the card's type, tags and due date.
+- `parent` makes the card a sub-card of another card on the same board. Sub-cards go one level deep.
+- `promoted` is the Linear identifier after `promote`. `archived` is the time of the archive. `created` is the time of the add.
+- A top-level `- [ ]` line of the details is a checklist item.
+- IDs are unique across all boards, in `cards/` and `archive/`.
+- herdboard keeps keys and comments of `board.toml` and `card.md` that it does not know.
+
+### Convert old boards
+
+Earlier versions of herdboard kept boards as Markdown files in the Obsidian Kanban format: `inbox.md` and `projects/<name>.md`, with logs in `.herdboard/log/` and attachments in `.herdboard/attachments/`. `herdboard convert-store` converts them to board folders, once. Other commands refuse the old files with `old_format`.
+
+- `--dry-run` reports what the conversion does, and writes nothing.
+- The command builds the new boards in `boards.tmp/`, then renames it to `boards/`. It stops when `boards/` already exists.
+- Cards without an ID, or with an ID that another card already has, get a new ID. The report lists them.
+- The old files move to `~/.local/state/herdboard/backup-<time>/`. herdboard does not delete them.
+- The command refuses to run while an agent, planner or reviewer works on a card.
+
+Convert your real todos in this order:
+
+1. Close every board view.
+2. Stop the automations timer: `systemctl --user stop herdboard-automations.timer`.
+3. Install the new version: `uv tool install --reinstall <path to plugins/herdboard>`.
+4. Run `herdboard convert-store --dry-run` and read the report.
+5. Run `herdboard convert-store`.
+6. Run `herdboard doctor`.
+7. Start the timer again: `systemctl --user start herdboard-automations.timer`.
 
 ### Repository identity
 
-herdboard finds a repository's board from its `origin` remote, as `host/owner/repo`. SSH and HTTPS remotes give the same identity. The board stores it in `repo:` frontmatter. All worktrees of a repository share its board. A repository without a remote uses the path of its main checkout.
+herdboard finds a repository's board from its `origin` remote, as `host/owner/repo`. SSH and HTTPS remotes give the same identity. The board stores it in `repo` in `board.toml`. All worktrees of a repository share its board. A repository without a remote uses the path of its main checkout.
 
 ### Writes
 
 - Agents and scripts change boards only through the CLI.
-- Every write takes one lock for the store (`<todos_dir>/.herdboard.lock`), reads the file again, and replaces it in one step. When the card changed since the command read it, the command stops with exit code 2. Changes to other cards stay.
-- Obsidian does not use the lock. herdboard cannot see an unsaved Obsidian edit. The check above catches most conflicts.
+- Every write takes one lock for the store (`<todos_dir>/.herdboard.lock`), reads the files again, and replaces each file in one step. When the card changed since the command read it, the command stops with exit code 2. Changes to other cards stay.
+- A text editor does not use the lock. The check above catches most conflicts with an edit by hand.
+- Multi-file changes write in an order that leaves no lost card after a crash. A crash can leave a card folder that no column lists. The board shows such a card in the first column, and `doctor --fix` adds it to that column.
 
 ## Files outside the board
 
@@ -1110,7 +1149,6 @@ herdboard keeps its state in `~/.local/state/herdboard/`:
 - Claude and Codex can show a folder trust prompt in an unfamiliar worktree. Answer it in the agent, reviewer, writer or planner pane. herdboard does not pre-trust folders.
 - In Claude's default permission mode, the card's agent asks once before it writes the pull request description in the state folder.
 - herdboard does not sync between machines.
-- It is not confirmed that Obsidian opens a `[[#^t5aa]]` parent link from a card.
 
 ## Agent skill
 

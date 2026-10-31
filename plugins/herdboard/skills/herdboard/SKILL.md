@@ -5,7 +5,7 @@ description: "Read and update the user's kanban boards with the herdboard CLI: l
 
 # herdboard
 
-herdboard keeps the user's todos as Markdown kanban boards (Obsidian Kanban format) and shows Linear issues in the same columns. You use it only through its CLI. Never edit the board files in `~/todos` yourself: the CLI takes a lock, checks for conflicts and assigns card IDs.
+herdboard keeps the user's todos as kanban boards in `~/todos/boards/`, one folder per board and one folder per card, and shows Linear issues in the same columns. You use it only through its CLI. Never edit the files in `~/todos` yourself: the CLI takes a lock, checks for conflicts and assigns card IDs.
 
 ## Run the CLI
 
@@ -19,11 +19,11 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 
 ## Cards
 
-- A card reference is a todo ID (`tep3`), a temporary reference (`acme-api:12`, before the board has IDs) or a Linear identifier (`ENG-123`). Use the `ref` field from `list` output.
+- A card reference is a todo ID (`tep3`) or a Linear identifier (`ENG-123`). Use the `ref` field from `list` output.
 - A card has `title`, `column`, `checked`, `due`, `tags`, `type`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `archived: true` means the todo is in its board's archive. `stale: true` means the Linear data comes from the cache.
 - Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
-- Tags and the due date are part of the card text: `#auth` adds a tag, `📅 2026-11-01` sets the due date.
-- The type is a tag too: `#type/bug`. The `type` field holds `bug`, and `tags` leaves it out. The `types` setting lists the types (default: bug, feature, chore, docs, refactor). A Linear issue's type is its first label that names a type.
+- Tags, the due date and the type are fields, not title text: use `--tag`, `--due` and `--type`. A `#` or a date in a title is plain text.
+- The `type` field holds the type, such as `bug`. The `types` setting lists the types (default: bug, feature, chore, docs, refactor). A Linear issue's type is its first label that names a type.
 - A todo can be a sub-card of another todo on the same board. Its `parent` field names the parent. Sub-cards go one level deep. A sub-card starts from its parent's branch and merges into it. A Linear sub-issue also has `parent` (its parent's identifier), but it starts from the current branch.
 
 ## Read
@@ -44,9 +44,9 @@ herdboard --json search "login timeout"    # open Linear issues of the user's te
 Do these when the user asks for them, or when a handed-over card tells you to update it:
 
 ```bash
-herdboard --json add "Fix the login timeout #auth 📅 2026-11-01"   # this repository's board, else the inbox
+herdboard --json add "Fix the login timeout" --tag auth --due 2026-11-01   # this repository's board, else the inbox
 herdboard --json add "Buy milk" --board inbox
-herdboard --json add "Fix the login timeout" --type bug     # adds #type/bug
+herdboard --json add "Fix the login timeout" --type bug     # --tag repeats for more tags
 herdboard --json add "Fix the login timeout" --body "Check the retry limit"
 herdboard --json add "Fix the login timeout" --body-file docs/login.md
 herdboard --json move tep3 "In progress"
@@ -54,7 +54,9 @@ herdboard --json move ENG-123 Review
 herdboard --json done tep3
 herdboard --json move tep3 --board inbox             # to another board; the ID stays
 herdboard --json move tep3 --up                      # one place higher in its column
-herdboard --json edit tep3 --title "Fix the login timeout #auth"   # the checkbox and the ID stay
+herdboard --json edit tep3 --title "Fix the login timeout"   # the column and the ID stay
+herdboard --json edit tep3 --tag auth --tag api        # replaces the tags; --no-tags removes them
+herdboard --json edit tep3 --due 2026-11-01           # or --no-due
 herdboard --json edit tep3 --body "Replace the card details"
 herdboard --json edit tep3 --body-file docs/login.md  # read multiple detail lines from a file
 herdboard --json edit tep3 --type feature             # or --no-type
@@ -69,7 +71,6 @@ herdboard --json edit tep3 --parent t5aa              # make a todo a sub-card
 herdboard --json edit tep3 --no-parent                # make it a plain todo again
 herdboard --json archive tep3                        # to the board's archive, hidden on the board
 herdboard --json unarchive tep3                      # back to the board's done column
-herdboard --json unarchive acme-api:archive-2        # an archived card without an ID, by its archive reference
 ```
 
 Use `add --body` or `add --body-file` to set details when you create a card, including from a started agent. Do not use both options. Relative file paths start from the command directory (`-C`, if set). With `add --linear`, these options set the issue description.
@@ -95,7 +96,7 @@ Ask the user first before these. They change shared Linear data, open workspaces
 - `pr-review` (opens a workspace and Hunk, and starts a reviewer agent), `pr-review-refresh` (moves `pr/<N>` and reopens Hunk) and `pr-review-finish` (removes the PR's worktree and branch).
 - `delete <id> --yes` (removes a todo for good; Linear issues cannot be deleted here).
 - `archive --done` (archives every card in the board's done column).
-- `link`, `pin`, `init`, `migrate --yes`, `doctor --fix-ids`.
+- `link`, `pin`, `init`, `migrate --yes`, `doctor --fix`, `convert-store`.
 - Every `automation` command except `automation list`. Automations spawn cards and start agents on a schedule; change one only when the user asks.
 
 ```bash
@@ -142,7 +143,7 @@ A card on the inbox can run without a repository. `start` and `plan` then fail w
 
 A repoless card writes its result to the card's attachments (for example `findings.md`). Review it with `review <id> --agent`; Hunk and `merge` refuse with `no_repository`. `finish` closes the workspace, deletes the card folder with everything in it, and moves the card to Done. `finish` also drops a card that was planned with `--new-repo` before its repository exists. The start record keeps the choice, so a later `start` or `plan` asks nothing. `--checkout` and `--base` need a repository that the card already has, so `--no-repo` and `--new-repo` refuse them with `usage`.
 
-`doctor` without `--fix-ids` only reads, and you can run it to explain a problem.
+`doctor` without `--fix` only reads, and you can run it to explain a problem.
 
 A pull request reviewer only adds notes to the Hunk session. The user submits the review from Hunk. Never submit, approve or comment on GitHub for them.
 
@@ -203,8 +204,10 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `unknown_type` | The type is not in the `types` setting. The message lists the types. Use one of them, or ask the user. |
 | `usage` | The arguments are wrong. Use only the forms in this skill, or read `herdboard <command> --help`. Do not guess options. |
 | `io` | herdboard could not read or write a file or folder. Tell the user the message. |
+| `old_format` | The todos folder still has the old Markdown boards (`inbox.md`, `projects/*.md`). Tell the user to run `herdboard convert-store`. Do not run it yourself. |
+| `convert` | `convert-store` could not convert the old boards and changed nothing. Tell the user the message. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
-| `card_active` | The card's worktree still exists, or its agent or planner still runs. Tell the user the message. |
+| `card_active` | The card's worktree still exists, or its agent or planner still runs. `move --board` refuses a started card too. Tell the user the message. |
 | `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
 | `linear_archive` | herdboard archives only todos. Tell the user. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |
@@ -214,7 +217,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `linear_offline`, `linear`, `linear_rejected` | Linear is not reachable or refused the request, and nothing changed. Tell the user. |
 | `linear_disabled` | Linear is off (neither `linear.api_key_command` nor an environment key is set, or `linear.enabled = false`). The default environment variable is `LINEAR_API_KEY`. Tell the user the message. |
 | `team_required` | Ask the user which Linear team, then use `--team KEY`. |
-| `already_promoted` | The todo already has a Linear issue (`→ ENG-123`). Tell the user. |
+| `already_promoted` | The todo already has a Linear issue (its `promoted` field, shown as `→ ENG-123`). Tell the user. |
 | `not_a_todo` | `promote` takes a todo, not a Linear issue. |
 | `checkout_unknown` | `start` does not know where the repository is. Ask the user for the path, then use `--checkout PATH`. |
 | `base_unknown` | The base is not a local branch, or the checkout has no branch, or an old start record has no base. Ask the user which local branch to use, then run `start` with `--base BRANCH`. |
