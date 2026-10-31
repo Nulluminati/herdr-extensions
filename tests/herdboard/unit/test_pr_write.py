@@ -168,7 +168,7 @@ class RequestTests(PrWriteTestCase):
         self.assertNotIn("git log", text)
 
     def test_a_typed_card_sets_the_title_type(self):
-        self.store.edit(self.card.ref, title="Fix login timeout #type/bug")
+        self.store.edit(self.card.ref, title="Fix login timeout", type="bug")
         self.request()
         text = (self.folder / "request.md").read_text()
         self.assertIn("The card is a bug: the title type is `fix`.", text)

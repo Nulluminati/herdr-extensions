@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 import sys
@@ -27,8 +26,22 @@ class CommandTests(CliTestCase):
         self.assertEqual(card["title"], "buy milk")
         self.assertEqual(card["column"], "Todo")
         self.assertEqual(card["board"], "inbox")
-        self.assertTrue(card["path"].endswith("inbox.md"))
+        self.assertTrue(card["path"].endswith("boards/inbox"))
         self.assertNotIn("hint", data)
+
+    def test_add_with_tags_and_a_due_date(self):
+        data = self.run_json("add", "buy milk", "--tag", "errand", "--tag", "#home", "--due", "2026-01-02")
+        card = data["card"]
+        self.assertEqual((card["title"], card["tags"], card["due"]), ("buy milk", ["errand", "home"], "2026-01-02"))
+
+    def test_add_refuses_a_bad_due_date(self):
+        data = self.run_json("add", "buy milk", "--due", "2026-02-30", expect=1)
+        self.assertIn("2026-02-30", data["error"]["message"])
+        self.assertEqual(self.run_json("list")["cards"], [])
+
+    def test_a_title_is_plain_text(self):
+        card = self.run_json("add", "fix #42 📅 later")["card"]
+        self.assertEqual((card["title"], card["tags"], card["due"]), ("fix #42 📅 later", [], None))
 
     def test_add_to_triage_creates_the_column(self):
         card = self.run_json("add", "harness bug", "--column", "Triage", directory=self.plain)["card"]
@@ -41,7 +54,7 @@ class CommandTests(CliTestCase):
 
     def test_add_with_body(self):
         card = self.run_json("add", "notes", "--body", "line one\nline two\n")["card"]
-        self.assertEqual(card["body"], ["\tline one", "\tline two"])
+        self.assertEqual(card["body"], ["line one", "line two"])
         self.assertEqual(self.run_json("show", card["ref"])["card"]["body"], card["body"])
 
     def test_add_with_empty_body(self):
@@ -54,7 +67,7 @@ class CommandTests(CliTestCase):
         for path in (str(body), "body.txt"):
             with self.subTest(path=path):
                 card = self.run_json("add", "notes", "--body-file", path, directory=self.plain)["card"]
-                self.assertEqual(card["body"], ["\tline one", "\tline two é"])
+                self.assertEqual(card["body"], ["line one", "line two é"])
 
     def test_add_body_options_are_mutually_exclusive(self):
         data = self.run_json("add", "notes", "--body", "", "--body-file", "missing.txt", expect=1)
@@ -70,7 +83,7 @@ class CommandTests(CliTestCase):
         parent = self.run_json("add", "parent")["card"]
         card = self.run_json("add", "child", "--parent", parent["ref"], "--body", "child detail")["card"]
         self.assertEqual(card["parent"], parent["ref"])
-        self.assertEqual(card["body"], ["\tchild detail"])
+        self.assertEqual(card["body"], ["child detail"])
 
     def test_card_agent_can_add_body_but_cannot_edit_it(self):
         with (
@@ -80,7 +93,7 @@ class CommandTests(CliTestCase):
             card = self.run_json("add", "notes", "--body", "original")["card"]
             data = self.run_json("edit", card["ref"], "--body", "changed", expect=1)
             self.assertEqual(data["error"]["code"], "agent_edit_denied")
-            self.assertEqual(self.run_json("show", card["ref"])["card"]["body"], ["\toriginal"])
+            self.assertEqual(self.run_json("show", card["ref"])["card"]["body"], ["original"])
 
     def test_add_position_top(self):
         self.run_cli("add", "first", directory=self.plain)
@@ -91,11 +104,23 @@ class CommandTests(CliTestCase):
     def test_list_text_and_empty(self):
         out, _ = self.run_cli("list", directory=self.plain)
         self.assertEqual(out, "No cards.\n")
-        self.run_cli("add", "buy milk 📅 2026-01-02", "--column", "Todo", directory=self.plain)
+        self.run_cli(
+            "add",
+            "buy milk",
+            "--type",
+            "chore",
+            "--tag",
+            "errand",
+            "--due",
+            "2026-01-02",
+            "--column",
+            "Todo",
+            directory=self.plain,
+        )
         out, _ = self.run_cli("list", directory=self.plain)
         lines = out.splitlines()
         self.assertEqual(lines[0], "## Todo")
-        self.assertRegex(lines[1], r"^  t[0-9a-z]{3}  buy milk 📅 2026-01-02$")
+        self.assertRegex(lines[1], r"^  t[0-9a-z]{3}  buy milk$")
         self.assertEqual(len(lines), 2)
         self.assertNotIn("Backlog", out)
 
@@ -128,6 +153,7 @@ class CommandTests(CliTestCase):
                 "stale",
                 "parent",
                 "archived",
+                "promoted",
             },
         )
         self.assertEqual(data["cards"][0]["source"], "todo")
@@ -140,7 +166,7 @@ class CommandTests(CliTestCase):
         self.assertEqual(len(data["boards"]), 1)
         board = data["boards"][0]
         self.assertEqual(board["name"], "inbox")
-        self.assertTrue(board["path"].endswith("inbox.md"))
+        self.assertTrue(board["path"].endswith("boards/inbox"))
         self.assertEqual(
             board["columns"],
             [
@@ -167,13 +193,15 @@ class CommandTests(CliTestCase):
             "edit",
             card["ref"],
             "--title",
-            "buy oat milk #errand",
+            "buy oat milk",
+            "--tag",
+            "errand",
             "--body",
             "two litres\nfrom the market",
             directory=self.plain,
         )
-        self.assertEqual(data["card"]["title"], "buy oat milk #errand")
-        self.assertEqual(data["card"]["body"], ["\ttwo litres", "\tfrom the market"])
+        self.assertEqual((data["card"]["title"], data["card"]["tags"]), ("buy oat milk", ["errand"]))
+        self.assertEqual(data["card"]["body"], ["two litres", "from the market"])
         out, _ = self.run_cli("edit", card["ref"], "--body", "", directory=self.plain)
         self.assertEqual(out, f"{card['ref']} edited (inbox / Backlog)\n")
         self.assertEqual(self.run_json("show", card["ref"], directory=self.plain)["card"]["body"], [])
@@ -183,7 +211,14 @@ class CommandTests(CliTestCase):
         body = self.plain / "body.txt"
         body.write_text("line one\nline two\n")
         data = self.run_json("edit", card["ref"], "--body-file", str(body), directory=self.plain)
-        self.assertEqual(data["card"]["body"], ["\tline one", "\tline two"])
+        self.assertEqual(data["card"]["body"], ["line one", "line two"])
+
+    def test_edit_tags_and_due_date(self):
+        card = self.run_json("add", "notes", "--tag", "a", "--due", "2026-01-02", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], "--tag", "b", "--due", "2026-03-04", directory=self.plain)
+        self.assertEqual((data["card"]["tags"], data["card"]["due"]), (["b"], "2026-03-04"))
+        data = self.run_json("edit", card["ref"], "--no-tags", "--no-due", directory=self.plain)
+        self.assertEqual((data["card"]["tags"], data["card"]["due"], data["card"]["title"]), ([], None, "notes"))
 
     def test_edit_needs_a_change(self):
         card = self.run_json("add", "notes", directory=self.plain)["card"]
@@ -191,14 +226,10 @@ class CommandTests(CliTestCase):
         self.assertEqual(data["error"]["code"], "usage")
 
     def test_add_with_a_type(self):
-        card = self.run_json("add", "fix login #auth", "--type", "Bug", directory=self.plain)["card"]
-        self.assertEqual(card["title"], "fix login #type/bug #auth")
+        card = self.run_json("add", "fix login", "--tag", "auth", "--type", "Bug", directory=self.plain)["card"]
+        self.assertEqual(card["title"], "fix login")
         self.assertEqual(card["type"], "bug")
         self.assertEqual(card["tags"], ["auth"])
-
-    def test_a_type_tag_in_the_text_is_the_type(self):
-        card = self.run_json("add", "fix login #type/chore", directory=self.plain)["card"]
-        self.assertEqual((card["type"], card["tags"]), ("chore", []))
 
     def test_add_refuses_an_unknown_type(self):
         data = self.run_json("add", "fix login", "--type", "epic", directory=self.plain, expect=1)
@@ -213,18 +244,20 @@ class CommandTests(CliTestCase):
         self.assertEqual(data["error"]["code"], "unknown_type")
 
     def test_edit_the_type(self):
-        card = self.run_json("add", "fix login #auth", directory=self.plain)["card"]
+        card = self.run_json("add", "fix login", "--tag", "auth", directory=self.plain)["card"]
         data = self.run_json("edit", card["ref"], "--type", "feature", directory=self.plain)
-        self.assertEqual(data["card"]["title"], "fix login #type/feature #auth")
+        self.assertEqual((data["card"]["type"], data["card"]["tags"]), ("feature", ["auth"]))
         data = self.run_json("edit", card["ref"], "--type", "bug", "--body", "detail", directory=self.plain)
-        self.assertEqual((data["card"]["title"], data["card"]["body"]), ("fix login #type/bug #auth", ["\tdetail"]))
+        self.assertEqual((data["card"]["type"], data["card"]["body"]), ("bug", ["detail"]))
         data = self.run_json("edit", card["ref"], "--no-type", directory=self.plain)
-        self.assertEqual((data["card"]["title"], data["card"]["type"]), ("fix login #auth", None))
+        self.assertEqual(
+            (data["card"]["title"], data["card"]["type"], data["card"]["tags"]), ("fix login", None, ["auth"])
+        )
 
     def test_edit_title_and_type(self):
         card = self.run_json("add", "fix login", directory=self.plain)["card"]
-        data = self.run_json("edit", card["ref"], "--title", "fix logout #web", "--type", "bug", directory=self.plain)
-        self.assertEqual(data["card"]["title"], "fix logout #type/bug #web")
+        data = self.run_json("edit", card["ref"], "--title", "fix logout", "--type", "bug", directory=self.plain)
+        self.assertEqual((data["card"]["title"], data["card"]["type"]), ("fix logout", "bug"))
 
     def test_edit_refuses_an_unknown_type(self):
         card = self.run_json("add", "fix login", directory=self.plain)["card"]
@@ -330,7 +363,7 @@ class CommandTests(CliTestCase):
         self.assertEqual(data["error"]["code"], "linear_delete")
 
     def test_show_text_and_json(self):
-        card = self.run_json("add", "buy #errand 📅 2026-01-02", directory=self.plain)["card"]
+        card = self.run_json("add", "buy", "--tag", "errand", "--due", "2026-01-02", directory=self.plain)["card"]
         out, _ = self.run_cli("show", card["ref"], directory=self.plain)
         lines = out.splitlines()
         self.assertEqual(lines[1], "inbox / Backlog")
@@ -365,12 +398,12 @@ class CommandTests(CliTestCase):
 class RepositoryTests(CliTestCase):
     def test_init_text_and_json(self):
         out, _ = self.run_cli("init", directory=self.repo)
-        self.assertEqual(out.strip(), str(self.todos / "projects/acme-api.md"))
+        self.assertEqual(out.strip(), str(self.todos / "boards/acme-api"))
         self.run_cli("init", directory=self.repo, expect=1)
 
     def test_init_json(self):
         data = self.run_json("init", directory=self.repo)
-        self.assertEqual(data, {"board": str(self.todos / "projects/acme-api.md")})
+        self.assertEqual(data, {"board": str(self.todos / "boards/acme-api")})
 
     def test_init_outside_repository_errors(self):
         data = self.run_json("init", directory=self.plain, expect=1)
@@ -462,9 +495,9 @@ class ErrorTests(CliTestCase):
             self.assertEqual(err, "herdboard: card changed\n")
 
     def test_non_utf8_board_is_io_error(self):
-        self.todos.mkdir()
-        bad = self.todos / "inbox.md"
-        bad.write_bytes(b"## Todo\n\n- [ ] caf\xe9\n")
+        self.run_cli("add", "x", directory=self.plain)
+        bad = self.todos / "boards" / "inbox" / "board.toml"
+        bad.write_bytes(b"format = 1\n# caf\xe9\n")
         data = self.run_json("list", "--view", "all", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "io")
         self.assertIn(str(bad), data["error"]["message"])
@@ -475,7 +508,7 @@ class ErrorTests(CliTestCase):
 
     def test_non_utf8_board_on_write_is_io_error(self):
         self.run_cli("add", "x", directory=self.plain)
-        (self.todos / "inbox.md").write_bytes(b"\xff")
+        (self.todos / "boards" / "inbox" / "board.toml").write_bytes(b"\xff")
         data = self.run_json("add", "y", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "io")
 
@@ -491,8 +524,8 @@ class LimitTests(CliTestCase):
         super().setUp()
         self.run_cli("add", "a", "--column", "Todo", directory=self.plain)
         self.run_cli("add", "b", "--column", "Review", directory=self.plain)
-        inbox = self.todos / "inbox.md"
-        inbox.write_text(inbox.read_text().replace("## Todo\n", "## Todo (5)\n"))
+        inbox = self.todos / "boards" / "inbox" / "board.toml"
+        inbox.write_text(inbox.read_text().replace('name = "Todo"\n', 'name = "Todo"\nlimit = 5\n'))
 
     def test_text_heading_shows_limit(self):
         out, _ = self.run_cli("list", directory=self.plain)
@@ -511,70 +544,6 @@ class LimitTests(CliTestCase):
         back = self.run_json("move", card["ref"], "Todo", directory=self.plain)["card"]
         self.assertEqual((back["column"], back["column_limit"]), ("Todo", 5))
         self.assertEqual(len(self.run_json("list", "--column", "todo", directory=self.plain)["cards"]), 1)
-
-
-class NoteTests(CliTestCase):
-    def setUp(self):
-        super().setUp()
-        root = Path(self.tmp.name)
-        self.vault = root / "vault"
-        (self.vault / "sub").mkdir(parents=True)
-        (self.vault / "plain.md").write_text("plain content\n")
-        (self.vault / "sub" / "deep.md").write_text("deep content\n")
-        (self.vault / "a-first").mkdir()
-        (self.vault / "a-first" / "dup.md").write_text("first dup\n")
-        (self.vault / "sub" / "dup.md").write_text("second dup\n")
-        (root / "secret.md").write_text("TOP SECRET\n")
-        self.config.write_text(f'todos_dir = "{self.todos}"\nvault_root = "{self.vault}"\n')
-
-    def card_with_links(self, *links):
-        card = self.run_json("add", "see " + links[0], directory=self.plain)["card"]
-        inbox = self.todos / "inbox.md"
-        body = "".join(f"\t{link}\n" for link in links[1:])
-        inbox.write_text(inbox.read_text().replace(f"^{card['ref']}\n", f"^{card['ref']}\n{body}"))
-        return card["ref"]
-
-    def notes(self, ref):
-        return {n["name"]: n for n in self.run_json("show", ref, directory=self.plain)["notes"]}
-
-    def test_found_at_root_and_in_subfolder_with_alias(self):
-        ref = self.card_with_links("[[plain]]", "[[deep|the deep one]]")
-        notes = self.notes(ref)
-        self.assertEqual(notes["plain"]["content"], "plain content\n")
-        self.assertEqual(notes["plain"]["path"], str(self.vault / "plain.md"))
-        self.assertEqual(notes["deep"]["content"], "deep content\n")
-        self.assertEqual(notes["deep"]["path"], str(self.vault / "sub" / "deep.md"))
-
-    def test_first_match_by_sorted_path(self):
-        ref = self.card_with_links("[[dup]]")
-        self.assertEqual(self.notes(ref)["dup"]["content"], "first dup\n")
-
-    def test_missing_note_listed_with_null_content(self):
-        ref = self.card_with_links("[[ghost]]")
-        note = self.notes(ref)["ghost"]
-        self.assertIsNone(note["content"])
-
-    def test_note_outside_vault_is_not_read(self):
-        ref = self.card_with_links("[[../secret]]")
-        out, _ = self.run_cli("--json", "show", ref, directory=self.plain)
-        self.assertNotIn("TOP SECRET", out)
-        self.assertIsNone(json.loads(out)["notes"][0]["content"])
-        out, _ = self.run_cli("show", ref, directory=self.plain)
-        self.assertNotIn("TOP SECRET", out)
-
-    def test_text_output_appends_notes(self):
-        ref = self.card_with_links("[[plain]]", "[[ghost]]")
-        out, _ = self.run_cli("show", ref, directory=self.plain)
-        self.assertIn("--- plain ---\nplain content", out)
-        self.assertIn("--- ghost ---", out)
-
-    def test_without_vault_root_nothing_is_resolved(self):
-        self.config.write_text(f'todos_dir = "{self.todos}"\n')
-        ref = self.card_with_links("[[plain]]")
-        data = self.run_json("show", ref, directory=self.plain)
-        self.assertNotIn("notes", data)
-        out, _ = self.run_cli("show", ref, directory=self.plain)
-        self.assertNotIn("---", out)
 
 
 class PullRequestReviewTests(CliTestCase):

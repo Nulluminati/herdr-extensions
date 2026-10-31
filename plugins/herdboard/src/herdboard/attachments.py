@@ -1,7 +1,7 @@
 """Card attachments: documents too large for the card text, such as the plan, next to the activity log.
 
-Like the log, attachments live in a hidden folder of the todos, so the card text stays the user's,
-and they work for Linear cards without a connection.
+Attachments live in the card's folder (see `paths`), in `attachments/`, so the card text stays
+the user's. Linear cards have a folder of their own, so they work without a connection.
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ import tempfile
 from pathlib import Path
 
 from . import activity
-from .activity import LogUsageError, log_path
 from .config import Config
 from .model import IoError, NotFoundError
+from .paths import LogUsageError, card_dir, data_dir
 
 PLAN_NAME = "plan.md"
 CHUNK = 1024 * 1024
@@ -26,9 +26,8 @@ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,99}")
 
 
 def folder(config: Config, ref: str) -> Path:
-    # The log checks that the reference is a card ID, which is then a safe folder name.
-    log_path(config, ref)
-    return config.todos_dir / ".herdboard" / "attachments" / ref
+    """The card's attachment folder. Raises NotFoundError for a todo that has no folder."""
+    return card_dir(config, ref) / "attachments"
 
 
 def _name(name: str) -> str:
@@ -43,7 +42,10 @@ def _entry(path: Path) -> dict:
 
 def listing(config: Config, ref: str) -> list[dict]:
     """The card's attachments, sorted by name."""
-    base = folder(config, ref)
+    try:
+        base = folder(config, ref)
+    except NotFoundError:
+        return []
     try:
         return [_entry(path) for path in sorted(base.iterdir()) if path.is_file() and NAME.fullmatch(path.name)]
     except FileNotFoundError:
@@ -59,15 +61,18 @@ def cards_with_files(config: Config) -> set[str]:
 
 def card_files(config: Config) -> dict[str, set[str]]:
     """The attachment names of each card that has at least one attachment."""
-    base = config.todos_dir / ".herdboard" / "attachments"
+    boards = config.todos_dir / "boards"
     try:
-        folders = [path for path in base.iterdir() if path.is_dir()]
-        found = {path.name: _file_names(path) for path in folders}
+        folders = [
+            *boards.glob("*/cards/*/attachments"),
+            *boards.glob("*/archive/*/attachments"),
+            *data_dir(config).glob("automations/*/attachments"),
+            *data_dir(config).glob("linear/*/attachments"),
+        ]
+        found = {path.parent.name: _file_names(path) for path in folders if path.is_dir()}
         return {ref: names for ref, names in found.items() if names}
-    except FileNotFoundError:
-        return {}
     except OSError as error:
-        raise IoError(f"{base}: cannot read the attachments: {error}") from error
+        raise IoError(f"{boards}: cannot read the attachments: {error}") from error
 
 
 def _file_names(card_folder: Path) -> set[str]:
@@ -91,7 +96,9 @@ def mark(config: Config, cards) -> None:
 
 def add(store, ref: str, source: Path, name: str | None = None) -> dict:
     """Copy a file into the card's attachments. An attachment with the same name is replaced."""
-    target = folder(store.config, ref) / _name(source.name if name is None else name)
+    name = _name(source.name if name is None else name)
+    # Checks the reference before the lock; the folder itself is found under the lock.
+    card_dir(store.config, ref)
     try:
         reader = source.open("rb")
     except FileNotFoundError as error:
@@ -99,9 +106,11 @@ def add(store, ref: str, source: Path, name: str | None = None) -> dict:
     except OSError as error:
         raise IoError(f"{source}: cannot read: {error}") from error
     # The agents read the plan as text, so it must be UTF-8.
-    decoder = codecs.getincrementaldecoder("utf-8")() if target.name == PLAN_NAME else None
+    decoder = codecs.getincrementaldecoder("utf-8")() if name == PLAN_NAME else None
     temp = None
     with reader, store._lock():
+        # Under the lock: an archive or a move to another board moves a todo's folder.
+        target = folder(store.config, ref) / name
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             fd, temp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
@@ -133,8 +142,9 @@ def _read(reader, source: Path) -> bytes:
 
 
 def remove(store, ref: str, name: str) -> dict:
-    target = folder(store.config, ref) / _name(name)
+    name = _name(name)
     with store._lock():
+        target = folder(store.config, ref) / name
         if not target.is_file():
             raise NotFoundError(f"{ref} has no attachment {name}")
         entry = _entry(target)

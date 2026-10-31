@@ -196,7 +196,7 @@ class AmbiguousStateTests(WriteCliCase):
 
 class AddLinearTests(WriteCliCase):
     def linked(self, *args):
-        if not (self.todos / "projects" / "acme-api.md").exists():
+        if not (self.todos / "boards" / "acme-api").exists():
             self.board()
         return self.link(*args)
 

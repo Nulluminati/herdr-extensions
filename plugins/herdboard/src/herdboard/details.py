@@ -12,11 +12,11 @@ from pathlib import Path
 from rich.text import Text
 
 from . import activity, attachments
-from .brief import _title
 from .config import Config
 from .linear_cards import LINEAR_REF
 from .linear_source import state_dir
-from .model import HerdboardError
+from .model import HerdboardError, NotFoundError
+from .paths import card_dir
 from .start import REPOLESS, _read, find_record, herdr
 
 CHECK_ITEM = re.compile(r"^\s*[-*+] \[(?P<mark>.)\] ")
@@ -80,10 +80,15 @@ def open_target(ref: str | None, pane: str | None) -> tuple[str, str]:
 
 
 def watched_paths(config: Config, ref: str, board_path: Path | None) -> list[Path]:
-    """The files whose change redraws the pane: the board, the log, the attachments and the starts."""
-    paths = [board_path] if board_path is not None else []
+    """The files whose change redraws the pane: the board, the card, the log, the attachments and the starts."""
+    paths = [board_path / "board.toml"] if board_path is not None else []
     if activity.LOG_REF.match(ref):
-        paths += [activity.log_path(config, ref), attachments.folder(config, ref)]
+        try:
+            folder = card_dir(config, ref)
+        except NotFoundError:
+            folder = None
+        if folder is not None:
+            paths += [folder / "card.md", folder / "log.md", folder / "attachments"]
     return [*paths, state_dir() / "starts.json"]
 
 
@@ -108,7 +113,7 @@ def _card_line(card, width: int) -> Text:
     column = card.state if card.source == "linear" and card.state else card.column
     pill = f" {column} "
     kind = card.type or ""
-    title = " ".join(_title(card).split())
+    title = " ".join(card.title.split())
     for right in ((kind,) if kind else ()) + ("",):
         fixed = len(card.ref) + len(" │ ") + 1 + len(pill) + (1 + len(right) if right else 0)
         room = width - fixed

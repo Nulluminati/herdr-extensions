@@ -5,89 +5,28 @@ from pathlib import Path
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
 from herdboard.linear import LinearError
-from herdboard.linear_links import ProjectLink, parse_links, replace_links
-from herdboard.linear_pins import IssuePin, add_pin, parse_pins, pin_issue, replace_pins, unpin_issue
+from herdboard.linear_links import ProjectLink
+from herdboard.linear_pins import IssuePin, add_pin, parse_pins, pin_issue, unpin_issue
 from herdboard.model import FormatError, NotFoundError
 from herdboard.store import Store
 
-BODY = "## Backlog\n\n- [ ] keep\tme  \n\n\n## Done\n\n**Complete**\n\n\n\n%% kanban:settings\n```\n{}\n```\n%%"
 PINS = [IssuePin("u1", "ENG-1"), IssuePin("u2", "OPS-7")]
-BLOCK = ["linear-issues:", "- id: u1", "  identifier: ENG-1", "- id: u2", "  identifier: OPS-7"]
-
-
-def board_text(front, newline="\n"):
-    return newline.join(["---", "", *front, "", "---", ""]) + BODY.replace("\n", newline)
-
-
-def frontmatter(text):
-    lines = text.split("\n")
-    return lines[: lines.index("---", 1) + 1]
 
 
 class ParsePinTests(unittest.TestCase):
     def test_reads_pins(self):
-        lines = [
-            "---",
-            "kanban-plugin: board",
-            "linear-issues:",
-            "  - id: u1",
-            "    identifier: ENG-1",
-            "  - {id: u2, identifier: OPS-7}",
-            "---",
-        ]
-        self.assertEqual(parse_pins(lines), PINS)
+        self.assertEqual(parse_pins([{"id": "u1", "identifier": "ENG-1"}, {"id": "u2", "identifier": "OPS-7"}]), PINS)
 
     def test_no_key_gives_no_pins(self):
-        self.assertEqual(parse_pins(["---", "kanban-plugin: board", "---"]), [])
-        self.assertEqual(parse_pins([]), [])
+        self.assertEqual(parse_pins(None), [])
 
     def test_invalid_shapes_are_format_errors(self):
-        bad = [
-            ["---", "linear-issues: nope", "---"],
-            ["---", "linear-issues:", "  - identifier: ENG-1", "---"],
-            ["---", "linear-issues:", "  - {id: u1}", "---"],
-            ["---", "linear-issues:", "  - just text", "---"],
-        ]
-        for lines in bad:
-            with self.subTest(lines=lines), self.assertRaisesRegex(FormatError, "linear-issues"):
-                parse_pins(lines)
+        for raw in ("nope", [{"id": "u1"}], [{"id": 3, "identifier": "ENG-1"}], ["ENG-1"]):
+            with self.subTest(raw=raw), self.assertRaises(FormatError):
+                parse_pins(raw)
 
-
-class ReplacePinTests(unittest.TestCase):
-    def test_adds_the_block_and_keeps_other_bytes(self):
-        front = ["# a comment", "repo: github.com/acme/api", "kanban-plugin: board"]
-        new = replace_pins(board_text(front), PINS)
-        self.assertEqual(new, board_text(front + BLOCK))
-        self.assertEqual(parse_pins(frontmatter(new)), PINS)
-
-    def test_keeps_the_project_links_block(self):
-        front = ["kanban-plugin: board", "linear-projects:", "- id: p1", "  name: Platform", "after: 1"]
-        new = replace_pins(board_text(front), PINS)
-        self.assertEqual(new, board_text(front + BLOCK))
-        self.assertEqual(parse_links(frontmatter(new)), [ProjectLink("p1", "Platform")])
-        removed = replace_pins(new, [])
-        self.assertEqual(removed, board_text(front))
-
-    def test_links_keep_the_pins_block(self):
-        front = ["kanban-plugin: board", *BLOCK, "after: 1"]
-        new = replace_links(board_text(front), [ProjectLink("p1", "Platform")])
-        self.assertEqual(new, board_text(front + ["linear-projects:", "- id: p1", "  name: Platform"]))
-        self.assertEqual(parse_pins(frontmatter(new)), PINS)
-
-    def test_replaces_only_its_own_block(self):
-        front = ["kanban-plugin: board", "linear-issues:", "- {id: x, identifier: X-1}", "after: 1"]
-        new = replace_pins(board_text(front), PINS[:1])
-        self.assertEqual(new, board_text(["kanban-plugin: board", *BLOCK[:3], "after: 1"]))
-
-    def test_crlf_is_kept(self):
-        new = replace_pins(board_text(["kanban-plugin: board"], "\r\n"), PINS)
-        self.assertNotRegex(new, r"(?<!\r)\n")
-        self.assertEqual(new, board_text(["kanban-plugin: board", *BLOCK], "\r\n"))
-
-    def test_duplicate_keys_are_a_format_error(self):
-        front = ["kanban-plugin: board", "linear-issues: []", "linear-issues: []"]
-        with self.assertRaisesRegex(FormatError, "duplicate"):
-            replace_pins(board_text(front), PINS)
+    def test_to_dict_round_trips(self):
+        self.assertEqual(parse_pins([pin.to_dict() for pin in PINS]), PINS)
 
 
 class StoreCase(unittest.TestCase):
@@ -101,11 +40,13 @@ class StoreCase(unittest.TestCase):
 
 class StorePinTests(StoreCase):
     def test_add_and_remove_round_trip(self):
-        before = self.path.read_text()
+        board = self.path / "board.toml"
+        before = board.read_text()
         self.assertEqual(self.store.update_pins(self.path, lambda pins: pins + PINS), PINS)
+        self.assertIn("[[linear-issues]]", board.read_text())
         self.assertEqual(self.store.board_meta(self.path).pins, PINS)
         self.store.update_pins(self.path, lambda pins: [])
-        self.assertEqual(self.path.read_text(), before)
+        self.assertEqual(board.read_text(), before)
 
     def test_update_config_writes_links_and_pins_together(self):
         self.store.update_pins(self.path, lambda pins: PINS)
@@ -116,15 +57,16 @@ class StorePinTests(StoreCase):
         self.assertEqual(meta.links, [ProjectLink("p1", "Platform")])
         self.assertEqual(meta.pins, PINS[1:])
 
-    def test_bad_pins_make_the_board_read_only(self):
-        text = self.path.read_text().replace("repo:", "linear-issues: nope\nrepo:")
-        self.path.write_text(text)
+    def test_bad_pins_make_the_settings_read_only(self):
+        board = self.path / "board.toml"
+        text = board.read_text().replace("repo =", 'linear-issues = "nope"\nrepo =', 1)
+        board.write_text(text)
         meta = self.store.board_meta(self.path)
         self.assertEqual(meta.pins, [])
         self.assertIn("linear-issues", meta.error)
         with self.assertRaisesRegex(FormatError, "read only"):
-            self.store.add(self.path, "card")
-        self.assertEqual(self.path.read_text(), text)
+            self.store.update_pins(self.path, lambda pins: PINS)
+        self.assertEqual(board.read_text(), text)
 
 
 class FakeClient:

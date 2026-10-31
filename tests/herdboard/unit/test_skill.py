@@ -3,10 +3,19 @@ import shlex
 import unittest
 
 from herdboard import cli
+from herdboard.convert_store import ConvertError
 from herdboard.linear import LinearError, LinearWriteRejectedError, LinearWriteUnknownError
 from herdboard.linear_source import LinearDisabledError
 from herdboard.linear_writes import LinearOfflineError, TeamRequiredError
-from herdboard.model import ArchivedError, CardActiveError, ConflictError, IoError, NotFoundError, UnknownTypeError
+from herdboard.model import (
+    ArchivedError,
+    CardActiveError,
+    ConflictError,
+    IoError,
+    NotFoundError,
+    OldFormatError,
+    UnknownTypeError,
+)
 from herdboard.promote import AlreadyPromotedError, NotATodoError
 from support.paths import ROOT
 
@@ -125,6 +134,8 @@ class SkillTests(unittest.TestCase):
                 AlreadyPromotedError,
                 NotATodoError,
                 IoError,
+                OldFormatError,
+                ConvertError,
             )
         }
         known.add(cli.UsageError.code)

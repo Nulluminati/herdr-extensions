@@ -6,7 +6,7 @@ from support.herdboard_board import SIZE, BoardTestCase, settle
 
 class TypeLookTests(BoardTestCase):
     async def test_a_typed_card_shows_its_type_before_the_tags(self):
-        card = self.store.add(self.repo_path, "Fix login #type/bug #auth", "Todo")
+        card = self.store.add(self.repo_path, "Fix login", "Todo", type="bug", tags=["auth"])
         app = self.make_app()
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
@@ -30,7 +30,7 @@ class TypeLookTests(BoardTestCase):
             self.assertEqual(app.query_one(".card").plain, f"Fix login  {card.ref}")
 
     async def test_the_detail_shows_the_type(self):
-        self.store.add(self.repo_path, "Fix login #type/feature #auth", "Todo")
+        self.store.add(self.repo_path, "Fix login", "Todo", type="feature", tags=["auth"])
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -42,15 +42,15 @@ class TypeLookTests(BoardTestCase):
             self.assertNotIn("type/feature", app.screen.query_one("#detail-chips").plain)
 
     async def test_hash_type_filters_by_type(self):
-        self.store.add(self.repo_path, "Fix login #type/bug", "Todo")
-        self.store.add(self.repo_path, "Add export #type/feature", "Todo")
+        self.store.add(self.repo_path, "Fix login", "Todo", type="bug")
+        self.store.add(self.repo_path, "Add export", "Todo", type="feature")
         app = self.make_app()
         async with app.run_test(size=(150, 30)) as pilot:
             await pilot.pause()
             await pilot.press("slash", *"#type/bug")
             await pilot.pause()
             visible = [card.title for column in app.columns for card in column.cards]
-            self.assertEqual(visible, ["Fix login #type/bug"])
+            self.assertEqual(visible, ["Fix login"])
 
 
 class TypeFormTests(BoardTestCase):
@@ -68,7 +68,7 @@ class TypeFormTests(BoardTestCase):
             await pilot.press("ctrl+s")
             await settle(pilot)
             card = self.store.list_cards([self.repo_path])[0]
-            self.assertEqual(card.title, "Fix login #type/bug #auth")
+            self.assertEqual((card.title, card.type, card.tags), ("Fix login", "bug", ["auth"]))
 
     async def test_the_type_list_comes_from_the_config(self):
         self.config.types = ["spike", "bug"]
@@ -81,7 +81,7 @@ class TypeFormTests(BoardTestCase):
             self.assertEqual([value for _, value in select._options if isinstance(value, str)], ["spike", "bug"])
 
     async def test_edit_shows_and_changes_the_type(self):
-        card = self.store.add(self.repo_path, "Fix login #type/bug #auth", "Backlog")
+        card = self.store.add(self.repo_path, "Fix login", "Backlog", type="bug", tags=["auth"])
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -94,10 +94,10 @@ class TypeFormTests(BoardTestCase):
             screen.query_one("#card-type").value = "chore"
             await pilot.press("ctrl+s")
             await settle(pilot)
-            self.assertEqual(self.store.show(card.ref).title, "Fix login #type/chore #auth")
+            self.assertEqual((self.store.show(card.ref).type, self.store.show(card.ref).tags), ("chore", ["auth"]))
 
     async def test_edit_clears_the_type(self):
-        card = self.store.add(self.repo_path, "Fix login #type/bug", "Backlog")
+        card = self.store.add(self.repo_path, "Fix login", "Backlog", type="bug")
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -107,10 +107,10 @@ class TypeFormTests(BoardTestCase):
             screen.query_one("#card-type").clear()
             await pilot.press("ctrl+s")
             await settle(pilot)
-            self.assertEqual(self.store.show(card.ref).title, "Fix login")
+            self.assertEqual((self.store.show(card.ref).title, self.store.show(card.ref).type), ("Fix login", None))
 
     async def test_edit_keeps_a_type_that_the_config_no_longer_lists(self):
-        card = self.store.add(self.repo_path, "Try it #type/spike", "Backlog")
+        card = self.store.add(self.repo_path, "Try it", "Backlog", type="spike")
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -119,7 +119,7 @@ class TypeFormTests(BoardTestCase):
             self.assertEqual(app.screen.query_one("#card-type").value, "spike")
             await pilot.press("ctrl+s")
             await settle(pilot)
-            self.assertEqual(self.store.show(card.ref).title, "Try it #type/spike")
+            self.assertEqual(self.store.show(card.ref).type, "spike")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from unittest import mock
 from herdboard.store import Store
 from support import linear_data
 from support.herdboard_linear_write_cli import WriteCliCase
+from support.herdboard_store import render_markdown
 
 
 class PromoteCliCase(WriteCliCase):
@@ -14,25 +15,26 @@ class PromoteCliCase(WriteCliCase):
         self.fixtures["labels"].append({"id": "l-ship", "name": "ship", "team": None})
         self.path = self.board()
 
-    def add_todo(self, text="Ship it #bug 📅 2026-12-01", column="Todo", *body):
-        card = self.run_json("add", text, "--column", column, directory=self.repo)["card"]
-        if body:
-            marker = f"{text} ^{card['ref']}"
-            self.path.write_text(
-                self.path.read_text().replace(marker, marker + "".join(f"\n\t{line}" for line in body))
-            )
-        return card["ref"]
+    def add_todo(self, text="Ship it", column="Todo", *body, type="bug", due="2026-12-01"):
+        args = ["add", text, "--column", column]
+        args += ["--type", type] if type else []
+        args += ["--due", due] if due else []
+        args += ["--body", "\n".join(body)] if body else []
+        return self.run_json(*args, directory=self.repo)["card"]["ref"]
+
+    def card_path(self, ref):
+        return self.path / "cards" / ref / "card.md"
 
     def promote(self, *args, expect=0, directory=None):
         return self.run_json("promote", *args, directory=directory or self.repo, expect=expect)
 
     def board_text(self):
-        return self.path.read_text()
+        return render_markdown(self.path)
 
 
 class PromoteCommandTests(PromoteCliCase):
     def test_json_has_the_issue_card_the_sub_issues_and_the_todo(self):
-        ref = self.add_todo("Ship it #bug 📅 2026-12-01", "Todo", "- [ ] First", "- [x] Second")
+        ref = self.add_todo("Ship it", "Todo", "- [ ] First", "- [x] Second")
         data = self.promote(ref, "--team", "ENG")
         card = data["card"]
         self.assertEqual(
@@ -42,7 +44,7 @@ class PromoteCommandTests(PromoteCliCase):
         self.assertEqual((card["tags"], card["type"]), ([], "bug"))
         self.assertEqual(data["sub_issues"], ["ENG-8", "ENG-9"])
         self.assertEqual((data["todo"]["ref"], data["todo"]["column"]), (ref, "Done"))
-        self.assertIn(f"- [x] Ship it #bug 📅 2026-12-01 → ENG-7 ^{ref}", self.board_text())
+        self.assertIn(f"- [x] Ship it #type/bug 📅 2026-12-01 → ENG-7 ^{ref}", self.board_text())
         self.assertEqual(self.issue("ENG-9")["state"]["type"], "completed")
 
     def test_text_output(self):
@@ -59,12 +61,6 @@ class PromoteCommandTests(PromoteCliCase):
         ref = self.add_todo("Shipped", "Done")
         card = self.promote(ref, "--team", "ENG")["card"]
         self.assertEqual((card["column"], card["checked"]), ("Done", True))
-
-    def test_a_todo_without_an_id_is_addressed_by_its_temporary_reference(self):
-        self.path.write_text(self.path.read_text().replace("## Todo\n", "## Todo\n\n- [ ] Plain\n", 1))
-        data = self.promote("acme-api:1", "--team", "ENG")
-        self.assertRegex(data["todo"]["ref"], r"^t[0-9a-z]{3}$")
-        self.assertIn(f"- [x] Plain → ENG-7 ^{data['todo']['ref']}", self.board_text())
 
     def test_without_team_the_error_lists_team_keys(self):
         ref = self.add_todo()
@@ -100,14 +96,14 @@ class TargetTests(PromoteCliCase):
         ref = self.add_todo()
         other = self.other_repo()
         self.promote(ref, "--team", "ENG", directory=other)
-        self.promote(self.add_todo("Again #bug"), "--team", "ENG", directory=self.plain)
+        self.promote(self.add_todo("Again"), "--team", "ENG", directory=self.plain)
         for parent in self.inputs("IssueCreate"):
             self.assertEqual(parent["projectId"], "p-plat")
             self.assertEqual(parent["labelIds"], ["l-api", "l-bug"])
 
     def test_an_inbox_todo_gets_no_linked_default(self):
         self.link("Platform", "--label", "repo:api")
-        card = self.run_json("add", "Loose #bug", directory=self.plain)["card"]
+        card = self.run_json("add", "Loose", "--type", "bug", directory=self.plain)["card"]
         self.promote(card["ref"], "--team", "ENG")
         (parent,) = self.inputs("IssueCreate")
         self.assertNotIn("projectId", parent)
@@ -191,7 +187,8 @@ class RefusalTests(PromoteCliCase):
 
     def test_a_todo_that_is_not_in_a_board_with_a_done_column_is_refused(self):
         ref = self.add_todo()
-        self.path.write_text(self.path.read_text().replace("**Complete**\n", "").replace("## Done", "## Finished"))
+        board = self.path / "board.toml"
+        board.write_text(board.read_text().replace("done = true\n", "").replace('"Done"', '"Finished"'))
         error = self.promote(ref, "--team", "ENG", expect=1)["error"]
         self.assertIn("done column", error["message"])
         self.assertEqual(self.requests("IssueCreate"), [])
@@ -215,7 +212,8 @@ class FailureTests(PromoteCliCase):
         real = Store.finish_promotion
 
         def edited(store, snapshot, identifier):
-            self.path.write_text(self.board_text().replace("First", "First thing"))
+            path = self.card_path(ref)
+            path.write_text(path.read_text().replace("First", "First thing"))
             return real(store, snapshot, identifier)
 
         with mock.patch.object(Store, "finish_promotion", edited):

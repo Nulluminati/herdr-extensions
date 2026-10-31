@@ -48,7 +48,7 @@ class PlanLinearTests(WriteCliCase):
         text = self.brief()
         self.assertIn("Plan Linear issue `ENG-1`", text)
         self.assertIn("## Description\n\nLine one\nLine two", text)
-        self.assertIn("/attachments/ENG-1/plan.md", text)
+        self.assertIn("/linear/ENG-1/attachments/plan.md", text)
         self.assertEqual(self.workers[0][0][-4:], ["plan-wait", "ENG-1", "--pane", "w1:p7"])
         # Planning writes nothing to Linear.
         self.assertEqual(self.requests("IssueUpdate"), [])

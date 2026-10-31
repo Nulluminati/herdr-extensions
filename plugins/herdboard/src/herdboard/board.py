@@ -51,6 +51,7 @@ from . import activity, agent_states, attachments, automations, notes, pr_review
 from . import merge as merge_module
 from . import start as start_module
 from .agent_review import AgentReviewer
+from .card_file import check_title, parse_due
 from .config import (
     AGENTS,
     THINKING_LEVELS,
@@ -67,13 +68,13 @@ from .linear_pins import IssuePin, add_pin, unpin_issue
 from .linear_states import StateCancelledError
 from .linear_writes import LinearWriter
 from .merge import Merger
-from .model import HerdboardError, is_automation_title, is_triage, join_title, parse_tags, plain_tags, split_title
+from .model import HerdboardError, is_automation_title, is_triage, parse_tags, plain_tags
 from .plan import Planner, mark_planning
 from .promote import Promoter
 from .promote_convert import promoted_identifier
 from .review import Reviewer
 from .start import Starter, codex_model_choices, mark_removed, pi_model_choices
-from .store import ARCHIVE_REF, KEEP, TEMP_REF, BoardMeta, CardView, Store
+from .store import KEEP, BoardMeta, CardView, Store
 from .views import LinearResult
 
 VIEWS = ["repo", "inbox", "all", "mine"]
@@ -729,10 +730,7 @@ def card_face(
     """A card's rows: the state icon, the planning and review markers and the ID, the title, the description,
     the type and tags, the sub-card count and due date, then the other status markers of the card.
     `busy` names the board action that runs on the card, and `frame` is its spinner frame."""
-    if card.source == "linear":
-        title, tags, due = card.title, card.tags, card.due
-    else:
-        title, tags, due = split_title(card.title)
+    title, tags, due = card.title, card.tags, card.due
     muted = "dim strike" if done else ""
     state = card_state(card, done)
     # A live work agent shows its Herdr state; the completed column always shows done.
@@ -748,11 +746,9 @@ def card_face(
     if card.has_attachments:
         # Nerd Font cards show the paperclip alone.
         corner.append(ICONS["attachment"] if icon_style == "nerd" else ATTACHMENT_MARK)
-    # A card without a block ID has a reference that is only its place on the board.
-    if card.source == "linear" or not (TEMP_REF.match(card.ref) or ARCHIVE_REF.match(card.ref)):
-        if corner:
-            corner.append(" ")
-        corner.append(f"{LINEAR_MARK} {card.ref}" if card.source == "linear" else card.ref)
+    if corner:
+        corner.append(" ")
+    corner.append(f"{LINEAR_MARK} {card.ref}" if card.source == "linear" else card.ref)
     description = Text()
     if card_style == "full":
         description = Text(card_description(card), style="dim strike" if done else "dim")
@@ -1049,7 +1045,7 @@ def mark_family(cards: list[CardView]) -> None:
     for card in cards:
         parent = by_ref.get(card.parent) if card.parent else None
         if parent:
-            card.parent_title = split_title(parent.title)[0] or parent.title
+            card.parent_title = parent.title
         else:
             card.parent_title = card.parent if card.source == "linear" else None
         if card.parent:
@@ -1123,8 +1119,7 @@ def link_lines(links: list[dict]) -> Text:
 
 
 class DetailScreen(ModalBase):
-    """A card in full: title, tags and date, where it lives, its details, linked notes, its pull request
-    and attachments."""
+    """A card in full: title, tags and date, where it lives, its details, its pull request and attachments."""
 
     BINDINGS = [
         Binding("e", "edit", "Edit"),
@@ -1137,14 +1132,12 @@ class DetailScreen(ModalBase):
     def __init__(
         self,
         card: CardView,
-        notes: list[dict] | None,
         tag_style: str = "round",
         log: list[dict] | None = None,
         files: list[dict] | None = None,
         icon_style: str = "plain",
     ):
         super().__init__()
-        self.notes = notes or []
         self.entries = log or []
         self.files = files or []
         self.links = card.linear_attachments
@@ -1156,7 +1149,7 @@ class DetailScreen(ModalBase):
     def _set_card(self, card: CardView) -> None:
         """Keep the card and the indexes of its checklist lines. Linear descriptions stay read only."""
         self.card = card
-        self.body = card.body if card.source == "linear" else [_unindent(line) for line in card.body]
+        self.body = list(card.body)
         self.items = (
             []
             if card.source == "linear"
@@ -1233,8 +1226,7 @@ class DetailScreen(ModalBase):
         card = self.card
         if card.source == "linear":
             return card.title, card.tags, card.due
-        title, tags, due = split_title(card.title)
-        return title, plain_tags(tags), due
+        return card.title, card.tags, card.due
 
     def _phase(self, key: str, agent: str, status: str | None) -> Text:
         """A phase icon, the agent's Herdr glyph, and the agent and its state in words."""
@@ -1315,14 +1307,6 @@ class DetailScreen(ModalBase):
                 block.ALLOW_SELECT = not self.items
                 block.border_title = "Details"
                 yield block
-            for note in self.notes:
-                content = note["content"]
-                with Vertical(classes="detail-block detail-note") as box:
-                    box.border_title = note["name"]
-                    if content is None:
-                        yield Label("Note not found", classes="dim")
-                    else:
-                        yield Markdown(content)
             if self.card.pr_url:
                 link = Text(self.card.pr_url, style=Style(meta={"@click": "screen.open_pr"}))
                 block = RichStatic(link, id="detail-pr", classes="detail-block")
@@ -1502,6 +1486,17 @@ class HelpScreen(ModalBase):
             yield Label("escape: close", classes="dim")
 
 
+@dataclass
+class CardFields:
+    """What the card form holds: the title, tags, type, due date and body lines."""
+
+    title: str
+    tags: list[str]
+    type: str | None
+    due: str | None
+    body: list[str]
+
+
 class CardFormScreen(ModalBase):
     """The fields of a todo: title, type, tags, due date and details. ctrl+s or enter saves."""
 
@@ -1577,16 +1572,19 @@ class CardFormScreen(ModalBase):
         error.plain = message
         error.update(Text(message))
 
-    def values(self) -> tuple[str, list[str]]:
-        """The first-line text and the detail lines. Raises HerdboardError for bad input."""
+    def values(self) -> CardFields:
+        """The form's fields. Raises HerdboardError for bad input."""
         kind = self.query_one("#card-type", Select)
-        tags = plain_tags(parse_tags(self.query_one("#card-tags", Input).value))
-        line = join_title(
-            self.query_one("#card-title", Input).value,
-            ([] if kind.is_blank() else [f"type/{kind.value}"]) + tags,
-            self.query_one("#card-due", Input).value.strip() or None,
+        due = self.query_one("#card-due", Input).value.strip() or None
+        if due is not None:
+            parse_due(due)
+        return CardFields(
+            check_title(self.query_one("#card-title", Input).value),
+            parse_tags(self.query_one("#card-tags", Input).value),
+            None if kind.is_blank() else str(kind.value),
+            due,
+            self.query_one("#card-body", TextArea).text.split("\n"),
         )
-        return line, self.query_one("#card-body", TextArea).text.split("\n")
 
     def is_empty(self) -> bool:
         fields = [self.query_one(f"#card-{name}", Input).value for name in ("title", "tags", "due")]
@@ -1601,13 +1599,13 @@ class CardFormScreen(ModalBase):
 
     def action_save(self) -> None:
         try:
-            line, body = self.values()
+            fields = self.values()
         except HerdboardError as error:
             self.show_error(str(error))
             return
-        self.submit(line, body)
+        self.submit(fields)
 
-    def submit(self, line: str, body: list[str]) -> None:
+    def submit(self, fields: CardFields) -> None:
         raise NotImplementedError
 
 
@@ -1622,7 +1620,7 @@ class AddScreen(CardFormScreen):
         self.heading = self._heading()
 
     def _heading(self) -> str:
-        return f"Add to {self.path.stem} / {self.column}"
+        return f"Add to {self.path.name} / {self.column}"
 
     def destination(self) -> ComposeResult:
         if len(self.board_options) > 1:
@@ -1635,32 +1633,20 @@ class AddScreen(CardFormScreen):
         self.path = Path(str(event.value))
         self.set_heading(self._heading())
 
-    def submit(self, line: str, body: list[str]) -> None:
-        self.app.submit_add(self, line, body)
-
-
-def _unindent(line: str) -> str:
-    """A body line as the edit dialog shows it: one indent level less than in the file."""
-    if line.startswith("\t"):
-        return line[1:]
-    if line.startswith("    "):
-        return line[4:]
-    return line.lstrip(" ")
+    def submit(self, fields: CardFields) -> None:
+        self.app.submit_add(self, fields)
 
 
 class EditScreen(CardFormScreen):
-    """Edit a todo's fields. The checkbox and the ID stay."""
+    """Edit a todo's fields. The column and the ID stay."""
 
     def __init__(self, card: CardView, types: list[str] = ()):
-        title, tags, due = split_title(card.title)
-        super().__init__(
-            title, plain_tags(tags), due, [_unindent(line) for line in card.body], kind=card.type, types=types
-        )
+        super().__init__(card.title, card.tags, card.due, card.body, kind=card.type, types=types)
         self.card = card
         self.heading = f"Edit {card.ref} ({card.board} / {card.column})"
 
-    def submit(self, line: str, body: list[str]) -> None:
-        self.app.submit_edit(self, line, body)
+    def submit(self, fields: CardFields) -> None:
+        self.app.submit_edit(self, fields)
 
 
 class StateScreen(ModalBase):
@@ -1814,7 +1800,7 @@ class BoardChoiceScreen(ModalBase):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(self.prompt or f"Move {split_title(self.card.title)[0]} to")
+            yield Label(self.prompt or f"Move {self.card.title} to")
             yield OptionList(*self.board_labels, id="board-choice")
             yield Label(
                 "enter: choose, escape: cancel" if self.prompt else "enter: move, escape: cancel", classes="dim"
@@ -2081,11 +2067,11 @@ class ParentScreen(ModalBase):
         super().__init__()
         self.card = card
         self.options = [None, *options]
-        self.labels = ["No parent", *(split_title(option.title)[0] or option.title for option in options)]
+        self.labels = ["No parent", *(option.title for option in options)]
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(f"Parent of {split_title(self.card.title)[0]}")
+            yield Label(f"Parent of {self.card.title}")
             yield OptionList(*self.labels, id="parent-choice")
             yield Label("enter: choose, escape: cancel", classes="dim")
 
@@ -2121,14 +2107,14 @@ CARD_KEY_ACTIONS = {action for action, _key, _label in MENU_ENTRIES} | {"move", 
 
 def promote_refusal(card: CardView) -> str | None:
     """Why the card cannot be promoted to Linear, or None. Sub-cards with a worktree are checked apart."""
-    name = split_title(card.title)[0] or card.title
+    name = card.title
     if card.source == "linear" or card.read_only:
         return "Only a local todo can be promoted to Linear."
     if card.archived:
         return f"{name} is archived. Unarchive it before you promote it."
     if card.parent:
         return f"{name} is a sub-card. Promote its parent: sub-cards become sub-issues."
-    done = promoted_identifier(card.title)
+    done = promoted_identifier(card)
     if done:
         return f"{name} was already promoted to {done}."
     if card.worktree:
@@ -2143,7 +2129,7 @@ def family_refusal(card: CardView, children: list[CardView]) -> str | None:
         return refusal
     for child in children:
         if child.worktree:
-            name = split_title(child.title)[0] or child.title
+            name = child.title
             return f"Its sub-card {name} has a worktree. Finish the sub-card before you promote the parent."
     return None
 
@@ -2578,7 +2564,7 @@ class ConfigScreen(ModalBase):
                 "No repository board. Press i in a repository to create one.", id="config-board-hint", classes="dim"
             )
             return
-        yield RichStatic(Text(f"Board: {self.path.stem}", style="bold"), id="config-board-name")
+        yield RichStatic(Text(f"Board: {self.path.name}", style="bold"), id="config-board-name")
         if self.meta.repo:
             yield Label(f"repo: {self.meta.repo}", classes="dim")
         yield self._titled(
@@ -5363,20 +5349,30 @@ class HerdboardApp(App):
     # Loading
 
     def _signature(self, paths: list[Path]) -> tuple:
-        sig = []
+        """What tells a reload apart: each board's `board.toml` and every card file on it.
+
+        Archived card files count only while the archive shows.
+        """
+        files = []
         for path in paths:
+            files.append(path / "board.toml")
+            files.extend(sorted(path.glob("cards/*/card.md")))
+            if self.show_archive:
+                files.extend(sorted(path.glob("archive/*/card.md")))
+        sig = []
+        for file in files:
             try:
-                stat = path.stat()
-                sig.append((str(path), stat.st_mtime_ns, stat.st_size))
+                stat = file.stat()
+                sig.append((str(file), stat.st_mtime_ns, stat.st_size))
             except OSError:
-                sig.append((str(path), None, None))
+                sig.append((str(file), None, None))
         return tuple(sig)
 
     def _load(self, paths: list[Path]) -> list[ColumnData]:
         by_key: dict[str, ColumnData] = {}
-        archive = ColumnData(self.store.config.archive_titles[0], archive=True)
+        archive = ColumnData("Archive", archive=True)
         for path in paths:
-            snapshot = self.store.snapshot(path)
+            snapshot = self.store.snapshot(path, archive=self.show_archive)
             if snapshot.archive is not None:
                 archive.cards.extend(snapshot.archive.cards)
             for column in snapshot.columns:
@@ -5418,10 +5414,8 @@ class HerdboardApp(App):
 
     @staticmethod
     def _identity(card: CardView) -> tuple:
-        """A block ID names a card. Without one, board and identical lines do."""
-        if not TEMP_REF.match(card.ref):
-            return ("id", card.ref)
-        return ("lines", card.path, card.checked, card.title, tuple(card.body))
+        """The card's ID names it."""
+        return ("id", card.ref)
 
     def _select(self, identity: tuple | None, column: str | None = None) -> None:
         """Select the card with `identity`.
@@ -5452,7 +5446,7 @@ class HerdboardApp(App):
         return self.screen_stack[0]
 
     def _ensure_inbox(self) -> None:
-        if self.view != "repo" and not self.store.inbox_path.exists():
+        if self.view != "repo" and not (self.store.inbox_path / "board.toml").exists():
             self.store.ensure_inbox()
 
     async def reload(self, select: str | None = None) -> None:
@@ -5748,7 +5742,7 @@ class HerdboardApp(App):
                 return
             await self.run_action(action)
 
-        title = split_title(card.title)[0] if card.source != "linear" else card.title
+        title = card.title
         # From the app's own message pump, so the choice still runs when a reload replaces the card widget.
         self.call_next(self.push_screen, CardMenuScreen(title or card.title, card_actions(card)), chosen)
 
@@ -6033,10 +6027,22 @@ class HerdboardApp(App):
             return
         self.push_screen(EditScreen(card, self.store.config.types))
 
-    def submit_edit(self, screen: EditScreen, title: str, body: list[str]) -> None:
-        """Save the dialog's text, if the card still matches what the dialog showed."""
+    def submit_edit(self, screen: EditScreen, fields: CardFields) -> None:
+        """Save the dialog's fields, if the card still matches what the dialog showed."""
         ref, before = screen.card.ref, screen.card
-        self._start_write(lambda: self.store.edit(ref, title=title, body=body, expected=before), add=screen, refs={ref})
+
+        def edit() -> CardView:
+            return self.store.edit(
+                ref,
+                title=fields.title,
+                body=fields.body,
+                expected=before,
+                tags=fields.tags,
+                type=fields.type,
+                due=fields.due,
+            )
+
+        self._start_write(edit, add=screen, refs={ref})
 
     def action_parent(self) -> None:
         card = self.current_card()
@@ -6046,9 +6052,7 @@ class HerdboardApp(App):
             self.notify("A Linear issue's sub-issues are set in Linear.", severity="warning")
             return
         options = [
-            other
-            for other in self.store.list_cards([card.path])
-            if other.ref != card.ref and other.parent is None and not TEMP_REF.match(other.ref)
+            other for other in self.store.list_cards([card.path]) if other.ref != card.ref and other.parent is None
         ]
         ref = card.ref
 
@@ -6089,7 +6093,7 @@ class HerdboardApp(App):
             if choice is not None:
                 self.submit_promote(card.ref, choice)
 
-        title = split_title(card.title)[0] or card.title
+        title = card.title
         self.push_screen(PromoteScreen(card.ref, title, load_teams, load_projects), chosen)
 
     def submit_promote(self, ref: str, choice: tuple[dict, dict | None]) -> None:
@@ -6697,12 +6701,6 @@ class HerdboardApp(App):
         card = self.current_card()
         if card is None:
             return
-        notes = None
-        if card.source != "linear":
-            try:
-                notes = self.store.notes_for(card)
-            except HerdboardError as error:
-                self.notify(str(error), severity="error")
         log = None
         files = None
         if activity.LOG_REF.match(card.ref):
@@ -6715,7 +6713,7 @@ class HerdboardApp(App):
             except HerdboardError as error:
                 self.notify(str(error), severity="error")
         self.push_screen(
-            DetailScreen(card, notes, self.store.config.tag_style, log, files, self.store.config.icon_style),
+            DetailScreen(card, self.store.config.tag_style, log, files, self.store.config.icon_style),
             lambda result: self.action_edit() if result == "edit" else None,
         )
 
@@ -6751,14 +6749,16 @@ class HerdboardApp(App):
             options.append((self.store.board_name(path), path))
         return options
 
-    def submit_add(self, screen: AddScreen, text: str, body: list[str]) -> None:
+    def submit_add(self, screen: AddScreen, fields: CardFields) -> None:
         """Add the card to the board the dialog shows and the column captured when it opened."""
         path, column, inbox = screen.path, screen.column, self.store.inbox_path
 
         def add() -> CardView:
             if path == inbox:
                 self.store.ensure_inbox()
-            return self.store.add(path, text, column, body=body)
+            return self.store.add(
+                path, fields.title, column, body=fields.body, tags=fields.tags, type=fields.type, due=fields.due
+            )
 
         self._start_write(add, add=screen)
 

@@ -10,7 +10,7 @@ BOARD_PATH = Path("/todos/boards/inbox/board.toml")
 CREATED = datetime(2026, 10, 31, 10, 0, tzinfo=timezone(timedelta(hours=-7)))
 
 CARD = """+++
-title = "Drop obsidian support"
+title = "Drop the old board format"
 type = "refactor"
 tags = ["herdboard"]
 due = 2026-11-15
@@ -52,7 +52,7 @@ cards = []
 class CardFileTest(unittest.TestCase):
     def test_parse_fields(self):
         card = card_file.parse_card(CARD, PATH)
-        self.assertEqual(card.title, "Drop obsidian support")
+        self.assertEqual(card.title, "Drop the old board format")
         self.assertEqual(card.type, "refactor")
         self.assertEqual(card.tags, ["herdboard"])
         self.assertEqual(card.due, "2026-11-15")
@@ -97,7 +97,7 @@ class CardFileTest(unittest.TestCase):
 
     def test_crlf(self):
         card = card_file.parse_card(CARD.replace("\n", "\r\n"), PATH)
-        self.assertEqual(card.title, "Drop obsidian support")
+        self.assertEqual(card.title, "Drop the old board format")
         self.assertEqual(card.body[-1], "- [ ] item")
 
     def test_bad_due(self):
@@ -200,7 +200,6 @@ class BoardFileTest(unittest.TestCase):
             "format = 1\n[[column]]\nname = 'A'\nlimit = 'x'\n",
             "format = 1\n[[column]]\nname = 'A'\ndone = 'yes'\n",
             "format = 1\nrepo = 3\n",
-            "format = 1\nlinear-issues = 3\n",
             "format = \n",
         ]
         for text in bad:

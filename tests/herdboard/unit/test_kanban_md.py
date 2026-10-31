@@ -1,7 +1,7 @@
 import unittest
 
 from herdboard import kanban_md
-from herdboard.model import Card, NotFoundError
+from herdboard.kanban_md import Card
 from support.paths import ROOT
 
 FIXTURES = ROOT / "tests/herdboard/fixtures"
@@ -199,111 +199,6 @@ class ParseFullTest(unittest.TestCase):
     def test_tail(self):
         self.assertTrue(self.board.tail.startswith("%% kanban:settings"))
         self.assertTrue(self.board.tail.endswith("\n%%"))
-
-
-class NewBoardTest(unittest.TestCase):
-    def test_matches_empty_fixture(self):
-        self.assertEqual(kanban_md.new_board(["Backlog", "Todo", "Done"], "Done"), EMPTY)
-
-    def test_extra_frontmatter_and_no_complete(self):
-        text = kanban_md.new_board(["A"], None, [("repo", "x/y")])
-        self.assertEqual(
-            text,
-            "---\n\nkanban-plugin: board\nrepo: x/y\n\n---\n\n## A\n\n\n\n\n\n" + SETTINGS,
-        )
-        board = kanban_md.parse(text)
-        self.assertEqual(board.frontmatter_value("repo"), "x/y")
-        self.assertEqual(kanban_md.serialize(board), text)
-
-
-class MoveTest(unittest.TestCase):
-    def move(self, text, source, target, position="bottom", index=0):
-        board = kanban_md.parse(text)
-        src, dst = board.column(source), board.column(target)
-        card = src.cards[index]
-        kanban_md.remove_card(src, card)
-        kanban_md.insert_card(dst, card, position)
-        return kanban_md.serialize(board)
-
-    def test_to_empty_column(self):
-        text = board_text(
-            "## Backlog\n\n- [ ] a\n\n\n",
-            "## Todo\n\n\n\n",
-        )
-        expected = board_text(
-            "## Backlog\n\n\n\n",
-            "## Todo\n\n- [ ] a\n\n\n",
-        )
-        self.assertEqual(self.move(text, "Backlog", "Todo"), expected)
-
-    def test_to_top_and_bottom_of_non_empty_column(self):
-        text = board_text(
-            "## Backlog\n\n- [ ] a\n\t- [ ] sub\n\n\n",
-            "## Todo\n\n- [ ] b\n- [ ] c\n\n\n",
-        )
-        top = board_text(
-            "## Backlog\n\n\n\n",
-            "## Todo\n\n- [ ] a\n\t- [ ] sub\n- [ ] b\n- [ ] c\n\n\n",
-        )
-        bottom = board_text(
-            "## Backlog\n\n\n\n",
-            "## Todo\n\n- [ ] b\n- [ ] c\n- [ ] a\n\t- [ ] sub\n\n\n",
-        )
-        self.assertEqual(self.move(text, "Backlog", "Todo", "top"), top)
-        self.assertEqual(self.move(text, "Backlog", "Todo", "bottom"), bottom)
-
-    def test_into_empty_complete_column(self):
-        text = board_text(
-            "## Backlog\n\n- [ ] a\n\n\n",
-            "## Done\n\n**Complete**\n\n\n",
-        )
-        expected = board_text(
-            "## Backlog\n\n\n\n",
-            "## Done\n\n**Complete**\n- [ ] a\n\n\n",
-        )
-        self.assertEqual(self.move(text, "Backlog", "Done"), expected)
-
-    def test_into_complete_column_with_cards(self):
-        text = board_text(
-            "## Backlog\n\n- [ ] a\n\n\n",
-            "## Done\n\n**Complete**\n- [x] b\n\n\n",
-        )
-        top = board_text(
-            "## Backlog\n\n\n\n",
-            "## Done\n\n**Complete**\n- [ ] a\n- [x] b\n\n\n",
-        )
-        self.assertEqual(self.move(text, "Backlog", "Done", "top"), top)
-
-    def test_move_in_full_fixture_matches_empty_layout(self):
-        out = self.move(FULL, "Backlog", "In progress")
-        self.assertIn(
-            "## In progress\n\n- [ ] Compare tile suppliers #research ^t3m9\n\n\n## Review",
-            out,
-        )
-        self.assertTrue(out.endswith(FULL[FULL.index("\n***\n") :]))
-
-    def test_remove_last_card_gives_empty_column_layout(self):
-        board = kanban_md.parse(FULL)
-        review = board.column("Review")
-        kanban_md.remove_card(review, review.cards[0])
-        self.assertEqual(
-            kanban_md.serialize(board),
-            FULL.replace("- [ ] Check the grout colour\n", ""),
-        )
-        self.assertIn("## In progress\n\n\n\n## Review\n\n\n\n## Done", kanban_md.serialize(board))
-
-    def test_remove_by_identity(self):
-        board = kanban_md.parse(board_text("## A\n\n- [ ] same\n- [ ] same\n\n\n"))
-        column = board.columns[0]
-        kanban_md.remove_card(column, column.cards[1])
-        self.assertEqual(len(column.cards), 1)
-        with self.assertRaises(NotFoundError):
-            kanban_md.remove_card(column, Card(["- [ ] same"]))
-
-    def test_insert_rejects_bad_position(self):
-        column = kanban_md.parse("## A\n\n").columns[0]
-        with self.assertRaises(ValueError):
-            kanban_md.insert_card(column, Card(["- [ ] x"]), "middle")
 
 
 if __name__ == "__main__":

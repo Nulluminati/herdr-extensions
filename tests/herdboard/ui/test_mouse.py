@@ -116,7 +116,7 @@ class DetailClickTests(MouseTestCase):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
-            app.push_screen(DetailScreen(linear, None))
+            app.push_screen(DetailScreen(linear))
             await pilot.pause()
             self.assertEqual(clicks(app.screen.query_one("#detail-body").rich_text), [])
 
@@ -183,11 +183,11 @@ class DragTests(MouseTestCase):
             self.assertEqual(self.column_of(self.first.ref), "Todo")
 
     async def test_a_drop_on_the_same_column_writes_nothing(self):
-        before = self.repo_path.read_text()
+        before = self.markdown(self.repo_path)
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await self.drag(pilot, self.first.ref, "Todo")
-            self.assertEqual(self.repo_path.read_text(), before)
+            self.assertEqual(self.markdown(self.repo_path), before)
 
     async def test_the_click_after_a_drop_does_not_select_again(self):
         app = self.make_app()
@@ -219,7 +219,7 @@ class DragTests(MouseTestCase):
             self.assertEqual(self.titles("Todo"), ["second todo"])
 
     async def test_only_the_left_button_drops(self):
-        before = self.repo_path.read_text()
+        before = self.markdown(self.repo_path)
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
@@ -228,7 +228,7 @@ class DragTests(MouseTestCase):
             target = self.column(app, "Review").query_one(".column-header")
             await pilot._post_mouse_events([events.MouseUp], target, button=3)
             await settle(pilot)
-            self.assertEqual(self.repo_path.read_text(), before)
+            self.assertEqual(self.markdown(self.repo_path), before)
             self.assertIsNone(app.drag)
             self.assertFalse(app.dropped)
 
@@ -239,7 +239,9 @@ class DragTests(MouseTestCase):
             widget = self.widget(app, self.first.ref)
             await pilot.mouse_down(widget, offset=content_offset(widget))
             # Another program adds a column before Todo while the mouse holds the card.
-            self.repo_path.write_text(self.repo_path.read_text().replace("## Todo", "## Extra\n\n## Todo", 1))
+            self.put_markdown(
+                self.repo_path, self.markdown(self.repo_path).replace("## Todo", "## Extra\n\n## Todo", 1)
+            )
             await app.reload()
             await pilot.pause()
             await pilot.mouse_up(self.column(app, "Todo").query_one(".column-header"))

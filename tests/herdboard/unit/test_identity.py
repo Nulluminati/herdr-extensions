@@ -146,64 +146,71 @@ class BoardLookupTest(unittest.TestCase):
 
     def board(self, name: str, repo: str) -> Path:
         path = self.dir / name
-        path.write_text(f"---\nkanban-plugin: board\nrepo: {repo}\n---\n\n## Todo\n")
+        path.mkdir()
+        (path / "board.toml").write_text(f'format = 1\nrepo = "{repo}"\n\n[[column]]\nname = "Todo"\ncards = []\n')
         return path
 
     def test_match(self):
-        self.board("other.md", "github.com/acme/web")
-        target = self.board("acme-api.md", "github.com/acme/api")
+        self.board("other", "github.com/acme/web")
+        target = self.board("acme-api", "github.com/acme/api")
         self.assertEqual(find_board(self.dir, self.ident), target)
 
     def test_github_match_ignores_case(self):
-        target = self.board("acme-api.md", "github.com/Acme/API")
+        target = self.board("acme-api", "github.com/Acme/API")
         self.assertEqual(find_board(self.dir, self.ident), target)
 
     def test_other_host_match_keeps_case(self):
-        self.board("g.md", "gitlab.com/Group/Repo")
+        self.board("g", "gitlab.com/Group/Repo")
         ident = RepoIdentity("gitlab.com/group/repo", "gitlab.com", ("group", "repo"))
         self.assertIsNone(find_board(self.dir, ident))
 
     def test_no_match(self):
-        self.board("other.md", "github.com/acme/web")
+        self.board("other", "github.com/acme/web")
         self.assertIsNone(find_board(self.dir, self.ident))
 
     def test_missing_directory(self):
         self.assertIsNone(find_board(self.dir / "nope", self.ident))
 
-    def test_ignores_file_without_frontmatter(self):
-        (self.dir / "notes.md").write_text("repo: github.com/acme/api\n")
-        (self.dir / "unclosed.md").write_text("---\nrepo: github.com/acme/api\n")
+    def test_ignores_folders_without_a_readable_board_file(self):
+        (self.dir / "loose").mkdir()
+        (self.dir / "loose" / "notes.md").write_text('repo = "github.com/acme/api"\n')
+        (self.dir / "broken").mkdir()
+        (self.dir / "broken" / "board.toml").write_text('repo = "github.com/acme/api\n')
         self.assertIsNone(find_board(self.dir, self.ident))
 
     def test_two_matches(self):
-        self.board("a.md", "github.com/acme/api")
-        self.board("b.md", "github.com/acme/api")
+        self.board("a", "github.com/acme/api")
+        self.board("b", "github.com/acme/api")
         with self.assertRaises(IdentityError) as ctx:
             find_board(self.dir, self.ident)
-        self.assertIn("a.md", str(ctx.exception))
-        self.assertIn("b.md", str(ctx.exception))
+        self.assertIn(str(self.dir / "a"), str(ctx.exception))
+        self.assertIn(str(self.dir / "b"), str(ctx.exception))
 
     def test_new_path_free(self):
-        self.assertEqual(new_board_path(self.dir, self.ident), self.dir / "acme-api.md")
+        self.assertEqual(new_board_path(self.dir, self.ident), self.dir / "acme-api")
         self.assertEqual(list(self.dir.iterdir()), [])
 
     def test_new_path_taken_uses_host(self):
-        self.board("acme-api.md", "gitlab.com/acme/api")
-        self.assertEqual(new_board_path(self.dir, self.ident), self.dir / "github.com-acme-api.md")
+        self.board("acme-api", "gitlab.com/acme/api")
+        self.assertEqual(new_board_path(self.dir, self.ident), self.dir / "github.com-acme-api")
+
+    def test_the_inbox_name_is_never_free(self):
+        ident = RepoIdentity("github.com/inbox", "github.com", ("inbox",))
+        self.assertEqual(new_board_path(self.dir, ident), self.dir / "github.com-inbox")
 
     def test_new_path_both_taken(self):
-        self.board("acme-api.md", "gitlab.com/acme/api")
-        self.board("github.com-acme-api.md", "other/x")
+        self.board("acme-api", "gitlab.com/acme/api")
+        self.board("github.com-acme-api", "other/x")
         with self.assertRaises(IdentityError) as ctx:
             new_board_path(self.dir, self.ident)
-        self.assertIn("github.com-acme-api.md", str(ctx.exception))
+        self.assertIn("github.com-acme-api", str(ctx.exception))
 
     def test_new_path_taken_without_host(self):
         ident = RepoIdentity("/x/solo", None, ("solo",))
-        (self.dir / "solo.md").write_text("x")
+        (self.dir / "solo").mkdir()
         with self.assertRaises(IdentityError) as ctx:
             new_board_path(self.dir, ident)
-        self.assertIn("solo.md", str(ctx.exception))
+        self.assertIn("solo", str(ctx.exception))
 
 
 if __name__ == "__main__":

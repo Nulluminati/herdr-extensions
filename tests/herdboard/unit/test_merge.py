@@ -339,10 +339,7 @@ class PullRequestTests(PullRequestTestCase):
         self.assertEqual(raised.exception.code, "usage")
 
     def test_the_board_merge_setting_picks_the_pull_request(self):
-        text = self.board.read_text(encoding="utf-8")
-        self.board.write_text(
-            text.replace("kanban-plugin: board\n", "kanban-plugin: board\nmerge: pr\n", 1), encoding="utf-8"
-        )
+        self.store.set_merge(self.board, "pr")
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.assertEqual(self.merger.merge(self.card.ref)["mode"], "pr")
@@ -430,10 +427,9 @@ class PullRequestStateTests(PullRequestTestCase):
 
 class MergeModeTests(MergeTestCase):
     def set_board_merge(self, value):
-        text = self.board.read_text(encoding="utf-8")
-        self.board.write_text(
-            text.replace("kanban-plugin: board\n", f"kanban-plugin: board\nmerge: {value}\n", 1), encoding="utf-8"
-        )
+        board = self.board / "board.toml"
+        text = board.read_text(encoding="utf-8")
+        board.write_text(f'merge = "{value}"\n' + text, encoding="utf-8")
 
     def test_the_mode_comes_from_the_board_then_the_config(self):
         record = {"repository": "x"}

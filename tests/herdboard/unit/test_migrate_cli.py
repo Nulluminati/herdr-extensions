@@ -7,9 +7,10 @@ import sys
 import unittest
 from unittest import mock
 
-from herdboard import cli, kanban_md
+from herdboard import cli
 from herdboard.store import Store
 from support.herdboard_cli import CliTestCase
+from support.herdboard_store import render_markdown, write_board
 from support.paths import ROOT
 
 FIXTURES = ROOT / "tests/herdboard/fixtures/migrate"
@@ -21,7 +22,18 @@ class MigrateCliTestCase(CliTestCase):
         super().setUp()
         self.todo = self.repo / "TODO.md"
         self.todo.write_bytes((FIXTURES / "loose-text.md").read_bytes())
-        self.board = self.todos / "projects/acme-api.md"
+        self.board = self.todos / "boards/acme-api"
+
+    def written(self):
+        """The board in Markdown notation."""
+        return render_markdown(self.board)
+
+    def titles(self, column):
+        return [c["title"] for c in self.cards() if c["column"] == column]
+
+    def cards(self):
+        out, _ = self.run_cli("--json", "list", "--board", "acme-api", directory=self.plain)
+        return json.loads(out)["cards"]
 
     def migrate(self, *args, tty=False, answer="", expect=0, directory=None):
         argv = ["--config", str(self.config), "-C", str(directory or self.repo), *args]
@@ -105,7 +117,7 @@ class WriteTests(MigrateCliTestCase):
     def test_yes_writes_and_prints_original_path(self):
         before = self.todo.read_bytes()
         out, _ = self.migrate("migrate", str(self.todo), "--yes")
-        self.assertTrue(self.board.is_file())
+        self.assertTrue(self.board.is_dir())
         self.assertIn(f"Wrote 5 cards to {self.board}", out)
         self.assertIn(f"Original file left unchanged: {self.todo}", out)
         self.assertEqual(self.todo.read_bytes(), before)
@@ -114,20 +126,17 @@ class WriteTests(MigrateCliTestCase):
         data = self.migrate_json("migrate", str(self.todo), "--yes")
         self.assertIs(data["written"], True)
         self.assertEqual(data["cards"], 5)
-        text = self.board.read_text()
-        self.assertEqual(len(ID.findall(text)), 5)
-        self.assertIn("repo: github.com/acme/api", text)
+        self.assertEqual(len(ID.findall(self.written())), 5)
+        self.assertIn('repo = "github.com/acme/api"', (self.board / "board.toml").read_text())
 
-    def test_round_trip(self):
+    def test_section_cards_land_in_the_first_column(self):
         self.todo.write_bytes((FIXTURES / "atx.md").read_bytes())
         self.migrate("migrate", str(self.todo), "--yes")
-        text = self.board.read_text()
-        self.assertEqual(kanban_md.serialize(kanban_md.parse(text)), text)
-        self.assertEqual(len(kanban_md.parse(text).column("Backlog").cards), 6)
+        self.assertEqual(len(self.titles("Backlog")), 6)
 
     def test_terminal_confirmation_yes(self):
         out, err = self.migrate("migrate", str(self.todo), tty=True, answer="y\n")
-        self.assertTrue(self.board.is_file())
+        self.assertTrue(self.board.is_dir())
         self.assertIn("Write 5 cards", err)
         self.assertIn("Original file left unchanged", out)
 
@@ -140,40 +149,36 @@ class WriteTests(MigrateCliTestCase):
     def test_yes_on_terminal_does_not_prompt(self):
         _, err = self.migrate("migrate", str(self.todo), "--yes", tty=True)
         self.assertNotIn("Write 5", err)
-        self.assertTrue(self.board.is_file())
+        self.assertTrue(self.board.is_dir())
 
     def test_second_run_appends_at_the_bottom(self):
         self.migrate("migrate", str(self.todo), "--yes")
-        first = self.board.read_text()
+        first = self.written()
         self.todo.write_text("# More\n- extra\n")
         self.migrate("migrate", str(self.todo), "--yes")
-        cards = [c.title for c in kanban_md.parse(self.board.read_text()).column("Backlog").cards]
-        self.assertEqual(cards[-1], "extra #more")
+        cards = [c for c in self.cards() if c["column"] == "Backlog"]
+        self.assertEqual((cards[-1]["title"], cards[-1]["tags"]), ("extra", ["more"]))
         self.assertEqual(len(cards), 6)
-        self.assertTrue(set(ID.findall(first)) <= set(ID.findall(self.board.read_text())))
+        self.assertTrue(set(ID.findall(first)) <= set(ID.findall(self.written())))
 
     def test_existing_board_cards_unchanged(self):
         self.init_repo_board()
         self.run_cli("add", "keep me", "--column", "Todo", directory=self.repo)
-        before = self.board.read_text()
+        (kept,) = self.cards()
+        before = (self.board / "cards" / kept["ref"] / "card.md").read_text()
         self.migrate("migrate", str(self.todo), "--yes")
-        kept = [
-            line
-            for line in self.board.read_text().split("\n")
-            if not any(t in line for t in ("item", "Intro", "note", "indented"))
-        ]
-        self.assertEqual("\n".join(kept), before)
+        self.assertEqual((self.board / "cards" / kept["ref"] / "card.md").read_text(), before)
+        self.assertEqual(self.titles("Todo"), ["keep me"])
 
 
 class TargetTests(MigrateCliTestCase):
     def test_board_option_names_an_existing_board(self):
         self.init_repo_board()
-        other = self.todos / "projects/homelab.md"
-        other.write_text(self.board.read_text().replace("github.com/acme/api", "github.com/acme/lab"))
+        other = write_board(self.todos, "homelab", [("Backlog", []), ("Done", [])], repo="github.com/acme/lab")
         data = self.migrate_json("migrate", str(self.todo), "--board", "homelab", "--yes")
         self.assertEqual(data["board"], str(other))
-        self.assertIn("first item", other.read_text())
-        self.assertNotIn("first item", self.board.read_text())
+        self.assertIn("first item", render_markdown(other))
+        self.assertNotIn("first item", self.written())
 
     def test_unknown_board_is_a_user_error(self):
         data = self.migrate_json("migrate", str(self.todo), "--board", "nope", "--yes", expect=1)
@@ -181,14 +186,14 @@ class TargetTests(MigrateCliTestCase):
 
     def test_inbox_board_is_created(self):
         data = self.migrate_json("migrate", str(self.todo), "--board", "inbox", "--yes")
-        self.assertEqual(data["board"], str(self.todos / "inbox.md"))
-        self.assertTrue((self.todos / "inbox.md").is_file())
+        self.assertEqual(data["board"], str(self.todos / "boards/inbox"))
+        self.assertTrue((self.todos / "boards/inbox/board.toml").is_file())
 
     def test_file_outside_a_repository_goes_to_inbox(self):
         loose = self.plain / "TODO.md"
         loose.write_bytes(self.todo.read_bytes())
         data = self.migrate_json("migrate", str(loose), "--yes")
-        self.assertEqual(data["board"], str(self.todos / "inbox.md"))
+        self.assertEqual(data["board"], str(self.todos / "boards/inbox"))
 
     def test_repository_comes_from_the_file_not_the_working_directory(self):
         data = self.migrate_json("migrate", str(self.todo), "--yes", directory=self.plain)
@@ -227,37 +232,40 @@ class ErrorTests(MigrateCliTestCase):
 
     def test_checked_item_on_board_without_done_column(self):
         self.init_repo_board()
-        self.board.write_text(self.board.read_text().replace("## Done", "## Finished").replace("**Complete**\n", ""))
-        before = self.board.read_text()
+        board = self.board / "board.toml"
+        board.write_text(board.read_text().replace('"Done"', '"Finished"').replace("done = true\n", ""))
+        before = board.read_text()
         self.todo.write_text("- [x] a\n")
         data = self.migrate_json("migrate", str(self.todo), "--yes", expect=1)
         self.assertIn("no done column", data["error"]["message"])
-        self.assertEqual(self.board.read_text(), before)
+        self.assertEqual(board.read_text(), before)
 
-    def test_unwritable_board(self):
+    def test_unreadable_board(self):
         self.init_repo_board()
-        text = self.board.read_text().replace("kanban-plugin: board", "kanban-plugin: other")
-        self.board.write_text(text)
+        board = self.board / "board.toml"
+        text = board.read_text().replace("format = 1", "format = 9")
+        board.write_text(text)
         self.migrate_json("migrate", str(self.todo), "--yes", expect=1)
-        self.assertEqual(self.board.read_text(), text)
+        self.assertEqual(board.read_text(), text)
 
 
 class FixtureStyleTests(MigrateCliTestCase):
-    def test_every_fixture_converts_and_round_trips(self):
+    def test_every_fixture_converts(self):
+        import shutil
+
         for fixture in sorted(FIXTURES.glob("*.md")):
             with self.subTest(fixture=fixture.name):
-                self.board.unlink(missing_ok=True)
+                shutil.rmtree(self.board, ignore_errors=True)
                 self.todo.write_bytes(fixture.read_bytes())
                 data = self.migrate_json("migrate", str(self.todo), "--yes")
                 self.assertGreater(data["cards"], 0)
-                text = self.board.read_text()
-                self.assertEqual(kanban_md.serialize(kanban_md.parse(text)), text)
+                self.assertEqual(len(self.cards()), data["cards"])
                 self.assertEqual(self.todo.read_bytes(), fixture.read_bytes())
 
 
 class ReviewFixTests(MigrateCliTestCase):
     def test_preview_keeps_source_order_when_first_column_is_done(self):
-        self.put_board("Done", "**Complete**")
+        self.put_board("Done")
         self.todo.write_text("- [x] first\n- second\n")
         data = self.migrate_json("migrate", str(self.todo))
         column = data["preview"]["columns"]
@@ -265,18 +273,10 @@ class ReviewFixTests(MigrateCliTestCase):
             [(c["column"], [x["title"] for x in c["cards"]]) for c in column], [("Done", ["first", "second"])]
         )
         self.migrate("migrate", str(self.todo), "--yes")
-        written = kanban_md.parse(self.board.read_text()).column("Done").cards
-        self.assertEqual([c.title for c in written], ["first", "second"])
+        self.assertEqual(self.titles("Done"), ["first", "second"])
 
-    def put_board(self, *column):
-        text = (
-            "---\n\nkanban-plugin: board\nrepo: github.com/acme/api\n\n---\n\n"
-            f"## {column[0]}\n\n"
-            + "".join(f"{line}\n" for line in column[1:])
-            + '\n\n%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%\n'
-        )
-        self.board.parent.mkdir(parents=True, exist_ok=True)
-        self.board.write_text(text)
+    def put_board(self, column, *cards):
+        write_board(self.todos, "acme-api", [(column, list(cards))], repo="github.com/acme/api")
 
     def test_preview_lists_dropped_ids_and_ambiguous_lines(self):
         self.todo.write_text("- root ^tabc\n\t- a\n - stray\n")
@@ -293,29 +293,31 @@ class ReviewFixTests(MigrateCliTestCase):
         self.assertIn("  ^tabc: root", out)
 
     def test_changed_repo_after_preview_is_a_conflict_with_no_write(self):
-        self.put_board("Backlog", "- [ ] one ^taaa")
+        self.put_board("Backlog", {"id": "taaa", "title": "one"})
         self.todo.write_text("- new\n")
 
         def change_repo(_prompt):
-            self.board.write_text(self.board.read_text().replace("acme/api", "acme/other"))
+            board = self.board / "board.toml"
+            board.write_text(board.read_text().replace("acme/api", "acme/other"))
             return True
 
         with mock.patch.object(cli, "_confirm", side_effect=change_repo):
             self.migrate("migrate", str(self.todo), tty=True, expect=2)
-        self.assertNotIn("new", self.board.read_text())
-        self.assertIn("repo: github.com/acme/other", self.board.read_text())
+        self.assertNotIn("new", self.written())
+        self.assertIn('repo = "github.com/acme/other"', (self.board / "board.toml").read_text())
 
     def test_explicit_board_stays_path_based(self):
-        self.put_board("Backlog", "- [ ] one ^taaa")
+        self.put_board("Backlog", {"id": "taaa", "title": "one"})
         self.todo.write_text("- new\n")
 
         def change_repo(_prompt):
-            self.board.write_text(self.board.read_text().replace("acme/api", "acme/other"))
+            board = self.board / "board.toml"
+            board.write_text(board.read_text().replace("acme/api", "acme/other"))
             return True
 
         with mock.patch.object(cli, "_confirm", side_effect=change_repo):
             self.migrate("migrate", str(self.todo), "--board", "acme-api", tty=True)
-        self.assertIn("- [ ] new ^t", self.board.read_text())
+        self.assertIn("- [ ] new ^t", self.written())
 
 
 if __name__ == "__main__":

@@ -27,10 +27,9 @@ def issue(**changes):
 
 
 class BriefTests(unittest.TestCase):
-    def brief(self, card, notes=()):
+    def brief(self, card):
         return brief_text(
             card,
-            notes=list(notes),
             repository="github.com/nulluminati/dotfiles-ansible",
             worktree="/home/n/.herdr/worktrees/dotfiles-ansible/t83k-move-to-shared",
             branch="t83k-move-to-shared",
@@ -70,7 +69,6 @@ class BriefTests(unittest.TestCase):
         log = [{"time": "2026-10-12 12:00", "author": "pi", "message": "Two commits.\nTests pass."}]
         text = brief_text(
             todo(),
-            notes=[],
             repository="r",
             worktree="w",
             branch="b",
@@ -94,12 +92,6 @@ class BriefTests(unittest.TestCase):
     def test_a_card_without_details_says_so(self):
         self.assertIn("## Details\n\nNone. The title is the whole task.\n", self.brief(todo(body=[])))
 
-    def test_linked_notes_are_included(self):
-        notes = [{"name": "Stow notes", "content": "Use stow -t ~\n"}, {"name": "Gone", "content": None}]
-        text = self.brief(todo(), notes)
-        self.assertIn("## Linked notes\n\n### Stow notes\n\nUse stow -t ~\n", text)
-        self.assertIn("### Gone\n\nThe note was not found.\n", text)
-
     def test_the_plan_is_included_and_other_attachments_are_listed(self):
         files = [
             {"name": "plan.md", "path": "/todos/.herdboard/attachments/t83k/plan.md", "size": 20},
@@ -107,7 +99,6 @@ class BriefTests(unittest.TestCase):
         ]
         text = brief_text(
             todo(),
-            notes=[],
             repository="r",
             worktree="w",
             branch="b",
@@ -136,7 +127,6 @@ class BriefTests(unittest.TestCase):
             with self.subTest(files=[entry["name"] for entry in files]):
                 text = brief_text(
                     todo(),
-                    notes=[],
                     repository="r",
                     worktree="w",
                     branch="b",
@@ -171,7 +161,6 @@ class BriefTests(unittest.TestCase):
     def test_the_cli_command_is_used_as_given(self):
         text = brief_text(
             todo(),
-            notes=[],
             repository="r",
             worktree="w",
             branch="b",
@@ -183,7 +172,6 @@ class BriefTests(unittest.TestCase):
     def test_a_repoless_brief_names_the_card_folder_and_the_attachments(self):
         text = brief_text(
             todo(),
-            notes=[],
             repository="",
             worktree="/todos/.herdboard/work/t83k",
             branch="",

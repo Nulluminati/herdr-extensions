@@ -69,7 +69,8 @@ class Views:
         return [(path, self.store.board_meta(path).links) for path in self.store.board_paths()]
 
     def paths(self, view: str) -> list[Path]:
-        """Board files that a view shows."""
+        """Board folders that a view shows."""
+        self.store.check_layout()
         if view == "repo":
             board = self.repo_board()
             if board is None:
@@ -77,7 +78,7 @@ class Views:
             return [board]
         if view == "inbox":
             inbox = self.store.inbox_path
-            return [inbox] if inbox.is_file() else []
+            return [inbox] if (inbox / "board.toml").is_file() else []
         if view == "all":
             return self.store.board_paths()
         if view == "mine":

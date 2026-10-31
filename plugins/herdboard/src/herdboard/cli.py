@@ -25,7 +25,7 @@ from .linear_writes import LinearWriter
 from .merge import Merger
 from .migrate import build_preview, preview_text
 from .migrate_convert import convert
-from .model import HerdboardError, IoError, NotFoundError, with_parent, with_type
+from .model import HerdboardError, IoError, NotFoundError
 from .plan import Planner
 from .promote import Promoter
 from .review import Reviewer
@@ -89,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--body-file", type=Path, help="read the card's details from a file")
     sub.add_argument("--parent", help="make the todo a sub-card of this todo, on its board")
     sub.add_argument("--type", help="the card's type, such as bug or feature (the `types` setting)")
+    sub.add_argument("--tag", action="append", default=[], help="a tag for the todo; repeat it for more tags")
+    sub.add_argument("--due", help="the todo's due date, YYYY-MM-DD")
     sub.add_argument("--column")
     sub.add_argument("--position", choices=["top", "bottom"], default="bottom")
     sub.add_argument("--board", help="board name: inbox or a project name")
@@ -122,11 +124,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("ref")
     write_options(sub)
 
-    sub = command("edit", "change a todo's text, its indented lines, or both")
+    sub = command("edit", "change a todo's title, details, tags, due date, type or parent")
     sub.add_argument("ref")
-    sub.add_argument("--title", help="the card's new first line, with #tags and 📅 date")
-    sub.add_argument("--body", help="the card's new indented lines, one per line; empty clears them")
-    sub.add_argument("--body-file", type=Path, help="read the new indented lines from a file")
+    sub.add_argument("--title", help="the card's new title, as plain text")
+    sub.add_argument("--body", help="the card's new details, one per line; empty clears them")
+    sub.add_argument("--body-file", type=Path, help="read the new details from a file")
+    tags = sub.add_mutually_exclusive_group()
+    tags.add_argument("--tag", action="append", help="set the todo's tags; repeat it for more tags")
+    tags.add_argument("--no-tags", action="store_true", help="remove every tag")
+    due = sub.add_mutually_exclusive_group()
+    due.add_argument("--due", help="set the todo's due date, YYYY-MM-DD")
+    due.add_argument("--no-due", action="store_true", help="remove the due date")
     parent = sub.add_mutually_exclusive_group()
     parent.add_argument("--parent", help="make the todo a sub-card of this todo, on the same board")
     parent.add_argument("--no-parent", action="store_true", help="make the sub-card a plain todo again")
@@ -174,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("--pane", help="with --open: the Herdr pane to start from; default: this pane")
 
-    sub = command("delete", "remove a todo and its indented lines")
+    sub = command("delete", "remove a todo: its card folder, with its log and attachments")
     sub.add_argument("ref")
     sub.add_argument("--yes", action="store_true", help="delete without asking")
 
@@ -429,8 +437,13 @@ def build_parser() -> argparse.ArgumentParser:
     found.add_argument("timer_action", choices=["install", "remove", "status"])
 
     sub = command("doctor", "check boards, configuration, Linear links and state")
-    sub.add_argument("--fix-ids", action="store_true", help="repair duplicate card IDs")
+    sub.add_argument(
+        "--fix", action="store_true", help="repair the card lists in board.toml: missing, repeated and orphan cards"
+    )
     sub.add_argument("--offline", action="store_true", help="skip Linear checks")
+
+    sub = command("convert-store", "convert the old Markdown boards (inbox.md, projects/*.md) to board folders, once")
+    sub.add_argument("--dry-run", action="store_true", help="print what the conversion does, and change nothing")
 
     command("init", "create the board for this repository")
     sub = command("migrate", "convert a free-form TODO.md into cards")
@@ -482,9 +495,7 @@ def _card_line(card: CardView) -> str:
 
 
 def _card_text(card: CardView) -> str:
-    # A Linear issue keeps its parent outside the title, so its title text stays as it is.
-    title = card.title if card.source == "linear" else with_parent(card.title, None)
-    line = f"  {card.ref}  {title}"
+    line = f"  {card.ref}  {card.title}"
     if card.source == "linear":
         if card.state and card.state.casefold() != card.column.casefold():
             line += f"  [{card.state}]"
@@ -549,9 +560,7 @@ def _attachments_text(files: list[dict]) -> list[str]:
     return ["--- attachments ---", *(entry["path"] for entry in files)] if files else []
 
 
-def _show_text(
-    card: CardView, notes: list[dict] | None = None, log: list[dict] | None = None, files: list[dict] | None = None
-) -> str:
+def _show_text(card: CardView, log: list[dict] | None = None, files: list[dict] | None = None) -> str:
     if card.source == "linear":
         return "\n".join([_show_linear_text(card), *_attachments_text(files or []), *_log_text(log or [])])
     lines = [card.title, f"{card.board} / {card.column}", f"ref: {card.ref}"]
@@ -564,9 +573,6 @@ def _show_text(
     if card.tags:
         lines.append("tags: " + ", ".join(card.tags))
     lines.extend(card.body)
-    for note in notes or []:
-        lines.append(f"--- {note['name']} ---")
-        lines.append("(note not found)" if note["content"] is None else note["content"].rstrip("\n"))
     lines.extend(_attachments_text(files or []))
     lines.extend(_log_text(log or []))
     return "\n".join(lines)
@@ -704,8 +710,11 @@ def _cmd_add(ctx: _Context) -> dict:
     if args.linear:
         return _cmd_add_linear(ctx, body)
     lines = body.splitlines() if body is not None else None
-    if args.type is not None:
-        args.text = with_type(args.text, ctx.config.type_named(args.type))
+    fields = {
+        "tags": [tag.strip().lstrip("#") for tag in args.tag if tag.strip().lstrip("#")],
+        "type": ctx.config.type_named(args.type) if args.type is not None else None,
+        "due": args.due,
+    }
     if args.parent is not None:
         if LINEAR_REF.match(args.parent):
             raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")
@@ -716,7 +725,7 @@ def _cmd_add(ctx: _Context) -> dict:
             else (store.resolve_board(args.board) if args.board else parent.path)
         )
         return {
-            "card": store.add(path, args.text, args.column, args.position, body=lines, parent=parent.ref),
+            "card": store.add(path, args.text, args.column, args.position, body=lines, parent=parent.ref, **fields),
             "hint": None,
         }
     if args.board == "inbox":
@@ -729,7 +738,7 @@ def _cmd_add(ctx: _Context) -> dict:
             if ctx.identity is not None:
                 raise HerdboardError(INIT_MESSAGE)
             path = store.ensure_inbox()
-    card = store.add(path, args.text, args.column, args.position, body=lines)
+    card = store.add(path, args.text, args.column, args.position, body=lines, **fields)
     return {"card": card, "hint": None}
 
 
@@ -776,7 +785,6 @@ def _cmd_show(ctx: _Context) -> dict:
     card = ctx.store.show(ref, archived=True)
     return {
         "card": card,
-        "notes": ctx.store.notes_for(card),
         "log": _card_log(ctx, card),
         "attachments": _card_attachments(ctx, card),
     }
@@ -938,9 +946,14 @@ def _cmd_edit(ctx: _Context) -> dict:
         and not args.no_parent
         and args.type is None
         and not args.no_type
+        and args.tag is None
+        and not args.no_tags
+        and args.due is None
+        and not args.no_due
     ):
         raise UsageError(
-            "Nothing to change: give --title, --body, --body-file, --parent, --no-parent, --type or --no-type"
+            "Nothing to change: give --title, --body, --body-file, --tag, --no-tags, --due, --no-due, "
+            "--parent, --no-parent, --type or --no-type"
         )
     kind = ctx.config.type_named(args.type) if args.type is not None else None
     # A guard against mistakes, not a security boundary: the card text is the user's.
@@ -951,12 +964,16 @@ def _cmd_edit(ctx: _Context) -> dict:
             f'Record progress with `herdboard log {args.ref} "..."` instead.'
         )
     lines = body.splitlines() if body is not None else None
-    title = args.title
+    fields: dict = {}
+    if args.tag is not None or args.no_tags:
+        fields["tags"] = [tag.strip().lstrip("#") for tag in args.tag or [] if tag.strip().lstrip("#")]
     if args.type is not None or args.no_type:
-        title = with_type(title if title is not None else ctx.store.show(args.ref).title, kind)
+        fields["type"] = kind
+    if args.due is not None or args.no_due:
+        fields["due"] = args.due
     card = None
-    if title is not None or lines is not None:
-        card = ctx.store.edit(args.ref, title=title, body=lines)
+    if args.title is not None or lines is not None or fields:
+        card = ctx.store.edit(args.ref, title=args.title, body=lines, **fields)
     if args.parent is not None or args.no_parent:
         if args.parent is not None and LINEAR_REF.match(args.parent):
             raise UsageError("A Linear issue's sub-issues are set in Linear; --parent takes a todo")
@@ -1341,6 +1358,27 @@ def _pr_text(command: str, result: dict) -> str:
     return f"PR #{number}: finished; worktree removed; {branch}"
 
 
+def _cmd_convert_store(ctx: _Context) -> dict:
+    from .convert_store import convert_store
+
+    return convert_store(ctx.store, config_file=config_path(ctx.args.config), dry_run=ctx.args.dry_run)
+
+
+def _render_convert(result: dict) -> None:
+    verb = "Would convert" if result["dry_run"] else "Converted"
+    for board in result["boards"]:
+        cards = sum(board["columns"].values())
+        print(f"{verb} {board['source']}: {cards} cards, {board['archived']} archived")
+        for change in board["new_ids"]:
+            print(f"  New ID {change['new']} for {change['title']!r} (was {change['old'] or 'none'})")
+    for ref in result["data_without_card"]:
+        print(f"Log or attachments of {ref} have no card; they stay in the backup")
+    if result["running"]:
+        print(f"Stop the agents, planners and reviewers of {', '.join(result['running'])} before the conversion")
+    if result.get("backup"):
+        print(f"Old files moved to {result['backup']}")
+
+
 def _cmd_init(ctx: _Context) -> dict:
     if ctx.identity is None:
         raise HerdboardError("Not in a Git repository.")
@@ -1578,7 +1616,9 @@ def _pin_board(ctx: _Context, repo: str | None) -> Path:
             # Like `start --repo`: a name that no board has can still be a checkout.
             path = ctx.directory / Path(repo).expanduser()
             identity = repo_identity(path) if path.is_dir() else None
-            board = path if path.is_file() else ctx.store.board_for_repo(identity) if identity else None
+            board = (
+                path if (path / "board.toml").is_file() else ctx.store.board_for_repo(identity) if identity else None
+            )
         if board is None:
             raise NotFoundError(f"{repo}: no board and no checkout with a board")
     if not ctx.store.board_meta(board).repo:
@@ -1815,6 +1855,7 @@ COMMANDS = {
     "merge": _cmd_merge,
     "finish": _cmd_finish,
     "init": _cmd_init,
+    "convert-store": _cmd_convert_store,
     "migrate": _cmd_migrate,
     "link": _cmd_link,
     "pin": _cmd_pin,
@@ -1859,6 +1900,9 @@ def _linear_warnings(result: LinearResult) -> None:
 
 def _render(command: str, result: dict, as_json: bool, action: str | None = None) -> None:
     if command in ("board", "sidebar-refresh"):
+        return
+    if command == "convert-store":
+        _emit_json(result) if as_json else _render_convert(result)
         return
     if command == "start":
         if as_json:
@@ -2056,22 +2100,20 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         elif command == "init":
             _emit_json({"board": str(result["board"])})
         elif command == "link":
-            _emit_json({"board": str(result["board"]), "links": [link.to_yaml() for link in result["links"]]})
+            _emit_json({"board": str(result["board"]), "links": [link.to_dict() for link in result["links"]]})
         elif command == "pin":
             _emit_json(
                 {
                     "board": str(result["board"]),
-                    "pin": result["pin"].to_yaml(),
+                    "pin": result["pin"].to_dict(),
                     "change": result["change"],
-                    "pins": [pin.to_yaml() for pin in result["pins"]],
+                    "pins": [pin.to_dict() for pin in result["pins"]],
                 }
             )
         elif command == "search":
             _emit_json({"issues": result["issues"]})
         else:
             data = {"card": _card_dict(result["card"])}
-            if result.get("notes") is not None:
-                data["notes"] = result["notes"]
             if result.get("log") is not None:
                 data["log"] = result["log"]
             if result.get("attachments") is not None:
@@ -2092,7 +2134,7 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
     elif command == "list":
         print(_list_text(result["cards"]))
     elif command == "show":
-        print(_show_text(result["card"], result.get("notes"), result.get("log"), result.get("attachments")))
+        print(_show_text(result["card"], result.get("log"), result.get("attachments")))
     elif command == "promote":
         print(_card_line(result["card"]))
         if result["sub_issues"]:
@@ -2135,7 +2177,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             from .doctor import diagnose, render
 
-            result = diagnose(args.config, repair_ids=args.fix_ids, offline=args.offline)
+            result = diagnose(args.config, repair=args.fix, offline=args.offline)
             if as_json:
                 _emit_json(result)
             else:
@@ -2145,7 +2187,7 @@ def main(argv: list[str] | None = None) -> int:
         # Add validates its input first. Migration previews write nothing. The sidebar refresh
         # runs from the plugin folder at Herdr startup and needs no board. The details pane
         # only reads.
-        if args.command not in ("init", "migrate", "add", "sidebar-refresh", "details"):
+        if args.command not in ("init", "migrate", "add", "sidebar-refresh", "details", "convert-store"):
             _ensure_repo_board(ctx)
         result = COMMANDS[args.command](ctx)
         _update_sidebar(args.command, result)

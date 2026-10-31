@@ -19,7 +19,7 @@ from pathlib import Path
 from . import activity, attachments
 from . import start as start_module
 from .agent_review import _reviewer_status, start_worker
-from .brief import _one_line, _title, _unindent
+from .brief import _one_line
 from .config import AGENTS, thinking_levels
 from .linear_cards import LINEAR_REF, issue_card
 from .model import HerdboardError, NotFoundError
@@ -39,7 +39,6 @@ from .start import (
     state_dir,
     write_brief,
 )
-from .store import TEMP_REF
 
 # A planning talk with the user can take hours; the worker stops watching after this.
 PLAN_TIMEOUT_SECONDS = 8 * 60 * 60
@@ -101,7 +100,6 @@ def brief_text(
     base: str,
     status: str,
     work_agent: bool,
-    notes: list[dict],
     plan: str | None,
     files: list[dict],
     log: list[dict],
@@ -112,7 +110,7 @@ def brief_text(
 ) -> str:
     linear = card.source == "linear"
     lines = [
-        f"# Plan: {_title(card)}",
+        f"# Plan: {card.title}",
         "",
         f"Plan {'Linear issue' if linear else 'herdboard card'} `{card.ref}` (board `{card.board}`, "
         f"column `{card.column}`) with the user. You do not do the work. A later agent does the work "
@@ -161,20 +159,12 @@ def brief_text(
             "```",
             "",
         ]
-    body = list(card.body) if linear else [_unindent(line) for line in card.body]
+    body = list(card.body)
     while body and not body[-1].strip():
         body.pop()
     lines += ["## Description" if linear else "## Details", ""]
     lines += body if any(line.strip() for line in body) else ["None. The title is the whole task."]
     lines.append("")
-    for note in notes:
-        content = note["content"]
-        lines += [
-            f"## Linked note: {note['name']}",
-            "",
-            content.rstrip("\n") if content is not None else "The note was not found.",
-            "",
-        ]
     if plan and plan.strip():
         lines += ["## The current plan", "", "A plan exists. Revise it with the user.", "", plan.strip("\n"), ""]
     others = [entry for entry in files if entry["name"] != attachments.PLAN_NAME]
@@ -275,10 +265,7 @@ class Planner:
             if issue is None:
                 raise NotFoundError(f"No card {ref}")
             return issue_card(self.config, issue, set(), datetime.now(UTC), False, show_canceled=True), issue
-        card = self.store.show(ref)
-        if TEMP_REF.match(card.ref):
-            card = self.store.ensure_id(card.ref)
-        return card, None
+        return self.store.show(ref), None
 
     def plan(
         self,
@@ -343,12 +330,6 @@ class Planner:
             no_repository = record.get("mode") in (start_module.REPOLESS, start_module.NEW_REPO)
             new_repo_path = Path(record["new_repo_path"]) if record.get("new_repo_path") else None
             plan_file = attachments.plan_path(self.config, ref)
-            notes = []
-            if card.source != "linear":
-                try:
-                    notes = self.store.notes_for(card) or []
-                except HerdboardError:
-                    notes = []
             status = "" if no_repository else (_git(worktree, "status", "--short") or "")
             work_agent = False
             if record.get("agent_name"):
@@ -365,7 +346,6 @@ class Planner:
                     base=record.get("base") or "",
                     status=status,
                     work_agent=work_agent,
-                    notes=notes,
                     plan=attachments.plan_for_agent(self.store, ref),
                     files=attachments.listing(self.config, ref),
                     log=activity.read(self.config, ref),
@@ -378,7 +358,7 @@ class Planner:
             # Read before the launch: the agent can save the plan while `agent start` waits for it.
             plan_mtime = _mtime(plan_file)
             prompt = _one_line(
-                f"Plan herdboard card {ref}: {_title(card)}. Read the brief at {brief} first; "
+                f"Plan herdboard card {ref}: {card.title}. Read the brief at {brief} first; "
                 "it has the card and how to plan it with me."
             )
             created = herdr(

@@ -11,8 +11,9 @@ from support import linear_data
 from support.herdboard_board import SIZE, settle
 from support.herdboard_linear_write_board import LinearWriteBoardCase
 from support.herdboard_mouse import content_offset
+from support.herdboard_store import render_markdown
 
-TITLE = "Renovate the bathroom #home 📅 2026-11-02"
+TITLE = "Renovate the bathroom"
 
 
 def prompts(options: OptionList) -> list[str]:
@@ -23,7 +24,9 @@ class PromoteBoardCase(LinearWriteBoardCase):
     def setUp(self):
         super().setUp()
         self.fixtures["projects"].append({"id": "p-plat2", "name": "platform", "teams": [linear_data.ENG]})
-        self.target = self.store.add(self.repo_path, TITLE, "Todo", body=["Ask for two quotes"])
+        self.target = self.store.add(
+            self.repo_path, TITLE, "Todo", body=["Ask for two quotes"], tags=["home"], due="2026-11-02"
+        )
 
     def card(self, app, title):
         return next(c for d in app.columns for c in d.cards if title in c.title and c.source == "todo")
@@ -73,7 +76,7 @@ class PromoteBoardCase(LinearWriteBoardCase):
         return [r["variables"]["input"] for r in self.requests("IssueCreate")]
 
     def board_text(self):
-        return self.repo_path.read_text(encoding="utf-8")
+        return render_markdown(self.repo_path)
 
 
 class FormTests(PromoteBoardCase):
@@ -329,7 +332,7 @@ class PromoteTests(PromoteBoardCase):
             self.assertEqual(checklist["parentId"], parent["id"])
             self.assertEqual(sub_card["parentId"], parent["id"])
             card = self.card(app, "Renovate")
-            self.assertTrue(card.title.endswith("→ ENG-7"), card.title)
+            self.assertEqual(card.promoted, "ENG-7")
             self.assertEqual(card.column, "Done")
             self.assertTrue(card.checked)
             self.assertEqual(app.current_card().ref, card.ref)
@@ -346,7 +349,7 @@ class PromoteTests(PromoteBoardCase):
             (parent,) = self.creates()
             self.assertEqual(parent["teamId"], "t-ops")
             self.assertNotIn("projectId", parent)
-            self.assertIn("→ OPS-", self.card(app, "Renovate").title)
+            self.assertTrue(self.card(app, "Renovate").promoted.startswith("OPS-"))
 
     async def test_a_project_that_left_the_team_is_refused(self):
         app = self.make_linear_app()
@@ -388,13 +391,13 @@ class PromoteTests(PromoteBoardCase):
             await self.promote(pilot, "ENG", "p-plat")
             errors = [m for m, s in self.notifications(app) if s == "error"]
             self.assertTrue(any("Press T" in m for m in errors), errors)
-            self.assertNotIn("→", self.card(app, "Renovate").title)
+            self.assertIsNone(self.card(app, "Renovate").promoted)
             self.assertGreater(len(self.requests("ProjectIssues")), fetches)
             app._notifications.clear()
             # Other choices on the retry: the recorded plan wins, with a warning.
             await self.promote(pilot, "OPS", "p-mob")
             self.assertEqual(len([i for i in self.fixtures["issues"] if i["title"] == "Renovate the bathroom"]), 1)
-            self.assertTrue(self.card(app, "Renovate").title.endswith("→ ENG-7"))
+            self.assertEqual(self.card(app, "Renovate").promoted, "ENG-7")
             warnings = [m for m, s in self.notifications(app) if s == "warning"]
             self.assertTrue(any("team OPS" in m and "ENG" in m for m in warnings), warnings)
 
@@ -407,7 +410,7 @@ class PromoteTests(PromoteBoardCase):
             await self.promote(pilot, "ENG", "p-plat")
             app._notifications.clear()
             await self.promote(pilot, "ENG", None)
-            self.assertTrue(self.card(app, "Renovate").title.endswith("→ ENG-7"))
+            self.assertEqual(self.card(app, "Renovate").promoted, "ENG-7")
             self.assertEqual(self.creates()[-1]["projectId"], "p-plat")
             warnings = [m for m, s in self.notifications(app) if s == "warning"]
             self.assertIn("project none is ignored: the recorded plan uses project Platform", warnings)

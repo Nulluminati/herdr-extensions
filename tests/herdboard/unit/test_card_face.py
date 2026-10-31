@@ -88,15 +88,13 @@ class CardFaceTests(unittest.TestCase):
         self.assertIn(f"{board.ICONS['sub_cards']} 2/5 done", nerd)
 
     def test_the_footer_has_the_count_at_the_left_and_the_due_date_at_the_right(self):
-        item = card(title="Ship it 📅 2026-11-01", sub_cards=(1, 2))
+        item = card(due="2026-11-01", sub_cards=(1, 2))
         footer = rendered(board.CardWidget(item, False), width=30)[-1]
         self.assertTrue(footer.startswith("1/2 done"), footer)
         self.assertTrue(footer.rstrip().endswith("Due Nov 1"), footer)
 
     def test_the_status_row_shows_only_when_there_is_status(self):
-        self.assertEqual(
-            board.CardWidget(card(tags=["api"], title="Ship it #api"), False).plain, "Ship it  t123\n api "
-        )
+        self.assertEqual(board.CardWidget(card(tags=["api"]), False).plain, "Ship it  t123\n api ")
         widget = board.CardWidget(card(pr_state="open", parent_title="Billing"), False)
         self.assertEqual(widget.plain.splitlines()[-1], "PR open · ↳ Billing")
 
@@ -110,7 +108,6 @@ class CardFaceTests(unittest.TestCase):
         item = card(title="Improve Auto tab titles", ref="tveq", has_attachments=True)
         lines = rendered(board.CardWidget(item, False), width=20)
         self.assertEqual([line.rstrip() for line in lines], ["○         files tveq", "Improve Auto tab", "titles"])
-        self.assertEqual(rendered(board.CardWidget(card(ref="api:3"), False), width=20)[0].rstrip(), "○")
 
     def test_cards_have_no_menu_marker(self):
         for style in ("full", "compact"):
@@ -136,18 +133,13 @@ class CardFaceTests(unittest.TestCase):
                 first = rendered(board.CardWidget(item, False), width=width)[0].rstrip()
                 self.assertTrue(first.endswith(" t323"), first)
 
-    def test_cards_without_a_block_id_show_no_id(self):
-        for ref in ("api:3", "api:archive-2"):
-            with self.subTest(ref=ref):
-                self.assertEqual(board.CardWidget(card(ref=ref), False).plain, "Ship it")
-
     def test_chips_wrap_only_between_two_chips(self):
-        item = card(title="Ship it #enhancement #low #documentation", type="feature")
+        item = card(tags=["enhancement", "low", "documentation"], type="feature")
         lines = rendered(board.CardWidget(item, False), width=24)
         self.assertEqual([line.rstrip() for line in lines[2:]], ["feature  enhancement", " low   documentation"])
 
     def test_tags_after_the_type_badge_do_not_take_its_bold(self):
-        item = card(title="Ship it #api #low #documentation", type="feature")
+        item = card(tags=["api", "low", "documentation"], type="feature")
         widget = board.CardWidget(item, False)
         output = Console(width=24, color_system=None, file=StringIO())
         row = next(r for r in widget.content.renderables if isinstance(r, board.ChipRow))
@@ -391,20 +383,20 @@ class AgentGlyphTests(unittest.TestCase):
             review_status="blocked",
             planned=True,
         )
-        meta = board.DetailScreen(item, None)._meta().plain.splitlines()
+        meta = board.DetailScreen(item)._meta().plain.splitlines()
         self.assertIn("Agent        ◐ claude: working", meta)
         self.assertIn("Planner      ✎ ○ pi: idle", meta)
         self.assertIn("Agent review ⌕ × pi: blocked", meta)
         self.assertIn("Plan         ▤ planned", meta)
         for reviewed, words in (("reviewed", "✔ reviewed"), ("new commits", "↑ new commits since review")):
-            meta = board.DetailScreen(card(reviewed=reviewed), None)._meta().plain.splitlines()
+            meta = board.DetailScreen(card(reviewed=reviewed))._meta().plain.splitlines()
             self.assertIn(f"Agent review {words}", meta)
-        nerd = board.DetailScreen(card(planned=True), None, icon_style="nerd")._meta().plain
+        nerd = board.DetailScreen(card(planned=True), icon_style="nerd")._meta().plain
         self.assertIn("Plan         \uf0f6 planned", nerd)
 
     def test_the_detail_screen_names_an_agent_without_a_recorded_kind(self):
         item = card(worktree=True, agent_status="blocked")
-        self.assertIn("Agent        × agent: blocked", board.DetailScreen(item, None)._meta().plain.splitlines())
+        self.assertIn("Agent        × agent: blocked", board.DetailScreen(item)._meta().plain.splitlines())
 
     def test_the_help_screen_explains_each_glyph(self):
         icons = dict(next(entries for title, entries in board.HELP_SECTIONS if title == "Icons"))

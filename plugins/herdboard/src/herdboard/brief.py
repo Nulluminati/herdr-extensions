@@ -7,27 +7,11 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from .attachments import PLAN_NAME
-from .model import commit_type, split_title
+from .model import commit_type
 from .store import CardView
 
 # Longest sidebar token; Herdr's sidebar is narrow.
 TOKEN_WIDTH = 60
-
-
-def _title(card: CardView) -> str:
-    """The card's text without tags and the due date. Linear titles have neither."""
-    if card.source == "linear":
-        return card.title
-    return split_title(card.title)[0] or card.title
-
-
-def _unindent(line: str) -> str:
-    """A todo detail line without the one indent level that ties it to the card."""
-    if line.startswith("\t"):
-        return line[1:]
-    if line.startswith("    "):
-        return line[4:]
-    return line.lstrip(" ")
 
 
 def _one_line(text: str) -> str:
@@ -38,7 +22,6 @@ def _one_line(text: str) -> str:
 def brief_text(
     card: CardView,
     *,
-    notes: list[dict],
     repository: str,
     worktree: str,
     branch: str,
@@ -60,7 +43,7 @@ def brief_text(
     """
     linear = card.source == "linear"
     ref = card.ref
-    lines = [f"# {_title(card)}", ""]
+    lines = [f"# {card.title}", ""]
     if linear:
         lines.append(f"You are working on Linear issue `{ref}` (board `{card.board}`, column `{card.column}`).")
     else:
@@ -110,7 +93,7 @@ def brief_text(
             "",
         ]
 
-    body = list(card.body) if linear else [_unindent(line) for line in card.body]
+    body = list(card.body)
     while body and not body[-1].strip():
         body.pop()
     lines += ["## Description" if linear else "## Details", ""]
@@ -119,13 +102,6 @@ def brief_text(
     else:
         lines.append("None. The title is the whole task.")
     lines.append("")
-
-    if notes:
-        lines += ["## Linked notes", ""]
-        for note in notes:
-            content = note["content"]
-            lines += [f"### {note['name']}", ""]
-            lines += [content.rstrip("\n") if content is not None else "The note was not found.", ""]
 
     if plan and plan.strip():
         lines += [
@@ -224,7 +200,7 @@ def brief_text(
 def agent_message(card: CardView, brief: Path) -> str:
     """The agent's first message: one line, because Herdr rejects line breaks in arguments."""
     return _one_line(
-        f"Start work on herdboard card {card.ref}: {_title(card)}. "
+        f"Start work on herdboard card {card.ref}: {card.title}. "
         f"Read the brief at {brief} first; it has the details and how to update the card."
     )
 
@@ -233,7 +209,7 @@ def card_token(card: CardView) -> str:
     """The sidebar text for the card an agent works on: `▶ title · column`."""
     mark = "✓ " if card.checked else "▶ "
     ending = f" · {card.column}"
-    title = " ".join(_one_line(_title(card)).split())
+    title = " ".join(_one_line(card.title).split())
     room = TOKEN_WIDTH - len(mark) - len(ending)
     if len(title) > room:
         title = title[: room - 1].rstrip() + "…"

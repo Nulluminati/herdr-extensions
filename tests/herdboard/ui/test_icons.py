@@ -11,11 +11,11 @@ from support.herdboard_icons import ATTACHMENT, CALENDAR, TYPE_ICONS
 
 class IconBoardTests(BoardTestCase):
     async def test_modes_reach_cards_details_and_card_replacement_at_narrow_widths(self):
-        item = self.store.add(self.repo_path, "Ship it #type/feature #api 📅 2026-11-01", "Backlog")
+        item = self.store.add(self.repo_path, "Ship it", "Backlog", type="feature", tags=["api"], due="2026-11-01")
         source = self.root / "spec.md"
         source.write_text("# Spec\n")
         attachments.add(self.store, item.ref, source)
-        stored = self.repo_path.read_bytes()
+        stored = (self.repo_path / "board.toml").read_bytes()
         for width in (24, 80):
             for style in ("plain", "nerd"):
                 with self.subTest(width=width, style=style):
@@ -58,12 +58,12 @@ class IconBoardTests(BoardTestCase):
                         if style == "nerd":
                             self.assertIn(TYPE_ICONS["feature"], app.query_one(".card").plain)
                         self.store.edit(item.ref, body=[])
-        self.assertEqual(self.repo_path.read_bytes(), stored)
+        self.assertEqual((self.repo_path / "board.toml").read_bytes(), stored)
 
     async def test_round_tags_stay_independent_in_plain_mode(self):
         self.config.icon_style = "plain"
         self.config.tag_style = "round"
-        self.store.add(self.repo_path, "Ship it #api", "Backlog")
+        self.store.add(self.repo_path, "Ship it", "Backlog", tags=["api"])
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()

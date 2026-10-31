@@ -9,331 +9,180 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from herdboard import cli, kanban_md, mockup, plan, start
-from herdboard.config import Config
+from herdboard import activity, attachments, cli, mockup, plan, start
 from herdboard.model import ConflictError, HerdboardError, NotFoundError
 from herdboard.store import Store
+from support.herdboard_store import StoreTestCase, write_board
 
-SETTINGS = '%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%'
-HEAD = "---\n\nkanban-plugin: board\n\n---\n\n"
-
-
-def board_text(*columns: str, archive: str = "") -> str:
-    return HEAD + "".join(columns) + archive + "\n\n" + SETTINGS
+DONE = ("Done", [{"id": "t222", "title": "two"}])
 
 
-def col(title: str, *lines: str) -> str:
-    return f"## {title}\n\n" + "".join(f"{line}\n" for line in lines) + "\n\n"
-
-
-class ArchiveStoreTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.todos = Path(self.tmp.name) / "todos"
-        (self.todos / "projects").mkdir(parents=True)
-        self.store = Store(Config(todos_dir=self.todos), lock_timeout=0.2)
-
-    def put(self, text):
-        path = self.todos / "projects/p.md"
-        path.write_text(text)
-        return path
-
-    def test_archive_adds_the_obsidian_archive_section(self):
-        path = self.put(board_text(col("Todo", "- [ ] one ^t111"), col("Done", "**Complete**", "- [x] two ^t222")))
+class ArchiveStoreTest(StoreTestCase):
+    def test_archive_moves_the_folder_and_stamps_it(self):
+        path = self.put("p", [("Todo", [{"id": "t111", "title": "one"}]), DONE])
+        (path / "cards" / "t222" / "log.md").write_text("- log\n")
         card = self.store.archive("t222")
         self.assertTrue(card.archived)
         self.assertEqual(card.column, "Archive")
-        text = path.read_text()
-        self.assertIn("\n***\n\n## Archive\n\n- [x] two ^t222\n", text)
-        self.assertTrue(text.endswith(SETTINGS))
-        board = kanban_md.parse(text)
-        self.assertEqual([c.title for c in board.columns], ["Todo", "Done"])
-        self.assertEqual([c.title for c in board.archive.cards], ["two"])
+        self.assertFalse((path / "cards" / "t222").exists())
+        self.assertTrue((path / "archive" / "t222" / "log.md").is_file())
+        self.assertIn("archived = ", self.card_text(path, "t222", "archive"))
+        self.assertEqual(self.columns(path)["Done"], [])
         self.assertNotIn("t222", [c.ref for c in self.store.list_cards()])
 
-    def test_archive_appends_to_an_existing_archive(self):
-        path = self.put(
-            board_text(
-                col("Todo", "- [ ] one ^t111"),
-                col("Done"),
-                archive="***\n\n## Archive\n\n- [x] old ^t000\n\n",
-            )
-        )
+    def test_crash_before_the_board_write_hides_the_card_and_loses_nothing(self):
+        path = self.put("p", [("Todo", []), DONE])
+        with mock.patch.object(Store, "_write_board", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            self.store.archive("t222")
+        self.assertEqual([c.ref for c in self.store.list_cards()], [])
+        self.assertEqual([c.ref for c in self.store.archived_cards()], ["t222"])
+        self.assertTrue(path.exists())
+
+    def test_archived_cards_are_newest_first(self):
+        path = self.put("p", [("Todo", [{"id": "t111", "title": "one"}]), DONE])
         self.store.archive("t111")
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.block_id for c in board.archive.cards], ["t000", "t111"])
-        self.assertEqual(board.archive_lines, ["***", ""])
+        file = path / "archive" / "t111" / "card.md"
+        file.write_text(file.read_text().replace("archived = 20", "archived = 19"))
+        self.store.archive("t222")
+        self.assertEqual([c.ref for c in self.store.archived_cards()], ["t222", "t111"])
 
-    def test_archive_gives_an_id_to_a_card_without_one(self):
-        path = self.put(board_text(col("Todo", "- [ ] one"), col("Done")))
-        card = self.store.archive("p:1")
-        self.assertRegex(card.ref, r"^t[0-9a-z]{3}$")
-        self.assertEqual(kanban_md.parse(path.read_text()).archive.cards[0].block_id, card.ref)
-
-    def test_archived_cards_lists_the_archive(self):
-        self.put(
-            board_text(col("Todo", "- [ ] one ^t111"), archive="***\n\n## Archive\n\n- [x] old ^t000\n- [x] no id\n\n")
-        )
-        cards = self.store.archived_cards()
-        self.assertEqual(
-            [(c.ref, c.title, c.archived, c.column) for c in cards],
-            [("t000", "old", True, "Archive"), ("p:archive-2", "no id", True, "Archive")],
-        )
-
-    def test_snapshot_has_the_archive(self):
-        path = self.put(board_text(col("Todo"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
-        snap = self.store.snapshot(path)
-        self.assertEqual([c.title for c in snap.columns], ["Todo"])
-        self.assertEqual([c.ref for c in snap.archive.cards], ["t000"])
-        self.assertIsNone(self.store.snapshot(self.put(board_text(col("Todo")))).archive)
+    def test_snapshot_has_the_archive_only_when_asked(self):
+        path = self.put("p", [DONE], archive=[{"id": "t000", "title": "old"}])
+        self.assertIsNone(self.store.snapshot(path).archive)
+        self.assertEqual([c.ref for c in self.store.snapshot(path, archive=True).archive.cards], ["t000"])
 
     def test_show_finds_an_archived_card_only_when_asked(self):
-        self.put(board_text(col("Todo"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
-        card = self.store.show("t000", archived=True)
-        self.assertEqual((card.title, card.archived, card.column), ("old", True, "Archive"))
-        self.assertEqual(self.store.ensure_id("t000", archived=True).ref, "t000")
-        for call in (lambda: self.store.show("t000"), lambda: self.store.ensure_id("t000")):
-            with self.assertRaises(NotFoundError) as caught:
-                call()
-            self.assertEqual(caught.exception.code, "archived")
-
-    def test_show_and_ensure_id_take_an_archive_reference(self):
-        path = self.put(board_text(col("Done"), archive="***\n\n## Archive\n\n- [x] old ^t000\n- [x] no id\n\n"))
-        card = self.store.show("p:archive-2", archived=True)
-        self.assertEqual((card.ref, card.title, card.archived), ("p:archive-2", "no id", True))
-        with self.assertRaises(NotFoundError):
-            self.store.show("p:archive-2")
-        given = self.store.ensure_id("p:archive-2", archived=True)
-        self.assertRegex(given.ref, r"^t[0-9a-z]{3}$")
-        self.assertTrue(given.archived)
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.block_id for c in board.archive.cards], ["t000", given.ref])
-
-    def test_show_by_archive_reference_reads_the_board_once(self):
-        self.put(board_text(col("Done"), archive="***\n\n## Archive\n\n- [x] a\n- [x] b\n\n"))
-        original = self.store._read
-        calls = []
-
-        def shrinking(read_path):
-            board = original(read_path)
-            calls.append(read_path)
-            if len(calls) > 1:
-                del board.archive.items[board.archive.items.index(board.archive.cards[-1])]
-            return board
-
-        self.store._read = shrinking
-        self.assertEqual(self.store.show("p:archive-2", archived=True).title, "b")
-        self.store._read = original
-        with self.assertRaises(NotFoundError):
-            self.store.show("p:archive-3", archived=True)
-
-    def test_show_by_id_of_a_card_that_left_the_archive(self):
-        path = self.put(board_text(col("Done"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
-        other = self.todos / "projects/q.md"
-        other.write_text(board_text(col("Done")))
-        found = iter([path, other])
-        self.store._find_archived = lambda ref: next(found)
+        self.put("p", [DONE], archive=[{"id": "t000", "title": "old"}])
         with self.assertRaises(NotFoundError) as caught:
-            self.store.show("t000", archived=True)
-        self.assertEqual(caught.exception.code, "not_found")
+            self.store.show("t000")
+        self.assertEqual(caught.exception.code, "archived")
+        card = self.store.show("t000", archived=True)
+        self.assertEqual((card.title, card.archived), ("old", True))
+
+    def test_unarchive_moves_the_folder_to_the_done_column(self):
+        path = self.put("p", [("Todo", []), ("Done", [])], archive=[{"id": "t000", "title": "old"}])
+        card = self.store.unarchive("t000")
+        self.assertEqual((card.column, card.checked, card.archived), ("Done", True, False))
+        self.assertEqual(self.columns(path)["Done"], ["t000"])
+        self.assertNotIn("archived", self.card_text(path, "t000"))
+        self.assertFalse((path / "archive" / "t000").exists())
+
+    def test_crash_after_the_unarchive_rename_leaves_an_orphan_that_shows(self):
+        path = self.put("p", [("Todo", []), ("Done", [])], archive=[{"id": "t000", "title": "old"}])
+        with mock.patch.object(Store, "_write_board", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            self.store.unarchive("t000")
+        self.assertEqual([(c.ref, c.column) for c in self.store.list_cards()], [("t000", "Todo")])
+        self.assertTrue(path.exists())
 
     def test_unarchive_needs_a_done_column(self):
-        path = self.put(board_text(col("Todo"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
-        before = path.read_text()
-        with self.assertRaises(HerdboardError) as caught:
+        path = self.put("p", [("Todo", [])], archive=[{"id": "t000", "title": "old"}])
+        with self.assertRaises(HerdboardError):
             self.store.unarchive("t000")
-        self.assertIn("no done column", str(caught.exception))
-        self.assertEqual(path.read_text(), before)
+        self.assertTrue((path / "archive" / "t000").exists())
 
-    def test_archive_by_temporary_reference_checks_the_card_id(self):
-        self.put(board_text(col("Todo", "- [ ] one ^t111"), col("Done")))
-        with self.assertRaises(HerdboardError) as caught:
-            self.store.archive("p:1", blocked=lambda ref: "its agent still runs" if ref == "t111" else None)
-        self.assertEqual(caught.exception.code, "card_active")
-
-    def test_unarchive_a_card_without_an_id_by_its_archive_reference(self):
-        path = self.put(
-            board_text(col("Done", "**Complete**"), archive="***\n\n## Archive\n\n- [x] old ^t000\n- [ ] no id\n\n")
-        )
-        card = self.store.unarchive("p:archive-2")
-        self.assertRegex(card.ref, r"^t[0-9a-z]{3}$")
-        self.assertEqual((card.title, card.column, card.checked), ("no id", "Done", True))
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.block_id for c in board.column("Done").cards], [card.ref])
+    def test_unarchive_of_a_card_that_is_not_archived(self):
+        self.put("p", [DONE])
         with self.assertRaises(NotFoundError):
-            self.store.unarchive("p:archive-5")
-
-    def test_unarchive_by_archive_reference_stops_when_the_card_changed(self):
-        self.put(board_text(col("Done", "**Complete**"), archive="***\n\n## Archive\n\n- [x] no id\n\n"))
-        original = self.store._read
-
-        def changed(read_path):
-            board = original(read_path)
-            if self.store.lock_path.exists():
-                board.archive.cards[0].lines[0] = "- [x] edited"
-            return board
-
-        self.store._read = changed
-        with self.assertRaises(ConflictError):
-            self.store.unarchive("p:archive-1")
+            self.store.unarchive("t222")
 
     def test_unarchive_of_a_sub_card_with_an_archived_parent(self):
         path = self.put(
-            board_text(
-                col("Done", "**Complete**"),
-                archive="***\n\n## Archive\n\n- [x] parent ^t111\n- [x] child [[#^t111]] ^t222\n\n",
-            )
+            "p",
+            [("Done", [])],
+            archive=[{"id": "t111", "title": "parent"}, {"id": "t222", "title": "child", "parent": "t111"}],
         )
         self.assertEqual(self.store.archived_parent("t222").ref, "t111")
         self.assertIsNone(self.store.archived_parent("t111"))
-        before = path.read_text()
         with self.assertRaises(HerdboardError) as caught:
             self.store.unarchive("t222")
         self.assertEqual(caught.exception.code, "parent_archived")
-        self.assertIn("t111", str(caught.exception))
-        self.assertEqual(path.read_text(), before)
-        card = self.store.unarchive("t222", with_parent=True)
-        self.assertEqual(card.column, "Done")
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.block_id for c in board.column("Done").cards], ["t111", "t222"])
-        self.assertEqual(board.archive.cards, [])
+        self.store.unarchive("t222", with_parent=True)
+        self.assertEqual(self.columns(path)["Done"], ["t111", "t222"])
 
     def test_commands_refuse_an_archived_card(self):
-        path = self.put(board_text(col("Todo"), col("Done"), archive="***\n\n## Archive\n\n- [x] old ^t000\n\n"))
-        before = path.read_text()
+        self.put("p", [("Todo", []), ("Done", [])], archive=[{"id": "t000", "title": "old"}])
         for call in (
             lambda: self.store.move("t000", "Todo"),
             lambda: self.store.done("t000"),
+            lambda: self.store.edit("t000", title="x"),
             lambda: self.store.delete("t000"),
             lambda: self.store.archive("t000"),
         ):
-            with self.assertRaises(NotFoundError) as caught:
+            with self.subTest(call=call), self.assertRaises(NotFoundError) as caught:
                 call()
             self.assertEqual(caught.exception.code, "archived")
-            self.assertIn("unarchive", str(caught.exception))
-        self.assertEqual(path.read_text(), before)
-
-    def test_unarchive_moves_the_card_to_the_done_column(self):
-        path = self.put(
-            board_text(
-                col("Todo"),
-                col("Done", "**Complete**", "- [x] two ^t222"),
-                archive="***\n\n## Archive\n\n- [ ] old ^t000\n\n",
-            )
-        )
-        card = self.store.unarchive("t000")
-        self.assertEqual((card.column, card.checked, card.archived), ("Done", True, False))
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.block_id for c in board.column("Done").cards], ["t222", "t000"])
-        self.assertEqual(board.archive.cards, [])
-
-    def test_unarchive_of_a_card_that_is_not_archived(self):
-        self.put(board_text(col("Todo", "- [ ] one ^t111"), col("Done")))
-        with self.assertRaises(NotFoundError):
-            self.store.unarchive("t111")
-        with self.assertRaises(NotFoundError):
-            self.store.unarchive("tzzz")
 
     def test_archive_refuses_a_card_that_the_check_blocks(self):
-        path = self.put(board_text(col("Todo", "- [ ] one ^t111"), col("Done")))
-        before = path.read_text()
-        seen = []
-
-        def blocked(ref):
-            seen.append(ref)
-            return "its worktree still exists"
-
+        path = self.put("p", [DONE])
         with self.assertRaises(HerdboardError) as caught:
-            self.store.archive("t111", blocked=blocked)
+            self.store.archive("t222", blocked=lambda ref: "its agent still runs")
         self.assertEqual(caught.exception.code, "card_active")
-        self.assertIn("its worktree still exists", str(caught.exception))
-        self.assertEqual(seen, ["t111"])
-        self.assertEqual(path.read_text(), before)
+        self.assertTrue((path / "cards" / "t222").exists())
 
     def test_archive_refuses_a_parent_with_sub_cards_on_the_board(self):
-        self.put(board_text(col("Todo", "- [ ] parent ^t111", "- [ ] child [[#^t111]] ^t222"), col("Done")))
+        self.put("p", [("Todo", [{"id": "t111", "title": "p"}, {"id": "t222", "title": "c", "parent": "t111"}])])
         with self.assertRaises(HerdboardError) as caught:
             self.store.archive("t111")
         self.assertEqual(caught.exception.code, "has_sub_cards")
-        self.store.archive("t222")
-        self.store.archive("t111")
 
     def test_archive_done_archives_the_done_column(self):
         path = self.put(
-            board_text(
-                col("Todo", "- [ ] open ^t111"),
-                col("Done", "**Complete**", "- [x] a ^t222", "- [x] b", "\tdetail", "- [x] busy ^t333"),
-            )
+            "p",
+            [
+                ("Todo", [{"id": "t111", "title": "open"}]),
+                ("Done", [{"id": "t222", "title": "a"}, {"id": "t333", "title": "b"}]),
+            ],
         )
-        archived, skipped = self.store.archive_done(
-            path, blocked=lambda ref: "its agent still runs" if ref == "t333" else None
-        )
-        self.assertEqual([c.title for c in archived], ["a", "b"])
-        self.assertEqual([(c.ref, reason) for c, reason in skipped], [("t333", "its agent still runs")])
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.title for c in board.column("Done").cards], ["busy"])
-        self.assertEqual([c.title for c in board.archive.cards], ["a", "b"])
-        self.assertEqual(board.archive.cards[1].body, ["\tdetail"])
-        self.assertRegex(board.archive.cards[1].block_id, r"^t[0-9a-z]{3}$")
+        archived, skipped = self.store.archive_done(path, blocked=lambda ref: "busy" if ref == "t333" else None)
+        self.assertEqual([c.ref for c in archived], ["t222"])
+        self.assertEqual([(c.ref, why) for c, why in skipped], [("t333", "busy")])
+        self.assertEqual(self.columns(path)["Done"], ["t333"])
+        self.assertTrue((path / "archive" / "t222").is_dir())
 
     def test_archive_done_keeps_a_parent_whose_sub_cards_stay(self):
         path = self.put(
-            board_text(
-                col("Todo", "- [ ] open child [[#^t111]] ^t444"),
-                col(
-                    "Done",
-                    "**Complete**",
-                    "- [x] parent ^t111",
-                    "- [x] other ^t555",
-                    "- [x] done child [[#^t555]] ^t666",
-                ),
-            )
+            "p",
+            [
+                ("Todo", [{"id": "t111", "title": "kid", "parent": "t222"}]),
+                ("Done", [{"id": "t222", "title": "parent"}]),
+            ],
         )
         archived, skipped = self.store.archive_done(path)
-        self.assertEqual([c.ref for c in archived], ["t555", "t666"])
-        self.assertEqual(
-            [(c.ref, reason) for c, reason in skipped], [("t111", "it has sub-cards that stay on the board")]
-        )
-        board = kanban_md.parse(path.read_text())
-        self.assertEqual([c.block_id for c in board.column("Done").cards], ["t111"])
+        self.assertEqual(archived, [])
+        self.assertEqual([(c.ref, why) for c, why in skipped], [("t222", "it has sub-cards that stay on the board")])
 
     def test_archive_done_on_an_empty_done_column(self):
-        path = self.put(board_text(col("Todo", "- [ ] open ^t111"), col("Done", "**Complete**")))
-        before = path.read_text()
+        path = self.put("p", [("Done", [])])
         self.assertEqual(self.store.archive_done(path), ([], []))
-        self.assertEqual(path.read_text(), before)
-
-    def test_archive_done_checks_sub_cards_again_under_the_lock(self):
-        path = self.put(board_text(col("Todo"), col("Done", "**Complete**", "- [x] parent ^t111", "- [x] other ^t222")))
-        original = self.store._read
-
-        def child_added(read_path):
-            board = original(read_path)
-            if self.store.lock_path.exists():
-                kanban_md.insert_card(board.column("Todo"), kanban_md.Card(["- [ ] new child [[#^t111]] ^t333"]))
-            return board
-
-        self.store._read = child_added
-        archived, skipped = self.store.archive_done(path)
-        self.assertEqual([c.ref for c in archived], ["t222"])
-        self.assertEqual(
-            [(c.ref, reason) for c, reason in skipped], [("t111", "it has sub-cards that stay on the board")]
-        )
 
     def test_archive_done_stops_when_a_card_changed(self):
-        path = self.put(board_text(col("Done", "**Complete**", "- [x] a ^t222")))
-        original = self.store._read
+        path = self.put("p", [DONE])
+        store = self.store
 
-        def changed(read_path):
-            board = original(read_path)
-            if self.store.lock_path.exists():
-                board.columns[0].cards[0].lines[0] = "- [x] edited ^t222"
-            return board
+        def blocked(ref):
+            store.edit(ref, title="changed")
+            return None
 
-        self.store._read = changed
         with self.assertRaises(ConflictError):
-            self.store.archive_done(path)
+            store.archive_done(path, blocked=blocked)
+        self.assertEqual(self.columns(path)["Done"], ["t222"])
+
+    def test_a_log_entry_for_an_archived_card_lands_in_its_folder(self):
+        path = self.put("p", [DONE])
+        self.store.archive("t222")
+        activity.append(self.store, "t222", "note", "user")
+        self.assertIn("note", (path / "archive" / "t222" / "log.md").read_text())
+        self.assertEqual([e["message"] for e in activity.read(self.config, "t222")], ["note"])
+
+    def test_attachments_move_with_archive_and_unarchive(self):
+        path = self.put("p", [DONE])
+        source = self.todos.parent / "spec.md"
+        source.write_text("spec")
+        attachments.add(self.store, "t222", source)
+        self.store.archive("t222")
+        self.assertEqual([e["name"] for e in attachments.listing(self.config, "t222")], ["spec.md"])
+        self.store.unarchive("t222")
+        self.assertTrue((path / "cards" / "t222" / "attachments" / "spec.md").is_file())
 
 
 class ArchiveBlockerTest(unittest.TestCase):
@@ -385,17 +234,18 @@ class ArchiveCliTest(unittest.TestCase):
         root = Path(self.tmp.name)
         self.enterContext(mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "state")}))
         self.todos = root / "todos"
-        (self.todos / "projects").mkdir(parents=True)
+        self.todos.mkdir()
         self.config = root / "config.toml"
         self.config.write_text(f'todos_dir = "{self.todos}"\n')
         self.plain = root / "plain"
         self.plain.mkdir()
-        self.board = self.todos / "projects/p.md"
-        self.board.write_text(
-            board_text(
-                col("Todo", "- [ ] open ^t111"),
-                col("Done", "**Complete**", "- [x] a ^t222", "- [x] b ^t333"),
-            )
+        self.board = write_board(
+            self.todos,
+            "p",
+            [
+                ("Todo", [{"id": "t111", "title": "open"}]),
+                ("Done", [{"id": "t222", "title": "a"}, {"id": "t333", "title": "b"}]),
+            ],
         )
         self.blocked = self.enterContext(mock.patch.object(start, "archive_blocker", return_value=None))
 
@@ -473,12 +323,12 @@ class ArchiveCliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         result = json.loads(out.getvalue())
         self.assertEqual(result["archived"], [])
-        self.assertTrue((self.todos / "projects/acme-api.md").exists())
-        self.assertFalse((self.todos / "inbox.md").exists())
+        self.assertTrue((self.todos / "boards/acme-api/board.toml").exists())
+        self.assertFalse((self.todos / "boards/inbox").exists())
 
     def test_archive_done_needs_a_done_column(self):
-        self.board.write_text(board_text(col("Todo", "- [ ] open ^t111")))
-        error = self.run_json("archive", "--done", "--board", "p", expect=1)["error"]
+        write_board(self.todos, "q", [("Todo", [])])
+        error = self.run_json("archive", "--done", "--board", "q", expect=1)["error"]
         self.assertIn("no done column", error["message"])
 
     def test_list_archived_refuses_linear_and_column_filters(self):
@@ -487,22 +337,27 @@ class ArchiveCliTest(unittest.TestCase):
                 error = self.run_json("list", "--board", "p", "--archived", *args, expect=1)["error"]
                 self.assertEqual(error["code"], "usage")
 
-    def test_unarchive_declined_in_a_terminal(self):
-        self.board.write_text(
-            board_text(
-                col("Done", "**Complete**"),
-                archive="***\n\n## Archive\n\n- [x] parent ^t111\n- [x] child [[#^t111]] ^t222\n\n",
-            )
+    def family(self):
+        write_board(
+            self.todos,
+            "f",
+            [("Done", [])],
+            archive=[{"id": "t444", "title": "parent"}, {"id": "t555", "title": "child", "parent": "t444"}],
         )
-        before = self.board.read_text()
+        return self.todos / "boards" / "f"
+
+    def test_unarchive_declined_in_a_terminal(self):
+        board = self.family()
+        before = (board / "board.toml").read_text()
         with (
             mock.patch.object(cli, "_interactive", return_value=True),
             mock.patch.object(sys, "stdin", io.StringIO("n\n")),
         ):
-            out, err = self.run_cli("unarchive", "t222")
+            out, err = self.run_cli("unarchive", "t555")
         self.assertEqual(out, "Nothing unarchived.\n")
-        self.assertIn("t111", err)
-        self.assertEqual(self.board.read_text(), before)
+        self.assertIn("t444", err)
+        self.assertEqual((board / "board.toml").read_text(), before)
+        self.assertTrue((board / "archive" / "t555").is_dir())
 
     def test_list_archived(self):
         self.run_cli("archive", "t222")
@@ -528,25 +383,19 @@ class ArchiveCliTest(unittest.TestCase):
         self.assertFalse((start.state_dir() / "starts.json").exists())
 
     def test_unarchive_of_a_sub_card_asks_to_unarchive_the_parent(self):
-        self.board.write_text(
-            board_text(
-                col("Done", "**Complete**"),
-                archive="***\n\n## Archive\n\n- [x] parent ^t111\n- [x] child [[#^t111]] ^t222\n\n",
-            )
-        )
-        error = self.run_json("unarchive", "t222", expect=1)["error"]
+        self.family()
+        error = self.run_json("unarchive", "t555", expect=1)["error"]
         self.assertEqual(error["code"], "confirmation_required")
-        self.assertIn("t111", error["message"])
-        out, _ = self.run_cli("unarchive", "t222", "--yes")
-        self.assertEqual(out, "t222 → Done (p)\nAlso unarchived the parent t111.\n")
-        self.assertEqual(self.run_json("show", "t111")["log"][-1]["message"], "Unarchived.")
+        self.assertIn("t444", error["message"])
+        out, _ = self.run_cli("unarchive", "t555", "--yes")
+        self.assertEqual(out, "t555 → Done (f)\nAlso unarchived the parent t444.\n")
+        self.assertEqual(self.run_json("show", "t444")["log"][-1]["message"], "Unarchived.")
 
-    def test_show_and_log_take_an_archive_reference(self):
-        self.board.write_text(board_text(col("Done", "**Complete**"), archive="***\n\n## Archive\n\n- [x] no id\n\n"))
-        self.assertEqual(self.run_json("show", "p:archive-1")["card"]["title"], "no id")
-        ref = self.run_json("log", "p:archive-1", "note")["ref"]
-        self.assertRegex(ref, r"^t[0-9a-z]{3}$")
-        self.assertEqual(self.run_json("show", ref)["log"][-1]["message"], "note")
+    def test_show_and_log_take_an_archived_card(self):
+        self.run_cli("archive", "t111")
+        self.assertEqual(self.run_json("show", "t111")["card"]["title"], "open")
+        self.run_json("log", "t111", "note")
+        self.assertEqual(self.run_json("show", "t111")["log"][-1]["message"], "note")
 
     def test_linear_cards_are_not_archived(self):
         for command in ("archive", "unarchive"):

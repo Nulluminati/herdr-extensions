@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from unittest import mock
 
@@ -47,13 +48,13 @@ class AutoInitTests(CliTestCase):
 
     def test_existing_board_does_not_prompt_or_change(self):
         path = Path(self.init_repo_board())
-        before = path.read_bytes()
+        before = (path / "board.toml").read_bytes()
         with (
             mock.patch("herdboard.cli._interactive", return_value=True),
             mock.patch("builtins.input", side_effect=AssertionError("Unexpected prompt")),
         ):
             self.run_cli("list", "--source", "todo", directory=self.repo)
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual((path / "board.toml").read_bytes(), before)
 
     def test_invalid_merge_repeats_question(self):
         with (
@@ -142,7 +143,7 @@ class AutoInitTests(CliTestCase):
             ):
                 self.run_cli(command, *arguments, directory=self.repo)
                 self.assertIsNotNone(self.board())
-                self.board().unlink()
+                shutil.rmtree(self.board())
 
     def test_missing_board_recovery_does_not_recommend_manual_init(self):
         with mock.patch.object(cli, "_ensure_repo_board"):

@@ -119,7 +119,7 @@ class OfflineTests(LinearWriteBoardCase):
         async with app.run_test(size=SIZE) as pilot:
             await settle(pilot)
         self.endpoint = DEAD
-        before = self.repo_path.read_text()
+        before = self.markdown(self.repo_path)
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await settle(pilot)
@@ -132,7 +132,7 @@ class OfflineTests(LinearWriteBoardCase):
                 self.assertIn((OFFLINE, "warning"), self.notifications(app))
             self.assertEqual(self.requests("IssueUpdate"), [])
             self.assertEqual(self.requests("IssueForWrite"), [])
-            self.assertEqual(self.repo_path.read_text(), before)
+            self.assertEqual(self.markdown(self.repo_path), before)
             self.assertEqual(self.column_of(app, "ENG-1"), "Todo")
             self.assertFalse(app.writing)
 

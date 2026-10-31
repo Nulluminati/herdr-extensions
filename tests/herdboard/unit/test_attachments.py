@@ -1,4 +1,4 @@
-"""Card attachments: large documents, such as a plan, in a hidden folder next to the activity log."""
+"""Card attachments: large documents, such as a plan, in the card folder next to the activity log."""
 
 import tempfile
 import unittest
@@ -10,6 +10,7 @@ from herdboard.config import load_config
 from herdboard.model import HerdboardError, NotFoundError
 from herdboard.store import Store
 from support.herdboard_cli import CliTestCase
+from support.herdboard_store import write_board
 
 
 class AttachmentTests(unittest.TestCase):
@@ -20,26 +21,31 @@ class AttachmentTests(unittest.TestCase):
         config = self.root / "config.toml"
         config.write_text(f'todos_dir = "{self.root / "todos"}"\n')
         self.store = Store(load_config(config))
-        self.folder = self.root / "todos" / ".herdboard" / "attachments"
+        todos = self.root / "todos"
+        cards = [{"id": "t3m9", "title": "One"}, {"id": "tabc", "title": "Two"}]
+        board = write_board(todos, "inbox", [("Todo", cards)])
+        self.homes = {"t3m9": board / "cards" / "t3m9", "tabc": board / "cards" / "tabc"}
+        self.homes["ENG-12"] = todos / ".herdboard" / "linear" / "ENG-12"
+        self.board = board
         self.doc = self.root / "spec.md"
         self.doc.write_text("# Spec\n\nLong text.\n", encoding="utf-8")
 
     def test_add_copies_the_file_into_the_card_folder(self):
         added = attachments.add(self.store, "t3m9", self.doc)
-        path = self.folder / "t3m9" / "spec.md"
+        path = self.homes["t3m9"] / "attachments" / "spec.md"
         self.assertEqual(added, {"name": "spec.md", "path": str(path), "size": 19})
         self.assertEqual(path.read_text(encoding="utf-8"), "# Spec\n\nLong text.\n")
         self.assertTrue(self.doc.exists())
 
     def test_add_takes_another_name(self):
         attachments.add(self.store, "ENG-12", self.doc, name="design.md")
-        self.assertTrue((self.folder / "ENG-12" / "design.md").is_file())
+        self.assertTrue((self.homes["ENG-12"] / "attachments" / "design.md").is_file())
 
     def test_add_replaces_an_attachment_with_the_same_name(self):
         attachments.add(self.store, "t3m9", self.doc)
         self.doc.write_text("Short.\n", encoding="utf-8")
         attachments.add(self.store, "t3m9", self.doc)
-        self.assertEqual((self.folder / "t3m9" / "spec.md").read_text(encoding="utf-8"), "Short.\n")
+        self.assertEqual((self.homes["t3m9"] / "attachments" / "spec.md").read_text(encoding="utf-8"), "Short.\n")
 
     def test_listing_is_sorted_by_name(self):
         attachments.add(self.store, "t3m9", self.doc, name="z.md")
@@ -76,7 +82,8 @@ class AttachmentTests(unittest.TestCase):
         self.assertIsNone(attachments.plan_text(self.store.config, "t3m9"))
         attachments.add(self.store, "t3m9", self.doc, name="plan.md")
         self.assertEqual(attachments.plan_text(self.store.config, "t3m9"), "# Spec\n\nLong text.\n")
-        self.assertEqual(attachments.plan_path(self.store.config, "t3m9"), self.folder / "t3m9" / "plan.md")
+        plan = self.homes["t3m9"] / "attachments" / "plan.md"
+        self.assertEqual(attachments.plan_path(self.store.config, "t3m9"), plan)
 
     def test_a_plan_that_is_not_utf8_text_is_refused(self):
         image = self.root / "photo.png"
@@ -93,8 +100,8 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(attachments.plan_text(self.store.config, "t3m9"), "# Spec\n\nLong text.\n")
 
     def test_a_plan_for_an_agent_that_cannot_be_read_is_left_out_with_a_warning(self):
-        plan = self.folder / "t3m9" / "plan.md"
-        plan.parent.mkdir(parents=True)
+        plan = self.homes["t3m9"] / "attachments" / "plan.md"
+        plan.parent.mkdir()
         plan.write_bytes(b"\xff\xfe")
         self.assertIsNone(attachments.plan_for_agent(self.store, "t3m9"))
         message = activity.read(self.store.config, "t3m9")[-1]["message"]
@@ -131,10 +138,21 @@ class AttachmentTests(unittest.TestCase):
     def test_cards_with_files_names_the_cards_that_have_an_attachment(self):
         attachments.add(self.store, "t3m9", self.doc)
         attachments.add(self.store, "ENG-12", self.doc)
-        (self.folder / "tempt").mkdir()
-        (self.folder / "tempt" / ".spec.md.x1y2").write_text("partial")
-        (self.folder / "tgon").mkdir()
+        (self.board / "cards" / "tempt" / "attachments").mkdir(parents=True)
+        (self.board / "cards" / "tempt" / "attachments" / ".spec.md.x1y2").write_text("partial")
+        (self.board / "cards" / "tgon" / "attachments").mkdir(parents=True)
         self.assertEqual(attachments.cards_with_files(self.store.config), {"t3m9", "ENG-12"})
+
+    def test_attachments_follow_the_card_into_the_archive(self):
+        attachments.add(self.store, "t3m9", self.doc)
+        self.store.archive("t3m9")
+        self.assertEqual([a["name"] for a in attachments.listing(self.store.config, "t3m9")], ["spec.md"])
+        self.assertEqual(attachments.cards_with_files(self.store.config), {"t3m9"})
+
+    def test_a_todo_without_a_card_gets_no_attachment(self):
+        with self.assertRaises(NotFoundError):
+            attachments.add(self.store, "tzzz", self.doc)
+        self.assertEqual(attachments.listing(self.store.config, "tzzz"), [])
 
     def test_cards_with_files_is_empty_without_an_attachments_folder(self):
         self.assertEqual(attachments.cards_with_files(self.store.config), set())

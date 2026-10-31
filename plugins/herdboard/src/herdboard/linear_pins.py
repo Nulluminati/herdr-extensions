@@ -1,10 +1,10 @@
-"""Single Linear issues pinned to a repository board, kept in frontmatter.
+"""Single Linear issues pinned to a repository board, kept in `board.toml`.
 
-The pins live under `linear-issues` as YAML:
+The pins are an array of tables under `linear-issues`:
 
-    linear-issues:
-    - id: <issue id>
-      identifier: ENG-123
+    [[linear-issues]]
+    id = "<issue id>"
+    identifier = "ENG-123"
 
 The board fetches pinned issues by id, because an identifier changes when an issue
 moves to another team. The identifier is for people who read the file.
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .linear import LinearError
-from .linear_links import _text, frontmatter_list, replace_block
+from .linear_links import _text, table_list
 from .model import NotFoundError
 
 if TYPE_CHECKING:
@@ -32,21 +32,17 @@ class IssuePin:
     id: str
     identifier: str
 
-    def to_yaml(self) -> dict:
+    def to_dict(self) -> dict:
         return {"id": self.id, "identifier": self.identifier}
 
 
-def parse_pins(lines: list[str]) -> list[IssuePin]:
+def parse_pins(raw: list | None) -> list[IssuePin]:
+    """The pinned issues in the `linear-issues` tables of a board."""
     pins = []
-    for index, item in enumerate(frontmatter_list(lines, KEY), start=1):
+    for index, item in enumerate(table_list(raw, KEY), start=1):
         where = f"entry {index}"
         pins.append(IssuePin(_text(item, where, "id", KEY), _text(item, where, "identifier", KEY)))
     return pins
-
-
-def replace_pins(text: str, pins: list[IssuePin]) -> str:
-    """`text` with the `linear-issues` block of the frontmatter set to `pins`."""
-    return replace_block(text, KEY, [pin.to_yaml() for pin in pins])
 
 
 def add_pin(store: Store, board: Path, issue: dict) -> tuple[IssuePin, bool]:
@@ -81,7 +77,7 @@ def pin_issue(store: Store, source: LinearSource, board: Path, ref: str) -> tupl
 def unpin_issue(store: Store, board: Path, ref: str) -> IssuePin:
     """Remove the pin of the issue `ref` (an identifier or an issue id) from a board.
 
-    This works offline: it changes only the board file.
+    This works offline: it changes only the board's `board.toml`.
     """
     wanted = ref.strip().casefold()
     removed: list[IssuePin] = []

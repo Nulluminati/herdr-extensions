@@ -1,4 +1,4 @@
-"""Sub-cards: a todo that points to a parent todo on the same board with `[[#^id]]`."""
+"""Sub-cards: a todo whose `parent` field names a parent todo on the same board."""
 
 import tempfile
 import unittest
@@ -7,25 +7,11 @@ from pathlib import Path
 from herdboard import cli, merge
 from herdboard.board import card_matches, mark_family
 from herdboard.config import Config
-from herdboard.model import HerdboardError, parent_of, split_title, with_parent
+from herdboard.model import HerdboardError
 from herdboard.store import CardView, Store
 from support.herdboard_cli import CliTestCase
 from support.herdboard_merge import MergeTestCase
-
-
-class ParentLinkTests(unittest.TestCase):
-    def test_the_link_names_the_parent(self):
-        self.assertEqual(parent_of("Add invoice table [[#^t5aa]] #api"), "t5aa")
-        self.assertIsNone(parent_of("Add invoice table [[Notes]]"))
-        self.assertIsNone(parent_of("Add invoice table [[#Heading]]"))
-
-    def test_with_parent_sets_replaces_and_removes_the_link(self):
-        self.assertEqual(with_parent("Add table #api", "t5aa"), "Add table #api [[#^t5aa]]")
-        self.assertEqual(with_parent("Add table [[#^t5aa]] #api", "t9zz"), "Add table #api [[#^t9zz]]")
-        self.assertEqual(with_parent("Add table [[#^t5aa]] #api", None), "Add table #api")
-
-    def test_the_link_is_not_part_of_the_display_title(self):
-        self.assertEqual(split_title("Add table [[#^t5aa]] #api 📅 2026-11-01"), ("Add table", ["api"], "2026-11-01"))
+from support.herdboard_store import write_board
 
 
 def linear_card(ref, title, parent=None, checked=False):
@@ -74,28 +60,23 @@ class StoreTestCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.config = Config(todos_dir=self.root / "todos", vault_root=self.root / "vault")
-        (self.root / "vault").mkdir()
+        self.config = Config(todos_dir=self.root / "todos")
         self.store = Store(self.config)
         self.inbox = self.store.ensure_inbox()
-        self.parent = self.store.add(self.inbox, "Billing v2 #feature")
+        self.parent = self.store.add(self.inbox, "Billing v2", tags=["feature"])
 
 
 class StoreParentTests(StoreTestCase):
     def test_add_with_a_parent(self):
         child = self.store.add(self.inbox, "Add invoice table", parent=self.parent.ref)
         self.assertEqual(child.parent, self.parent.ref)
-        self.assertEqual(child.title, f"Add invoice table [[#^{self.parent.ref}]]")
-        self.assertIn(
-            f"- [ ] Add invoice table [[#^{self.parent.ref}]] ^{child.ref}", self.inbox.read_text(encoding="utf-8")
-        )
+        self.assertEqual(child.title, "Add invoice table")
+        card_text = (self.inbox / "cards" / child.ref / "card.md").read_text(encoding="utf-8")
+        self.assertIn(f'parent = "{self.parent.ref}"', card_text)
         self.assertIsNone(self.parent.parent)
 
     def test_the_parent_must_be_on_the_same_board(self):
-        projects = self.store.projects_dir
-        projects.mkdir(parents=True, exist_ok=True)
-        board = projects / "other.md"
-        board.write_text("---\nkanban-plugin: board\n---\n\n## Todo\n\n", encoding="utf-8")
+        board = write_board(self.config.todos_dir, "other", [("Todo", [])])
         with self.assertRaises(HerdboardError) as raised:
             self.store.add(board, "Elsewhere", parent=self.parent.ref)
         self.assertEqual(raised.exception.code, "parent_missing")
@@ -116,21 +97,17 @@ class StoreParentTests(StoreTestCase):
         self.assertEqual(raised.exception.code, "usage")
 
     def test_set_and_remove_a_parent(self):
-        child = self.store.add(self.inbox, "Child #api")
+        child = self.store.add(self.inbox, "Child")
         self.assertEqual(self.store.set_parent(child.ref, self.parent.ref).parent, self.parent.ref)
         removed = self.store.set_parent(child.ref, None)
         self.assertIsNone(removed.parent)
-        self.assertEqual(removed.title, "Child #api")
+        self.assertEqual(removed.title, "Child")
 
     def test_a_title_edit_keeps_the_parent(self):
         child = self.store.add(self.inbox, "Child", parent=self.parent.ref)
-        edited = self.store.edit(child.ref, title="Child renamed #api")
+        edited = self.store.edit(child.ref, title="Child renamed")
         self.assertEqual(edited.parent, self.parent.ref)
-        self.assertEqual(edited.title, f"Child renamed #api [[#^{self.parent.ref}]]")
-
-    def test_the_link_is_not_a_note(self):
-        child = self.store.add(self.inbox, "Child [[Real note]]", parent=self.parent.ref)
-        self.assertEqual([note["name"] for note in self.store.notes_for(child)], ["Real note"])
+        self.assertEqual(edited.title, "Child renamed")
 
     def test_children_of_a_card(self):
         first = self.store.add(self.inbox, "One", parent=self.parent.ref)
@@ -148,7 +125,7 @@ class ParentCliTests(CliTestCase):
         parent = self.run_json("add", "Billing v2", directory=self.repo)["card"]
         child = self.add("Add invoice table", "--parent", parent["ref"])
         self.assertEqual((child["board"], child["parent"]), (parent["board"], parent["ref"]))
-        self.assertTrue(board.endswith(".md"))
+        self.assertTrue(board.endswith("acme-api"))
 
     def test_edit_parent_and_no_parent(self):
         parent = self.add("Billing v2")
@@ -173,12 +150,11 @@ class ParentCliTests(CliTestCase):
         out, _ = self.run_cli("show", child["ref"], directory=self.plain)
         self.assertIn(f"parent: {parent['ref']}", out)
 
-    def test_list_text_hides_the_parent_link(self):
+    def test_list_text_shows_the_plain_title(self):
         parent = self.add("Billing v2")
-        self.add("Child #api 📅 2026-11-01", "--parent", parent["ref"])
+        self.add("Child", "--tag", "api", "--due", "2026-11-01", "--parent", parent["ref"])
         out, _ = self.run_cli("list", directory=self.plain)
-        self.assertNotIn("[[#^", out)
-        self.assertRegex(out, r"\n  t[0-9a-z]{3}  Child #api 📅 2026-11-01\n")
+        self.assertRegex(out, r"\n  t[0-9a-z]{3}  Child\n")
 
 
 class SubCardStartTests(MergeTestCase):
@@ -223,12 +199,20 @@ class SubCardStartTests(MergeTestCase):
 
 class DoctorParentTests(CliTestCase):
     def test_missing_and_nested_parents_are_warnings(self):
-        self.todos.mkdir(parents=True, exist_ok=True)
-        (self.todos / "inbox.md").write_text(
-            "---\nkanban-plugin: board\n---\n\n## Todo\n\n"
-            "- [ ] Parent ^t100\n- [ ] Child [[#^t100]] ^t101\n- [ ] Grandchild [[#^t101]] ^t102\n"
-            "- [ ] Orphan [[#^t999]] ^t103\n",
-            encoding="utf-8",
+        write_board(
+            self.todos,
+            "inbox",
+            [
+                (
+                    "Todo",
+                    [
+                        {"id": "t100", "title": "Parent"},
+                        {"id": "t101", "title": "Child", "parent": "t100"},
+                        {"id": "t102", "title": "Grandchild", "parent": "t101"},
+                        {"id": "t103", "title": "Orphan", "parent": "t999"},
+                    ],
+                )
+            ],
         )
         result = self.run_json("doctor", "--offline", directory=self.plain)
         found = {(f["code"], f["level"]) for f in result["findings"] if f["code"].startswith("parent_")}

@@ -235,8 +235,10 @@ class SpawnTests(AutomationTestCase):
         card = automations.spawn(self.store, added, local(2026, 10, 23, 9, 0))
         self.assertEqual(card.board, "inbox")
         self.assertEqual(card.column, self.config.columns[0])
-        self.assertEqual(card.title, "Automation: Check security alerts #type/chore #security")
-        self.assertEqual(card.body, ["\tLook at Dependabot.", "\t- merge the safe ones"])
+        self.assertEqual(
+            (card.title, card.type, card.tags), ("Automation: Check security alerts", "chore", ["security"])
+        )
+        self.assertEqual(card.body, ["Look at Dependabot.", "- merge the safe ones"])
         self.assertEqual([e["name"] for e in attachments.listing(self.config, card.ref)], ["plan.md"])
         log = activity.read(self.config, card.ref)
         self.assertEqual(log[0]["message"], f"Spawned by automation {added.id} for 2026-10-23 09:00.")
@@ -519,7 +521,6 @@ class BriefMergeTests(unittest.TestCase):
     def brief(self, **options):
         return brief_text(
             todo(),
-            notes=[],
             repository="github.com/acme/api",
             worktree="/w",
             branch="b",

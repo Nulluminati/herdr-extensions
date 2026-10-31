@@ -1,4 +1,15 @@
-"""Read and write boards: card references, IDs, and locked atomic writes."""
+"""Read and write boards: card references, IDs, and locked atomic writes.
+
+A board is a folder under `<todos>/boards/`. Its `board.toml` lists the columns and,
+in order, the IDs of the cards in each column. Each card is a folder `cards/<id>/`
+with `card.md` (see `card_file`), its activity log and its attachments. An archived
+card moves to `archive/<id>/`.
+
+Every write holds the store lock for its whole read, check and write. A command that
+changes more than one file writes them in an order where a crash leaves at most a
+card folder that no column lists (an orphan, which shows at the bottom of the first
+column) or a listed ID with no folder (which is skipped). It never loses a card.
+"""
 
 from __future__ import annotations
 
@@ -6,48 +17,47 @@ import fcntl
 import os
 import re
 import secrets
+import shutil
 import tempfile
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import attachments, kanban_md
-from .activity import log_path
+from . import card_file
+from .card_file import BoardFile, CardFile, ColumnFile
 from .config import MERGE_MODES, Config
 from .identity import RepoIdentity, find_board, new_board_path, same_repo
-from .linear_links import ProjectLink, parse_links, replace_links
-from .linear_pins import IssuePin, parse_pins, replace_pins
+from .linear_links import ProjectLink, parse_links
+from .linear_pins import IssuePin, parse_pins
 from .migrate_convert import Item
 from .model import (
-    BLOCK_ID,
-    PARENT_LINK,
     TRIAGE_COLUMN,
     ArchivedError,
-    Board,
-    Card,
     CardActiveError,
-    Column,
     ConflictError,
     DuplicateIdError,
     FormatError,
     HerdboardError,
     IoError,
     NotFoundError,
+    OldFormatError,
     ParentError,
-    card_type,
     is_triage,
-    parent_of,
-    plain_tags,
-    with_parent,
 )
 
 ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
-TEMP_REF = re.compile(r"^(?P<board>.+):(?P<number>\d+)$")
-# An archive card without an ID: its board and its place in the archive.
-ARCHIVE_REF = re.compile(r"^(?P<board>.+):archive-(?P<number>\d+)$")
-NOTE_LINK = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
+# A todo ID: `t` and three base-36 characters. A card folder's name is its ID.
+CARD_ID = re.compile(r"^t[0-9a-z]{3}$")
+BOARD_FILE = "board.toml"
+CARD_FILE = "card.md"
+INBOX = "inbox"
+
+
+def is_card_id(text: str) -> bool:
+    return bool(CARD_ID.match(text))
 
 
 @dataclass
@@ -62,7 +72,7 @@ class CardView:
     tags: list[str]
     body: list[str]
     column_limit: int | None = None
-    # The card's type: a todo's `#type/<name>` tag, or a Linear label that names a configured type.
+    # The card's type: a todo's `type` field, or a Linear label that names a configured type.
     type: str | None = None
     # Linear cards fill the fields below; todos keep the defaults.
     source: str = "todo"
@@ -107,18 +117,20 @@ class CardView:
     planning_status: str | None = None
     review_status: str | None = None
     pr_write_status: str | None = None
-    # The card ID of a sub-card's parent, from its `[[#^id]]` link.
+    # The card ID of a sub-card's parent, from its `parent` field.
     parent: str | None = None
     # Board-only: a Linear card's issue ID, which stays when the identifier changes.
     issue_id: str | None = None
     # Board-only family status: the parent's title, and a parent's (done, total) sub-cards.
     parent_title: str | None = None
     sub_cards: tuple[int, int] | None = None
-    # True for a card in the board's archive section.
+    # True for a card in the board's archive folder.
     archived: bool = False
+    # The Linear identifier that `promote` made from the todo, or None.
+    promoted: str | None = None
 
 
-# `Store.update_config` leaves the merge mode as it is.
+# `Store.update_config` and `Store.edit` leave a value as it is.
 KEEP = object()
 
 
@@ -129,7 +141,7 @@ class BoardMeta:
     repo: str | None
     links: list[ProjectLink]
     error: str | None = None
-    # The board's `merge:` frontmatter: "local", "pr" or None for the config default.
+    # The board's `merge` setting: "local", "pr" or None for the config default.
     merge: str | None = None
     pins: list[IssuePin] = field(default_factory=list)
 
@@ -144,12 +156,12 @@ class ColumnSnapshot:
 
 @dataclass
 class BoardSnapshot:
-    """One read of a board: its name, path and columns in file order."""
+    """One read of a board: its name, folder and columns in order."""
 
     name: str
     path: Path
     columns: list[ColumnSnapshot]
-    # The archive section, or None when the board has none.
+    # The archived cards, newest first, when the read asked for them; else None.
     archive: ColumnSnapshot | None = None
 
 
@@ -166,14 +178,47 @@ class ImportTarget:
 
 
 @dataclass
-class _Located:
-    """A card found without the lock. `number` is set for a temporary ref."""
+class _Card:
+    """A card as read: its ID, its folder, the parsed file and the text it was parsed from."""
+
+    id: str
+    folder: Path
+    file: CardFile
+    text: str
+
+    @property
+    def path(self) -> Path:
+        return self.folder / CARD_FILE
+
+
+@dataclass
+class _Board:
+    """A board as read. `file.columns` lists only cards that have a folder, orphans included."""
 
     path: Path
-    block_id: str | None
-    number: int | None
+    file: BoardFile
+    # The canonical text of `board.toml` as read, before orphans join the first column.
+    text: str
+    cards: dict[str, _Card]
+
+    def column_of(self, card_id: str) -> ColumnFile:
+        column = self.file.column_of(card_id)
+        if column is None:
+            raise NotFoundError(f"No card {card_id} on {self.path}")
+        return column
+
+    def children(self, card_id: str) -> list[str]:
+        return [other for other in self.file.card_ids() if self.cards[other].file.parent == card_id]
+
+
+@dataclass
+class _Located:
+    """A card found without the lock: where it was, and its text and column then."""
+
+    path: Path
+    block_id: str
     column: str
-    lines: list[str]
+    text: str
 
 
 @dataclass
@@ -186,11 +231,17 @@ class TodoSnapshot:
     done: bool
 
 
-def _all_ids(board: Board) -> set[str]:
-    cards = [card for _, card in board.all_cards()]
-    if board.archive is not None:
-        cards.extend(board.archive.cards)
-    return {card.block_id for card in cards if card.block_id}
+def _now() -> datetime:
+    return datetime.now().astimezone().replace(microsecond=0)
+
+
+def _insert(cards: list[str], card_id: str, position: str) -> None:
+    if position not in ("top", "bottom"):
+        raise ValueError(f"position must be 'top' or 'bottom', not {position!r}")
+    if position == "top":
+        cards.insert(0, card_id)
+    else:
+        cards.append(card_id)
 
 
 class Store:
@@ -198,21 +249,31 @@ class Store:
         self.config = config
         self.lock_timeout = lock_timeout
         self.lock_path = config.todos_dir / ".herdboard.lock"
-        self.inbox_path = config.todos_dir / "inbox.md"
-        self.projects_dir = config.todos_dir / "projects"
+        self.boards_dir = config.todos_dir / "boards"
+        self.inbox_path = self.boards_dir / INBOX
 
     # Files
 
-    def _read(self, path: Path) -> Board:
+    def _read_text(self, path: Path, what: str) -> str:
         try:
-            text = path.read_bytes().decode("utf-8")
+            return path.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError) as error:
-            raise IoError(f"{path}: cannot read board: {error}") from error
-        return kanban_md.parse(text, tuple(self.config.archive_titles))
+            raise IoError(f"{path}: cannot read {what}: {error}") from error
 
-    def _write_file(self, path: Path, data: bytes, mode: int) -> None:
-        """Write to a temporary file beside `path`, then rename it over `path`."""
+    def _write_file(self, path: Path, data: bytes, mode: int | None = None) -> None:
+        """Write to a temporary file beside `path`, then rename it over `path`.
+
+        A new file gets the usual mode for the umask; an existing one keeps its mode.
+        """
         try:
+            if mode is None:
+                try:
+                    mode = path.stat().st_mode & 0o7777
+                except FileNotFoundError:
+                    umask = os.umask(0)
+                    os.umask(umask)
+                    mode = 0o666 & ~umask
+            path.parent.mkdir(parents=True, exist_ok=True)
             fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
             try:
                 with os.fdopen(fd, "wb") as handle:
@@ -226,59 +287,113 @@ class Store:
                     os.unlink(temp)
                 raise
         except OSError as error:
-            raise IoError(f"{path}: cannot write board: {error}") from error
+            raise IoError(f"{path}: cannot write: {error}") from error
 
-    def _write(self, path: Path, board: Board) -> None:
-        data = kanban_md.serialize(board).encode("utf-8")
-        try:
-            mode = path.stat().st_mode & 0o7777
-        except OSError as error:
-            raise IoError(f"{path}: cannot write board: {error}") from error
-        self._write_file(path, data, mode)
+    def _write_board(self, board: _Board) -> None:
+        self._write_file(board.path / BOARD_FILE, card_file.dump_board(board.file).encode("utf-8"))
 
-    def _create(self, path: Path, text: str) -> None:
-        """Create a new board. The caller holds the lock and checked that it is absent."""
+    def _write_card(self, card: _Card) -> None:
+        self._write_file(card.path, card_file.dump_card(card.file).encode("utf-8"))
+
+    def _rename(self, source: Path, target: Path) -> None:
+        if target.exists():
+            raise DuplicateIdError(f"{target} already exists")
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(source, target)
         except OSError as error:
-            raise IoError(f"{path}: cannot create board: {error}") from error
-        umask = os.umask(0)
-        os.umask(umask)
-        self._write_file(path, text.encode("utf-8"), 0o666 & ~umask)
+            raise IoError(f"{source}: cannot move to {target}: {error}") from error
+
+    def _read_card(self, folder: Path) -> _Card:
+        path = folder / CARD_FILE
+        text = self._read_text(path, "card")
+        return _Card(folder.name, folder, card_file.parse_card(text, path), text)
+
+    def _card_folders(self, folder: Path) -> list[Path]:
+        """The card folders under `folder` whose names are card IDs and that hold a `card.md`."""
+        try:
+            return sorted(p for p in folder.iterdir() if is_card_id(p.name) and (p / CARD_FILE).is_file())
+        except FileNotFoundError:
+            return []
+        except OSError as error:
+            raise IoError(f"{folder}: cannot read: {error}") from error
+
+    def _read(self, path: Path) -> _Board:
+        """Read a board and every card in its `cards/` folder.
+
+        A listed ID with no folder leaves its column. A folder that no column lists joins
+        the bottom of the first column. Archived cards are not read.
+        """
+        board_path = path / BOARD_FILE
+        file = card_file.parse_board(self._read_text(board_path, "board"), board_path)
+        text = card_file.dump_board(file)
+        cards = {folder.name: self._read_card(folder) for folder in self._card_folders(path / "cards")}
+        seen: set[str] = set()
+        for column in file.columns:
+            kept = []
+            for card_id in column.cards:
+                if card_id in cards and card_id not in seen:
+                    kept.append(card_id)
+                    seen.add(card_id)
+            column.cards = kept
+        orphans = [card_id for card_id in cards if card_id not in seen]
+        if orphans and file.columns:
+            file.columns[0].cards.extend(orphans)
+        return _Board(path, file, text, cards)
+
+    def _read_archive(self, path: Path) -> list[_Card]:
+        """The archived cards of a board, newest first."""
+        cards = [self._read_card(folder) for folder in self._card_folders(path / "archive")]
+        oldest = datetime.min.replace(tzinfo=_now().tzinfo)
+        return sorted(cards, key=lambda card: card.file.archived or oldest, reverse=True)
 
     # Boards
 
+    def check_layout(self) -> None:
+        """Raise OldFormatError when the todos folder still has the Markdown board files."""
+        todos = self.config.todos_dir
+        old = [todos / "inbox.md"] if (todos / "inbox.md").is_file() else []
+        if (todos / "projects").is_dir():
+            old.extend(sorted((todos / "projects").glob("*.md")))
+        if not old:
+            return
+        if self.boards_dir.is_dir():
+            raise OldFormatError(
+                f"{old[0]} is a board file of the old format, but {self.boards_dir} exists. "
+                "An old herdboard copy wrote it after the conversion: move its cards by hand, then remove it"
+            )
+        raise OldFormatError(f"{todos} has boards in the old format. Run `herdboard convert-store` to convert them")
+
     def board_paths(self) -> list[Path]:
-        paths = [self.inbox_path] if self.inbox_path.is_file() else []
-        if self.projects_dir.is_dir():
-            paths.extend(sorted(self.projects_dir.glob("*.md")))
-        return paths
+        self.check_layout()
+        if not self.boards_dir.is_dir():
+            return []
+        paths = sorted(path.parent for path in self.boards_dir.glob(f"*/{BOARD_FILE}"))
+        return sorted(paths, key=lambda path: path.name != INBOX)
 
     def board_name(self, path: Path) -> str:
-        if path.parent == self.inbox_path.parent and path.name == self.inbox_path.name:
-            return "inbox"
-        return path.stem
+        return path.name
 
     def resolve_board(self, name: str) -> Path:
-        if name == "inbox":
-            path = self.inbox_path
-        elif "/" in name or name in ("", ".", ".."):
+        if "/" in name or name in ("", ".", ".."):
             raise NotFoundError(f"No board named {name!r}")
-        else:
-            path = self.projects_dir / f"{name}.md"
-        if not path.is_file():
+        self.check_layout()
+        path = self.boards_dir / name
+        if not (path / BOARD_FILE).is_file():
             raise NotFoundError(f"No board named {name!r}")
         return path
 
-    def _new_board_text(self, frontmatter: list[tuple[str, str]] = ()) -> str:
-        columns = self.config.columns
-        done = next((title for title in columns if title.casefold() == "done"), None)
-        return kanban_md.new_board(columns, done, list(frontmatter))
+    def _create_board(self, path: Path, repo: str | None = None, merge: str | None = None) -> BoardFile:
+        """Write the `board.toml` of a new board. The caller holds the lock and checked that it is absent."""
+        file = card_file.new_board(self.config.columns, repo=repo, merge=merge)
+        self._write_file(path / BOARD_FILE, card_file.dump_board(file).encode("utf-8"))
+        return file
 
     def ensure_inbox(self) -> Path:
+        self.check_layout()
         with self._lock():
-            if not self.inbox_path.exists():
-                self._create(self.inbox_path, self._new_board_text())
+            if not (self.inbox_path / BOARD_FILE).exists():
+                self._create_board(self.inbox_path)
         return self.inbox_path
 
     def init_board(
@@ -296,69 +411,67 @@ class Store:
         """
         if merge is not None and merge not in MERGE_MODES:
             raise HerdboardError("merge must be local or pr")
+        self.check_layout()
         with self._lock():
-            existing = find_board(self.projects_dir, identity)
+            existing = find_board(self.boards_dir, identity)
             if existing is not None:
                 if exist_ok:
                     if on_existing is not None:
                         on_existing(existing)
                     return existing
                 raise HerdboardError(f"{identity.identity} already has a board: {existing}")
-            path = new_board_path(self.projects_dir, identity)
-            frontmatter = [("repo", identity.identity)]
-            if merge is not None:
-                frontmatter.append(("merge", merge))
-            text = self._new_board_text(frontmatter)
-            if links:
-                text = replace_links(text, links)
-            self._create(path, text)
+            path = new_board_path(self.boards_dir, identity)
+            file = card_file.new_board(self.config.columns, repo=identity.identity, merge=merge)
+            file.set_tables("linear-projects", [link.to_dict() for link in links])
+            self._write_file(path / BOARD_FILE, card_file.dump_board(file).encode("utf-8"))
         return path
 
+    def _board_file(self, path: Path) -> BoardFile:
+        board_path = path / BOARD_FILE
+        return card_file.parse_board(self._read_text(board_path, "board"), board_path)
+
     def board_meta(self, path: Path) -> BoardMeta:
-        board = self._read(path)
-        merge = board.frontmatter_value("merge")
+        try:
+            file = self._board_file(path)
+        except FormatError as error:
+            return BoardMeta(None, [], str(error))
+        merge = file.merge
         if merge not in (None, *MERGE_MODES):
-            return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: merge must be local or pr")
+            return BoardMeta(file.repo, [], f"{path}: merge must be local or pr")
         try:
             return BoardMeta(
-                board.frontmatter_value("repo"),
-                parse_links(board.frontmatter),
+                file.repo,
+                parse_links(file.tables("linear-projects")),
                 merge=merge,
-                pins=parse_pins(board.frontmatter),
+                pins=parse_pins(file.tables("linear-issues")),
             )
         except FormatError as error:
-            return BoardMeta(board.frontmatter_value("repo"), [], f"{path}: {error}", merge=merge)
+            return BoardMeta(file.repo, [], f"{path}: {error}", merge=merge)
 
     def update_links(self, path: Path, change: Callable[[list[ProjectLink]], list[ProjectLink]]) -> list[ProjectLink]:
-        """Rewrite the `linear-projects` frontmatter of a board with `change(links)`."""
-        with self._lock():
-            try:
-                text = path.read_bytes().decode("utf-8")
-                mode = path.stat().st_mode & 0o7777
-            except (OSError, UnicodeDecodeError) as error:
-                raise IoError(f"{path}: cannot read board: {error}") from error
-            board = kanban_md.parse(text, tuple(self.config.archive_titles))
-            self._require_writable(path, board)
-            links = change(parse_links(board.frontmatter))
-            self._write_file(path, replace_links(text, links).encode("utf-8"), mode)
-        return links
+        """Rewrite the `linear-projects` tables of a board with `change(links)`."""
+        result: list[ProjectLink] = []
+
+        def keep(links):
+            result[:] = change(links)
+            return result
+
+        self.update_config(path, change_links=keep)
+        return result
 
     def update_pins(self, path: Path, change: Callable[[list[IssuePin]], list[IssuePin]]) -> list[IssuePin]:
-        """Rewrite the `linear-issues` frontmatter of a board with `change(pins)`."""
-        with self._lock():
-            try:
-                text = path.read_bytes().decode("utf-8")
-                mode = path.stat().st_mode & 0o7777
-            except (OSError, UnicodeDecodeError) as error:
-                raise IoError(f"{path}: cannot read board: {error}") from error
-            board = kanban_md.parse(text, tuple(self.config.archive_titles))
-            self._require_writable(path, board)
-            pins = change(parse_pins(board.frontmatter))
-            self._write_file(path, replace_pins(text, pins).encode("utf-8"), mode)
-        return pins
+        """Rewrite the `linear-issues` tables of a board with `change(pins)`."""
+        result: list[IssuePin] = []
+
+        def keep(pins):
+            result[:] = change(pins)
+            return result
+
+        self.update_config(path, change_pins=keep)
+        return result
 
     def set_merge(self, path: Path, merge: str | None) -> None:
-        """Set the `merge:` frontmatter of a board, or remove it for None (the config default)."""
+        """Set the `merge` setting of a board, or remove it for None (the config default)."""
         self.update_config(path, merge=merge)
 
     def update_config(
@@ -368,235 +481,209 @@ class Store:
         change_links: Callable[[list[ProjectLink]], list[ProjectLink]] | None = None,
         change_pins: Callable[[list[IssuePin]], list[IssuePin]] | None = None,
     ) -> None:
-        """Set the `merge:` frontmatter (None removes it) and rewrite the links with `change_links`
+        """Set the `merge` setting (None removes it) and rewrite the links with `change_links`
         and the pinned issues with `change_pins`.
 
         `KEEP` leaves the merge mode, and None for `change_links` or `change_pins` leaves the links
-        or the pins. All changes apply to the text in memory, then go to the file in one write, so
-        a failed one writes nothing.
+        or the pins. All changes apply in memory, then go to `board.toml` in one write, so a
+        failed one writes nothing.
         """
         if merge is not KEEP and merge not in (None, *MERGE_MODES):
             raise HerdboardError(f"merge must be local or pr, not {merge!r}")
         with self._lock():
+            board = self._read(path)
+            file = board.file
             try:
-                text = path.read_bytes().decode("utf-8")
-                mode = path.stat().st_mode & 0o7777
-            except (OSError, UnicodeDecodeError) as error:
-                raise IoError(f"{path}: cannot read board: {error}") from error
-            board = kanban_md.parse(text, tuple(self.config.archive_titles))
-            self._require_writable(path, board)
+                links = parse_links(file.tables("linear-projects"))
+                pins = parse_pins(file.tables("linear-issues"))
+            except FormatError as error:
+                raise FormatError(f"{path}: {error}. The board is read only") from error
             if change_links is not None:
-                text = replace_links(text, change_links(parse_links(board.frontmatter)))
+                file.set_tables("linear-projects", [link.to_dict() for link in change_links(links)])
             if change_pins is not None:
-                text = replace_pins(text, change_pins(parse_pins(board.frontmatter)))
+                file.set_tables("linear-issues", [pin.to_dict() for pin in change_pins(pins)])
             if merge is not KEEP:
-                text = kanban_md.set_frontmatter_value(text, "merge", merge)
-            written = kanban_md.parse(text, tuple(self.config.archive_titles)).frontmatter
-            parse_links(written)
-            parse_pins(written)
-            self._write_file(path, text.encode("utf-8"), mode)
+                file.merge = merge
+            self._write_board(board)
 
     def import_target(self, identity: RepoIdentity | None = None, board: str | None = None) -> ImportTarget:
         """The board that `migrate` writes to: `board`, else the one of `identity`, else the inbox."""
-        if board is not None and board != "inbox":
+        self.check_layout()
+        if board is not None and board != INBOX:
             path, found = self.resolve_board(board), True
         elif board is None and identity is not None:
-            path = find_board(self.projects_dir, identity)
+            path = find_board(self.boards_dir, identity)
             found = path is not None
-            path = path or new_board_path(self.projects_dir, identity)
+            path = path or new_board_path(self.boards_dir, identity)
         else:
             path = self.inbox_path
-            found = path.is_file()
+            found = (path / BOARD_FILE).is_file()
         if not found:
             columns = self.config.columns
             done = next((t for t in columns if t.casefold() == "done"), None)
             return ImportTarget(path, identity if board is None else None, False, columns[0], done)
-        parsed = self._read(path)
-        if not parsed.columns:
+        file = self._board_file(path)
+        if not file.columns:
             raise HerdboardError(f"{path}: board has no columns")
         try:
-            done_title, error = self._done_column(parsed, path).title, None
+            done_title, error = self._done_column(file, path).name, None
         except HerdboardError as problem:
             done_title, error = None, str(problem)
         return ImportTarget(
-            path, identity if board is None else None, True, self._default_column(parsed, path).title, done_title, error
+            path, identity if board is None else None, True, self._default_column(file, path).name, done_title, error
         )
 
     def import_cards(self, items: list[Item], path: Path | None = None, identity: RepoIdentity | None = None) -> Path:
-        """Append converted cards at the bottom of their columns, in one locked write.
+        """Add converted cards at the bottom of their columns, under one lock.
 
         With `path`, the board must exist (the inbox is created). With `identity`, the board
         of that repository is created like `init` when it is absent. With both, the board at
         `path` must still belong to that repository, else the write is a conflict.
         """
+        self.check_layout()
         with self._lock():
             if path is None:
-                path = find_board(self.projects_dir, identity)
+                path = find_board(self.boards_dir, identity)
                 if path is None:
-                    path = new_board_path(self.projects_dir, identity)
-                    self._create(path, self._new_board_text([("repo", identity.identity)]))
-            elif not path.exists() and path == self.inbox_path:
-                self._create(path, self._new_board_text())
-            elif not path.is_file():
-                raise NotFoundError(f"No board file: {path}")
+                    path = new_board_path(self.boards_dir, identity)
+                    self._create_board(path, repo=identity.identity)
+            elif not (path / BOARD_FILE).exists() and path == self.inbox_path:
+                self._create_board(path)
+            elif not (path / BOARD_FILE).is_file():
+                raise NotFoundError(f"No board: {path}")
             board = self._read(path)
-            self._require_writable(path, board)
-            if identity is not None and not same_repo(board.frontmatter_value("repo"), identity):
+            if identity is not None and not same_repo(board.file.repo, identity):
                 raise ConflictError(f"{path}: board no longer belongs to {identity.identity}; retry")
-            if not board.columns:
+            if not board.file.columns:
                 raise HerdboardError(f"{path}: board has no columns")
-            done = self._done_column(board, path) if any(i.checked for i in items) else None
-            open_column = self._default_column(board, path)
+            done = self._done_column(board.file, path) if any(i.checked for i in items) else None
+            open_column = self._default_column(board.file, path)
+            taken = self._taken_ids()
             for item in items:
-                column = done if item.checked else open_column
-                kanban_md.insert_card(column, Card(item.card_lines()), "bottom")
-            self._assign_ids(path, board)
-            self._write(path, board)
+                body = [line[1:] if line.startswith("\t") else line.lstrip(" ") for line in item.body]
+                card = self._new_card(path, self._new_id(taken), item.title, [item.tag] if item.tag else [], body=body)
+                self._write_card(card)
+                board.cards[card.id] = card
+                (done if item.checked else open_column).cards.append(card.id)
+            self._write_board(board)
         return path
 
     def board_for_repo(self, identity: RepoIdentity) -> Path | None:
-        return find_board(self.projects_dir, identity)
+        self.check_layout()
+        return find_board(self.boards_dir, identity)
 
     # Reading
 
-    def _view(self, path: Path, column: Column, card: Card, ref: str) -> CardView:
+    def _view(self, board_path: Path, card: _Card, column: ColumnFile | None, done: bool = False) -> CardView:
+        file = card.file
         return CardView(
-            ref=ref,
-            board=self.board_name(path),
-            path=path,
-            column=column.title,
-            title=card.title,
-            checked=card.checked,
-            due=card.due,
-            tags=plain_tags(card.tags),
-            body=list(card.body),
-            column_limit=column.limit,
-            type=card_type(card.tags),
-            parent=parent_of(card.title),
-            archived=column.archive,
+            ref=card.id,
+            board=self.board_name(board_path),
+            path=board_path,
+            column=column.name if column is not None else "Archive",
+            title=file.title,
+            checked=done,
+            due=file.due,
+            tags=file.tags,
+            body=list(file.body),
+            column_limit=column.limit if column is not None else None,
+            type=file.type,
+            parent=file.parent,
+            archived=column is None,
+            promoted=file.promoted,
         )
 
-    def _archive_views(self, path: Path, board: Board) -> list[CardView]:
-        """The archive cards of a board. A card without an ID gets a reference that no command takes."""
-        if board.archive is None:
-            return []
-        name = self.board_name(path)
-        return [
-            self._view(path, board.archive, card, card.block_id or f"{name}:archive-{number}")
-            for number, card in enumerate(board.archive.cards, start=1)
-        ]
+    def _board_view(self, board: _Board, card_id: str) -> CardView:
+        column = board.column_of(card_id)
+        done = self._done_or_none(board.file)
+        return self._view(board.path, board.cards[card_id], column, column is done)
+
+    def _done_or_none(self, file: BoardFile) -> ColumnFile | None:
+        try:
+            return self._done_column(file, None)
+        except HerdboardError:
+            return None
+
+    def _views(self, board: _Board) -> list[CardView]:
+        return [self._board_view(board, card_id) for card_id in board.file.card_ids()]
 
     def list_cards(self, paths: list[Path] | None = None) -> list[CardView]:
         views = []
         for path in self.board_paths() if paths is None else paths:
-            name = self.board_name(path)
-            for number, (column, card) in enumerate(self._read(path).all_cards(), start=1):
-                views.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
+            views.extend(self._views(self._read(path)))
         return views
 
     def archived_cards(self, paths: list[Path] | None = None) -> list[CardView]:
-        """The cards in the archive sections of the boards, in file order."""
+        """The archived cards of the boards, newest first on each board."""
         views = []
         for path in self.board_paths() if paths is None else paths:
-            views.extend(self._archive_views(path, self._read(path)))
+            views.extend(self._view(path, card, None) for card in self._read_archive(path))
         return views
 
-    def snapshot(self, path: Path) -> BoardSnapshot:
+    def snapshot(self, path: Path, archive: bool = False) -> BoardSnapshot:
+        """One read of a board. With `archive`, the archived cards too."""
         board = self._read(path)
-        name = self.board_name(path)
-        columns = []
-        number = 0
-        for column in board.columns:
-            cards = []
-            for card in column.cards:
-                number += 1
-                cards.append(self._view(path, column, card, card.block_id or f"{name}:{number}"))
-            columns.append(ColumnSnapshot(column.title, column.limit, self._is_completed(column), cards))
-        archive = None
-        if board.archive is not None:
-            archive = ColumnSnapshot(board.archive.title, None, False, self._archive_views(path, board))
-        return BoardSnapshot(name, path, columns, archive)
+        done = self._done_or_none(board.file)
+        columns = [
+            ColumnSnapshot(
+                column.name,
+                column.limit,
+                column is done,
+                [self._view(path, board.cards[card_id], column, column is done) for card_id in column.cards],
+            )
+            for column in board.file.columns
+        ]
+        archived = None
+        if archive:
+            archived = ColumnSnapshot(
+                "Archive", None, False, [self._view(path, c, None) for c in self._read_archive(path)]
+            )
+        return BoardSnapshot(self.board_name(path), path, columns, archived)
 
-    def _check_unique(self, block_id: str) -> None:
-        """Raise when a block ID is on more than one card, archive cards included."""
-        places = []
-        for path in self.board_paths():
-            board = self._read(path)
-            pairs = board.all_cards()
-            if board.archive is not None:
-                pairs += [(board.archive, card) for card in board.archive.cards]
-            places.extend(f"{path} ({column.title})" for column, card in pairs if card.block_id == block_id)
+    def _places(self, ref: str, folder: str) -> list[Path]:
+        """The card folders named `ref` under `folder` (`cards` or `archive`) of every board."""
+        if not is_card_id(ref):
+            return []
+        return [path / folder / ref for path in self.board_paths() if (path / folder / ref / CARD_FILE).is_file()]
+
+    def _check_unique(self, ref: str) -> None:
+        """Raise when a card ID names more than one card folder, archived cards included."""
+        places = self._places(ref, "cards") + self._places(ref, "archive")
         if len(places) > 1:
-            raise DuplicateIdError(f"ID {block_id} is on two cards: {' and '.join(places)}")
+            raise DuplicateIdError(f"ID {ref} is on two cards: {' and '.join(str(p) for p in places)}")
+
+    def card_dir(self, ref: str) -> Path | None:
+        """The folder of the todo `ref`, on the board or in an archive, or None.
+
+        A card folder moves on archive, unarchive and move to another board: hold the lock
+        from this call until the folder is used.
+        """
+        places = self._places(ref, "cards") + self._places(ref, "archive")
+        return places[0] if places else None
 
     def _resolve(self, ref: str) -> _Located:
-        temp = TEMP_REF.match(ref)
-        if temp:
-            path = self.resolve_board(temp.group("board"))
-            number = int(temp.group("number"))
-            cards = self._read(path).all_cards()
-            if not 1 <= number <= len(cards):
-                raise NotFoundError(f"No card {ref}")
-            column, card = cards[number - 1]
-            if card.block_id:
-                self._check_unique(card.block_id)
-            return _Located(path, None, number, column.title, list(card.lines))
-        found = []
-        for path in self.board_paths():
-            for column, card in self._read(path).all_cards():
-                if card.block_id == ref:
-                    found.append((path, column, card))
-        if not found:
-            if self._find_archived(ref) is not None:
+        places = self._places(ref, "cards")
+        if not places:
+            if self._places(ref, "archive"):
                 raise ArchivedError(f"{ref} is archived. Run `herdboard unarchive {ref}` first")
             raise NotFoundError(f"No card {ref}")
         self._check_unique(ref)
-        path, column, card = found[0]
-        return _Located(path, ref, None, column.title, list(card.lines))
+        path = places[0].parent.parent
+        board = self._read(path)
+        card = board.cards[ref]
+        return _Located(path, ref, board.column_of(ref).name, card.text)
 
     def _find_archived(self, ref: str) -> Path | None:
-        """The board whose archive has the card with block ID `ref`, or None."""
-        for path in self.board_paths():
-            board = self._read(path)
-            if board.archive is not None and any(card.block_id == ref for card in board.archive.cards):
-                return path
-        return None
+        """The board whose archive has the card `ref`, or None."""
+        places = self._places(ref, "archive")
+        return places[0].parent.parent if places else None
 
     def notes_for(self, card: CardView) -> list[dict] | None:
-        """Notes that `[[name]]` links in a card point to; None without `vault_root`."""
-        vault = self.config.vault_root
-        if vault is None:
-            return None
-        text = PARENT_LINK.sub("", "\n".join([card.title, *card.body]))
-        names = list(dict.fromkeys(m.group(1).strip() for m in NOTE_LINK.finditer(text)))
-        root = vault.resolve()
-        notes = []
-        for name in names:
-            path = vault / f"{name}.md"
-            if not path.is_file():
-                matches = sorted(vault.rglob(f"{Path(name).name}.md")) if name else []
-                path = matches[0] if matches else path
-            content = None
-            if path.is_file() and path.resolve().is_relative_to(root):
-                try:
-                    content = path.read_bytes().decode("utf-8")
-                except (OSError, UnicodeDecodeError) as error:
-                    raise IoError(f"{path}: cannot read note: {error}") from error
-            notes.append({"name": name, "path": str(path), "content": content})
-        return notes
+        """Notes that a card links to. Cards no longer link to notes, so there are none."""
+        return None
 
     def show(self, ref: str, archived: bool = False) -> CardView:
-        """A card. With `archived`, also a card from an archive, found by its ID or its archive reference;
-        else an archived card raises."""
-        temp = ARCHIVE_REF.match(ref) if archived else None
-        if temp:
-            path = self.resolve_board(temp.group("board"))
-            # One read: a second one can find a shorter archive.
-            views = self._archive_views(path, self._read(path))
-            number = int(temp.group("number"))
-            if not 1 <= number <= len(views):
-                raise NotFoundError(f"No archived card {ref}")
-            return views[number - 1]
+        """A card. With `archived`, also a card from an archive; else an archived card raises."""
         try:
             located = self._resolve(ref)
         except ArchivedError:
@@ -604,14 +691,10 @@ class Store:
                 raise
             self._check_unique(ref)
             path = self._find_archived(ref)
-            views = self._archive_views(path, self._read(path)) if path is not None else []
-            # The card can leave the archive between the reads.
-            view = next((view for view in views if view.ref == ref), None)
-            if view is None:
+            if path is None:
                 raise NotFoundError(f"No card {ref}") from None
-            return view
-        column, card = self._find(self._read(located.path), located)
-        return self._view(located.path, column, card, card.block_id or ref)
+            return self._view(path, self._read_card(path / "archive" / ref), None)
+        return self._board_view(self._read(located.path), ref)
 
     # Writing
 
@@ -637,222 +720,209 @@ class Store:
         finally:
             handle.close()
 
-    def _require_writable(self, path: Path, board: Board) -> None:
-        frontmatter = board.frontmatter
-        closed = len(frontmatter) >= 2
-        if not closed or board.frontmatter_value("kanban-plugin") != "board":
-            raise FormatError(
-                f"{path}: not a valid board: frontmatter must be closed and contain "
-                "'kanban-plugin: board'. The board is read only"
-            )
-        try:
-            parse_links(frontmatter)
-            parse_pins(frontmatter)
-        except FormatError as error:
-            raise FormatError(f"{path}: {error}. The board is read only") from error
-
-    def _find(self, board: Board, located: _Located) -> tuple[Column, Card]:
-        """Find the card again in a fresh parse; its lines must be unchanged."""
-        cards = board.all_cards()
-        if located.number is not None:
-            match = cards[located.number - 1] if located.number <= len(cards) else None
-        else:
-            matches = [pair for pair in cards if pair[1].block_id == located.block_id]
-            if len(matches) > 1:
-                raise DuplicateIdError(f"ID {located.block_id} is on two cards in {located.path}")
-            match = matches[0] if matches else None
-        if match is None or match[1].lines != located.lines or match[0].title != located.column:
+    def _find(self, board: _Board, located: _Located) -> _Card:
+        """Find the card again in a fresh read; its text and its column must be unchanged."""
+        card = board.cards.get(located.block_id)
+        column = board.file.column_of(located.block_id)
+        if card is None or card.text != located.text or column is None or column.name != located.column:
             raise ConflictError(f"{located.path}: card changed on disk; retry")
-        return match
+        return card
+
+    def _taken_ids(self) -> set[str]:
+        """Every card folder name, on the boards and in the archives."""
+        taken: set[str] = set()
+        for path in self.board_paths():
+            for folder in ("cards", "archive"):
+                try:
+                    taken.update(p.name for p in (path / folder).iterdir())
+                except FileNotFoundError:
+                    pass
+                except OSError as error:
+                    raise IoError(f"{path / folder}: cannot read: {error}") from error
+        return taken
 
     def _new_id(self, taken: set[str]) -> str:
         while True:
             candidate = "t" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
-            # A deleted card keeps its log and attachments, so its ID stays taken.
-            if candidate not in taken and not (
-                log_path(self.config, candidate).exists() or attachments.folder(self.config, candidate).exists()
-            ):
+            if candidate not in taken:
                 taken.add(candidate)
                 return candidate
 
-    def _assign_ids(self, path: Path, board: Board, taken: set[str] | None = None) -> None:
-        """Give every column card without an ID a new one. `taken` collects the IDs in use."""
-        taken = set() if taken is None else taken
-        taken |= _all_ids(board)
-        for other in self.board_paths():
-            if other != path:
-                taken |= _all_ids(self._read(other))
-        for _, card in board.all_cards():
-            if card.block_id is None:
-                card.set_block_id(self._new_id(taken))
+    def _new_card(
+        self,
+        path: Path,
+        card_id: str,
+        title: str,
+        tags: list[str] = (),
+        *,
+        type: str | None = None,
+        due: str | None = None,
+        parent: str | None = None,
+        body: list[str] = (),
+    ) -> _Card:
+        file = card_file.new_card(
+            title, created=_now(), type=type, tags=list(tags), due=due, parent=parent, body=list(body)
+        )
+        return _Card(card_id, path / "cards" / card_id, file, "")
 
     def _modify(
         self,
         ref: str,
-        change: Callable[[Board, Path, Column, Card], Column],
+        change: Callable[[_Board, _Card, ColumnFile], None],
         located: _Located | None = None,
     ) -> CardView:
+        """Apply `change` to a card and its board under the lock.
+
+        Only the files whose text changed are written: the card first, then the board.
+        """
         located = located or self._resolve(ref)
         path = located.path
         with self._lock():
             board = self._read(path)
-            self._require_writable(path, board)
-            column, card = self._find(board, located)
-            if card.block_id:
-                self._check_unique(card.block_id)
-            self._assign_ids(path, board)
-            column = change(board, path, column, card)
-            self._write(path, board)
-        return self._view(path, column, card, card.block_id)
+            card = self._find(board, located)
+            self._check_unique(card.id)
+            card_before = card_file.dump_card(card.file)
+            change(board, card, board.column_of(card.id))
+            if card_file.dump_card(card.file) != card_before:
+                self._write_card(card)
+            if card_file.dump_board(board.file) != board.text:
+                self._write_board(board)
+            return self._board_view(board, card.id)
 
-    def _is_completed(self, column: Column) -> bool:
-        """True when a `**<marker>**` line marks the column complete."""
-        return column.has_marker(["Complete", *self.config.complete_markers])
-
-    def _default_column(self, board: Board, path: Path) -> Column:
+    def _default_column(self, file: BoardFile, path: Path) -> ColumnFile:
         """The column for a card that names none: the first one that is not the triage column."""
-        column = next((c for c in board.columns if not is_triage(c.title)), None)
+        column = next((c for c in file.columns if not is_triage(c.name)), None)
         if column is None:
-            if board.columns:
+            if file.columns:
                 raise HerdboardError(f"{path}: board has no column apart from {TRIAGE_COLUMN}")
             raise HerdboardError(f"{path}: board has no columns")
         return column
 
-    def _target_column(self, board: Board, title: str) -> Column:
+    def _target_column(self, file: BoardFile, title: str) -> ColumnFile:
         """The column named `title`. The triage column is added first on a board that has none.
 
-        Only the triage column is made on demand; any other unknown name raises like `Board.column`.
+        Only the triage column is made on demand; any other unknown name raises.
         """
-        try:
-            return board.column(title)
-        except NotFoundError:
-            if not is_triage(title):
-                raise
-        column = Column(f"## {TRIAGE_COLUMN}", ["", "", ""])
-        board.columns.insert(0, column)
+        column = file.column(title)
+        if column is not None:
+            return column
+        if not is_triage(title):
+            raise NotFoundError(f"No column named {title!r}")
+        column = ColumnFile(TRIAGE_COLUMN)
+        file.columns.insert(0, column)
         return column
 
-    def _done_column(self, board: Board, path: Path) -> Column:
-        column = next((c for c in board.columns if self._is_completed(c)), None)
+    def _done_column(self, file: BoardFile, path: Path | None) -> ColumnFile:
+        """The column marked `done = true`, else the column named Done."""
+        column = next((c for c in file.columns if c.done), None) or file.column("done")
         if column is None:
-            column = next((c for c in board.columns if c.title.casefold() == "done"), None)
-        if column is None:
-            raise HerdboardError(
-                f"Board {self.board_name(path)} has no done column: add a complete marker or a column named Done"
-            )
+            name = self.board_name(path) if path is not None else "the board"
+            raise HerdboardError(f"Board {name} has no done column: add `done = true` to a column or name one Done")
         return column
 
-    def _move_card(
-        self,
-        column: Column,
-        card: Card,
-        target: Column,
-        position: str,
-        check: bool = False,
-    ) -> Column:
-        kanban_md.remove_card(column, card)
-        if check or self._is_completed(target):
-            if not card.checked:
-                card.set_checked(True)
-        elif self._is_completed(column):
-            card.set_checked(False)
-        kanban_md.insert_card(target, card, position)
-        return target
+    def _move_card(self, card_id: str, source: ColumnFile, target: ColumnFile, position: str) -> None:
+        source.cards.remove(card_id)
+        _insert(target.cards, card_id, position)
 
     def move(self, ref: str, column: str, position: str = "bottom") -> CardView:
-        def change(board, path, source, card):
-            return self._move_card(source, card, self._target_column(board, column), position)
+        def change(board, card, source):
+            self._move_card(card.id, source, self._target_column(board.file, column), position)
 
         return self._modify(ref, change)
 
     def done(self, ref: str) -> CardView:
-        def change(board, path, source, card):
-            target = self._done_column(board, path)
-            return self._move_card(source, card, target, "bottom", check=True)
+        def change(board, card, source):
+            self._move_card(card.id, source, self._done_column(board.file, board.path), "bottom")
 
         return self._modify(ref, change)
 
     def toggle_item(self, ref: str, index: int, expected: CardView | None = None) -> CardView:
-        """Check or clear the checklist item on detail line `index` (0 is the first detail line)."""
+        """Check or clear the checklist item on body line `index` (0 is the first body line)."""
 
-        def change(board, path, column, card):
-            if expected is not None and (card.title != expected.title or card.body != expected.body):
-                raise ConflictError(f"{path}: card changed on disk since you opened it; open it again")
-            line = card.lines[index + 1] if 0 <= index < len(card.lines) - 1 else ""
+        def change(board, card, column):
+            body = card.file.body
+            if expected is not None and (card.file.title != expected.title or body != expected.body):
+                raise ConflictError(f"{card.path}: card changed on disk since you opened it; open it again")
+            line = body[index] if 0 <= index < len(body) else ""
             match = CHECK_LINE.match(line)
             if match is None:
-                raise HerdboardError(f"Detail line {index + 1} of {card.block_id or ref} is not a checklist item")
+                raise HerdboardError(f"Detail line {index + 1} of {card.id} is not a checklist item")
             mark = " " if match.group("mark") != " " else "x"
-            card.lines[index + 1] = f"{match.group('start')}{mark}{line[match.end('mark') :]}"
-            return column
+            body[index] = f"{match.group('start')}{mark}{line[match.end('mark') :]}"
 
         return self._modify(ref, change)
 
     def shift(self, ref: str, step: int) -> CardView:
         """Swap a card with the card above (step -1) or below (step 1) in its column.
 
-        Other lines of the column, such as a complete marker, keep their place.
         At the top or bottom of the column the card stays where it is.
         """
 
-        def change(board, path, column, card):
-            places = [i for i, item in enumerate(column.items) if isinstance(item, Card)]
-            here = places.index(next(i for i in places if column.items[i] is card))
+        def change(board, card, column):
+            here = column.cards.index(card.id)
             there = here + step
-            if 0 <= there < len(places):
-                a, b = places[here], places[there]
-                column.items[a], column.items[b] = column.items[b], column.items[a]
-            return column
+            if 0 <= there < len(column.cards):
+                column.cards[here], column.cards[there] = column.cards[there], column.cards[here]
 
         return self._modify(ref, change)
 
-    def move_to_board(self, ref: str, target: Path, column: str | None = None) -> CardView:
-        """Move a todo, with its indented lines and its ID, to another board.
+    def move_to_board(
+        self,
+        ref: str,
+        target: Path,
+        column: str | None = None,
+        blocked: Callable[[str], str | None] | None = None,
+    ) -> CardView:
+        """Move a todo, with its folder (log and attachments too), to another board.
 
         Without `column`, the card keeps its column name when the target board has
         it, else it goes to the target's default column. A card that leaves the
         triage column lands in the target's triage column, which that board gains
-        when it has none. The target file is written before the source file, so a
-        failure between the two leaves the card on both boards (`doctor` reports the
-        duplicate ID) instead of on neither.
+        when it has none. A sub-card loses its parent, which stays behind.
+
+        `blocked` names why the card must stay, such as a running agent that holds the
+        folder path, or returns None. The folder moves first, then the target board is
+        written, then the source board: a crash between them leaves an orphan on the
+        target board, which shows there.
         """
         located = self._resolve(ref)
         source = located.path
         if Path(target).resolve() == Path(source).resolve():
             raise HerdboardError(f"The card is already on {self.board_name(source)}")
-        if not Path(target).is_file():
-            raise NotFoundError(f"No board file: {target}")
+        if not (Path(target) / BOARD_FILE).is_file():
+            raise NotFoundError(f"No board: {target}")
+        reason = blocked(ref) if blocked is not None else None
+        if reason:
+            raise CardActiveError(f"Cannot move {ref} to another board: {reason}")
         with self._lock():
             board = self._read(source)
-            self._require_writable(source, board)
-            old_column, card = self._find(board, located)
-            if card.block_id:
-                self._check_unique(card.block_id)
+            card = self._find(board, located)
+            self._check_unique(card.id)
+            if board.children(card.id):
+                raise ParentError(
+                    f"Cannot move {card.id}: it has sub-cards on the board. Move them first", "has_sub_cards"
+                )
+            old_column = board.column_of(card.id)
             destination = self._read(target)
-            self._require_writable(target, destination)
             if column is not None:
-                new_column = self._target_column(destination, column)
-            elif is_triage(old_column.title):
-                new_column = self._target_column(destination, TRIAGE_COLUMN)
+                new_column = self._target_column(destination.file, column)
+            elif is_triage(old_column.name):
+                new_column = self._target_column(destination.file, TRIAGE_COLUMN)
             else:
-                new_column = next(
-                    (c for c in destination.columns if c.title.casefold() == old_column.title.casefold()),
-                    None,
-                ) or self._default_column(destination, target)
-            # One set of used IDs for both boards: neither file has the other's new IDs yet.
-            taken = _all_ids(destination)
-            self._assign_ids(source, board, taken)
-            self._assign_ids(target, destination, taken)
-            kanban_md.remove_card(old_column, card)
-            if self._is_completed(new_column):
-                if not card.checked:
-                    card.set_checked(True)
-            elif self._is_completed(old_column):
-                card.set_checked(False)
-            kanban_md.insert_card(new_column, card, "bottom")
-            self._write(target, destination)
-            self._write(source, board)
-        return self._view(target, new_column, card, card.block_id)
+                new_column = destination.file.column(old_column.name) or self._default_column(destination.file, target)
+            folder = target / "cards" / card.id
+            self._rename(card.folder, folder)
+            moved = _Card(card.id, folder, card.file, card.text)
+            if moved.file.parent is not None:
+                moved.file.parent = None
+                self._write_card(moved)
+            destination.cards[card.id] = moved
+            new_column.cards.append(card.id)
+            self._write_board(destination)
+            old_column.cards.remove(card.id)
+            del board.cards[card.id]
+            self._write_board(board)
+            return self._board_view(destination, card.id)
 
     def edit(
         self,
@@ -860,260 +930,223 @@ class Store:
         title: str | None = None,
         body: list[str] | None = None,
         expected: CardView | None = None,
+        *,
+        tags: list[str] | None = None,
+        type: str | None | object = KEEP,
+        due: str | None | object = KEEP,
     ) -> CardView:
-        """Replace a card's first-line text, its indented lines, or both.
+        """Change a card's title, body, tags, type or due date.
 
-        The checkbox and the block ID stay. `body` lines are written one level
-        deeper than the card. With `expected`, the card must still match it.
+        None for `title`, `body` or `tags`, and `KEEP` for `type` or `due`, leave the
+        value. With `expected`, the card must still match it.
         """
         if title is not None:
-            title = title.strip()
-            if not title or "\n" in title or "\r" in title:
-                raise HerdboardError("A card title must be one line of text")
-            if BLOCK_ID.search(title):
-                raise HerdboardError("A card title must not end with a block ID such as ^t1a2")
+            title = _check_title(title)
+        if due is not KEEP and due is not None:
+            card_file.parse_due(due)
 
-        def change(board, path, column, card):
+        def change(board, card, column):
+            file = card.file
             if expected is not None and (
-                card.title != expected.title
-                or card.body != expected.body
-                or card.checked != expected.checked
-                or column.title != expected.column
+                file.title != expected.title
+                or file.body != expected.body
+                or (column is self._done_or_none(board.file)) != expected.checked
+                or column.name != expected.column
             ):
-                raise ConflictError(f"{path}: card changed on disk since you opened it; open it again")
+                raise ConflictError(f"{card.path}: card changed on disk since you opened it; open it again")
             if title is not None:
-                ending = f" ^{card.block_id}" if card.block_id else ""
-                # The parent link is card structure, not text: only set_parent changes it.
-                text = with_parent(title, parent_of(title) or parent_of(card.title))
-                card.lines[0] = f"- [{card.check_char}] {text}{ending}"
+                file.title = title
             if body is not None:
-                card.lines[1:] = _body_lines(body)
-            return column
+                file.body = card_file.body_lines(body)
+            if tags is not None:
+                file.tags = list(dict.fromkeys(tags))
+            if type is not KEEP:
+                file.type = type
+            if due is not KEEP:
+                file.due = due
 
         return self._modify(ref, change)
 
     def delete(self, ref: str) -> CardView:
-        """Remove a card and its indented lines. Returns the card as it was."""
+        """Remove a card with its folder: its log and attachments too. Returns the card as it was.
 
-        def change(board, path, column, card):
-            kanban_md.remove_card(column, card)
-            return column
+        The ID leaves `board.toml` first, then the folder goes: a crash between them leaves
+        an orphan, which shows again.
+        """
+        located = self._resolve(ref)
+        with self._lock():
+            board = self._read(located.path)
+            card = self._find(board, located)
+            self._check_unique(card.id)
+            view = self._board_view(board, card.id)
+            board.column_of(card.id).cards.remove(card.id)
+            self._write_board(board)
+            try:
+                shutil.rmtree(card.folder)
+            except OSError as error:
+                raise IoError(f"{card.folder}: cannot remove: {error}") from error
+        return view
 
-        return self._modify(ref, change)
-
-    def _archive_column(self, board: Board) -> Column:
-        """The board's archive section. A missing one is added after the last column, as Obsidian writes it."""
-        if board.archive is None:
-            last = board.columns[-1].items[-1] if board.columns and board.columns[-1].items else ""
-            blank = isinstance(last, str) and not last.strip()
-            board.archive_lines = ([] if blank else [""]) + ["***", ""]
-            board.archive = Column(f"## {self.config.archive_titles[0]}", ["", ""], archive=True)
-        return board.archive
+    def _archive_one(self, board: _Board, card: _Card, when: datetime) -> _Card:
+        """Move a card folder to the archive and stamp it. The caller writes `board.toml` after."""
+        folder = board.path / "archive" / card.id
+        self._rename(card.folder, folder)
+        archived = _Card(card.id, folder, card.file, card.text)
+        archived.file.archived = when
+        self._write_card(archived)
+        board.column_of(card.id).cards.remove(card.id)
+        del board.cards[card.id]
+        return archived
 
     def archive(self, ref: str, blocked: Callable[[str], str | None] | None = None) -> CardView:
-        """Move a todo to its board's archive section.
+        """Move a todo's folder to its board's archive.
 
         `blocked` names why a card must stay on the board, such as a worktree that still
         exists, or returns None. It runs before the lock, because it can ask Herdr.
         """
         located = self._resolve(ref)
-        # A temporary reference has no block ID in `located`, but the card can have one.
-        reason = blocked(Card(located.lines).block_id or ref) if blocked is not None else None
+        reason = blocked(ref) if blocked is not None else None
         if reason:
             raise CardActiveError(f"Cannot archive {ref}: {reason}")
-
-        def change(board, path, column, card):
-            if card.block_id and any(parent_of(other.title) == card.block_id for _, other in board.all_cards()):
+        with self._lock():
+            board = self._read(located.path)
+            card = self._find(board, located)
+            self._check_unique(card.id)
+            if board.children(card.id):
                 raise ParentError(
-                    f"Cannot archive {card.block_id}: it has sub-cards on the board. Archive them first",
+                    f"Cannot archive {card.id}: it has sub-cards on the board. Archive them first",
                     "has_sub_cards",
                 )
-            kanban_md.remove_card(column, card)
-            archive = self._archive_column(board)
-            kanban_md.insert_card(archive, card, "bottom")
-            return archive
-
-        return self._modify(ref, change, located)
+            archived = self._archive_one(board, card, _now())
+            self._write_board(board)
+        return self._view(located.path, archived, None)
 
     def done_cards(self, path: Path) -> list[CardView]:
         """The cards in the board's done column."""
         board = self._read(path)
-        done = self._done_column(board, path)
-        return [view for view in self.list_cards([path]) if view.column == done.title]
+        done = self._done_column(board.file, path)
+        return [self._view(path, board.cards[card_id], done, True) for card_id in done.cards]
 
     def archive_done(
         self,
         path: Path,
         blocked: Callable[[str], str | None] | None = None,
     ) -> tuple[list[CardView], list[tuple[CardView, str]]]:
-        """Archive every card in the board's done column, in one write.
+        """Archive every card in the board's done column.
 
         A card stays when `blocked` gives a reason, or when it is a parent whose sub-cards
         stay on the board. Returns the archived cards, and the cards that stay with the reason.
         """
-        board = self._read(path)
-        done = self._done_column(board, path)
-        name = self.board_name(path)
-        numbers = {id(card): number for number, (_, card) in enumerate(board.all_cards(), start=1)}
+        first = self._read(path)
+        done = self._done_column(first.file, path)
         skipped: list[tuple[CardView, str]] = []
-        chosen: list[tuple[CardView, Card]] = []
-        for card in done.cards:
-            view = self._view(path, done, card, card.block_id or f"{name}:{numbers[id(card)]}")
-            # A card without an ID was never started, so nothing can block it.
-            reason = blocked(card.block_id) if blocked is not None and card.block_id else None
+        chosen: dict[str, CardView] = {}
+        for card_id in done.cards:
+            view = self._view(path, first.cards[card_id], done, True)
+            reason = blocked(card_id) if blocked is not None else None
             if reason:
                 skipped.append((view, reason))
             else:
-                chosen.append((view, card))
-        moving = {id(card) for _, card in chosen}
-        staying = {parent_of(card.title) for _, card in board.all_cards() if id(card) not in moving}
-        for view, card in list(chosen):
-            if card.block_id and card.block_id in staying:
-                chosen.remove((view, card))
-                skipped.append((view, "it has sub-cards that stay on the board"))
+                chosen[card_id] = view
         if not chosen:
             return [], skipped
         with self._lock():
             board = self._read(path)
-            self._require_writable(path, board)
-            done = self._done_column(board, path)
-            pairs: list[tuple[CardView, Card]] = []
-            for view, card in chosen:
-                match = next(
-                    (c for c in done.cards if c.lines == card.lines and not any(c is m for _, m in pairs)), None
-                )
-                if match is None:
-                    raise ConflictError(f"{path}: {view.ref} changed on disk; retry")
-                pairs.append((view, match))
-            # A sub-card can have appeared since the first read: check the parents again.
-            moving = {id(card) for _, card in pairs}
-            staying = {parent_of(card.title) for _, card in board.all_cards() if id(card) not in moving}
-            matches: list[Card] = []
-            for view, card in pairs:
-                if card.block_id and card.block_id in staying:
+            done = self._done_column(board.file, path)
+            for card_id in chosen:
+                card = board.cards.get(card_id)
+                if card_id not in done.cards or card is None or card.text != first.cards[card_id].text:
+                    raise ConflictError(f"{path}: {card_id} changed on disk; retry")
+            moving = set(chosen)
+            staying = {board.cards[c].file.parent for c in board.file.card_ids() if c not in moving}
+            matches = []
+            for card_id, view in chosen.items():
+                if card_id in staying:
                     skipped.append((view, "it has sub-cards that stay on the board"))
                 else:
-                    matches.append(card)
+                    matches.append(card_id)
             if not matches:
                 return [], skipped
-            for card in matches:
-                if card.block_id:
-                    self._check_unique(card.block_id)
-            self._assign_ids(path, board)
-            archive = self._archive_column(board)
-            for card in matches:
-                kanban_md.remove_card(done, card)
-                kanban_md.insert_card(archive, card, "bottom")
-            self._write(path, board)
-        return [self._view(path, archive, card, card.block_id) for card in matches], skipped
-
-    def _locate_archived(self, ref: str) -> tuple[Path, int | None, list[str] | None]:
-        """Find an archived card by its ID, or by an archive reference such as `p:archive-2`.
-
-        Returns its board, and for an archive reference its place and its lines.
-        """
-        temp = ARCHIVE_REF.match(ref)
-        if temp:
-            path = self.resolve_board(temp.group("board"))
-            board = self._read(path)
-            cards = board.archive.cards if board.archive is not None else []
-            number = int(temp.group("number"))
-            if not 1 <= number <= len(cards):
-                raise NotFoundError(f"No archived card {ref}")
-            return path, number, list(cards[number - 1].lines)
-        path = self._find_archived(ref)
-        if path is None:
-            raise NotFoundError(f"No archived card {ref}")
-        return path, None, None
-
-    @staticmethod
-    def _archived_card(board: Board, path: Path, ref: str, number: int | None, lines: list[str] | None) -> Card:
-        """Find the card of `_locate_archived` again in a fresh parse; its lines must be unchanged."""
-        cards = board.archive.cards if board.archive is not None else []
-        if number is not None:
-            card = cards[number - 1] if number <= len(cards) else None
-            if card is not None and card.lines != lines:
-                card = None
-        else:
-            card = next((c for c in cards if c.block_id == ref), None)
-        if card is None:
-            raise ConflictError(f"{path}: card changed on disk; retry")
-        return card
-
-    def _archive_id(self, ref: str) -> CardView:
-        """Give the archive card of an archive reference a new ID."""
-        path, number, lines = self._locate_archived(ref)
-        with self._lock():
-            board = self._read(path)
-            self._require_writable(path, board)
-            card = self._archived_card(board, path, ref, number, lines)
-            taken: set[str] = set()
-            self._assign_ids(path, board, taken)
-            card.set_block_id(self._new_id(taken))
-            self._write(path, board)
-        return self._view(path, board.archive, card, card.block_id)
+            when = _now()
+            # One second apart, so the archive lists the cards newest first in their column order.
+            archived = [
+                self._archive_one(board, board.cards[card_id], when - timedelta(seconds=index))
+                for index, card_id in enumerate(matches)
+            ]
+            self._write_board(board)
+        return [self._view(path, card, None) for card in archived], skipped
 
     def archived_parent(self, ref: str) -> CardView | None:
         """The parent of an archived sub-card, when the parent is archived too."""
-        path, number, lines = self._locate_archived(ref)
-        board = self._read(path)
-        parent = parent_of(self._archived_card(board, path, ref, number, lines).title)
-        if parent is None:
+        path = self._find_archived(ref)
+        if path is None:
+            raise NotFoundError(f"No archived card {ref}")
+        parent = self._read_card(path / "archive" / ref).file.parent
+        if parent is None or not (path / "archive" / parent / CARD_FILE).is_file():
             return None
-        return next((view for view in self._archive_views(path, board) if view.ref == parent), None)
+        return self._view(path, self._read_card(path / "archive" / parent), None)
 
     def unarchive(self, ref: str, with_parent: bool = False) -> CardView:
-        """Move an archived todo to its board's done column.
+        """Move an archived todo's folder back to its board, into the done column.
 
-        A card without an ID takes its archive reference, and gets an ID. A sub-card whose
-        parent is archived too needs `with_parent`, which moves the parent back first.
+        A sub-card whose parent is archived too needs `with_parent`, which moves the parent
+        back first. Each folder moves before `board.toml` is written: a crash between them
+        leaves an orphan, which shows in the first column.
         """
-        path, number, lines = self._locate_archived(ref)
+        path = self._find_archived(ref)
+        if path is None:
+            raise NotFoundError(f"No archived card {ref}")
         with self._lock():
-            board = self._read(path)
-            self._require_writable(path, board)
-            card = self._archived_card(board, path, ref, number, lines)
-            if card.block_id:
-                self._check_unique(card.block_id)
-            parent_id = parent_of(card.title)
-            parent = next((c for c in board.archive.cards if c.block_id == parent_id), None) if parent_id else None
-            if parent is not None and not with_parent:
+            if not (path / "archive" / ref / CARD_FILE).is_file():
+                raise ConflictError(f"{path}: card changed on disk; retry")
+            self._check_unique(ref)
+            card = self._read_card(path / "archive" / ref)
+            parent_id = card.file.parent
+            parent_folder = path / "archive" / parent_id if parent_id else None
+            parent_archived = parent_folder is not None and (parent_folder / CARD_FILE).is_file()
+            if parent_archived and not with_parent:
                 raise ParentError(
                     f"The parent {parent_id} of {ref} is archived too. Unarchive the parent with it", "parent_archived"
                 )
-            done = self._done_column(board, path)
-            if parent is not None:
-                self._move_card(board.archive, parent, done, "bottom", check=True)
-            target = self._move_card(board.archive, card, done, "bottom", check=True)
-            self._assign_ids(path, board)
-            self._write(path, board)
-        return self._view(path, target, card, card.block_id)
+            board = self._read(path)
+            done = self._done_column(board.file, path)
+            order = ([self._read_card(parent_folder)] if parent_archived else []) + [card]
+            for one in order:
+                folder = path / "cards" / one.id
+                self._rename(one.folder, folder)
+                back = _Card(one.id, folder, one.file, one.text)
+                back.file.archived = None
+                self._write_card(back)
+                board.cards[one.id] = back
+                for column in board.file.columns:
+                    if one.id in column.cards:
+                        column.cards.remove(one.id)
+                done.cards.append(one.id)
+            self._write_board(board)
+            return self._board_view(board, ref)
 
-    def _check_parent(self, board: Board, path: Path, parent: str, child: str | None) -> None:
+    def _check_parent(self, board: _Board, parent: str, child: str | None) -> None:
         """Refuse a parent that is not on this board, that has a parent, or whose child has children."""
         if parent == child:
             raise ParentError(f"{parent} cannot be its own parent", "usage")
-        cards = [card for _, card in board.all_cards()]
-        found = next((card for card in cards if card.block_id == parent), None)
+        found = board.cards.get(parent)
         if found is None:
             raise ParentError(
-                f"No card {parent} on board {self.board_name(path)}; a parent must be on the same board",
+                f"No card {parent} on board {self.board_name(board.path)}; a parent must be on the same board",
                 "parent_missing",
             )
-        if parent_of(found.title):
+        if found.file.parent:
             raise ParentError(f"{parent} is a sub-card; sub-cards go one level deep", "parent_nested")
-        if child is not None and any(parent_of(card.title) == child for card in cards):
+        if child is not None and board.children(child):
             raise ParentError(f"{child} has sub-cards, so it cannot be a sub-card", "parent_nested")
 
     def set_parent(self, ref: str, parent: str | None) -> CardView:
-        """Set or remove a todo's parent link."""
+        """Set or remove a todo's parent."""
 
-        def change(board, path, column, card):
+        def change(board, card, column):
             if parent is not None:
-                self._check_parent(board, path, parent, card.block_id)
-            ending = f" ^{card.block_id}" if card.block_id else ""
-            card.lines[0] = f"- [{card.check_char}] {with_parent(card.title, parent)}{ending}"
-            return column
+                self._check_parent(board, parent, card.id)
+            card.file.parent = parent
 
         return self._modify(ref, change)
 
@@ -1123,38 +1156,29 @@ class Store:
         return [view for view in self.list_cards([card.path]) if view.parent == card.ref]
 
     def ensure_id(self, ref: str, archived: bool = False) -> CardView:
-        """The card, with a block ID: a card without one gets IDs by the usual write rule.
-
-        With `archived`, an archived card is returned too. One without an ID gets one.
-        """
-        view = self.show(ref, archived)
-        if view.archived and ARCHIVE_REF.match(view.ref):
-            view = self._archive_id(view.ref)
-        elif TEMP_REF.match(view.ref):
-            view = self._modify(ref, lambda board, path, column, card: column)
-        return view
+        """The card. Every card has its ID from the start, so this only reads it."""
+        return self.show(ref, archived)
 
     def todo_snapshot(self, ref: str) -> TodoSnapshot:
         """Read a todo for `promote`. Fails when its board has no done column."""
         located = self._resolve(ref)
         board = self._read(located.path)
-        column, card = self._find(board, located)
-        done = self._done_column(board, located.path)
-        return TodoSnapshot(located, self._view(located.path, column, card, card.block_id or ref), column is done)
+        card = self._find(board, located)
+        done = self._done_column(board.file, located.path)
+        view = self._board_view(board, card.id)
+        return TodoSnapshot(located, view, board.column_of(card.id) is done)
 
     def finish_promotion(self, snapshot: TodoSnapshot, identifier: str) -> CardView:
-        """Add `→ identifier` before the block ID and move the todo to the done column.
+        """Set the todo's `promoted` field and move it to the done column.
 
         Fails with a conflict when the todo changed since `snapshot`.
         """
 
-        def change(board, path, source, card):
-            card.lines[0] = BLOCK_ID.sub(lambda match: f" → {identifier}{match.group(0)}", card.first_line)
-            target = self._done_column(board, path)
-            if target is source:
-                card.set_checked(True)
-                return source
-            return self._move_card(source, card, target, "bottom", check=True)
+        def change(board, card, source):
+            card.file.promoted = identifier
+            target = self._done_column(board.file, board.path)
+            if target is not source:
+                self._move_card(card.id, source, target, "bottom")
 
         return self._modify(snapshot.located.block_id, change, snapshot.located)
 
@@ -1166,44 +1190,49 @@ class Store:
         position: str = "bottom",
         body: list[str] | None = None,
         parent: str | None = None,
+        *,
+        tags: list[str] = (),
+        type: str | None = None,
+        due: str | None = None,
     ) -> CardView:
-        if not text.strip() or "\n" in text or "\r" in text:
-            raise HerdboardError("Card text must be one non-empty line")
-        if not path.is_file():
-            raise NotFoundError(f"No board file: {path}")
+        """Add a card. Its `card.md` is written first, then `board.toml`: a crash between
+        them leaves an orphan, which shows in the first column."""
+        text = _check_title(text)
+        if due is not None:
+            card_file.parse_due(due)
+        if not (path / BOARD_FILE).is_file():
+            raise NotFoundError(f"No board: {path}")
         with self._lock():
             board = self._read(path)
-            self._require_writable(path, board)
             if column is None:
-                target = self._default_column(board, path)
+                target = self._default_column(board.file, path)
             else:
-                target = self._target_column(board, column)
-            self._assign_ids(path, board)
+                target = self._target_column(board.file, column)
             if parent is not None:
-                self._check_parent(board, path, parent, None)
-                text = with_parent(text, parent)
-            mark = "x" if self._is_completed(target) else " "
-            card = Card([f"- [{mark}] {text}", *_body_lines(body or [])])
-            card.set_block_id(self._new_id(self._taken_ids(path, board)))
-            kanban_md.insert_card(target, card, position)
-            self._write(path, board)
-        return self._view(path, target, card, card.block_id)
-
-    def _taken_ids(self, path: Path, board: Board) -> set[str]:
-        taken = _all_ids(board)
-        for other in self.board_paths():
-            if other != path:
-                taken |= _all_ids(self._read(other))
-        return taken
-
-
-# A checklist item in a card's detail lines: `<indent>- [ ] text`.
-CHECK_LINE = re.compile(r"^(?P<start>\s+[-*+] \[)(?P<mark>.)\] ")
+                self._check_parent(board, parent, None)
+            card = self._new_card(
+                path,
+                self._new_id(self._taken_ids()),
+                text,
+                list(dict.fromkeys(tags)),
+                type=type,
+                due=due,
+                parent=parent,
+                body=body or [],
+            )
+            self._write_card(card)
+            board.cards[card.id] = card
+            _insert(target.cards, card.id, position)
+            self._write_board(board)
+            return self._board_view(board, card.id)
 
 
-def _body_lines(body: list[str]) -> list[str]:
-    """Card lines for typed detail lines: one level deeper than the card, trailing blanks dropped."""
-    lines = list(body)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    return [f"\t{line}" if line.strip() else "\t" for line in lines]
+def _check_title(title: str) -> str:
+    try:
+        return card_file.check_title(title)
+    except FormatError as error:
+        raise HerdboardError(str(error)) from None
+
+
+# A checklist item in a card's body: `- [ ] text`, at any indent.
+CHECK_LINE = re.compile(r"^(?P<start>\s*[-*+] \[)(?P<mark>.)\] ")

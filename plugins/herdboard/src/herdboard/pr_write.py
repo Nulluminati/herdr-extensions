@@ -18,9 +18,8 @@ from pathlib import Path
 from . import activity, merge
 from . import start as start_module
 from .agent_review import _notify, _reviewer_status, reviewer_arguments, start_worker
-from .brief import _unindent
 from .config import thinking_levels
-from .model import HerdboardError, commit_type, split_title
+from .model import HerdboardError, commit_type
 from .start import Starter, _lock, _read, _write, agent_live, find_record, herdr, safe_key, state_dir
 
 # Writing a description takes minutes; the worker gives up after this.
@@ -74,9 +73,7 @@ def find_templates(worktree: Path) -> list[Path]:
 
 def card_text(card) -> tuple[str, str]:
     """The card's title and description, without board markup."""
-    if card.source == "linear":
-        return card.title, "\n".join(card.body).strip()
-    return split_title(card.title)[0] or card.title, "\n".join(_unindent(line) for line in card.body).strip()
+    return card.title, "\n".join(card.body).strip()
 
 
 def request_text(card, ref: str, data: dict, folder: Path, templates: list[Path], entries: list[dict]) -> str:

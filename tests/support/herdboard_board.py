@@ -9,6 +9,7 @@ from herdboard.board import HerdboardApp
 from herdboard.config import Config
 from herdboard.identity import RepoIdentity
 from herdboard.store import Store
+from support.herdboard_store import render_markdown, write_markdown_board
 
 SIZE = (80, 24)
 
@@ -43,8 +44,7 @@ class BoardTestCase(unittest.IsolatedAsyncioTestCase):
         if not os.environ.get("XDG_STATE_HOME", "").startswith(tempfile.gettempdir()):
             env["XDG_STATE_HOME"] = str(self.root / "state")
         self.enterContext(mock.patch.dict(os.environ, env))
-        self.config = Config(todos_dir=self.root / "todos", vault_root=self.root / "vault")
-        (self.root / "vault").mkdir()
+        self.config = Config(todos_dir=self.root / "todos")
         self.store = Store(self.config)
         self.identity = RepoIdentity("github.com/acme/api", "github.com", ("acme", "api"))
         self.repo_path = self.store.init_board(self.identity)
@@ -74,6 +74,14 @@ class BoardTestCase(unittest.IsolatedAsyncioTestCase):
 
     def selected(self, app):
         return [w.plain for w in app.query(".card.selected")]
+
+    def put_markdown(self, path, text):
+        """Write a board folder from the old Markdown notation, as an outside edit would."""
+        write_markdown_board(self.config.todos_dir, path.name, text)
+
+    def markdown(self, path):
+        """A board folder in the old Markdown notation."""
+        return render_markdown(path)
 
     def refs(self, path):
         return {c.title: (c.ref, c.column) for c in self.store.list_cards([path])}

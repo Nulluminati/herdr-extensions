@@ -41,7 +41,7 @@ class ViewTests(LinearCliCase):
         self.repin(IssuePin("i4", "ENG-4"))
         self.assertEqual(self.refs(self.listing())[1:], [])
         self.assertEqual(
-            self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").pins, [IssuePin("i4", "ENG-4")]
+            self.store_for().board_meta(self.store_for().boards_dir / "acme-api").pins, [IssuePin("i4", "ENG-4")]
         )
 
     def test_project_view_has_no_pins(self):
@@ -405,7 +405,7 @@ class TextTests(LinearCliCase):
 
 class LinkTests(LinearCliCase):
     def links(self):
-        return self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").links
+        return self.store_for().board_meta(self.store_for().boards_dir / "acme-api").links
 
     def test_creates_board_but_requires_repository(self):
         self.link("Platform")
@@ -414,7 +414,7 @@ class LinkTests(LinearCliCase):
         self.assertIn("Not in a Git repository", out["message"])
 
     def test_add_replace_and_remove(self):
-        board = self.board()
+        board = self.board() / "board.toml"
         before = board.read_text()
         data = self.link("platform")
         self.assertEqual(data["links"], [{"id": "p-plat", "name": "Platform"}])
@@ -470,31 +470,31 @@ class LinkTests(LinearCliCase):
         self.assertEqual(self.link("Platform", expect=1)["error"]["code"], "linear_disabled")
 
     def test_invalid_frontmatter_board_is_read_only(self):
-        board = self.board()
-        board.write_text(board.read_text().replace("repo:", "bad: [x\nrepo:", 1))
+        board = self.board() / "board.toml"
+        board.write_text(board.read_text().replace("repo =", "linear-projects = 3\nrepo =", 1))
         error = self.link("Platform", expect=1)["error"]
         self.assertEqual(error["code"], "format")
-        self.assertIn("invalid YAML", error["message"])
+        self.assertIn("linear-projects", error["message"])
 
     def test_text_output(self):
         self.board()
         out, _ = self.run_cli("link", "Platform", directory=self.repo)
-        self.assertRegex(out, r"acme-api.md: linked projects: Platform\n$")
+        self.assertRegex(out, r"acme-api: linked projects: Platform\n$")
 
 
 class PinTests(LinearCliCase):
     def pins(self):
-        return self.store_for().board_meta(self.store_for().projects_dir / "acme-api.md").pins
+        return self.store_for().board_meta(self.store_for().boards_dir / "acme-api").pins
 
     def test_pin_and_pin_again(self):
         self.board()
         data = self.run_json("pin", "eng-5", directory=self.repo)
         self.assertEqual(data["change"], "added")
         self.assertEqual(data["pin"], {"id": "i5", "identifier": "ENG-5"})
-        self.assertTrue(data["board"].endswith("acme-api.md"))
+        self.assertTrue(data["board"].endswith("acme-api"))
         self.assertEqual(self.pins(), [IssuePin("i5", "ENG-5")])
         out, _ = self.run_cli("pin", "ENG-5", directory=self.repo)
-        self.assertRegex(out, r"^ENG-5 is already pinned to .*acme-api.md\n$")
+        self.assertRegex(out, r"^ENG-5 is already pinned to .*acme-api\n$")
         self.assertEqual(self.pins(), [IssuePin("i5", "ENG-5")])
         self.assertIn("ENG-5", self.refs(self.listing()))
 

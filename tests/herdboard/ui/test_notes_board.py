@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +21,7 @@ from herdboard.board import (
 from herdboard.config import Config
 from herdboard.pr_reviews import Page
 from herdboard.store import Store
+from support.herdboard_store import write_board
 
 
 class NotesTabTests(unittest.IsolatedAsyncioTestCase):
@@ -36,9 +36,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
         self.store = Store(Config(todos_dir=root / "todos"))
         self.inbox = self.store.ensure_inbox()
         self.store.add(self.inbox, "Inbox card")
-        self.store.projects_dir.mkdir(parents=True)
-        self.repo = self.store.projects_dir / "acme-api.md"
-        shutil.copy(self.inbox, self.repo)
+        self.repo = write_board(self.store.config.todos_dir, "acme-api", [("Backlog", []), ("Done", [])])
         self.store.add(self.repo, "Repo card")
         self.service = Mock()
         self.service.page.return_value = ("acme/api", Page([], 0, None))
@@ -126,7 +124,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(app.screen_stack), 1)
 
     async def test_the_repository_view_shows_the_repository_note(self):
-        self.note("acme-api").parent.mkdir(parents=True)
+        self.note("acme-api").parent.mkdir(parents=True, exist_ok=True)
         self.note("acme-api").write_text("# Repo ideas\n")
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
@@ -138,7 +136,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_preview_keeps_each_blank_line(self):
         from textual.widgets._markdown import MarkdownBlock
 
-        self.note("acme-api").parent.mkdir(parents=True)
+        self.note("acme-api").parent.mkdir(parents=True, exist_ok=True)
         self.note("acme-api").write_text("\n# Head\n\n- one\n- two\n\n\nend\n")
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
@@ -156,7 +154,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_preview_keeps_lists_across_blank_lines(self):
         from textual.widgets._markdown import MarkdownBullet, MarkdownList
 
-        self.note("acme-api").parent.mkdir(parents=True)
+        self.note("acme-api").parent.mkdir(parents=True, exist_ok=True)
         self.note("acme-api").write_text("1. a\n\n1. b\n\n   more\n")
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
@@ -290,11 +288,11 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:
             screen = await self.open_notes(app, pilot)
-            self.note("acme-api").parent.mkdir(parents=True)
-            self.note("acme-api").write_text("from Obsidian")
+            self.note("acme-api").parent.mkdir(parents=True, exist_ok=True)
+            self.note("acme-api").write_text("from another editor")
             screen.check_file()
             await self.settle(app, pilot)
-            self.assertIn("from Obsidian", screen.text())
+            self.assertIn("from another editor", screen.text())
 
     async def test_the_preview_reads_the_file_on_a_timer(self):
         app = self.app()
@@ -307,8 +305,8 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(160, 30)) as pilot:
             screen = await self.open_notes(app, pilot)
             await pilot.press("e", "m")
-            self.note("acme-api").parent.mkdir(parents=True)
-            self.note("acme-api").write_text("from Obsidian")
+            self.note("acme-api").parent.mkdir(parents=True, exist_ok=True)
+            self.note("acme-api").write_text("from another editor")
             screen.check_file()
             await self.settle(app, pilot)
             self.assertEqual(screen.editor_text(), "m")
@@ -316,8 +314,8 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
     async def outside_conflict(self, app, pilot) -> NotesScreen:
         screen = await self.open_notes(app, pilot)
         await pilot.press("e", "m")
-        self.note("acme-api").parent.mkdir(parents=True)
-        self.note("acme-api").write_text("from Obsidian")
+        self.note("acme-api").parent.mkdir(parents=True, exist_ok=True)
+        self.note("acme-api").write_text("from another editor")
         await pilot.press("ctrl+s")
         await self.settle(app, pilot)
         self.assertIsInstance(app.screen, NoteChangedScreen)
@@ -340,9 +338,9 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("r")
             await self.settle(app, pilot)
             self.assertIs(app.screen, screen)
-            self.assertEqual(self.note("acme-api").read_text(), "from Obsidian")
+            self.assertEqual(self.note("acme-api").read_text(), "from another editor")
             self.assertFalse(screen.editing)
-            self.assertIn("from Obsidian", screen.text())
+            self.assertIn("from another editor", screen.text())
 
     async def test_escape_on_the_question_keeps_the_edit(self):
         app = self.app()
@@ -353,7 +351,7 @@ class NotesTabTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app.screen, screen)
             self.assertTrue(screen.editing)
             self.assertEqual(screen.editor_text(), "m")
-            self.assertEqual(self.note("acme-api").read_text(), "from Obsidian")
+            self.assertEqual(self.note("acme-api").read_text(), "from another editor")
 
     async def test_a_write_error_shows_and_keeps_the_edit(self):
         app = self.app()

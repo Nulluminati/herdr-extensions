@@ -280,7 +280,9 @@ class BoardFile:
     def tables(self, key: str) -> list[dict]:
         """The array of tables under `key` as plain values; empty when the key is not there."""
         value = self.doc.get(key)
-        return [] if value is None else value.unwrap()
+        if value is None:
+            return []
+        return value.unwrap() if hasattr(value, "unwrap") else value
 
     def set_tables(self, key: str, items: list[dict]) -> None:
         """Set the array of tables under `key`, or remove it for an empty list."""
@@ -356,9 +358,9 @@ def parse_board(text: str, path: Path) -> BoardFile:
     for key in ("repo", "merge"):
         if key in doc and not isinstance(doc[key], str):
             raise FormatError(f"{path}: {key!r} must be text")
-    for key in ("linear-projects", "linear-issues", "column"):
-        if key in doc and not isinstance(doc[key], list):
-            raise FormatError(f"{path}: {key!r} must be an array of tables ([[{key}]])")
+    # The Linear tables are checked where they are read, so a bad one leaves the board readable.
+    if "column" in doc and not isinstance(doc["column"], list):
+        raise FormatError(f"{path}: 'column' must be an array of tables ([[column]])")
     columns = [_column(table, index, path) for index, table in enumerate(doc.get("column", []), start=1)]
     return BoardFile(doc, columns)
 

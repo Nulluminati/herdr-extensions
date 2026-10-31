@@ -21,7 +21,7 @@ def card(**fields):
         board="acme-api",
         path=None,
         column="In progress",
-        title="Fix login timeout #bug #api",
+        title="Fix login timeout",
         checked=False,
         due=None,
         tags=["api"],
@@ -63,7 +63,7 @@ class DetailsLinesTests(unittest.TestCase):
     def test_a_started_card_with_everything(self):
         data = {
             "ref": "t123",
-            "card": card(body=["\t- [x] one", "\t- [ ] two", "\t- [x] three", "\tnotes"]),
+            "card": card(body=["- [x] one", "- [ ] two", "- [x] three", "notes"]),
             "record": RECORD,
             "attachments": [{"name": "plan.md"}, {"name": "mockup-pane.png"}],
             "log": log(8),
@@ -132,8 +132,8 @@ class DetailsDataTests(StoreCase, unittest.TestCase):
         ref = self.card.ref
         self.write_records({ref: {**RECORD, "ref": ref}})
         activity.append(self.store, ref, "Started.", "claude", now=datetime(2026, 10, 29, 13, 28))
-        folder = self.config.todos_dir / ".herdboard" / "attachments" / ref
-        folder.mkdir(parents=True)
+        folder = self.card.path / "cards" / ref / "attachments"
+        folder.mkdir()
         (folder / "plan.md").write_text("# Plan\n")
         data = details.details_data(self.store, self.config, ref)
         self.assertEqual(data["card"].ref, ref)
@@ -156,12 +156,21 @@ class DetailsDataTests(StoreCase, unittest.TestCase):
         self.assertEqual(
             paths,
             [
-                self.card.path,
+                self.card.path / "board.toml",
+                self.card.path / "cards" / ref / "card.md",
                 activity.log_path(self.config, ref),
-                self.config.todos_dir / ".herdboard" / "attachments" / ref,
+                self.card.path / "cards" / ref / "attachments",
                 self.root / "state" / "herdboard" / "starts.json",
             ],
         )
+
+    def test_signature_changes_when_the_card_file_changes(self):
+        ref = self.card.ref
+        paths = details.watched_paths(self.config, ref, self.card.path)
+        before = details.signature(paths)
+        card_file = self.card.path / "cards" / ref / "card.md"
+        os.utime(card_file, ns=(1, 1))
+        self.assertNotEqual(details.signature(paths), before)
 
     def test_signature_changes_when_a_watched_file_changes(self):
         ref = self.card.ref

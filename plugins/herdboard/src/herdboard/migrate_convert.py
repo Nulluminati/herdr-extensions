@@ -6,8 +6,6 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from .model import BLOCK_ID
-
 # Markdown allows up to three leading spaces before a heading; four spaces or a tab make text.
 ATX_HEADING = re.compile(r"^ {0,3}#{1,6}\s+(?P<name>.*?)\s*$")
 FENCE_OPEN = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
@@ -15,6 +13,8 @@ UNDERLINE = re.compile(r"^(?:=+|-{2,})\s*$")
 LIST_ITEM = re.compile(r"^(?P<indent>[ \t]*)(?:[-*+]|\d+[.)])[ \t]+(?:\[(?P<box>[ xX])\][ \t]+)?(?P<text>\S.*?)\s*$")
 EMPTY_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])(?:[ \t]+\[[ xX]\])?\s*$")
 SLUG_BREAK = re.compile(r"[\W_]+")
+# A block ID (` ^id`) at the end of an item: a card ID from an old Markdown board.
+BLOCK_ID = re.compile(r" \^(?P<id>[A-Za-z0-9-]+)$")
 
 
 def slug(name: str) -> str | None:

@@ -15,6 +15,7 @@ from herdboard.linear_source import state_dir
 from herdboard.model import HerdboardError
 from herdboard.store import Store
 from support.herdboard_cli import CliTestCase
+from support.herdboard_store import write_board
 
 NOON = datetime(2026, 10, 12, 12, 0)
 
@@ -28,11 +29,12 @@ class LogFileTests(unittest.TestCase):
         config.write_text(f'todos_dir = "{root / "todos"}"\n')
         self.store = Store(load_config(config))
         self.todos = root / "todos"
+        self.board = write_board(self.todos, "inbox", [("Todo", [{"id": "t3m9", "title": "Card"}])])
 
-    def test_append_writes_one_line_in_a_hidden_folder(self):
+    def test_append_writes_one_line_in_the_card_folder(self):
         entry = activity.append(self.store, "t3m9", "Ready for review: 3 commits.", "pi", now=NOON)
         self.assertEqual(entry, {"time": "2026-10-12 12:00", "author": "pi", "message": "Ready for review: 3 commits."})
-        path = self.todos / ".herdboard" / "log" / "t3m9.md"
+        path = self.board / "cards" / "t3m9" / "log.md"
         self.assertEqual(path.read_text(encoding="utf-8"), "- 2026-10-12 12:00 · pi · Ready for review: 3 commits.\n")
 
     def test_entries_come_back_oldest_first(self):
@@ -52,7 +54,7 @@ class LogFileTests(unittest.TestCase):
 
     def test_several_lines_become_indented_lines_of_one_entry(self):
         activity.append(self.store, "t3m9", "Blocked.\nThe API key is missing.\r\n", "pi", now=NOON)
-        path = self.todos / ".herdboard" / "log" / "t3m9.md"
+        path = self.board / "cards" / "t3m9" / "log.md"
         self.assertEqual(
             path.read_text(encoding="utf-8"), "- 2026-10-12 12:00 · pi · Blocked.\n\tThe API key is missing.\n"
         )
@@ -61,9 +63,23 @@ class LogFileTests(unittest.TestCase):
     def test_a_card_without_a_log_has_no_entries(self):
         self.assertEqual(activity.read(self.store.config, "t3m9"), [])
 
-    def test_linear_identifiers_name_their_own_file(self):
+    def test_linear_identifiers_and_automations_have_their_own_folders(self):
         activity.append(self.store, "ENG-123", "Started.", "herdboard", now=NOON)
-        self.assertTrue((self.todos / ".herdboard" / "log" / "ENG-123.md").is_file())
+        self.assertTrue((self.todos / ".herdboard" / "linear" / "ENG-123" / "log.md").is_file())
+        activity.append(self.store, "a7k2", "Spawned.", "herdboard", now=NOON)
+        self.assertTrue((self.todos / ".herdboard" / "automations" / "a7k2" / "log.md").is_file())
+
+    def test_the_log_follows_the_card_into_the_archive(self):
+        activity.append(self.store, "t3m9", "First.", "pi", now=NOON)
+        self.store.archive("t3m9")
+        activity.append(self.store, "t3m9", "Second.", "pi", now=NOON)
+        self.assertEqual([e["message"] for e in activity.read(self.store.config, "t3m9")], ["First.", "Second."])
+        self.assertTrue((self.board / "archive" / "t3m9" / "log.md").is_file())
+
+    def test_a_todo_without_a_card_has_no_log(self):
+        with self.assertRaises(HerdboardError):
+            activity.append(self.store, "tzzz", "Hi.", "pi", now=NOON)
+        self.assertEqual(activity.read(self.store.config, "tzzz"), [])
 
     def test_an_empty_message_is_refused(self):
         with self.assertRaises(HerdboardError):
@@ -75,8 +91,7 @@ class LogFileTests(unittest.TestCase):
                 activity.append(self.store, ref, "Hi.", "pi", now=NOON)
 
     def test_lines_that_are_not_entries_are_ignored(self):
-        path = self.todos / ".herdboard" / "log" / "t3m9.md"
-        path.parent.mkdir(parents=True)
+        path = self.board / "cards" / "t3m9" / "log.md"
         path.write_text("# notes\n- 2026-10-12 12:00 · pi · Kept.\nstray\n", encoding="utf-8")
         self.assertEqual([e["message"] for e in activity.read(self.store.config, "t3m9")], ["Kept."])
 
@@ -195,15 +210,6 @@ class LogCliTests(CliTestCase):
     def test_log_of_an_unknown_todo_fails(self):
         data = self.run_json("log", "tzzz", "Hi.", directory=self.plain, expect=1)
         self.assertEqual(data["error"]["code"], "not_found")
-
-    def test_log_of_a_temporary_reference_gives_the_card_an_id(self):
-        (self.todos).mkdir(parents=True, exist_ok=True)
-        (self.todos / "inbox.md").write_text(
-            "---\nkanban-plugin: board\n---\n\n## Todo\n\n- [ ] No ID yet\n", encoding="utf-8"
-        )
-        data = self.run_json("log", "inbox:1", "Hi.", directory=self.plain)
-        self.assertRegex(data["ref"], r"^t[0-9a-z]{3}$")
-        self.assertIn("^" + data["ref"], (self.todos / "inbox.md").read_text(encoding="utf-8"))
 
     def test_log_of_a_linear_issue_needs_no_connection(self):
         data = self.run_json("log", "eng-123", "Started.", directory=self.plain)

@@ -38,7 +38,7 @@ class MenuRuleTests(unittest.TestCase):
             "read only": todo(read_only=True),
             "archived": todo(archived=True),
             "sub-card": todo(parent="t9"),
-            "promoted": todo(title="Task → ENG-7"),
+            "promoted": todo(promoted="ENG-7"),
             "worktree": todo(worktree=True),
         }
         for name, card in cards.items():

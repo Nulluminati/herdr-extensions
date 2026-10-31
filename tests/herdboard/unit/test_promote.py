@@ -1,5 +1,4 @@
 import json
-import shutil
 import unittest
 import uuid
 from unittest import mock
@@ -14,6 +13,7 @@ from herdboard.promote import AlreadyPromotedError, NotATodoError, Promoter
 from herdboard.store import Store
 from support import linear_data
 from support.herdboard_linear_writes import WriterCase
+from support.herdboard_store import render_markdown, write_markdown_board
 from support.paths import ROOT
 
 FIXTURE = ROOT / "tests/herdboard/fixtures/kanban-promote.md"
@@ -28,8 +28,7 @@ class PromoteCase(WriterCase):
         super().setUp()
         self.todos = self.root / "todos"
         self.todos.mkdir()
-        self.inbox = self.todos / "inbox.md"
-        shutil.copy(FIXTURE, self.inbox)
+        self.inbox = write_markdown_board(self.todos, "inbox", FIXTURE.read_text())
         self.config = Config(todos_dir=self.todos)
         self.fixtures["labels"] += [
             {"id": "l-home-ws", "name": "home", "team": None},
@@ -51,10 +50,14 @@ class PromoteCase(WriterCase):
     def write_board(self, body, done=True):
         if done and "## Done" not in body and "**Complete**" not in body:
             body += "\n## Done\n\n**Complete**\n"
-        self.inbox.write_text(HEADER + body + FOOTER, encoding="utf-8")
+        self.put_text(HEADER + body + FOOTER)
+
+    def put_text(self, text):
+        """Write the inbox from Markdown notation; only changed cards are written."""
+        write_markdown_board(self.todos, "inbox", text)
 
     def text(self):
-        return self.inbox.read_text(encoding="utf-8")
+        return render_markdown(self.inbox)
 
     def record_file(self):
         return self.state / "herdboard" / "o1" / "u1" / "promotions.json"
@@ -77,7 +80,7 @@ class PromoteCase(WriterCase):
             self.promote()
 
     def mark(self, identifier="ENG-7"):
-        self.inbox.write_text(self.text().replace("^t5r1", f"→ {identifier} ^t5r1"))
+        self.put_text(self.text().replace("^t5r1", f"→ {identifier} ^t5r1"))
 
     def creates(self):
         return self.inputs("IssueCreate")
@@ -183,7 +186,7 @@ class LabelTests(PromoteCase):
 
     def test_a_type_without_a_label_goes_into_the_description(self):
         self.assertIsNone(self.labels_of("#type/spike"))
-        self.assertEqual(self.creates()[0]["description"], "#type/spike")
+        self.assertEqual(self.creates()[0]["description"], "#spike")
 
     def test_the_team_decides_which_label_wins(self):
         self.write_board("## Todo\n\n- [ ] Card #bug ^t0aa\n")
@@ -192,51 +195,11 @@ class LabelTests(PromoteCase):
 
 
 class DescriptionTests(PromoteCase):
-    def setUp(self):
-        super().setUp()
-        self.vault = self.root / "vault"
-        self.vault.mkdir()
-        (self.vault / "Tile notes.md").write_text("Tile notes body\nSecond line\n", encoding="utf-8")
-
-    def test_linked_note_becomes_the_description(self):
-        config = Config(todos_dir=self.todos, vault_root=self.vault)
-        self.promoter(config).promote("t6n2", team="ENG")
+    def test_note_links_stay_text(self):
+        self.promote("t6n2")
         (inputs,) = self.creates()
         self.assertEqual(inputs["title"], "Read [[Tile notes]] and [[Missing note]]")
-        self.assertEqual(
-            inputs["description"],
-            "\n\n".join(["Tile notes body\nSecond line", "See also [[Grout guide]]", "[[Missing note]]"]),
-        )
-
-    def test_several_notes_get_a_heading_each(self):
-        (self.vault / "Missing note.md").write_text("Found now\n", encoding="utf-8")
-        config = Config(todos_dir=self.todos, vault_root=self.vault)
-        self.promoter(config).promote("t6n2", team="ENG")
-        self.assertEqual(
-            self.creates()[0]["description"],
-            "\n\n".join(
-                [
-                    "## Tile notes\nTile notes body\nSecond line",
-                    "## Missing note\nFound now",
-                    "See also [[Grout guide]]",
-                ]
-            ),
-        )
-
-    def test_without_a_vault_the_links_stay_text(self):
-        self.promote("t6n2")
-        self.assertEqual(
-            self.creates()[0]["description"], "See also [[Grout guide]]\n\n[[Tile notes]]\n[[Missing note]]"
-        )
-
-    def test_note_outside_the_vault_is_not_read(self):
-        outside = self.root / "outside.md"
-        outside.write_text("secret", encoding="utf-8")
-        (self.vault / "Tile notes.md").unlink()
-        (self.vault / "Tile notes.md").symlink_to(outside)
-        config = Config(todos_dir=self.todos, vault_root=self.vault)
-        self.promoter(config).promote("t6n2", team="ENG")
-        self.assertNotIn("secret", self.creates()[0]["description"])
+        self.assertEqual(inputs["description"], "See also [[Grout guide]]")
 
 
 class StateTests(PromoteCase):
@@ -390,15 +353,14 @@ class RecordTests(PromoteCase):
     def test_equal_card_ids_in_two_stores_keep_separate_records(self):
         self.unfinished()
         other = self.root / "other"
-        other.mkdir()
-        (other / "inbox.md").write_text(
-            self.text().replace("Renovate the bathroom", "Completely different").replace(" → ENG-7", "")
+        board = write_markdown_board(
+            other, "inbox", self.text().replace("Renovate the bathroom", "Completely different").replace(" → ENG-7", "")
         )
         config = Config(todos_dir=other)
         result = self.promoter(config).promote("t5r1", team="ENG")
         self.assertEqual(len(self.issues_titled("Completely different")), 1)
         self.assertEqual(len(self.issues_titled("Renovate the bathroom")), 1)
-        self.assertIn("→ " + result.issue["identifier"] + " ^t5r1", (other / "inbox.md").read_text())
+        self.assertIn("→ " + result.issue["identifier"] + " ^t5r1", render_markdown(board))
         self.assertNotIn("Completely different", self.text())
         self.assertIn("t5r1", self.records())
         self.assertEqual(self.records(other), {})
@@ -520,9 +482,7 @@ class UnknownResultTests(PromoteCase):
         self.fake.mutation_failures = [None, "http_500"]
         with self.assertRaises(LinearWriteUnknownError):
             self.promote()
-        self.inbox.write_text(
-            self.text().replace("\t- [ ] Book the plumber", "\t- [ ] Book the plumber\n\t- [ ] Extra")
-        )
+        self.put_text(self.text().replace("\t- [ ] Book the plumber", "\t- [ ] Book the plumber\n\t- [ ] Extra"))
         self.promote()
         titles = [i["title"] for i in self.fixtures["issues"][6:]]
         self.assertEqual(titles, ["Renovate the bathroom", "Choose tiles", "Measure the room", "Book the plumber"])
@@ -550,19 +510,18 @@ class TodoUpdateTests(PromoteCase):
         self.assertEqual(lines[index], "- [x] Paint the hallway #home → ENG-7 ^t9d4")
         self.assertEqual(len(lines), len(before))
 
-    def test_a_todo_without_an_id_gets_one_first(self):
-        self.write_board("## Todo\n\n- [ ] No id yet\n\n## Done\n\n**Complete**\n")
-        result = self.promoter().promote("inbox:1", team="ENG")
-        self.assertRegex(result.todo.ref, r"^t[0-9a-z]{3}$")
-        self.assertIn(f"- [x] No id yet → ENG-7 ^{result.todo.ref}", self.text())
+    def test_the_promotion_is_a_field_of_the_card(self):
+        self.promote()
+        text = (self.inbox / "cards" / "t5r1" / "card.md").read_text()
+        self.assertIn('promoted = "ENG-7"', text)
+        self.assertIn('title = "Renovate the bathroom"', text)
         self.assertEqual(len(self.records()), 0)
 
-    def test_crlf_line_endings_are_kept(self):
-        self.inbox.write_bytes(self.text().replace("\n", "\r\n").encode())
+    def test_a_card_edited_with_crlf_line_endings_promotes(self):
+        path = self.inbox / "cards" / "t5r1" / "card.md"
+        path.write_bytes(path.read_text().replace("\n", "\r\n").encode())
         self.promote()
-        data = self.inbox.read_bytes()
-        self.assertEqual(data.count(b"\n"), data.count(b"\r\n"))
-        self.assertIn("→ ENG-7 ^t5r1\r\n".encode(), data)
+        self.assertIn("→ ENG-7 ^t5r1", self.text())
 
     def test_a_board_without_a_done_column_fails_before_any_write(self):
         self.write_board("## Todo\n\n- [ ] A ^t0aa\n", done=False)
@@ -584,7 +543,7 @@ class ConflictTests(PromoteCase):
         real = Store.finish_promotion
 
         def edited(store, snapshot, identifier):
-            path = snapshot.located.path
+            path = snapshot.located.path / "cards" / snapshot.located.block_id / "card.md"
             path.write_text(path.read_text().replace("Choose tiles", "Choose floor tiles"))
             return real(store, snapshot, identifier)
 
@@ -662,7 +621,7 @@ class RefusalTests(PromoteCase):
         self.mark()
         with self.assertRaises(AlreadyPromotedError):
             self.promote()
-        self.inbox.write_text(self.text().replace(" → ENG-7", ""))
+        self.put_text(self.text().replace(" → ENG-7", ""))
         result = self.promote()
         self.assertEqual(len(self.issues_titled("Renovate the bathroom")), 1)
         self.assertEqual(result.issue["identifier"], "ENG-7")
@@ -702,12 +661,12 @@ class RefusalTests(PromoteCase):
         self.assertEqual(self.fake.requests, [])
 
     def test_offline_is_refused_without_a_request_or_a_change(self):
-        before = self.inbox.read_bytes()
+        before = self.text()
         with self.assertRaises(LinearOfflineError) as caught:
             self.promoter(offline=True).promote("t5r1", team="ENG")
         self.assertEqual(caught.exception.code, "linear_offline")
         self.assertEqual(self.fake.requests, [])
-        self.assertEqual(self.inbox.read_bytes(), before)
+        self.assertEqual(self.text(), before)
 
     def test_an_unreachable_linear_is_refused(self):
         self.endpoint = "http://127.0.0.1:1/graphql"
@@ -741,7 +700,7 @@ class StoreTests(PromoteCase):
     def test_finish_promotion_refuses_a_changed_card(self):
         store = Store(self.config)
         snapshot = store.todo_snapshot("t5r1")
-        self.inbox.write_text(self.text().replace("Choose tiles", "Choose rugs"))
+        self.put_text(self.text().replace("Choose tiles", "Choose rugs"))
         with self.assertRaises(ConflictError):
             store.finish_promotion(snapshot, "ENG-1")
 
@@ -783,7 +742,7 @@ class SubCardTests(PromoteCase):
         self.assertEqual(tax["stateId"], "ws-ENG-Done")
         self.assertEqual(len(result.sub_issues), 3)
         text = self.text()
-        self.assertIn("- [x] Add invoice table [[#^tp00]] 📅 2026-11-05 → ENG-9 ^tc01", text)
+        self.assertIn("- [x] Add invoice table 📅 2026-11-05 [[#^tp00]] → ENG-9 ^tc01", text)
         self.assertIn("- [x] Add tax field [[#^tp00]] → ENG-10 ^tc02", text)
         self.assertIn("- [ ] Unrelated ^tu02", text)
         done = text.index("## Done")

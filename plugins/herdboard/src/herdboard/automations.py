@@ -28,7 +28,8 @@ from pathlib import Path
 from . import activity, attachments
 from . import start as start_module
 from .config import AGENTS, Config, thinking_levels
-from .model import ConflictError, HerdboardError, IoError, NotFoundError, automation_title, join_title, with_type
+from .model import ConflictError, HerdboardError, IoError, NotFoundError, automation_title
+from .paths import card_dir
 from .start import Starter, _lock, _read, _write, notify, state_dir
 from .store import ID_ALPHABET, CardView
 
@@ -314,12 +315,8 @@ def get(config: Config, automation_id: str) -> Automation:
 def _new_id(config: Config, taken: set[str]) -> str:
     while True:
         candidate = "a" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
-        # A removed automation keeps its attachments and log, so its ID stays taken.
-        if (
-            candidate not in taken
-            and not attachments.folder(config, candidate).exists()
-            and not activity.log_path(config, candidate).exists()
-        ):
+        # A removed automation keeps its folder (attachments and log), so its ID stays taken.
+        if candidate not in taken and not card_dir(config, candidate).exists():
             return candidate
 
 
@@ -347,8 +344,6 @@ def _check(store, item: Automation) -> Automation:
         raise AutomationError(f"Thinking must be one of {', '.join(levels)}")
     if item.model is not None and (not item.model or any(ch.isspace() for ch in item.model)):
         raise AutomationError("The model must be one name, such as zai/glm-5.3")
-    # Card text is one line; the title and tags make it.
-    join_title(title, item.tags, None)
     return replace(item, title=title, type=kind, tags=list(item.tags))
 
 
@@ -485,11 +480,9 @@ def spawn(store, automation: Automation, due: datetime) -> CardView:
     The card's title starts with `Automation: `, so the board and the user see where it came from."""
     config = store.config
     path = store.ensure_inbox() if automation.board == "inbox" else store.resolve_board(automation.board)
-    text = join_title(automation_title(automation.title), automation.tags, None)
-    if automation.type:
-        text = with_type(text, config.type_named(automation.type))
+    kind = config.type_named(automation.type) if automation.type else None
     body = automation.body.splitlines() if automation.body.strip() else None
-    card = store.add(path, text, body=body)
+    card = store.add(path, automation_title(automation.title), body=body, tags=automation.tags, type=kind)
     activity.append(store, card.ref, f"Spawned by automation {automation.id} for {_stamp(due)}.", "herdboard")
     try:
         for entry in attachments.listing(config, automation.id):

@@ -1,4 +1,4 @@
-"""The scratchpad notes: one Markdown file per board in `<todos_dir>/notes`."""
+"""The scratchpad notes: `notes.md` in each board folder."""
 
 import os
 import tempfile
@@ -17,10 +17,10 @@ class NoteTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.config = Config(todos_dir=Path(self.temp.name) / "todos")
 
-    def test_notes_live_in_a_folder_of_the_todos(self):
-        self.assertEqual(notes.notes_dir(self.config), self.config.todos_dir / "notes")
-        self.assertEqual(notes.note_path(self.config, "acme-api"), self.config.todos_dir / "notes" / "acme-api.md")
-        self.assertEqual(notes.note_path(self.config, "inbox"), self.config.todos_dir / "notes" / "inbox.md")
+    def test_notes_live_in_the_board_folder(self):
+        boards = self.config.todos_dir / "boards"
+        self.assertEqual(notes.note_path(self.config, "acme-api"), boards / "acme-api" / "notes.md")
+        self.assertEqual(notes.note_path(self.config, "inbox"), boards / "inbox" / "notes.md")
 
     def test_a_board_name_with_a_folder_is_not_a_note(self):
         for name in ("", ".", "..", "a/b", "../x"):
@@ -37,7 +37,7 @@ class NoteTests(unittest.TestCase):
         self.assertEqual(stamp, path.stat().st_mtime_ns)
         self.assertEqual(notes.read_note(path), ("# Ideas\n", stamp))
         # No temporary file stays.
-        self.assertEqual([entry.name for entry in path.parent.iterdir()], ["acme.md"])
+        self.assertEqual([entry.name for entry in path.parent.iterdir()], ["notes.md"])
 
     def test_a_save_after_a_save_needs_no_force(self):
         path = notes.note_path(self.config, "acme")

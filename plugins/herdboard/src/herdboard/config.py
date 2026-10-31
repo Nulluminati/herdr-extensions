@@ -115,15 +115,16 @@ class LinearConfig:
         return wanted and self.key_configured
 
 
+# Settings of the old Markdown boards. herdboard ignores them; `doctor` names them.
+OBSOLETE_KEYS = ("complete_markers", "vault_root", "archive_titles")
+
+
 @dataclass
 class Config:
     todos_dir: Path = field(default_factory=lambda: Path("~/todos").expanduser())
     # Where `start --new-repo` creates a new repository, under a slug of the card title.
     projects_dir: Path = field(default_factory=lambda: Path("~/Projects").expanduser())
     columns: list[str] = field(default_factory=lambda: list(DEFAULT_COLUMNS))
-    complete_markers: list[str] = field(default_factory=lambda: ["Complete"])
-    vault_root: Path | None = None
-    archive_titles: list[str] = field(default_factory=lambda: ["Archive"])
     linear: LinearConfig = field(default_factory=LinearConfig)
     start_agent: str = "claude"
     # The model and thinking level `start` gives an agent; None keeps the agent's own default.
@@ -503,15 +504,6 @@ def load_config(path: Path | None = None) -> Config:
         if not columns:
             raise HerdboardError(f"{path}: columns must not be empty")
         config.columns = columns
-    markers = _string_list(path, data, "complete_markers")
-    if markers is not None:
-        config.complete_markers = markers
-    archive_titles = _string_list(path, data, "archive_titles")
-    if archive_titles is not None:
-        config.archive_titles = ["Archive"] + [t for t in archive_titles if t != "Archive"]
-    vault_root = _string(path, data, "vault_root")
-    if vault_root is not None:
-        config.vault_root = Path(vault_root).expanduser()
     config.linear = _load_linear(path, data)
     start_agent = _string(path, data, "start_agent")
     if start_agent is not None:

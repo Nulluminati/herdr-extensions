@@ -28,11 +28,11 @@ class LinearCliCase(CliTestCase, LinearEnvTestCase):
 
     def relink(self, *links):
         store = self.store_for()
-        store.update_links(store.projects_dir / "acme-api.md", lambda _: list(links))
+        store.update_links(store.boards_dir / "acme-api", lambda _: list(links))
 
     def repin(self, *pins):
         store = self.store_for()
-        store.update_pins(store.projects_dir / "acme-api.md", lambda _: list(pins))
+        store.update_pins(store.boards_dir / "acme-api", lambda _: list(pins))
 
     def listing(self, *args, directory=None, expect=0):
         return self.run_json("list", *args, directory=directory or self.repo, expect=expect)

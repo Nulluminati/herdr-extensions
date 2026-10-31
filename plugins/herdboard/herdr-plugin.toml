@@ -2,7 +2,7 @@ id = "nulluminati.herdboard"
 name = "herdboard"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-description = "Kanban board for Obsidian Markdown todos and Linear issues."
+description = "Kanban board for local todos and Linear issues."
 platforms = ["linux", "macos"]
 
 # The action opens the board pane in the focused pane's directory, so the

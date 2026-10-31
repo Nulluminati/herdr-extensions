@@ -1,16 +1,14 @@
-"""Convert the lines of a todo card into the parts of a Linear issue. No network."""
+"""Convert a todo card into the parts of a Linear issue. No network."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 
-from .model import BLOCK_ID, CARD_START, DUE_DATE, PARENT_LINK, TAG, HerdboardError
+from .model import HerdboardError
 
-# One level below the card: a tab, or 4 spaces when the vault does not use tabs.
-SUB_ITEM = re.compile(r"^(?:\t| {4})- \[(?P<check>.)\] (?P<title>\S.*)$")
-NOTE_LINK = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
-PROMOTED = re.compile(r"→ (?P<identifier>[A-Za-z][A-Za-z0-9]*-\d+)(?!\S)")
+# A checklist item at the top level of the card body.
+SUB_ITEM = re.compile(r"^- \[(?P<check>.)\] (?P<title>\S.*)$")
 
 
 @dataclass
@@ -23,54 +21,30 @@ class SubItem:
 class Conversion:
     title: str
     due: str | None
+    # The card's type first, then its tags: each can become a Linear label.
     tags: list[str]
-    # Names of the `[[note]]` links on the first line, in order.
-    links: list[str]
     subs: list[SubItem] = field(default_factory=list)
-    # Indented lines that are not sub-items, one level of indentation removed.
+    # Body lines that are not sub-items.
     leftover: list[str] = field(default_factory=list)
 
 
-def promoted_identifier(first_line: str) -> str | None:
-    """The Linear identifier after `→` on a card's first line, if the card was promoted."""
-    found = PROMOTED.search(BLOCK_ID.sub("", first_line))
-    return found.group("identifier") if found else None
+def promoted_identifier(card) -> str | None:
+    """The Linear identifier that a todo was promoted to, or None."""
+    return card.promoted
 
 
-def _title(first_line: str) -> str:
-    text = BLOCK_ID.sub("", CARD_START.sub("", first_line, count=1))
-    text = PARENT_LINK.sub("", TAG.sub("", DUE_DATE.sub("", text)))
-    return re.sub(r"\s{2,}", " ", text).strip()
-
-
-def _dedent(line: str) -> str:
-    if line.startswith("\t"):
-        line = line[1:]
-    elif line.startswith("    "):
-        line = line[4:]
-    else:
-        line = line.lstrip()
-    return line.rstrip()
-
-
-def convert(lines: list[str]) -> Conversion:
-    """The title, due date, tags, links, sub-items and leftover text of a card."""
-    first = lines[0]
-    title = _title(first)
+def convert(card) -> Conversion:
+    """The title, due date, tags, sub-items and leftover text of a todo card."""
+    title = " ".join(card.title.split())
     if not title:
         raise HerdboardError("The todo has no text for a title")
-    found = Conversion(
-        title=title,
-        due=(m.group("date") if (m := DUE_DATE.search(first)) else None),
-        tags=[m.group("tag") for m in TAG.finditer(first)],
-        links=list(dict.fromkeys(m.group(1).strip() for m in NOTE_LINK.finditer(title))),
-    )
-    for line in lines[1:]:
+    found = Conversion(title=title, due=card.due, tags=([card.type] if card.type else []) + list(card.tags))
+    for line in card.body:
         item = SUB_ITEM.match(line)
         if item:
             found.subs.append(SubItem(item.group("title").strip(), item.group("check") != " "))
         else:
-            found.leftover.append(_dedent(line))
+            found.leftover.append(line.rstrip())
     while found.leftover and not found.leftover[0]:
         found.leftover.pop(0)
     while found.leftover and not found.leftover[-1]:

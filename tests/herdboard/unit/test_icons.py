@@ -75,13 +75,13 @@ class IconTextTests(unittest.TestCase):
                 self.assertIn(expected, text)
                 if style == "plain":
                     self.assertNotIn(icon, text)
-            meta = board.DetailScreen(item, None, icon_style=style)._meta().plain
+            meta = board.DetailScreen(item, icon_style=style)._meta().plain
             self.assertIn("Pull request", meta)
             self.assertIn(f"{PULL_REQUEST} writing" if style == "nerd" else "writing", meta)
             self.assertIn(f"{BRANCH} removed" if style == "nerd" else "removed", meta)
             item.pr_writing = False
             item.worktree_removed = False
-            meta = board.DetailScreen(item, None, icon_style=style)._meta().plain
+            meta = board.DetailScreen(item, icon_style=style)._meta().plain
             self.assertIn(f"{PULL_REQUEST} merged" if style == "nerd" else "merged", meta)
             self.assertIn(f"{BRANCH} still exists" if style == "nerd" else "still exists", meta)
 
@@ -97,13 +97,13 @@ class IconTextTests(unittest.TestCase):
             with self.subTest(status=status):
                 item = card(type="bug", **status)
                 self.assertEqual(item.source, "todo")
-                self.assertEqual(board.DetailScreen(item, None)._meta().plain, expected)
+                self.assertEqual(board.DetailScreen(item)._meta().plain, expected)
 
     def test_detail_type_values_are_unstyled_in_plain_mode_and_badges_in_nerd_mode(self):
         for kind in ("bug", "spike"):
             for mode in ("plain", "nerd"):
                 with self.subTest(kind=kind, mode=mode):
-                    meta = board.DetailScreen(card(type=kind), None, icon_style=mode)._meta()
+                    meta = board.DetailScreen(card(type=kind), icon_style=mode)._meta()
                     offset = meta.plain.rindex(kind)
                     style = meta.get_style_at_offset(Console(), offset)
                     if mode == "plain":
@@ -115,7 +115,6 @@ class IconTextTests(unittest.TestCase):
 
     def test_rendering_does_not_change_data_or_filter_results(self):
         item = card(
-            title="Ship it #type/bug #api 📅 2026-11-01",
             type="bug",
             tags=["api"],
             due="2026-11-01",
@@ -133,7 +132,7 @@ class IconTextTests(unittest.TestCase):
         for width in (24, 80):
             for style in ("plain", "nerd"):
                 with self.subTest(width=width, style=style):
-                    item = card(title="Ship it #type/bug 📅 2026-11-01", type="bug", has_attachments=True)
+                    item = card(type="bug", due="2026-11-01", has_attachments=True)
                     widget = board.CardWidget(item, False, icon_style=style)
                     output = StringIO()
                     Console(file=output, width=width, color_system=None).print(widget.content)
@@ -146,12 +145,12 @@ class IconTextTests(unittest.TestCase):
 
 
 class IconCliTests(CliTestCase):
-    def test_modes_leave_markdown_text_and_json_output_unchanged(self):
-        title = "Ship it #type/bug #api 📅 2026-11-01"
-        item = self.run_json("add", title)["card"]
+    def test_modes_leave_card_files_and_json_output_unchanged(self):
+        title = "Ship it"
+        item = self.run_json("add", title, "--type", "bug", "--tag", "api", "--due", "2026-11-01")["card"]
         commands = (("list",), ("--json", "list"), ("--json", "show", item["ref"]))
         baseline = [self.run_cli(*args) for args in commands]
-        path = Path(item["path"])
+        path = Path(item["path"]) / "cards" / item["ref"] / "card.md"
         stored = path.read_bytes()
         for style in ("plain", "nerd"):
             with self.subTest(style=style):

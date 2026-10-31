@@ -1,23 +1,25 @@
-"""Read-only store diagnostics, with an explicit locked duplicate-ID repair."""
+"""Read-only store diagnostics, with an explicit locked repair of the boards' card lists."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import linear_links, linear_source
-from .config import Config, config_path, load_config
+from . import card_file, linear_source
+from .card_file import BoardFile, CardFile
+from .config import MERGE_MODES, OBSOLETE_KEYS, Config, config_path, load_config
 from .identity import IdentityError, _canonical_identity, repo_identity
 from .linear import LinearAuthError, LinearError, LinearNetworkError
 from .linear_links import parse_links
 from .linear_pins import parse_pins
-from .model import BLOCK_ID, Card, Column, ConflictError, FormatError, HerdboardError, parent_of
+from .model import FormatError, HerdboardError, OldFormatError
 from .promotions import PromotionRecords
 from .start import _entries, _read
-from .store import Store
+from .store import BOARD_FILE, CARD_FILE, Store, is_card_id
 
 LEVELS = ("error", "warning", "info")
 
@@ -34,124 +36,192 @@ def finding(level, code, message, path=None, line=None, fix=None):
 
 
 @dataclass
-class CardLocation:
+class BoardRead:
+    """A board folder as doctor reads it: the parsed `board.toml` and the card folders found."""
+
     path: Path
-    column: Column
-    card: Card
-    line: int
-    number: int
+    file: BoardFile
+    # The IDs of the card folders under `cards/` and `archive/` that hold a readable `card.md`.
+    cards: dict[str, CardFile]
+    archived: dict[str, CardFile]
 
 
-def locations(path, board):
-    """Locate parsed cards by counting preserved source lines, not by parsing again."""
-    line = len(board.frontmatter) + len(board.preamble) + 1
-    number = 0
-    columns = list(board.columns)
-    for column in columns + ([board.archive] if board.archive is not None else []):
-        if column.archive:
-            line += len(board.archive_lines)
-        line += 1  # the heading
-        for item in column.items:
-            if isinstance(item, Card):
-                number += 1
-                yield CardLocation(path, column, item, line, number)
-                line += len(item.lines)
-            else:
-                line += 1
+def _card_folders(path: Path, folder: str, findings: list) -> dict[str, CardFile]:
+    found: dict[str, CardFile] = {}
+    try:
+        entries = sorted((path / folder).iterdir())
+    except FileNotFoundError:
+        return found
+    except OSError as error:
+        findings.append(finding("error", "board_invalid", f"cannot read: {error}", path / folder))
+        return found
+    for entry in entries:
+        if entry.name.startswith(".") or not entry.is_dir():
+            continue
+        if not is_card_id(entry.name):
+            findings.append(
+                finding(
+                    "warning",
+                    "card_folder_invalid",
+                    f"{entry.name!r} is not a card ID (t and 3 letters or digits), so herdboard ignores the folder.",
+                    entry,
+                )
+            )
+            continue
+        card_path = entry / CARD_FILE
+        try:
+            text = card_path.read_bytes().decode("utf-8")
+        except FileNotFoundError:
+            findings.append(finding("warning", "card_file_missing", "Card folder has no card.md.", entry))
+            continue
+        except (OSError, UnicodeDecodeError) as error:
+            findings.append(finding("error", "card_invalid", f"cannot read: {error}", card_path))
+            continue
+        try:
+            found[entry.name] = card_file.parse_card(text, card_path)
+        except FormatError as error:
+            findings.append(finding("error", "card_invalid", str(error), card_path))
+    return found
 
 
 def read_boards(store):
     boards, findings = {}, []
-    for path in sorted(store.board_paths()):
+    try:
+        store.check_layout()
+    except OldFormatError as error:
+        return boards, [
+            finding("error", "old_format", str(error), store.config.todos_dir, fix="herdboard convert-store")
+        ]
+    for path in store.board_paths():
+        board_path = path / BOARD_FILE
         try:
-            boards[path] = store._read(path)
-        except HerdboardError as error:
-            findings.append(finding("error", "board_invalid", str(error), path))
+            file = card_file.parse_board(board_path.read_bytes().decode("utf-8"), board_path)
+        except (OSError, UnicodeDecodeError) as error:
+            findings.append(finding("error", "board_invalid", f"cannot read: {error}", board_path))
+            continue
+        except FormatError as error:
+            findings.append(finding("error", "board_invalid", str(error), board_path))
+            continue
+        cards = _card_folders(path, "cards", findings)
+        archived = _card_folders(path, "archive", findings)
+        boards[path] = BoardRead(path, file, cards, archived)
     return boards, findings
 
 
-def check_board(store, path, board):
+def check_board(store, board):
     findings = []
-    if len(board.frontmatter) < 2 or board.frontmatter_value("kanban-plugin") != "board":
+    path, file = board.path, board.file
+    board_path = path / BOARD_FILE
+    if file.merge not in (None, *MERGE_MODES):
+        findings.append(finding("error", "board_invalid", "merge must be local or pr.", board_path))
+    try:
+        parse_links(file.tables("linear-projects"))
+    except FormatError as error:
+        findings.append(finding("error", "linear_links_invalid", str(error), board_path))
+    try:
+        parse_pins(file.tables("linear-issues"))
+    except FormatError as error:
+        findings.append(finding("error", "linear_pins_invalid", str(error), board_path))
+    done = [column.name for column in file.columns if column.done]
+    if len(done) > 1:
         findings.append(
             finding(
-                "error",
-                "board_invalid",
-                "Frontmatter must be closed and contain kanban-plugin: board. The board is read only.",
-                path,
-                1,
+                "warning",
+                "done_column_multiple",
+                f"Columns {', '.join(done)} are all marked done; herdboard uses the first.",
+                board_path,
             )
         )
     try:
-        parse_links(board.frontmatter)
-    except FormatError as error:
-        line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-projects:")), 1)
-        if linear_links._yaml() is None:
+        store._done_column(file, path)
+    except HerdboardError as error:
+        findings.append(finding("warning", "done_column_missing", str(error), board_path))
+    fix = "herdboard doctor --fix"
+    listed: set[str] = set()
+    for card_id in file.card_ids():
+        if card_id in listed:
+            findings.append(finding("warning", "card_listed_twice", f"{card_id} is listed twice.", board_path, fix=fix))
+        elif card_id not in board.cards:
             findings.append(
-                finding(
-                    "warning", "pyyaml_missing", "PyYAML is not installed; Linear links cannot be checked.", path, line
-                )
+                finding("warning", "card_missing", f"{card_id} is listed, but has no card folder.", board_path, fix=fix)
             )
-        else:
-            findings.append(finding("error", "linear_links_invalid", str(error), path, line))
-    try:
-        parse_pins(board.frontmatter)
-    except FormatError as error:
-        line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-issues:")), 1)
-        if linear_links._yaml() is None:
+        listed.add(card_id)
+    for card_id in board.cards:
+        if card_id not in listed:
             findings.append(
                 finding(
                     "warning",
-                    "pyyaml_missing",
-                    "PyYAML is not installed; pinned Linear issues cannot be checked.",
-                    path,
-                    line,
-                )
-            )
-        else:
-            findings.append(finding("error", "linear_pins_invalid", str(error), path, line))
-    try:
-        store._done_column(board, path)
-    except HerdboardError as error:
-        findings.append(finding("warning", "done_column_missing", str(error), path))
-    for place in locations(path, board):
-        if place.card.block_id is None:
-            findings.append(
-                finding(
-                    "info",
-                    "card_id_missing",
-                    "Card has no ID. The next write assigns IDs to column cards; archive cards keep their IDs.",
-                    path,
-                    place.line,
+                    "card_orphan",
+                    f"{card_id} is in no column; the board shows it at the bottom of the first column.",
+                    path / "cards" / card_id,
+                    fix=fix,
                 )
             )
     return findings
 
 
-def duplicates(boards):
-    first = {}
-    for path, board in sorted(boards.items()):
-        for place in locations(path, board):
-            block_id = place.card.block_id
-            if block_id is None:
+def repaired_columns(board) -> list[list[str]]:
+    """Each column's card list without duplicates and missing cards, orphans added to the first."""
+    seen: set[str] = set()
+    columns = []
+    for column in board.file.columns:
+        kept = []
+        for card_id in column.cards:
+            if card_id in board.cards and card_id not in seen:
+                kept.append(card_id)
+                seen.add(card_id)
+        columns.append(kept)
+    orphans = [card_id for card_id in board.cards if card_id not in seen]
+    if columns:
+        columns[0].extend(orphans)
+    return columns
+
+
+def fix_lists(store, before):
+    """Repair the card lists of `board.toml` under the lock. Returns what changed and any errors."""
+    planned = [
+        path for path, board in before.items() if repaired_columns(board) != [c.cards for c in board.file.columns]
+    ]
+    if not planned:
+        return [], []
+    fixed, findings = [], []
+    with store._lock():
+        boards, _ = read_boards(store)
+        for path in planned:
+            board = boards.get(path)
+            if board is None:
                 continue
-            if block_id in first:
-                yield first[block_id], place
+            old = [list(column.cards) for column in board.file.columns]
+            for column, cards in zip(board.file.columns, repaired_columns(board), strict=True):
+                column.cards = cards
+            if old == [column.cards for column in board.file.columns]:
+                continue
+            try:
+                store._write_file(path / BOARD_FILE, card_file.dump_board(board.file).encode("utf-8"))
+            except HerdboardError as error:
+                findings.append(finding("error", "board_fix_failed", str(error), path))
             else:
-                first[block_id] = place
+                fixed.append({"path": str(path / BOARD_FILE), "message": "Repaired the card lists."})
+    return fixed, findings
 
 
 def check_duplicate_ids(boards):
+    places: dict[str, list[Path]] = {}
+    for path, board in sorted(boards.items()):
+        for card_id in board.cards:
+            places.setdefault(card_id, []).append(path / "cards" / card_id)
+        for card_id in board.archived:
+            places.setdefault(card_id, []).append(path / "archive" / card_id)
     return [
         finding(
             "error",
             "duplicate_id",
-            f"ID {place.card.block_id} duplicates {first.path}:{first.line}.",
-            place.path,
-            place.line,
-            "herdboard doctor --fix-ids",
+            f"ID {card_id} names {len(found)} card folders: {', '.join(str(p) for p in found)}.",
+            found[1],
+            fix="Rename one folder to an ID that no other card has, and its ID in board.toml",
         )
-        for first, place in duplicates(boards)
+        for card_id, found in sorted(places.items())
+        if len(found) > 1
     ]
 
 
@@ -159,24 +229,28 @@ def check_parents(boards):
     """Sub-cards whose parent is not on their board, or is a sub-card itself."""
     findings = []
     for path, board in sorted(boards.items()):
-        parents = {card.block_id: parent_of(card.title) for _, card in board.all_cards() if card.block_id}
-        for _, card in board.all_cards():
-            parent = parent_of(card.title)
+        parents = {card_id: card.parent for card_id, card in board.cards.items()}
+        for card_id, card in board.cards.items():
+            parent = card.parent
             if parent is None:
                 continue
-            ref = card.block_id or card.title
             if parent not in parents:
                 findings.append(
                     finding(
                         "warning",
                         "parent_missing",
-                        f"{ref} links to parent {parent}, which is not on this board.",
-                        path,
+                        f"{card_id} names parent {parent}, which is not on this board.",
+                        path / "cards" / card_id / CARD_FILE,
                     )
                 )
             elif parents[parent]:
                 findings.append(
-                    finding("warning", "parent_nested", f"{ref} has parent {parent}, which is a sub-card itself.", path)
+                    finding(
+                        "warning",
+                        "parent_nested",
+                        f"{card_id} has parent {parent}, which is a sub-card itself.",
+                        path / "cards" / card_id / CARD_FILE,
+                    )
                 )
     return findings
 
@@ -184,75 +258,39 @@ def check_parents(boards):
 def check_duplicate_repos(boards):
     first, findings = {}, []
     for path, board in sorted(boards.items()):
-        repo = board.frontmatter_value("repo")
+        repo = board.file.repo
         if repo is None:
             continue
         key = _canonical_identity(repo)
         if key in first:
-            line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("repo:")), None)
             findings.append(
-                finding("error", "duplicate_repo", f"Repository {repo} is also claimed by {first[key]}.", path, line)
+                finding(
+                    "error", "duplicate_repo", f"Repository {repo} is also claimed by {first[key]}.", path / BOARD_FILE
+                )
             )
         else:
             first[key] = path
     return findings
 
 
-def fix_ids(store, before):
-    """Repair writable duplicates, preserving source lines and checking under the lock."""
-
-    def writable_duplicates(boards):
-        places = []
-        for _, place in duplicates(boards):
-            try:
-                store._require_writable(place.path, boards[place.path])
-            except FormatError:
-                continue  # The checks below report why this board is read only.
-            places.append(place)
-        return places
-
-    planned = writable_duplicates(before)
-    if not planned:
-        return [], []
-    fixed, findings = [], []
-    with store._lock():
-        boards, _ = read_boards(store)
-        current_duplicates = writable_duplicates(boards)
-
-        def key(place):
-            return place.path, place.number, place.card.block_id
-
-        if {key(place) for place in current_duplicates} != {key(place) for place in planned}:
-            raise ConflictError("Duplicate cards changed on disk; retry")
-        # Verify each duplicate card's lines and column, while keeping other edits.
-        for old in planned:
-            board = boards.get(old.path)
-            places = list(locations(old.path, board)) if board is not None else []
-            current = next((p for p in places if p.number == old.number), None)
-            if current is None or current.card.lines != old.card.lines or current.column.title != old.column.title:
-                raise ConflictError(f"{old.path}: card changed on disk; retry")
-        taken = {p.card.block_id for path, board in boards.items() for p in locations(path, board) if p.card.block_id}
-        changed = {}
-        for place in current_duplicates:
-            old_id = place.card.block_id
-            new_id = store._new_id(taken)
-            place.card.lines[0] = BLOCK_ID.sub(lambda match: f" ^{new_id}", place.card.first_line)  # noqa: B023  used in this iteration
-            changed.setdefault(place.path, []).append(
-                {"old_id": old_id, "new_id": new_id, "path": str(place.path), "line": place.line}
-            )
-        for path in sorted(changed):
-            board = boards[path]
-            try:
-                # Normal first-write rules assign IDs to all unaddressed column cards.
-                for _, card in board.all_cards():
-                    if card.block_id is None:
-                        card.set_block_id(store._new_id(taken))
-                store._write(path, board)
-            except HerdboardError as error:
-                findings.append(finding("error", "board_fix_failed", str(error), path))
-            else:
-                fixed.extend(changed[path])
-    return fixed, findings
+def check_config_keys(path):
+    """Settings that herdboard no longer reads."""
+    try:
+        with open(config_path(path), "rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    return [
+        finding(
+            "warning",
+            "config_key_obsolete",
+            f"{key} is no longer used; herdboard ignores it.",
+            config_path(path),
+            fix=f"Remove {key} from the config file",
+        )
+        for key in OBSOLETE_KEYS
+        if key in data
+    ]
 
 
 def check_linear(config, boards, offline):
@@ -270,10 +308,11 @@ def check_linear(config, boards, offline):
             raise LinearAuthError("Linear did not return a viewer. Check the API key.")
         for path, board in sorted(boards.items()):
             try:
-                links = parse_links(board.frontmatter)
+                links = parse_links(board.file.tables("linear-projects"))
             except FormatError:
                 continue
-            line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-projects:")), None)
+            line = None
+            path = path / BOARD_FILE
             for link in links:
                 try:
                     project = client.project(link.id)
@@ -314,12 +353,11 @@ def check_linear(config, boards, offline):
                             )
                         )
             try:
-                pins = parse_pins(board.frontmatter)
+                pins = parse_pins(board.file.tables("linear-issues"))
             except FormatError:
                 continue
             if not pins:
                 continue
-            line = next((i for i, text in enumerate(board.frontmatter, 1) if text.startswith("linear-issues:")), None)
             try:
                 # Every state: a done pin still exists, and only a missing one is a finding.
                 found = {issue["id"] for issue in client.issues_by_ids([pin.id for pin in pins], done_days=None)}
@@ -588,7 +626,7 @@ def check_hunk():
     return []
 
 
-def diagnose(path=None, *, repair_ids=False, offline=False):
+def diagnose(path=None, *, repair=False, offline=False):
     findings, fixed = [], []
     config = None
     try:
@@ -605,17 +643,18 @@ def diagnose(path=None, *, repair_ids=False, offline=False):
         config = Config()
     if config is not None:
         store = Store(config)
+        findings.extend(check_config_keys(path))
         boards, read_errors = read_boards(store)
-        if repair_ids:
-            fixed, repair_errors = fix_ids(store, boards)
+        if repair:
+            fixed, repair_errors = fix_lists(store, boards)
             findings.extend(repair_errors)
             boards, read_errors = read_boards(store)
         findings.extend(read_errors)
         for board_path, board in sorted(boards.items()):
             try:
-                findings.extend(check_board(store, board_path, board))
+                findings.extend(check_board(store, board))
             except Exception as error:
-                findings.append(finding("error", "board_invalid", str(error), board_path))
+                findings.append(finding("error", "board_invalid", str(error), board_path / BOARD_FILE))
                 boards[board_path] = None
         boards = {path: board for path, board in boards.items() if board is not None}
         findings.extend(check_duplicate_ids(boards))
@@ -653,7 +692,7 @@ def render(result):
             if item["fix"]:
                 lines.append(f"    Fix: {item['fix']}")
     for item in result["fixed"]:
-        lines.append(f"Fixed {item['path']}:{item['line']}: {item['old_id']} -> {item['new_id']}")
+        lines.append(f"Fixed {item['path']}: {item['message']}")
     summary = result["summary"]
     lines.append(f"Summary: {summary['error']} errors, {summary['warning']} warnings, {summary['info']} info")
     return "\n".join(lines)

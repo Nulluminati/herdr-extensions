@@ -292,9 +292,9 @@ class StartTests(unittest.TestCase):
     def test_a_typed_todo_branch_starts_with_its_commit_type(self):
         for kind, prefix in (("bug", "fix/"), ("feature", "feat/"), ("chore", "chore/"), ("spike", "spike/")):
             with self.subTest(kind=kind):
-                card = self.store.add(self.board, f"Fix login #type/{kind} #auth")
+                card = self.store.add(self.board, "Fix login", tags=["auth"], type=kind)
                 self.assertEqual(start.todo_branch(card), f"{prefix}{card.ref}-fix-login")
-        self.assertLessEqual(len(start.todo_branch(self.store.add(self.board, "long " * 30 + "#type/refactor"))), 50)
+        self.assertLessEqual(len(start.todo_branch(self.store.add(self.board, "long " * 30, type="refactor"))), 50)
 
     def test_invalid_branch_and_slug_limit(self):
         self.assertLessEqual(len(start.todo_branch(self.store.add(self.board, "long " * 30))), 50)
@@ -393,20 +393,6 @@ class StartTests(unittest.TestCase):
                 self.starter.start(self.card.ref)
         self.assertIn("worktree", raised.exception.steps_done)
         self.starter.start(self.card.ref)
-        self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
-
-    def test_temporary_ref_assigns_all_ids_without_reordering(self):
-        self.board.write_text(self.board.read_text().replace(" ^" + self.card.ref, ""))
-        result = self.starter.start(self.board.stem + ":1", no_agent=True)
-        self.assertRegex(result["ref"], r"^t[0-9a-z]{3}$")
-        self.assertTrue(result["branch"].startswith(result["ref"]))
-        self.assertNotIn(self.board.stem + ":1", json.loads((start.state_dir() / "starts.json").read_text()))
-
-    def test_temporary_reference_for_identified_card_reuses_id_record(self):
-        self.starter.start(self.card.ref, no_agent=True)
-        self.starter.start(self.board.stem + ":1", no_agent=True)
-        records = json.loads((start.state_dir() / "starts.json").read_text())
-        self.assertEqual(list(records), [self.card.ref])
         self.assertEqual(sum(c[:2] == ["worktree", "create"] for c in self.fake.calls), 1)
 
     def test_unknown_checkout_prompts_or_errors(self):
@@ -577,7 +563,8 @@ class StartTests(unittest.TestCase):
                 check=True,
                 capture_output=True,
             )
-        self.board.write_text(self.board.read_text().replace(str(self.repo), "github.com/acme/api"))
+        board = self.board / "board.toml"
+        board.write_text(board.read_text().replace(str(self.repo), "github.com/acme/api"))
         start.register_checkout(self.repo)
         self.fake.fail = "worktree create"
         with self.assertRaises(start.StartError):
@@ -619,13 +606,6 @@ class StartTests(unittest.TestCase):
         with self.assertRaises(start.HerdboardError):
             self.starter.start(self.card.ref, no_agent=True)
         self.assertFalse(any(c[:2] == ["worktree", "create"] for c in self.fake.calls))
-
-    def test_ensure_id_failure_writes_no_record(self):
-        self.board.write_text(self.board.read_text().replace(" ^" + self.card.ref, ""))
-        with patch.object(self.store, "ensure_id", side_effect=start.IoError("readonly")):
-            with self.assertRaises(start.IoError):
-                self.starter.start(self.board.stem + ":1", no_agent=True)
-        self.assertEqual(start._read(start.state_dir() / "starts.json"), {})
 
     def test_corrupt_starts_is_io_error(self):
         (start.state_dir() / "starts.json").write_text("bad json")

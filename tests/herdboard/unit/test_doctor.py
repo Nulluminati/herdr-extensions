@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -44,11 +45,27 @@ class DoctorTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def board(self, name="inbox", body="- [ ] Task ^t123\n", front="kanban-plugin: board\n", done=True):
-        path = self.todos / ("inbox.md" if name == "inbox" else f"projects/{name}.md")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\n{front}---\n## Todo\n{body}" + ("## Done\n" if done else ""))
+    def board(self, name="inbox", cards=("t123",), folders=None, archive=(), done=True, top="", columns=None):
+        """A board folder. `top` is raw TOML before the columns; `folders` the card folders made."""
+        path = self.todos / "boards" / name
+        path.mkdir(parents=True, exist_ok=True)
+        if columns is None:
+            columns = [("Todo", list(cards), {})] + ([("Done", [], {"done": True})] if done else [])
+        lines = ["format = 1", *([top.rstrip("\n")] if top else [])]
+        for title, ids, options in columns:
+            lines += ["", "[[column]]", f"name = {json.dumps(title)}"]
+            lines += ["done = true"] if options.get("done") else []
+            lines += [f"cards = {json.dumps(ids)}"]
+        (path / "board.toml").write_text("\n".join(lines) + "\n")
+        for folder, ids in (("cards", cards if folders is None else folders), ("archive", archive)):
+            for card_id in ids:
+                (path / folder / card_id).mkdir(parents=True, exist_ok=True)
+                (path / folder / card_id / "card.md").write_text(f'+++\ntitle = "Card {card_id}"\n+++\n')
         return path
+
+    def lists(self, path):
+        """The card lists of the columns in a board folder."""
+        return [column["cards"] for column in tomllib.loads((path / "board.toml").read_text())["column"]]
 
     def run_doctor(self, *args, expect=0, text=False):
         out, err = io.StringIO(), io.StringIO()
@@ -71,8 +88,12 @@ class DoctorTests(unittest.TestCase):
         self.config.write_text(f'todos_dir = "{self.todos}"\n[linear]\nenabled = true\n')
         os.environ["LINEAR_API_KEY"] = key
 
-    def links(self, project="p-plat", labels=""):
-        return f"kanban-plugin: board\nlinear-projects:\n  - id: {project}\n    name: Platform\n{labels}"
+    def links(self, project="p-plat", labels=()):
+        text = f'[[linear-projects]]\nid = "{project}"\nname = "Platform"\n'
+        if labels:
+            items = ", ".join(f'{{id = "{i}", name = "{n}"}}' for i, n in labels)
+            text += f"labels = [{items}]\n"
+        return text
 
     @contextlib.contextmanager
     def server(self):
@@ -85,54 +106,75 @@ class DoctorTests(unittest.TestCase):
                 yield fake
 
     def test_invalid_boards_reported_together(self):
-        paths = [self.board("a", front="other: value\n"), self.board("b")]
-        paths[1].write_text("---\nkanban-plugin: board\n## Todo\n- [ ] Open ^t222\n")
-        bad = self.board("c")
-        bad.write_bytes(b"\xff")
+        paths = [self.board("a"), self.board("b"), self.board("c")]
+        (paths[0] / "board.toml").write_text("format = [\n")
+        (paths[1] / "board.toml").write_text("format = 2\n")
+        (paths[2] / "board.toml").write_bytes(b"\xff")
         found = self.findings("board_invalid", expect=1)
-        self.assertEqual({f["path"] for f in found}, {str(p) for p in [*paths, bad]})
+        self.assertEqual({f["path"] for f in found}, {str(p / "board.toml") for p in paths})
 
-    def test_duplicate_ids_in_one_board_reports_every_duplicate(self):
-        self.board(body="- [ ] One ^t123\n- [ ] Two ^t123\n- [ ] Three ^t123\n- [ ] Four ^t456\n- [ ] Five ^t456\n")
-        found = self.findings("duplicate_id", expect=1)
-        self.assertEqual(len(found), 3)
-        self.assertEqual([f["line"] for f in found], [6, 7, 9])
-        self.assertTrue(all(f["fix"] == "herdboard doctor --fix-ids" for f in found))
+    def test_card_folders_that_herdboard_cannot_read(self):
+        path = self.board(cards=["t123", "t456"])
+        (path / "cards" / "t123" / "card.md").write_text("no frontmatter\n")
+        (path / "cards" / "t456" / "card.md").unlink()
+        (path / "cards" / "notes").mkdir()
+        result = self.run_doctor(expect=1)
+        codes = {f["code"]: f["path"] for f in result["findings"]}
+        self.assertEqual(codes["card_invalid"], str(path / "cards" / "t123" / "card.md"))
+        self.assertEqual(codes["card_file_missing"], str(path / "cards" / "t456"))
+        self.assertEqual(codes["card_folder_invalid"], str(path / "cards" / "notes"))
+
+    def test_the_old_layout_names_convert_store(self):
+        self.todos.mkdir()
+        (self.todos / "inbox.md").write_text("## Todo\n")
+        (found,) = self.findings("old_format", expect=1)
+        self.assertEqual(found["fix"], "herdboard convert-store")
+
+    def test_obsolete_config_keys_are_warnings(self):
+        self.config.write_text(f'todos_dir = "{self.todos}"\nvault_root = "~/Notes"\n[linear]\nenabled = false\n')
+        (found,) = self.findings("config_key_obsolete")
+        self.assertEqual(found["level"], "warning")
+        self.assertIn("vault_root", found["message"])
+
+    def test_card_lists_that_do_not_match_the_folders(self):
+        path = self.board(cards=["t123", "t123", "tgon"], folders=["t123", "t456"])
+        result = self.run_doctor()
+        found = {f["code"]: f for f in result["findings"] if f["code"].startswith("card_")}
+        self.assertIn("t123", found["card_listed_twice"]["message"])
+        self.assertIn("tgon", found["card_missing"]["message"])
+        self.assertEqual(found["card_orphan"]["path"], str(path / "cards" / "t456"))
+        self.assertTrue(all(f["fix"] == "herdboard doctor --fix" for f in found.values()))
 
     def test_duplicate_ids_across_boards_and_archive(self):
-        self.board(body="- [ ] One ^t123\n***\n## Archive\n- [x] Old ^t123\n")
-        self.board("other")
-        self.assertEqual(len(self.findings("duplicate_id", expect=1)), 2)
+        self.board()
+        other = self.board("other", cards=[], archive=["t123"])
+        (found,) = self.findings("duplicate_id", expect=1)
+        self.assertEqual(found["path"], str(other / "archive" / "t123"))
 
     def test_duplicate_repository_identity(self):
-        self.board("a", front="kanban-plugin: board\nrepo: github.com/Acme/API\n")
-        self.board("b", front="kanban-plugin: board\nrepo: github.com/acme/api\n")
+        self.board("a", top='repo = "github.com/Acme/API"')
+        self.board("b", cards=[], top='repo = "github.com/acme/api"')
         self.assertEqual(len(self.findings("duplicate_repo", expect=1)), 1)
 
     def test_invalid_linear_projects(self):
-        path = self.board(front="kanban-plugin: board\nlinear-projects: wrong\n")
+        path = self.board(top='linear-projects = "wrong"')
         found = self.findings("linear_links_invalid", expect=1)
-        self.assertEqual(found[0]["path"], str(path))
-        self.assertEqual(found[0]["line"], 3)
+        self.assertEqual(found[0]["path"], str(path / "board.toml"))
 
     def test_invalid_linear_pins(self):
-        path = self.board(front="kanban-plugin: board\nrepo: github.com/acme/api\nlinear-issues:\n  - id: i1\n")
+        path = self.board(top='repo = "github.com/acme/api"\n\n[[linear-issues]]\nid = "i1"')
         found = self.findings("linear_pins_invalid", expect=1)
-        self.assertEqual(found[0]["path"], str(path))
-        self.assertEqual(found[0]["line"], 4)
+        self.assertEqual(found[0]["path"], str(path / "board.toml"))
         self.assertIn("identifier", found[0]["message"])
 
     def test_missing_pinned_issue(self):
         self.enable_linear()
-        self.board(
-            front="kanban-plugin: board\nlinear-issues:\n  - {id: i1, identifier: ENG-1}\n"
-            "  - {id: gone, identifier: ENG-404}\n  - {id: i6, identifier: ENG-6}\n"
-        )
+        pins = [("i1", "ENG-1"), ("gone", "ENG-404"), ("i6", "ENG-6")]
+        self.board(top="".join(f'[[linear-issues]]\nid = "{i}"\nidentifier = "{n}"\n' for i, n in pins))
         with self.server() as fake:
             found = self.findings("linear_pin_missing")
             self.assertEqual([f["level"] for f in found], ["warning"])
             self.assertIn("ENG-404", found[0]["message"])
-            self.assertEqual(found[0]["line"], 3)
             self.assertEqual([r["operationName"] for r in fake.requests], ["Viewer", "PinnedIssues"])
 
     def test_invalid_config(self):
@@ -146,15 +188,14 @@ class DoctorTests(unittest.TestCase):
         self.board(done=False)
         self.assertEqual(self.findings("done_column_missing")[0]["level"], "warning")
 
-    def test_complete_marker_counts_as_done(self):
-        self.board(body="**Complete**\n- [x] Task ^t123\n", done=False)
+    def test_a_done_flag_or_the_name_done_counts_as_done(self):
+        self.board(columns=[("Todo", ["t123"], {}), ("Shipped", [], {"done": True})])
+        self.board("b", cards=[], columns=[("Todo", [], {}), ("done", [], {})])
         self.assertEqual(self.findings("done_column_missing"), [])
 
-    def test_card_missing_id(self):
-        self.board(body="- [ ] Task\n***\n## Archive\n- [x] Old\n")
-        found = self.findings("card_id_missing")
-        self.assertEqual([f["line"] for f in found], [5, 8])
-        self.assertTrue(all(f["level"] == "info" for f in found))
+    def test_two_done_columns_are_a_warning(self):
+        self.board(columns=[("Todo", ["t123"], {}), ("A", [], {"done": True}), ("B", [], {"done": True})])
+        self.assertEqual(len(self.findings("done_column_multiple")), 1)
 
     def test_linear_missing_key(self):
         self.enable_linear("")
@@ -184,21 +225,21 @@ class DoctorTests(unittest.TestCase):
 
     def test_missing_project(self):
         self.enable_linear()
-        self.board(front=self.links("missing"))
+        self.board(top=self.links("missing"))
         with self.server() as fake:
             self.assertEqual(self.findings("linear_project_missing")[0]["level"], "warning")
             self.assertFalse(any("mutation" in r["query"] for r in fake.requests))
 
     def test_missing_labels_checks_even_missing_project(self):
         self.enable_linear()
-        self.board(front=self.links("missing", "    labels:\n      - id: gone\n        name: Gone\n"))
+        self.board(top=self.links("missing", [("gone", "Gone")]))
         with self.server():
             self.assertEqual(len(self.findings("linear_label_missing")), 1)
 
     def test_linear_unreachable_is_one_warning(self):
         self.enable_linear()
-        self.board(front=self.links())
-        self.board("b", body="", front=self.links())
+        self.board(top=self.links())
+        self.board("b", cards=[], top=self.links())
         with FakeLinear(fixtures()) as fake:
             endpoint = fake.endpoint
         with patch.object(
@@ -212,8 +253,8 @@ class DoctorTests(unittest.TestCase):
 
     def test_network_failure_after_viewer_stops_link_checks(self):
         self.enable_linear()
-        self.board(front=self.links())
-        self.board("b", body="", front=self.links())
+        self.board(top=self.links())
+        self.board("b", cards=[], top=self.links())
         with self.server() as fake:
             client = LinearClient("test-key", fake.endpoint, timeout=2, max_retries=0)
             viewer = client.viewer
@@ -370,7 +411,8 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(self.findings("herdr_missing"), [])
 
     def test_json_shape_and_error_exit(self):
-        self.board(body="- [ ] One ^t123\n- [ ] Two ^t123\n")
+        self.board()
+        self.board("other", cards=["t123"])
         result = self.run_doctor(expect=1)
         self.assertEqual(set(result), {"findings", "fixed", "summary"})
         self.assertEqual(set(result["summary"]), {"error", "warning", "info"})
@@ -379,46 +421,44 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result["summary"]["error"], 1)
 
     def test_human_output_grouped_with_summary(self):
-        self.board(body="- [ ] One\n", done=False)
-        with patch("herdboard.doctor.check_hunk", return_value=[]):
+        self.board(done=False)
+        with (
+            patch("herdboard.doctor.check_hunk", return_value=[]),
+            patch("herdboard.doctor.check_gh", return_value=[doctor.finding("info", "gh_missing", "no gh")]),
+        ):
             text = self.run_doctor(text=True)
         self.assertLess(text.index("Warning"), text.index("Info"))
         self.assertIn("0 errors, 1 warnings, 2 info", text)
 
-    def test_fix_ids_order_and_second_run(self):
-        first = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n***\n## Archive\n- [x] Third ^t123\n")
-        last = self.board("z", body="- [ ] Fourth ^t123\n")
-        result = self.run_doctor("--fix-ids")
-        self.assertEqual(
-            [(f["path"], f["line"], f["old_id"]) for f in result["fixed"]],
-            [(str(first), 6, "t123"), (str(first), 9, "t123"), (str(last), 5, "t123")],
-        )
-        self.assertEqual(len({f["new_id"] for f in result["fixed"]}), 3)
-        self.assertIn("First ^t123", first.read_text())
-        self.assertEqual(self.findings("duplicate_id"), [])
-        self.assertEqual(self.run_doctor("--fix-ids")["fixed"], [])
-
-    def test_fix_ids_skips_read_only(self):
-        self.board()
-        path = self.board("z", front="not-kanban: board\n")
-        before = path.read_bytes()
-        result = self.run_doctor("--fix-ids", expect=1)
+    def test_fix_repairs_the_lists_and_a_second_run_does_nothing(self):
+        first = self.board(cards=["t123", "t123", "tgon"], folders=["t123", "t456"])
+        last = self.board("z", cards=[], folders=["t789"])
+        text = self.run_doctor("--fix", text=True)
+        self.assertIn(f"Fixed {first / 'board.toml'}: Repaired the card lists.", text)
+        result = self.run_doctor("--fix")
         self.assertEqual(result["fixed"], [])
-        self.assertEqual(path.read_bytes(), before)
-        self.assertEqual(len([f for f in result["findings"] if f["code"] == "board_invalid"]), 1)
+        self.assertFalse([f for f in result["findings"] if f["code"].startswith("card_")])
+        self.assertEqual(self.lists(first), [["t123", "t456"], []])
+        self.assertEqual(self.lists(last), [["t789"], []])
 
-    def test_fix_preserves_crlf_unknown_lines_and_assigns_missing_ids(self):
-        path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n\tBody\nunknown\n- [ ] Missing\n")
-        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
-        self.run_doctor("--fix-ids")
-        content = path.read_bytes()
-        self.assertNotIn(b"\n", content.replace(b"\r\n", b""))
-        self.assertIn(b"\tBody\r\nunknown\r\n", content)
-        self.assertEqual(self.findings("card_id_missing"), [])
+    def test_fix_skips_an_unreadable_board(self):
+        self.board(cards=[], folders=["t123"])
+        path = self.board("z", cards=[], folders=["t456"])
+        (path / "board.toml").write_text("format = 9\n")
+        result = self.run_doctor("--fix", expect=1)
+        self.assertEqual([f["path"] for f in result["fixed"]], [str(self.todos / "boards" / "inbox" / "board.toml")])
+        self.assertEqual((path / "board.toml").read_text(), "format = 9\n")
+
+    def test_fix_keeps_comments_and_unknown_keys(self):
+        path = self.board(cards=[], folders=["t123"], top='# My board\nowner = "nate"')
+        self.run_doctor("--fix")
+        text = (path / "board.toml").read_text()
+        self.assertTrue(text.startswith('format = 1\n# My board\nowner = "nate"\n'), text)
+        self.assertEqual(self.lists(path), [["t123"], []])
 
     def test_fix_lock_conflict_exits_two(self):
-        path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n")
-        before = path.read_bytes()
+        path = self.board(cards=[], folders=["t123"])
+        before = (path / "board.toml").read_bytes()
         with (self.todos / ".herdboard.lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             original = Store.__init__
@@ -427,9 +467,9 @@ class DoctorTests(unittest.TestCase):
                 original(store, config, lock_timeout=0)
 
             with patch.object(Store, "__init__", fast):
-                result = self.run_doctor("--fix-ids", expect=2)
+                result = self.run_doctor("--fix", expect=2)
         self.assertEqual(result["error"]["code"], "conflict")
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual((path / "board.toml").read_bytes(), before)
 
     def test_corrupt_promotions_reported_with_invalid_config(self):
         path = self.state_file("org/user/promotions.json", [])
@@ -444,43 +484,26 @@ class DoctorTests(unittest.TestCase):
             path.write_bytes(b"\xff")
         self.assertEqual(len(self.findings("state_invalid", expect=1)), 3)
 
-    def test_fix_rechecks_target_under_lock(self):
-        path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n")
+    def test_fix_reads_the_board_again_under_the_lock(self):
+        path = self.board(cards=[], folders=["t123"])
         original = Store._lock
 
         @contextlib.contextmanager
-        def edit_before_lock(store):
-            path.write_text(path.read_text().replace("Second", "Changed"))
+        def add_before_lock(store):
+            (path / "cards" / "t456").mkdir()
+            (path / "cards" / "t456" / "card.md").write_text('+++\ntitle = "New"\n+++\n')
             with original(store):
                 yield
 
-        with patch.object(Store, "_lock", edit_before_lock):
-            result = self.run_doctor("--fix-ids", expect=2)
-        self.assertEqual(result["error"]["code"], "conflict")
-        self.assertIn("Changed ^t123", path.read_text())
+        with patch.object(Store, "_lock", add_before_lock):
+            self.run_doctor("--fix")
+        self.assertEqual(self.lists(path), [["t123", "t456"], []])
 
-    def test_fix_keeps_edits_to_other_cards(self):
-        path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n- [ ] Other ^t456\n")
-        original = Store._lock
-
-        @contextlib.contextmanager
-        def edit_before_lock(store):
-            path.write_text(path.read_text().replace("Other", "Changed"))
-            with original(store):
-                yield
-
-        with patch.object(Store, "_lock", edit_before_lock):
-            self.run_doctor("--fix-ids")
-        self.assertIn("Changed ^t456", path.read_text())
-
-    def test_fix_skips_invalid_links_but_repairs_other_boards(self):
-        self.board()
-        bad = self.board("a", front="kanban-plugin: board\nlinear-projects: wrong\n")
-        good = self.board("b")
-        before = bad.read_bytes()
-        result = self.run_doctor("--fix-ids", expect=1)
-        self.assertEqual([f["path"] for f in result["fixed"]], [str(good)])
-        self.assertEqual(bad.read_bytes(), before)
+    def test_fix_repairs_a_board_with_invalid_links(self):
+        path = self.board(cards=[], folders=["t123"], top='linear-projects = "wrong"')
+        result = self.run_doctor("--fix", expect=1)
+        self.assertEqual([f["path"] for f in result["fixed"]], [str(path / "board.toml")])
+        self.assertIn('linear-projects = "wrong"', (path / "board.toml").read_text())
 
     def test_herdr_path_fallback(self):
         os.environ.pop("HERDR_BIN_PATH")
@@ -490,48 +513,39 @@ class DoctorTests(unittest.TestCase):
 
     def test_valid_linear_links_make_only_read_queries(self):
         self.enable_linear()
-        self.board(front=self.links("p-plat", "    labels:\n      - id: l-api\n        name: repo:api\n"))
+        self.board(top=self.links("p-plat", [("l-api", "repo:api")]))
         with self.server() as fake:
             result = self.run_doctor()
             self.assertEqual([r["operationName"] for r in fake.requests], ["Viewer", "Project", "LabelsById"])
         self.assertFalse(any(f["code"].startswith("linear_") for f in result["findings"]))
         self.assertFalse(self.state.exists())
 
-    def test_bad_yaml_scalar_keeps_other_board_findings(self):
-        self.enable_linear()
-        good = self.board("z", body="- [ ] No ID\n")
-        for scalar in ("2001-13-45", "[unclosed"):
-            with self.subTest(scalar=scalar):
-                bad = self.board(front=f"kanban-plugin: board\nfoo: {scalar}\n")
-                with self.server():
-                    result = self.run_doctor(expect=1)
-                self.assertIn(str(bad), [f["path"] for f in result["findings"] if f["code"] == "linear_links_invalid"])
-                self.assertIn(str(good), [f["path"] for f in result["findings"] if f["code"] == "card_id_missing"])
-
     def test_unexpected_board_check_failure_keeps_other_board(self):
         bad = self.board()
-        good = self.board("z", body="- [ ] No ID\n")
+        good = self.board("z", cards=[], folders=["t456"])
         original = doctor.check_board
 
-        def check(store, path, board):
-            if path == bad:
+        def check(store, board):
+            if board.path == bad:
                 raise ValueError("unexpected board failure")
-            return original(store, path, board)
+            return original(store, board)
 
         with patch.object(doctor, "check_board", side_effect=check):
             result = self.run_doctor(expect=1)
-        self.assertIn(str(bad), [f["path"] for f in result["findings"] if f["code"] == "board_invalid"])
-        self.assertIn(str(good), [f["path"] for f in result["findings"] if f["code"] == "card_id_missing"])
+        self.assertIn(str(bad / "board.toml"), [f["path"] for f in result["findings"] if f["code"] == "board_invalid"])
+        self.assertIn(
+            str(good / "cards" / "t456"), [f["path"] for f in result["findings"] if f["code"] == "card_orphan"]
+        )
 
     def test_unknown_user_in_config(self):
         self.config.write_text('todos_dir = "~herdboard-no-such-user-91479/x"')
         self.assertEqual(len(self.findings("config_invalid", expect=1)), 1)
 
     def test_invalid_config_checks_default_boards(self):
-        self.board(body="- [ ] No ID\n")
+        self.board(cards=[], folders=["t123"])
         self.config.write_text("[")
         result = self.run_doctor(expect=1)
-        self.assertTrue(any(f["code"] == "card_id_missing" for f in result["findings"]))
+        self.assertTrue(any(f["code"] == "card_orphan" for f in result["findings"]))
         self.assertIn("default", next(f["message"] for f in result["findings"] if f["code"] == "config_invalid"))
 
     def test_tolerated_start_records_are_warnings(self):
@@ -547,8 +561,8 @@ class DoctorTests(unittest.TestCase):
         from unittest.mock import Mock
 
         self.enable_linear()
-        self.board(front=self.links(labels="    labels:\n      - id: l-api\n        name: API\n"))
-        self.board("z", front=self.links(), body="")
+        self.board(top=self.links(labels=[("l-api", "API")]))
+        self.board("z", cards=[], top=self.links())
         for method in ("project", "labels"):
             with self.subTest(method=method):
                 client = Mock()
@@ -583,80 +597,24 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(sum(f["code"] == "checkout_stale" for f in result["findings"]), 1)
         identity.assert_called_once()
 
-    def test_missing_yaml_is_warning(self):
-        self.board(front=self.links())
-        with patch("herdboard.linear_links._yaml", return_value=None):
-            found = self.findings("pyyaml_missing")
-        self.assertEqual(len(found), 1)
-        self.assertEqual(found[0]["level"], "warning")
-        self.assertIn("cannot", found[0]["message"])
-
-    def test_fix_rejects_new_duplicate_under_lock(self):
-        path = self.board(body="- [ ] First ^t123\n- [ ] Second ^t123\n- [ ] Other ^t456\n")
-        original = Store._lock
-        expected = path.read_bytes().replace(b"Other ^t456", b"Other ^t123")
-
-        @contextlib.contextmanager
-        def edit_before_lock(store):
-            path.write_bytes(expected)
-            with original(store):
-                yield
-
-        with patch.object(Store, "_lock", edit_before_lock):
-            result = self.run_doctor("--fix-ids", expect=2)
-        self.assertEqual(result["error"]["code"], "conflict")
-        self.assertEqual(path.read_bytes(), expected)
-
-    def test_fix_ignores_changed_read_only_duplicate(self):
-        self.board()
-        writable = self.board("a")
-        path = self.board("z", front="not-kanban: board\n")
-        original = Store._lock
-        expected = path.read_bytes().replace(b"Task", b"Changed")
-
-        @contextlib.contextmanager
-        def edit_before_lock(store):
-            path.write_bytes(expected)
-            with original(store):
-                yield
-
-        with patch.object(Store, "_lock", edit_before_lock):
-            result = self.run_doctor("--fix-ids", expect=1)
-        self.assertEqual([f["path"] for f in result["fixed"]], [str(writable)])
-        self.assertEqual(path.read_bytes(), expected)
-
     def test_fix_keeps_report_after_write_failure(self):
-        self.board()
-        first = self.board("a")
-        failed = self.board("b")
-        before = failed.read_bytes()
-        original = Store._write
+        first = self.board("a", cards=[], folders=["t123"])
+        failed = self.board("b", cards=[], folders=["t456"])
+        before = (failed / "board.toml").read_bytes()
+        original = Store._write_file
 
-        def write(store, path, board):
-            if path == failed:
+        def write(store, path, data):
+            if path == failed / "board.toml":
                 raise IoError("write failed")
-            return original(store, path, board)
+            return original(store, path, data)
 
-        with patch.object(Store, "_write", write):
-            result = self.run_doctor("--fix-ids", expect=1)
-        self.assertEqual([f["path"] for f in result["fixed"]], [str(first)])
-        self.assertEqual(failed.read_bytes(), before)
-        self.assertTrue(any(f["path"] == str(failed) and "write failed" in f["message"] for f in result["findings"]))
-
-    def test_fix_preserves_all_other_bytes(self):
-        path = self.board(
-            body="- [ ] First ^t123\n- [ ] Second ^t123\n  details\n- [ ] Other ^t456\n",
-            front="kanban-plugin: board\ncustom: value\n",
+        with patch.object(Store, "_write_file", write):
+            result = self.run_doctor("--fix", expect=1)
+        self.assertEqual([f["path"] for f in result["fixed"]], [str(first / "board.toml")])
+        self.assertEqual((failed / "board.toml").read_bytes(), before)
+        self.assertTrue(
+            any(f["code"] == "board_fix_failed" and "write failed" in f["message"] for f in result["findings"])
         )
-        path.write_text(
-            path.read_text()
-            + '**Complete**\n- [x] Finished ^t789\n\n%% kanban:settings\n```\n{"custom": true}\n```\n%%\n'
-        )
-        before = path.read_bytes()
-        result = self.run_doctor("--fix-ids")
-        self.assertEqual(len(result["fixed"]), 1)
-        replacement = result["fixed"][0]["new_id"].encode()
-        self.assertEqual(path.read_bytes(), before.replace(b"Second ^t123", b"Second ^" + replacement))
 
     def test_doctor_does_not_register_checkout_or_write_state(self):
         with patch.object(cli, "register_checkout") as register:

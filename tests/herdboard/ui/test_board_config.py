@@ -9,8 +9,9 @@ from herdboard.board import ConfigScreen
 from herdboard.config import load_config, save_global_config
 from herdboard.linear_links import LabelLink, ProjectLink
 from herdboard.linear_pins import IssuePin
-from herdboard.model import HerdboardError
+from herdboard.model import HerdboardError, IoError
 from herdboard.start import Starter
+from herdboard.store import Store
 from support.herdboard_board import BoardTestCase, settle
 
 
@@ -63,8 +64,8 @@ class ConfigScreenTests(BoardTestCase):
         self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
 
     async def test_display_changes_persist_and_update_cards_and_details_immediately(self):
-        self.store.add(self.repo_path, "Ship it #type/bug #api", "Backlog")
-        original = self.repo_path.read_bytes()
+        self.store.add(self.repo_path, "Ship it", "Backlog", type="bug", tags=["api"])
+        original = (self.repo_path / "board.toml").read_bytes()
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
@@ -82,7 +83,7 @@ class ConfigScreenTests(BoardTestCase):
             self.assertEqual(app.screen.query_one("#detail-chips").plain, " api ")
         config = load_config(app.config_file)
         self.assertEqual((config.icon_style, config.tag_style), ("nerd", "block"))
-        self.assertEqual(self.repo_path.read_bytes(), original)
+        self.assertEqual((self.repo_path / "board.toml").read_bytes(), original)
 
     async def test_display_saves_run_in_the_worker_and_apply_on_the_event_loop(self):
         app = self.make_app()
@@ -242,7 +243,7 @@ class ConfigScreenTests(BoardTestCase):
     async def test_menu_can_disable_icons_and_restore_round_tags(self):
         self.config.icon_style = "nerd"
         self.config.tag_style = "block"
-        item = self.store.add(self.repo_path, "Ship it #type/bug #api", "Backlog")
+        item = self.store.add(self.repo_path, "Ship it", "Backlog", type="bug", tags=["api"])
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
@@ -341,7 +342,7 @@ class ConfigScreenTests(BoardTestCase):
             screen.query_one("#config-merge").value = "default"
             await pilot.press("ctrl+s")
             await settle(pilot)
-        self.assertNotIn("merge:", self.repo_path.read_text())
+        self.assertNotIn("merge", (self.repo_path / "board.toml").read_text())
 
     async def test_enter_on_a_link_marks_it_for_removal_and_save_removes_it(self):
         self.link(ProjectLink("p1", "Platform"))
@@ -387,9 +388,9 @@ class ConfigScreenTests(BoardTestCase):
         self.assertEqual(meta.links, [ProjectLink("p2", "Billing"), ProjectLink("p3", "Mobile")])
 
     async def test_a_failed_link_write_writes_nothing_and_shows_the_error(self):
-        text = self.repo_path.read_text().replace("repo:", "other: 1\nother: 2\nrepo:")
-        self.repo_path.write_text(text)
+        text = (self.repo_path / "board.toml").read_text()
         app = self.make_app(resolve_link=lambda name, labels: ProjectLink("p3", name))
+        self.enterContext(mock.patch.object(Store, "_write_file", side_effect=IoError("disk full")))
         async with app.run_test(size=(100, 40)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
@@ -398,9 +399,9 @@ class ConfigScreenTests(BoardTestCase):
             await pilot.press("ctrl+s")
             await settle(pilot)
             self.assertIs(app.screen, screen)
-            self.assertIn("duplicate key 'other'", screen.query_one("#config-error").plain)
+            self.assertIn("disk full", screen.query_one("#config-error").plain)
             self.assertIsNone(screen.meta.merge)
-        self.assertEqual(self.repo_path.read_text(), text)
+        self.assertEqual((self.repo_path / "board.toml").read_text(), text)
 
     async def test_enter_in_the_project_field_moves_to_the_labels(self):
         asked = []
@@ -444,7 +445,7 @@ class ConfigScreenTests(BoardTestCase):
         def resolve(name, labels):
             raise HerdboardError(f"No Linear project named {name!r}")
 
-        before = self.repo_path.read_text()
+        before = (self.repo_path / "board.toml").read_text()
         app = self.make_app(resolve_link=resolve)
         async with app.run_test(size=(100, 40)) as pilot:
             await settle(pilot)
@@ -457,7 +458,7 @@ class ConfigScreenTests(BoardTestCase):
             self.assertIs(app.screen, screen)
             self.assertIn("No Linear project named 'Nope'", screen.query_one("#config-error").plain)
             self.assertEqual(self.config.icon_style, "plain")
-        self.assertEqual(self.repo_path.read_text(), before)
+        self.assertEqual((self.repo_path / "board.toml").read_text(), before)
         self.assertFalse(app.config_file.exists())
 
     async def test_without_linear_the_add_fields_are_hidden(self):
@@ -468,7 +469,7 @@ class ConfigScreenTests(BoardTestCase):
             self.assertFalse(screen.query("#config-project"))
 
     async def test_escape_closes_without_a_write(self):
-        before = self.repo_path.read_text()
+        before = (self.repo_path / "board.toml").read_text()
         app = self.make_app()
         async with app.run_test(size=(100, 40)) as pilot:
             await settle(pilot)
@@ -477,7 +478,7 @@ class ConfigScreenTests(BoardTestCase):
             await pilot.press("escape")
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
-        self.assertEqual(self.repo_path.read_text(), before)
+        self.assertEqual((self.repo_path / "board.toml").read_text(), before)
 
     async def test_a_long_error_stays_in_view_in_a_small_terminal(self):
         for number in range(8):
@@ -505,7 +506,7 @@ class ConfigScreenTests(BoardTestCase):
         app = self.make_app()
         async with app.run_test(size=(100, 40)) as pilot:
             await settle(pilot)
-            self.repo_path.unlink()
+            (self.repo_path / "board.toml").unlink()
             await pilot.press("c")
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
@@ -617,7 +618,7 @@ class ConfigScreenTests(BoardTestCase):
                 self.assertEqual((config.merge, config.start_agent), ("pr", "pi"))
 
     async def test_escape_writes_and_applies_no_global_or_board_change(self):
-        before = self.repo_path.read_bytes()
+        before = (self.repo_path / "board.toml").read_bytes()
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
@@ -632,7 +633,7 @@ class ConfigScreenTests(BoardTestCase):
             self.assertEqual(app.theme, "ansi-dark")
         self.assertEqual((self.config.start_agent, self.config.merge), ("claude", "local"))
         self.assertFalse(app.config_file.exists())
-        self.assertEqual(self.repo_path.read_bytes(), before)
+        self.assertEqual((self.repo_path / "board.toml").read_bytes(), before)
 
     async def test_theme_choices_save_and_apply_at_once(self):
         self.store.add(self.repo_path, "Ship it", "Backlog")
@@ -943,7 +944,7 @@ class ConfigScreenTests(BoardTestCase):
 
     async def test_an_invalid_global_value_writes_neither_file(self):
         self.config.start_agent = "pi"
-        before = self.repo_path.read_bytes()
+        before = (self.repo_path / "board.toml").read_bytes()
         asked = []
         app = self.make_app(resolve_link=lambda name, labels: asked.append(name) or ProjectLink("p3", name))
         with mock.patch("herdboard.board.pi_model_choices", return_value=(None, ["zai/glm 5"])):
@@ -961,12 +962,12 @@ class ConfigScreenTests(BoardTestCase):
                 self.assertNotIn("Board settings saved", error)
                 self.assertIsNone(screen.meta.merge)
         self.assertEqual(asked, [])
-        self.assertEqual(self.repo_path.read_bytes(), before)
+        self.assertEqual((self.repo_path / "board.toml").read_bytes(), before)
         self.assertFalse(app.config_file.exists())
         self.assertIsNone(self.config.start_model)
 
     async def test_a_global_only_change_writes_no_board_file(self):
-        before = self.repo_path.read_bytes()
+        before = (self.repo_path / "board.toml").read_bytes()
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
@@ -974,7 +975,7 @@ class ConfigScreenTests(BoardTestCase):
             screen.query_one("#config-agent").value = "pi"
             await pilot.press("ctrl+s")
             await settle(pilot)
-        self.assertEqual(self.repo_path.read_bytes(), before)
+        self.assertEqual((self.repo_path / "board.toml").read_bytes(), before)
         self.assertEqual(load_config(app.config_file).start_agent, "pi")
 
     async def test_submit_from_an_unrelated_input_does_not_save(self):
@@ -991,7 +992,7 @@ class ConfigScreenTests(BoardTestCase):
 
     async def test_c_without_a_repository_board_can_save_global_display_settings(self):
         app = self.make_app(view="inbox", repo=False)
-        boards = {path: path.read_bytes() for path in self.store.board_paths()}
+        boards = {path: (path / "board.toml").read_bytes() for path in self.store.board_paths()}
         async with app.run_test(size=(80, 24)) as pilot:
             await settle(pilot)
             screen = await self.open_config(pilot)
@@ -1007,7 +1008,7 @@ class ConfigScreenTests(BoardTestCase):
             await settle(pilot)
             self.assertNotIsInstance(app.screen, ConfigScreen)
         self.assertEqual(load_config(app.config_file).icon_style, "nerd")
-        self.assertEqual({path: path.read_bytes() for path in self.store.board_paths()}, boards)
+        self.assertEqual({path: (path / "board.toml").read_bytes() for path in self.store.board_paths()}, boards)
 
 
 if __name__ == "__main__":

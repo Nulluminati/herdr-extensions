@@ -4,6 +4,7 @@ from unittest import mock
 from herdboard import start
 from herdboard.board import AddScreen, ConfirmScreen, HelpScreen
 from support.herdboard_board import SIZE, BoardTestCase, settle
+from support.herdboard_store import write_board
 
 
 class ArchiveBoardTests(BoardTestCase):
@@ -144,8 +145,7 @@ class ArchiveBoardTests(BoardTestCase):
             self.assertEqual(self.titles(self.repo_path), ["open card"])
 
     async def test_D_skips_a_board_without_a_done_column(self):
-        other = self.root / "todos/projects/no-done.md"
-        other.write_text("---\n\nkanban-plugin: board\n\n---\n\n## Todo\n\n- [ ] x\n\n")
+        write_board(self.root / "todos", "no-done", [("Todo", [{"id": "txyz", "title": "x"}])])
         app = self.make_app("all")
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()

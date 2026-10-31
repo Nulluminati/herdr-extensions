@@ -123,7 +123,7 @@ class StartLinearTests(WriteCliCase):
 
     def pins(self):
         store = self.store_for()
-        return [pin.identifier for pin in store.board_meta(store.projects_dir / "acme-api.md").pins]
+        return [pin.identifier for pin in store.board_meta(store.boards_dir / "acme-api").pins]
 
     def test_start_pins_the_issue_to_the_repository_board(self):
         self.run_json("start", "ENG-3", "--repo", "acme-api", "--no-agent", directory=self.plain)
@@ -153,8 +153,8 @@ class StartLinearTests(WriteCliCase):
         self.assertEqual(self.pins(), [])
 
     def mixed_case_board(self):
-        board = self.store_for().projects_dir / "acme-api.md"
-        board.write_text(board.read_text().replace("repo: github.com/acme/api", "repo: github.com/Acme/API", 1))
+        board = self.store_for().boards_dir / "acme-api" / "board.toml"
+        board.write_text(board.read_text().replace('repo = "github.com/acme/api"', 'repo = "github.com/Acme/API"', 1))
 
     def test_a_checkout_start_pins_to_a_mixed_case_github_board(self):
         self.mixed_case_board()
@@ -169,11 +169,11 @@ class StartLinearTests(WriteCliCase):
         self.assertEqual(result["branch"], "nate/eng-5")
 
     def test_a_pin_failure_warns_and_the_start_goes_on(self):
-        board = self.store_for().projects_dir / "acme-api.md"
-        board.write_text(board.read_text().replace("repo:", "linear-issues: nope\nrepo:", 1))
+        board = self.store_for().boards_dir / "acme-api" / "board.toml"
+        board.write_text(board.read_text().replace("repo =", "linear-issues = 3\nrepo =", 1))
         out, err = self.run_cli("--json", "start", "ENG-3", "--repo", "acme-api", "--no-agent", directory=self.plain)
         self.assertEqual(json.loads(out)["branch"], "nate/eng-3")
-        self.assertRegex(err, r"herdboard: warning: cannot pin ENG-3 to .*acme-api.md: .*linear-issues")
+        self.assertRegex(err, r"herdboard: warning: cannot pin ENG-3 to .*acme-api: .*linear-issues")
 
     def test_missing_state_precedes_worktree(self):
         self.config.write_text(self.config.read_text() + '\nstart_column = "Missing"\n')

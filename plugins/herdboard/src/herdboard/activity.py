@@ -1,4 +1,4 @@
-"""The activity log of a card: one Markdown file per card in a hidden folder of the todos.
+"""The activity log of a card: `log.md` in the card's folder (see `paths`).
 
 Agents, herdboard and the user append entries. Nobody rewrites them, so the log is
 the card's history, and the card's own text stays the user's.
@@ -14,35 +14,34 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import Config
-from .model import HerdboardError, IoError
+from .model import IoError, NotFoundError
+from .paths import LOG_REF, LogUsageError, card_dir
 
-# A todo ID (`t3m9`), an automation ID (`a7k2`) or a Linear identifier (`ENG-123`): all are safe file names.
-LOG_REF = re.compile(r"^(t[0-9a-z]{3}|a[0-9a-z]{3}|[A-Z][A-Z0-9]*-\d+)$")
+__all__ = ["LOG_REF", "LogUsageError", "append", "log_path", "read"]
+
 ENTRY = re.compile(r"^- (?P<time>\d{4}-\d\d-\d\d \d\d:\d\d) · (?P<author>[a-z]+) · (?P<message>.*)$")
 # Panes whose agent herdboard started, newest last. Herdr pane IDs are never reused.
 PANE_AGENTS_FILE = "panes.json"
 PANE_AGENT_LIMIT = 256
 
 
-class LogUsageError(HerdboardError):
-    code = "usage"
-
-
 def log_path(config: Config, ref: str) -> Path:
-    if not LOG_REF.match(ref):
-        raise LogUsageError(f"{ref!r} is not a card ID: use a todo ID or a Linear identifier")
-    return config.todos_dir / ".herdboard" / "log" / f"{ref}.md"
+    """The card's log file. Raises NotFoundError for a todo that has no folder."""
+    return card_dir(config, ref) / "log.md"
 
 
 def append(store, ref: str, message: str, author: str, now: datetime | None = None) -> dict:
     """Add one entry to the end of a card's log. A message with several lines keeps them, indented."""
-    path = log_path(store.config, ref)
+    if not LOG_REF.match(ref):
+        raise LogUsageError(f"{ref!r} is not a card ID: use a todo ID or a Linear identifier")
     lines = [line.rstrip() for line in message.replace("\r", "").strip().split("\n")]
     if not lines[0]:
         raise LogUsageError("The log message is empty")
     stamp = (now or datetime.now()).strftime("%Y-%m-%d %H:%M")
     text = f"- {stamp} · {author} · {lines[0]}\n" + "".join(f"\t{line}\n" for line in lines[1:])
     with store._lock():
+        # Under the lock: an archive or a move to another board moves a todo's folder.
+        path = log_path(store.config, ref)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as handle:
@@ -54,7 +53,10 @@ def append(store, ref: str, message: str, author: str, now: datetime | None = No
 
 def read(config: Config, ref: str, limit: int | None = None) -> list[dict]:
     """A card's log entries, oldest first; with `limit`, only the newest ones."""
-    path = log_path(config, ref)
+    try:
+        path = log_path(config, ref)
+    except NotFoundError:
+        return []
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

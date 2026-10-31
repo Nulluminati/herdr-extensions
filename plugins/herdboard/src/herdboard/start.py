@@ -29,7 +29,7 @@ from .linear_pins import add_pin
 from .linear_source import state_dir
 from .linear_states import StateChoices, refuse, resolve_state
 from .model import ConflictError, HerdboardError, IoError, NotFoundError, commit_type
-from .store import TEMP_REF, CardView
+from .store import CardView
 
 # A card's Hunk review pane stays open only while the card is in this column.
 REVIEW_COLUMN = "Review"
@@ -997,7 +997,7 @@ class Starter:
                         return meta.repo
                     raise StartError(f"Board {value} has no repository", "repo_required")
             path = Path(repo).expanduser()
-            if path.is_file():
+            if (path / "board.toml").is_file():
                 meta = self.store.board_meta(path)
                 if meta.repo:
                     return meta.repo
@@ -1082,8 +1082,6 @@ class Starter:
             else:
                 # The caller only prepares, so the parent is prepared too: no move and no agent.
                 parent = self.store.show(card.parent)
-                if TEMP_REF.match(parent.ref):
-                    parent = self.store.ensure_id(parent.ref)
                 self.prepare(
                     parent, None, parent.ref, repo=repo, checkout=checkout, move_parent=False, check_column=check_column
                 )
@@ -1175,17 +1173,10 @@ class Starter:
         name = "hb-" + card.ref.lower()
         # Herdr rejects line breaks in agent arguments, so the details
         # go to a brief file and the message is one line that names it.
-        notes = []
-        if not linear:
-            try:
-                notes = self.store.notes_for(card)
-            except HerdboardError:
-                notes = []
         brief = write_brief(
             lock_key,
             brief_text(
                 card,
-                notes=notes,
                 repository=record.get("repository") or "",
                 worktree=record["worktree_path"],
                 branch=record.get("branch") or "",
@@ -1549,8 +1540,6 @@ class Starter:
             key = issue["id"]
         else:
             card = self.store.show(ref)
-            if TEMP_REF.match(card.ref):
-                card = self.store.ensure_id(card.ref)
             key = card.ref
         lock_key = safe_key(key)
         with _lock(".start-" + lock_key + ".lock"):

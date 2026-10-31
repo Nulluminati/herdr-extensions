@@ -16,10 +16,10 @@ from .linear import LinearClient, LinearError
 from .linear_cards import LINEAR_REF
 from .linear_states import Ask, StateChoices, refuse, resolve_state
 from .linear_writes import LinearWriter, pick_label
-from .model import ConflictError, HerdboardError, card_type
+from .model import ConflictError, HerdboardError
 from .promote_convert import Conversion, convert, promoted_identifier
 from .promotions import PromotionRecords
-from .store import TEMP_REF, CardView, Store, TodoSnapshot
+from .store import CardView, Store, TodoSnapshot
 
 CLOSED = ("completed", "canceled")
 
@@ -112,7 +112,7 @@ class Promoter:
         parent, *children = record["issues"]
         for child in children:
             # A sub-card that a rerun finds marked was finished by the run before.
-            if child.get("todo") and not promoted_identifier(self.store.show(child["todo"]).title):
+            if child.get("todo") and not promoted_identifier(self.store.show(child["todo"])):
                 self.store.finish_promotion(self.store.todo_snapshot(child["todo"]), child["identifier"])
         try:
             todo = self.store.finish_promotion(snapshot, parent["identifier"])
@@ -130,11 +130,11 @@ class Promoter:
 
     def _refuse_if_marked(self, records, view: CardView) -> None:
         """Refuse a todo with a `→ identifier` marker. Its record stays while work is left."""
-        done = promoted_identifier(view.title)
+        done = promoted_identifier(view)
         if not done:
             return
         message = f"{view.ref} was already promoted to {done}"
-        record = None if TEMP_REF.match(view.ref) else records.get(view.ref)
+        record = records.get(view.ref)
         if record is not None:
             left = [i for i in record["issues"] if i["identifier"] is None]
             if left:
@@ -166,7 +166,7 @@ class Promoter:
 
     def _plan(self, client, snapshot: TodoSnapshot, team_key, target, ask, state_name) -> dict:
         """The issues to create, with a client UUID each. Sends nothing to Linear."""
-        converted = convert(snapshot.located.lines)
+        converted = convert(snapshot.view)
         project, label_ids = target(client, snapshot.view)
         team = self.writer.resolve_team(client, team_key, project)
         states = client.team_states(team["id"])
@@ -215,7 +215,7 @@ class Promoter:
             child = {**base, "title": sub.title, "state_id": state["id"], "parent_id": parent_id}
             issues.append({"id": str(uuid.uuid4()), "input": child, "identifier": None})
         for card in self.store.children(snapshot.view.ref):
-            if promoted_identifier(card.title):
+            if promoted_identifier(card):
                 continue
             child = self._sub_card(client, card, team, states, choices, ask, base, parent_id)
             issues.append({"id": str(uuid.uuid4()), "input": child, "identifier": None, "todo": card.ref})
@@ -229,7 +229,7 @@ class Promoter:
     def _sub_card(self, client, card, team, states, choices, ask, base, parent_id) -> dict:
         """The create input of a sub-card's issue: its own title, state, labels, due date and text."""
         sub_snapshot = self.store.todo_snapshot(card.ref)
-        converted = convert(sub_snapshot.located.lines)
+        converted = convert(sub_snapshot.view)
         completed = self.config.linear.columns["completed"]
         state = resolve_state(
             self.config,
@@ -262,7 +262,7 @@ class Promoter:
         ids, unlabeled = [], []
         for tag in dict.fromkeys(tags):
             # A `type/<name>` tag becomes the label `<name>`.
-            chosen = pick_label(client, card_type([tag]) or tag, team)
+            chosen = pick_label(client, tag, team)
             if chosen is None:
                 unlabeled.append(tag)
             else:
@@ -270,14 +270,11 @@ class Promoter:
         return ids, unlabeled
 
     def _description(self, snapshot: TodoSnapshot, converted: Conversion, unlabeled) -> str | None:
-        """Notes first, then the leftover lines, then tags and links with nothing to become."""
-        notes = [n for n in self.store.notes_for(snapshot.view) or [] if n["content"] is not None]
-        parts = [n["content"].strip() if len(notes) == 1 else f"## {n['name']}\n{n['content'].strip()}" for n in notes]
+        """The leftover lines, then tags with nothing to become."""
+        parts = []
         if converted.leftover:
             parts.append("\n".join(converted.leftover))
-        found = {n["name"] for n in notes}
         rest = [" ".join(f"#{tag}" for tag in unlabeled)] if unlabeled else []
-        rest += [f"[[{name}]]" for name in converted.links if name not in found]
         if rest:
             parts.append("\n".join(rest))
         return "\n\n".join(parts) or None

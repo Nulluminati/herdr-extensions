@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .model import HerdboardError, frontmatter_scalars
+from .model import HerdboardError
 
 SCP_FORM = re.compile(r"^(?:[^@/:]+(?::[^@/]*)?@)?(?P<host>[^:/@]+):(?P<path>[^/].*)$")
 
@@ -111,43 +112,39 @@ def repo_identity(directory: Path) -> RepoIdentity | None:
     return RepoIdentity(str(main), None, (name,))
 
 
-def _frontmatter(path: Path) -> list[str] | None:
+def _board_repo(board: Path) -> str | None:
+    """The `repo` value of a board folder's `board.toml`, or None when it has none or cannot be read."""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+        with open(board / "board.toml", "rb") as handle:
+            repo = tomllib.load(handle).get("repo")
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
         return None
-    if not lines or lines[0].strip() != "---":
-        return None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            return lines[1:index]
-    return None
+    return repo if isinstance(repo, str) else None
 
 
-def find_board(projects_dir: Path, identity: RepoIdentity) -> Path | None:
-    if not projects_dir.is_dir():
+def find_board(boards_dir: Path, identity: RepoIdentity) -> Path | None:
+    """The board folder whose `repo` names the repository of `identity`, or None."""
+    if not boards_dir.is_dir():
         return None
     matches = []
-    for path in sorted(projects_dir.glob("*.md")):
-        lines = _frontmatter(path)
-        if lines is None:
-            continue
-        repo = frontmatter_scalars(lines).get("repo")
+    for board in sorted(path.parent for path in boards_dir.glob("*/board.toml")):
+        repo = _board_repo(board)
         if repo is not None and _canonical_identity(repo) == _canonical_identity(identity.identity):
-            matches.append(path)
+            matches.append(board)
     if len(matches) > 1:
         names = " and ".join(str(path) for path in matches)
         raise IdentityError(f"Two boards claim {identity.identity}: {names}")
     return matches[0] if matches else None
 
 
-def new_board_path(projects_dir: Path, identity: RepoIdentity) -> Path:
-    plain = projects_dir / f"{identity.board_stem}.md"
-    if not plain.exists():
+def new_board_path(boards_dir: Path, identity: RepoIdentity) -> Path:
+    """A free board folder for the repository of `identity`. The inbox name is never free."""
+    plain = boards_dir / identity.board_stem
+    if not plain.exists() and identity.board_stem != "inbox":
         return plain
     if identity.host is None:
         raise IdentityError(f"Board name is taken by another repository: {plain}")
-    prefixed = projects_dir / f"{identity.host}-{identity.board_stem}.md"
+    prefixed = boards_dir / f"{identity.host}-{identity.board_stem}"
     if prefixed.exists():
         raise IdentityError(f"Board name is taken by another repository: {prefixed}")
     return prefixed

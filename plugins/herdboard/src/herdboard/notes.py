@@ -1,7 +1,7 @@
 """Scratchpad notes: one Markdown file per board, and the inbox's note for all boards.
 
-The notes are plain Markdown in a folder of the todos, so Obsidian shows them. A note is the
-user's own text: no agent or command writes it.
+A board's note is `notes.md` in the board's folder. A note is the user's own text: no agent
+or command writes it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import Config
 from .model import HerdboardError, IoError
 
-FOLDER = "notes"
+NAME = "notes.md"
 # The note of the inbox board is the global note.
 GLOBAL = "inbox"
 # The first line of a fenced code block, or its last line. A closing line has nothing but
@@ -34,15 +34,11 @@ class NoteChanged(HerdboardError):
     code = "note_changed"
 
 
-def notes_dir(config: Config) -> Path:
-    return config.todos_dir / FOLDER
-
-
 def note_path(config: Config, board: str) -> Path:
     """The note of a board, by the board's name (`Store.board_name`)."""
     if "/" in board or board in ("", ".", ".."):
         raise HerdboardError(f"No note for a board named {board!r}")
-    return notes_dir(config) / f"{board}.md"
+    return config.todos_dir / "boards" / board / NAME
 
 
 def preview_markdown(text: str) -> str:

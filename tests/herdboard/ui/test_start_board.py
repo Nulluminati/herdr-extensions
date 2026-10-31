@@ -708,7 +708,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         from herdboard.identity import repo_identity
         from support.herdboard_start import FakeHerdr
 
-        repo = self.path.parent / "repo"
+        repo = self.store.config.todos_dir.parent / "repo"
         repo.mkdir()
         for args in (
             ["init", "-q"],
@@ -754,7 +754,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         from herdboard.identity import repo_identity
         from support.herdboard_start import FakeHerdr
 
-        repo = self.path.parent / "repo"
+        repo = self.store.config.todos_dir.parent / "repo"
         repo.mkdir()
         for args in (
             ["init", "-q"],

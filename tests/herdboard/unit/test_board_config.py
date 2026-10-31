@@ -1,63 +1,12 @@
 import unittest
 from unittest import mock
 
-from herdboard import kanban_md
 from herdboard.board import HerdboardApp
 from herdboard.linear_links import LabelLink, ProjectLink, with_link
 from herdboard.model import FormatError, HerdboardError
 from support.herdboard_board import BoardTestCase
 from support.herdboard_cli import CliTestCase
 from support.herdboard_linear_cli import LinearCliCase
-
-FRONT = "---\n\nkanban-plugin: board\nrepo: github.com/acme/api\n\n---\n\n## Todo\n"
-
-
-class FrontmatterValueTests(unittest.TestCase):
-    def test_adds_a_key_before_the_trailing_blank_line(self):
-        text = kanban_md.set_frontmatter_value(FRONT, "merge", "pr")
-        self.assertEqual(text, FRONT.replace("api\n", "api\nmerge: pr\n"))
-
-    def test_replaces_a_key_in_place(self):
-        before = FRONT.replace("board\n", "board\nmerge: local\n")
-        text = kanban_md.set_frontmatter_value(before, "merge", "pr")
-        self.assertEqual(text, FRONT.replace("board\n", "board\nmerge: pr\n"))
-
-    def test_none_removes_the_key_and_only_the_key(self):
-        before = FRONT.replace("board\n", "board\nmerge: local\n")
-        self.assertEqual(kanban_md.set_frontmatter_value(before, "merge", None), FRONT)
-
-    def test_none_without_the_key_changes_nothing(self):
-        self.assertEqual(kanban_md.set_frontmatter_value(FRONT, "merge", None), FRONT)
-
-    def test_crlf_is_kept(self):
-        before = FRONT.replace("\n", "\r\n")
-        text = kanban_md.set_frontmatter_value(before, "merge", "pr")
-        self.assertEqual(text, FRONT.replace("api\n", "api\nmerge: pr\n").replace("\n", "\r\n"))
-
-    def test_unclosed_frontmatter_is_a_format_error(self):
-        with self.assertRaisesRegex(FormatError, "frontmatter must be closed"):
-            kanban_md.set_frontmatter_value("---\nkanban-plugin: board\n## Todo\n", "merge", "pr")
-
-    def test_a_nested_value_is_a_format_error(self):
-        before = FRONT.replace("board\n", "board\nmerge:\n  mode: pr\n")
-        with self.assertRaisesRegex(FormatError, "'merge' has a nested value"):
-            kanban_md.set_frontmatter_value(before, "merge", "pr")
-
-    def test_an_indented_comment_or_blank_line_after_the_key_stays(self):
-        for extra in ("  # Merge policy", "  "):
-            before = FRONT.replace("board\n", f"board\nmerge: local\n{extra}\n")
-            text = kanban_md.set_frontmatter_value(before, "merge", "pr")
-            self.assertEqual(text, FRONT.replace("board\n", f"board\nmerge: pr\n{extra}\n"))
-
-    def test_a_nested_value_after_a_comment_is_a_format_error(self):
-        before = FRONT.replace("board\n", "board\nmerge:\n  # policy\n\n  mode: pr\n")
-        with self.assertRaisesRegex(FormatError, "nested value"):
-            kanban_md.set_frontmatter_value(before, "merge", "pr")
-
-    def test_a_duplicate_key_is_a_format_error(self):
-        before = FRONT.replace("board\n", "board\nmerge: pr\nmerge: local\n")
-        with self.assertRaisesRegex(FormatError, "duplicate key 'merge'"):
-            kanban_md.set_frontmatter_value(before, "merge", "pr")
 
 
 class WithLinkTests(unittest.TestCase):
@@ -74,18 +23,22 @@ class WithLinkTests(unittest.TestCase):
 
 
 class StoreMergeTests(BoardTestCase):
+    def board_file(self):
+        return self.repo_path / "board.toml"
+
     def test_set_merge_writes_and_removes_the_key(self):
         self.store.set_merge(self.repo_path, "pr")
         self.assertEqual(self.store.board_meta(self.repo_path).merge, "pr")
+        self.assertIn('merge = "pr"', self.board_file().read_text())
         self.store.set_merge(self.repo_path, None)
         self.assertIsNone(self.store.board_meta(self.repo_path).merge)
-        self.assertNotIn("merge:", self.repo_path.read_text())
+        self.assertNotIn("merge", self.board_file().read_text())
 
     def test_set_merge_refuses_an_unknown_mode(self):
-        before = self.repo_path.read_text()
+        before = self.board_file().read_text()
         with self.assertRaisesRegex(HerdboardError, "local or pr"):
             self.store.set_merge(self.repo_path, "squash")
-        self.assertEqual(self.repo_path.read_text(), before)
+        self.assertEqual(self.board_file().read_text(), before)
 
     def test_merge_and_links_change_in_one_write(self):
         self.store.update_links(self.repo_path, lambda links: [ProjectLink("p1", "One")])
@@ -96,36 +49,25 @@ class StoreMergeTests(BoardTestCase):
         self.assertEqual((meta.merge, [link.id for link in meta.links]), ("pr", ["p1", "p2"]))
 
     def test_a_failed_link_change_leaves_the_merge_mode(self):
-        text = self.repo_path.read_text().replace("repo:", "other: 1\nother: 2\nrepo:")
-        self.repo_path.write_text(text)
-        with self.assertRaisesRegex(FormatError, "duplicate key 'other'"):
+        text = self.board_file().read_text().replace("repo =", "linear-projects = 3\nrepo =", 1)
+        self.board_file().write_text(text)
+        with self.assertRaisesRegex(FormatError, "linear-projects"):
             self.store.update_config(self.repo_path, merge="pr", change_links=lambda links: [])
-        self.assertEqual(self.repo_path.read_text(), text)
+        self.assertEqual(self.board_file().read_text(), text)
 
-    def test_a_nested_merge_value_is_not_written(self):
-        text = self.repo_path.read_text().replace("repo:", "merge:\n  mode: pr\nrepo:")
-        self.repo_path.write_text(text)
-        with self.assertRaisesRegex(FormatError, "nested value"):
+    def test_an_invalid_board_file_is_not_written(self):
+        text = self.board_file().read_text().replace("repo =", "merge = 3\nrepo =", 1)
+        self.board_file().write_text(text)
+        with self.assertRaises(FormatError):
             self.store.set_merge(self.repo_path, "pr")
-        self.assertEqual(self.repo_path.read_text(), text)
+        self.assertEqual(self.board_file().read_text(), text)
 
-    def test_a_change_that_makes_the_frontmatter_invalid_is_not_written(self):
-        text = self.repo_path.read_text()
-        with mock.patch.object(
-            kanban_md,
-            "set_frontmatter_value",
-            side_effect=lambda text, key, value: text.replace("repo:", "bad: [\nrepo:"),
-        ):
-            with self.assertRaisesRegex(FormatError, "invalid YAML"):
-                self.store.set_merge(self.repo_path, "pr")
-        self.assertEqual(self.repo_path.read_text(), text)
-
-    def test_a_duplicate_merge_key_is_not_written(self):
-        text = self.repo_path.read_text().replace("repo:", "merge: pr\nmerge: local\nrepo:")
-        self.repo_path.write_text(text)
-        with self.assertRaisesRegex(FormatError, "duplicate key 'merge'"):
-            self.store.set_merge(self.repo_path, "pr")
-        self.assertEqual(self.repo_path.read_text(), text)
+    def test_unknown_keys_and_comments_stay(self):
+        text = '# Board settings\nowner = "nate"\n' + self.board_file().read_text()
+        self.board_file().write_text(text)
+        self.store.set_merge(self.repo_path, "pr")
+        self.store.set_merge(self.repo_path, None)
+        self.assertEqual(self.board_file().read_text(), text)
 
 
 def board_arguments(case, *args):

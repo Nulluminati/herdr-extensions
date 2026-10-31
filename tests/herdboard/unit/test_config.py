@@ -55,8 +55,6 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.todos_dir, self.dir / "home" / "todos")
         self.assertEqual(config.projects_dir, self.dir / "home" / "Projects")
         self.assertEqual(config.columns, ["Backlog", "Todo", "In progress", "Review", "Done"])
-        self.assertEqual(config.complete_markers, ["Complete"])
-        self.assertIsNone(config.vault_root)
 
     def test_theme_defaults_to_the_terminal_palette(self):
         self.assertEqual(load_config().theme, "ansi-dark")
@@ -540,10 +538,9 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(load_config().columns, ["H"])
 
     def test_tilde_expansion(self):
-        path = self.write(self.dir / "a.toml", 'todos_dir = "~/t"\nvault_root = "~/Notes"\n')
+        path = self.write(self.dir / "a.toml", 'todos_dir = "~/t"\n')
         config = load_config(path)
         self.assertEqual(config.todos_dir, self.dir / "home" / "t")
-        self.assertEqual(config.vault_root, self.dir / "home" / "Notes")
 
     def test_an_explicit_relative_config_path_becomes_absolute(self):
         # Agents and workers run in other folders, so they get the full path.
@@ -574,19 +571,12 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(HerdboardError):
             load_config(path)
 
-    def test_all_values(self):
-        path = self.write(self.dir / "a.toml", 'complete_markers = ["Complete", "Shipped"]\n')
-        self.assertEqual(load_config(path).complete_markers, ["Complete", "Shipped"])
-
-    def test_archive_titles_default_and_added(self):
-        self.assertEqual(load_config().archive_titles, ["Archive"])
-        path = self.write(self.dir / "a.toml", 'archive_titles = ["Archiv", "Archive"]\n')
-        self.assertEqual(load_config(path).archive_titles, ["Archive", "Archiv"])
-
-    def test_archive_titles_wrong_type(self):
-        path = self.write(self.dir / "a.toml", "archive_titles = 1\n")
-        with self.assertRaises(HerdboardError):
-            load_config(path)
+    def test_obsolete_keys_are_ignored(self):
+        path = self.write(
+            self.dir / "a.toml",
+            'complete_markers = ["Shipped"]\narchive_titles = 1\nvault_root = [1]\ncolumns = ["A"]\n',
+        )
+        self.assertEqual(load_config(path).columns, ["A"])
 
     def test_non_utf8_config_is_io_error(self):
         path = self.dir / "bad.toml"
@@ -611,7 +601,7 @@ class ConfigTest(unittest.TestCase):
             self.dir / "a.toml",
             'mystery = 1\n[linear]\nenabled = true\n[linear.columns]\nbacklog = "Backlog"\n',
         )
-        self.assertEqual(load_config(path).complete_markers, ["Complete"])
+        self.assertEqual(load_config(path).columns, ["Backlog", "Todo", "In progress", "Review", "Done"])
 
     def test_invalid_toml(self):
         path = self.write(self.dir / "bad.toml", "columns = [\n")
@@ -624,8 +614,6 @@ class ConfigTest(unittest.TestCase):
             "todos_dir = 3\n",
             'columns = "Todo"\n',
             "columns = [1]\n",
-            "complete_markers = 1\n",
-            "vault_root = [1]\n",
         ):
             path = self.write(self.dir / "t.toml", text)
             with self.subTest(text=text), self.assertRaises(HerdboardError) as caught:
