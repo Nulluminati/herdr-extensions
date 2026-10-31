@@ -1,0 +1,2 @@
+# Test data whose CRLF line endings are the point of the test.
+tests/herdboard/fixtures/convert/inbox-crlf.md -text
