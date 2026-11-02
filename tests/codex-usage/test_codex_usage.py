@@ -89,7 +89,7 @@ class CodexUsageTests(unittest.TestCase):
 
     def test_a_torn_utf8_line_costs_one_line_not_the_run(self):
         # A Codex process killed mid-write leaves a last line that stops inside a multi-byte character.
-        self.agents = [codex("w1:p1", session="s-torn"), codex("w1:p3", session="s-1")]
+        self.panes = [codex("w1:p1", session="s-torn"), codex("w1:p3", session="s-1")]
         self.run_main()
         self.assertEqual(
             self.reports(),
