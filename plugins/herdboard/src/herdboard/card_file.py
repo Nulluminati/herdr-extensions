@@ -30,6 +30,7 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 
 from .model import FormatError
+from .paths import TODO_REF
 
 FORMAT = 1
 FENCE = "+++"
@@ -182,6 +183,8 @@ def _check_card(doc: tomlkit.TOMLDocument, path: Path) -> None:
     for key in ("type", "parent", "promoted"):
         if key in doc and not isinstance(doc[key], str):
             raise FormatError(f"{path}: {key!r} must be text")
+    if "parent" in doc and not TODO_REF.match(doc["parent"]):
+        raise FormatError(f"{path}: 'parent' must be a card ID such as t1a2")
     if "tags" in doc and not _string_list(doc["tags"]):
         raise FormatError(f"{path}: 'tags' must be a list of text")
     if "due" in doc and (not isinstance(doc["due"], date) or isinstance(doc["due"], datetime)):

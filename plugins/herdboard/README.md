@@ -839,7 +839,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard details <id>` / `details --open [<id>] [--pane ID]` | Show the card's compact status, the view of the [details pane](#details-pane); or open that pane in Herdr |
 | `herdboard plan <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Plan the card with an agent in a tab in its worktree, or in its card folder when it has no repository |
 | `herdboard sidebar-refresh` | Report the Herdr sidebar tokens of the started cards again. Herdr runs it at startup and when it finds an agent |
-| `herdboard delete <id> [--yes]` | Delete a todo: its card folder, with its log and attachments |
+| `herdboard delete <id> [--yes]` | Delete a todo: its card folder, with its log and attachments. A started card cannot be deleted |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
 | `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first |
@@ -1101,9 +1101,10 @@ Ask finance for the columns.
 Earlier versions of herdboard kept boards as Markdown files in the Obsidian Kanban format: `inbox.md` and `projects/<name>.md`, with logs in `.herdboard/log/` and attachments in `.herdboard/attachments/`. `herdboard convert-store` converts them to board folders, once. Other commands refuse the old files with `old_format`.
 
 - `--dry-run` reports what the conversion does, and writes nothing.
-- The command builds the new boards in `boards.tmp/`, then renames it to `boards/`. It stops when `boards/` already exists.
-- Cards without an ID, or with an ID that another card already has, get a new ID. The report lists them.
-- The old files move to `~/.local/state/herdboard/backup-<time>/`. herdboard does not delete them.
+- The command builds the new boards in `boards.tmp/` and copies the old files to `~/.local/state/herdboard/backup-<time>/`. Then it renames `boards.tmp/` to `boards/` and removes the old files. A failure before the rename leaves the old files as they were. The command stops when `boards/` already exists.
+- Cards without an ID, or with an ID that another card already has, get a new ID. Their sub-cards follow the new ID. The report lists them. The log and attachments of a shared ID go to the card that keeps the ID, and the report names that card.
+- The report lists logs and attachments that have no card. They stay in the backup.
+- The command refuses `projects/inbox.md`, because the inbox has that name. Rename the file first.
 - The command refuses to run while an agent, planner or reviewer works on a card.
 
 Convert your real todos in this order:

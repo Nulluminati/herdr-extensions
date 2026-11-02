@@ -6168,7 +6168,7 @@ class HerdboardApp(App):
             def write() -> CardView:
                 if path == inbox:
                     self.store.ensure_inbox()
-                return self.store.move_to_board(ref, path)
+                return self.store.move_to_board(ref, path, blocked=start_module.archive_blocker)
 
             self._start_write(write, refs={ref})
 
@@ -6196,7 +6196,11 @@ class HerdboardApp(App):
         self.push_screen(
             DeleteScreen(card),
             lambda delete: (
-                self._start_write(lambda: self.store.delete(ref), removed=True, refs={ref}) if delete else None
+                self._start_write(
+                    lambda: self.store.delete(ref, blocked=start_module.archive_blocker), removed=True, refs={ref}
+                )
+                if delete
+                else None
             ),
         )
 

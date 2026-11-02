@@ -12,9 +12,10 @@ New layout (see `store` and `paths`):
     boards/<name>/board.toml, cards/<id>/, archive/<id>/, notes.md
     .herdboard/automations/<id>/, .herdboard/linear/<IDENTIFIER>/
 
-The run holds the store lock. It builds the new boards in `boards.tmp/` and renames that
-folder to `boards/` only when the build is complete. Only then do the old files move to a
-backup folder in the state folder. A failure before the rename leaves the old store as it was.
+The run holds the store lock. It builds the new boards in `boards.tmp/` and copies the old
+files to a backup folder in the state folder. Only when both are complete does it rename
+`boards.tmp/` to `boards/` and remove the old files. A failure before the rename leaves the
+old store as it was.
 """
 
 from __future__ import annotations
@@ -131,14 +132,27 @@ def split_title(title: str) -> dict:
     return fields
 
 
-def _dedent(line: str) -> str:
-    """A body line with the one indent level that tied it to the card removed."""
-    line = line.rstrip("\r")
-    if line.startswith("\t"):
-        return line[1:]
-    if line.startswith("    "):
-        return line[4:]
-    return line.lstrip(" ")
+def _dedent(lines: list[str]) -> list[str]:
+    """The body lines with the one indent level that tied them to the card removed.
+
+    A tab indent loses one tab. A space indent loses the smallest space indent of the
+    card, so deeper lines keep their nesting.
+    """
+    lines = [line.rstrip("\r") for line in lines]
+    width = min((_spaces(line) for line in lines if line.strip() and line[0] == " "), default=0)
+    result = []
+    for line in lines:
+        if not line.strip():
+            result.append("")
+        elif line.startswith("\t"):
+            result.append(line[1:])
+        else:
+            result.append(line[min(width, _spaces(line)) :])
+    return result
+
+
+def _spaces(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
 
 
 def _card(card: kanban_md.Card, created: datetime) -> CardFile:
@@ -157,7 +171,7 @@ def _card(card: kanban_md.Card, created: datetime) -> CardFile:
         tags=fields["tags"],
         due=fields["due"],
         parent=fields["parent"],
-        body=[_dedent(line) for line in card.body],
+        body=_dedent(card.body),
     )
     file.promoted = fields["promoted"]
     return file
@@ -245,6 +259,12 @@ def convert_board(
         # The old archive lists the newest card last; the new one sorts newest first.
         result.archived = now - timedelta(seconds=len(archived) - 1 - index)
         converted.archive[new] = result
+    # A sub-card is on the board of its parent, so it follows the parent's new ID.
+    kept = {*converted.cards, *converted.archive}
+    renamed = {old: new for old, new, _ in converted.new_ids if old is not None and old not in kept}
+    for card in [*converted.cards.values(), *converted.archive.values()]:
+        if card.parent in renamed:
+            card.parent = renamed[card.parent]
     return converted
 
 
@@ -279,14 +299,16 @@ def convert_store(
     sources = old_board_files(todos)
     if not sources:
         raise ConvertError(f"{todos} has no boards in the old format to convert")
+    if (todos / "projects" / "inbox.md").is_file():
+        raise ConvertError(
+            f"{todos / 'projects' / 'inbox.md'} has the name of the inbox board. Rename it, then convert"
+        )
     markers, titles = old_settings(config_file)
     now = datetime.now().astimezone().replace(microsecond=0)
     old_logs = todos / ".herdboard" / "log"
     old_files = todos / ".herdboard" / "attachments"
     with store._lock():
         temp = todos / "boards.tmp"
-        if temp.exists():
-            shutil.rmtree(temp)
         taken: set[str] = set()
         boards = []
         for name, path in sources:
@@ -320,12 +342,10 @@ def convert_store(
         )
         moves, dropped = [], []
         for ref in data_refs:
-            if not LOG_REF.match(ref):
-                continue
-            if TODO_REF.match(ref):
-                if ref not in homes:
-                    dropped.append(ref)
-                    continue
+            if not LOG_REF.match(ref) or (TODO_REF.match(ref) and ref not in homes):
+                # The backup keeps the data of a deleted card, and data with a name herdboard does not know.
+                dropped.append(ref)
+            elif TODO_REF.match(ref):
                 name, folder = homes[ref]
                 moves.append((ref, Path("boards") / name / folder / ref))
             elif AUTOMATION_REF.match(ref):
@@ -342,18 +362,35 @@ def convert_store(
                     "source": str(board.source),
                     "columns": {column.name: len(column.cards) for column in board.file.columns},
                     "archived": len(board.archive),
-                    "new_ids": [{"old": old, "new": new, "title": title} for old, new, title in board.new_ids],
+                    "new_ids": [
+                        {
+                            "old": old,
+                            "new": new,
+                            "title": title,
+                            # The old log and attachments go to the card that kept the old ID.
+                            "data_stays_with": homes[old][0] if old in homes and old in data_refs else None,
+                        }
+                        for old, new, title in board.new_ids
+                    ],
                 }
                 for board in boards
             ],
             "data": [{"ref": ref, "to": str(todos / target)} for ref, target in moves],
             "data_without_card": dropped,
             "notes": [str(path) for _, path in notes],
+            "left_over": str(temp) if temp.exists() else None,
             "dry_run": dry_run,
         }
         if dry_run:
             return summary
+        if temp.exists():
+            shutil.rmtree(temp)
+        backup = (state or _state_dir()) / f"backup-{now.strftime('%Y%m%d-%H%M%S')}"
+        old = [path for _, path in sources if path.parent == todos]
+        old += [todos / "projects", todos / "notes", old_logs, old_files]
+        old = [path for path in old if path.exists()]
         created: list[Path] = []
+        backup_made = False
         try:
             for board in boards:
                 folder = temp / board.name
@@ -377,22 +414,41 @@ def convert_store(
                     shutil.copy2(old_logs / f"{ref}.md", where / "log.md")
                 if (old_files / ref).is_dir():
                     shutil.copytree(old_files / ref, where / "attachments", dirs_exist_ok=True)
-            os.rename(temp, boards_dir)
-        except BaseException:
-            shutil.rmtree(temp, ignore_errors=True)
-            for path in created:
-                shutil.rmtree(path, ignore_errors=True)
-            raise
-        backup = (state or _state_dir()) / f"backup-{now.strftime('%Y%m%d-%H%M%S')}"
-        backup.mkdir(parents=True, exist_ok=True)
-        old = [path for _, path in sources if path.parent == todos]
-        old += [todos / "projects", todos / "notes", old_logs, old_files]
-        for path in old:
-            if path.exists():
+            backup.mkdir(parents=True)
+            backup_made = True
+            for path in old:
                 target = backup / path.relative_to(todos)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(path), str(target))
+                if path.is_dir():
+                    shutil.copytree(path, target, symlinks=True)
+                else:
+                    shutil.copy2(path, target)
+            os.rename(temp, boards_dir)
+        except BaseException as error:
+            shutil.rmtree(temp, ignore_errors=True)
+            if backup_made:
+                shutil.rmtree(backup, ignore_errors=True)
+            for path in created:
+                shutil.rmtree(path, ignore_errors=True)
+            if isinstance(error, OSError):
+                raise ConvertError(f"Cannot convert the store: {error}. The old store is as it was") from error
+            raise
         summary["backup"] = str(backup)
+        # The backup is complete, so a failed removal loses nothing.
+        kept = []
+        for path in old:
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+            except OSError:
+                kept.append(str(path))
+        if kept:
+            raise ConvertError(
+                f"The boards are converted and {backup} has the backup, but these old files are still"
+                f" there: {', '.join(kept)}. Remove them by hand"
+            )
         return summary
 
 

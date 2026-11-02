@@ -404,6 +404,15 @@ class DeleteTest(StoreTestCase):
         self.assertEqual(self.columns(path)["Doing"], [])
         self.assertIn("tabc", [c.ref for c in self.store.list_cards()])
 
+    def test_active_card_is_refused(self):
+        path = self.put("p")
+        with self.assertRaises(HerdboardError) as caught:
+            self.store.delete("tabc", blocked=lambda ref: "its agent runs")
+        self.assertEqual(caught.exception.code, "card_active")
+        self.assertEqual(str(caught.exception), "Cannot delete tabc: its agent runs")
+        self.assertTrue((path / "cards" / "tabc").exists())
+        self.assertEqual(self.columns(path)["Doing"], ["tabc"])
+
     def test_delete_unknown_card(self):
         self.put("p")
         with self.assertRaises(NotFoundError):

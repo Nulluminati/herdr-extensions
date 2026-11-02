@@ -117,6 +117,7 @@ class CardFileTest(unittest.TestCase):
             "+++\ntitle = 'x'\ntags = 'a'\n+++\n",
             "+++\ntitle = 'x'\ndue = 'tomorrow'\n+++\n",
             "+++\ntitle = 'x'\nparent = 3\n+++\n",
+            "+++\ntitle = 'x'\nparent = '../../x'\n+++\n",
         ]
         for text in bad:
             with self.subTest(text=text), self.assertRaises(FormatError) as caught:

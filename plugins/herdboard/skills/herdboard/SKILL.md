@@ -207,7 +207,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `old_format` | The todos folder still has the old Markdown boards (`inbox.md`, `projects/*.md`). Tell the user to run `herdboard convert-store`. Do not run it yourself. |
 | `convert` | `convert-store` could not convert the old boards and changed nothing. Tell the user the message. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
-| `card_active` | The card's worktree still exists, or its agent or planner still runs. `move --board` refuses a started card too. Tell the user the message. |
+| `card_active` | The card's worktree still exists, or its agent or planner still runs. `move --board` and `delete` refuse a started card too. Tell the user the message. |
 | `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
 | `linear_archive` | herdboard archives only todos. Tell the user. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |

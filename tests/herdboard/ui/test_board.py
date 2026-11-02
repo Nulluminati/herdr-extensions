@@ -438,6 +438,21 @@ class NavigationTests(BoardTestCase):
             self.assertNotIn("a1", self.refs(self.repo_path))
             self.assertIn("a2", self.selected(app)[0])
 
+    async def test_b_refuses_an_active_card(self):
+        from herdboard import start as start_module
+
+        app = self.make_app()
+        ref = self.refs(self.repo_path)["a1"][0]
+        with mock.patch.object(start_module, "archive_blocker", return_value="its agent still runs") as blocker:
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause()
+                await pilot.press("b")
+                await pilot.pause()
+                await pilot.press("enter")
+                await settle(pilot)
+                self.assertIn("a1", self.refs(self.repo_path))
+        blocker.assert_called_once_with(ref)
+
     async def test_b_then_escape_keeps_the_card(self):
         app = self.make_app()
         async with app.run_test(size=SIZE) as pilot:
@@ -494,6 +509,21 @@ class NavigationTests(BoardTestCase):
             await settle(pilot)
             self.assertNotIn("a1", self.refs(self.repo_path))
             self.assertIn("a2", self.selected(app)[0])
+
+    async def test_x_refuses_an_active_card(self):
+        from herdboard import start as start_module
+
+        app = self.make_app()
+        ref = self.refs(self.repo_path)["a1"][0]
+        with mock.patch.object(start_module, "archive_blocker", return_value="its agent still runs") as blocker:
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause()
+                await pilot.press("x")
+                await pilot.pause()
+                await pilot.press("y")
+                await settle(pilot)
+                self.assertIn("a1", self.refs(self.repo_path))
+        blocker.assert_called_once_with(ref)
 
     async def test_x_then_n_or_escape_keeps_the_card(self):
         app = self.make_app()
@@ -765,6 +795,20 @@ class ReloadTests(BoardTestCase):
                 if any("external" in c for c in self.cards(app)):
                     break
             self.assertTrue(any("external" in c for c in self.cards(app)))
+
+    async def test_timer_reloads_an_outside_edit_of_one_card(self):
+        a = self.store.add(self.repo_path, "a", "Backlog")
+        app = self.make_app(interval=0.05)
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            board_toml = (self.repo_path / "board.toml").read_bytes()
+            Store(self.config).edit(a.ref, title="renamed outside")
+            self.assertEqual((self.repo_path / "board.toml").read_bytes(), board_toml)
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if any("renamed outside" in c for c in self.cards(app)):
+                    break
+            self.assertTrue(any("renamed outside" in c for c in self.cards(app)))
 
     async def test_manual_reload(self):
         app = self.make_app()

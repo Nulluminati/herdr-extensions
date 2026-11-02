@@ -197,8 +197,9 @@ class ConvertStoreTests(ConvertTestCase):
     def test_a_failure_mid_build_leaves_the_old_store(self):
         before = (self.todos / "inbox.md").read_bytes()
         with mock.patch("herdboard.convert_store.shutil.copytree", side_effect=OSError("disk full")):
-            with self.assertRaises(OSError):
+            with self.assertRaises(ConvertError) as caught:
                 self.convert()
+        self.assertIn("disk full", str(caught.exception))
         self.assertFalse((self.todos / "boards").exists())
         self.assertFalse((self.todos / "boards.tmp").exists())
         self.assertFalse((self.todos / ".herdboard" / "linear").exists())
@@ -209,6 +210,81 @@ class ConvertStoreTests(ConvertTestCase):
         (self.todos / "boards.tmp" / "junk").mkdir(parents=True)
         self.convert()
         self.assertFalse((self.todos / "boards" / "junk").exists())
+
+    def test_a_dry_run_keeps_a_left_over_temp_folder_and_names_it(self):
+        (self.todos / "boards.tmp" / "junk").mkdir(parents=True)
+        result = self.convert(dry_run=True)
+        self.assertTrue((self.todos / "boards.tmp" / "junk").is_dir())
+        self.assertEqual(result["left_over"], str(self.todos / "boards.tmp"))
+
+    def test_a_failed_backup_copy_leaves_the_old_store(self):
+        before = (self.todos / "inbox.md").read_bytes()
+        real = shutil.copy2
+
+        def copy2(source, target, *args, **kwargs):
+            if Path(target).is_relative_to(self.root / "state"):
+                raise OSError("state disk full")
+            return real(source, target, *args, **kwargs)
+
+        with mock.patch("herdboard.convert_store.shutil.copy2", side_effect=copy2):
+            with self.assertRaises(ConvertError) as caught:
+                self.convert()
+        self.assertIn("state disk full", str(caught.exception))
+        self.assertFalse((self.todos / "boards").exists())
+        self.assertFalse((self.todos / "boards.tmp").exists())
+        self.assertFalse((self.todos / ".herdboard" / "linear").exists())
+        self.assertEqual((self.todos / "inbox.md").read_bytes(), before)
+        self.assertEqual(list((self.root / "state").glob("**/backup-*")), [])
+        self.assertEqual(len(self.convert()["boards"]), 2)
+
+    def test_a_failed_removal_of_the_old_files_names_them(self):
+        real = shutil.rmtree
+
+        def rmtree(path, *args, **kwargs):
+            if Path(path) == self.todos / "notes":
+                raise OSError("busy")
+            return real(path, *args, **kwargs)
+
+        with mock.patch("herdboard.convert_store.shutil.rmtree", side_effect=rmtree):
+            with self.assertRaises(ConvertError) as caught:
+                self.convert()
+        message = str(caught.exception)
+        self.assertIn(str(self.todos / "notes"), message)
+        self.assertIn("backup", message)
+        self.assertEqual(len(self.store.list_cards()), 9)
+        backup = next((self.root / "state").glob("**/backup-*"))
+        self.assertTrue((backup / "notes" / "inbox.md").is_file())
+        self.assertFalse((self.todos / "inbox.md").exists())
+
+    def test_sub_cards_follow_a_parent_that_gets_a_new_id(self):
+        (self.todos / "projects" / "zeta.md").write_text(
+            "## Todo\n\n- [ ] Same ID as acme ^tpar\n- [ ] Child [[#^tpar]] ^tzk1\n"
+        )
+        result = self.convert()
+        change = result["boards"][2]["new_ids"][0]
+        self.assertEqual((change["old"], change["title"]), ("tpar", "Same ID as acme"))
+        self.assertEqual(change["data_stays_with"], "acme-api")
+        self.assertEqual(self.store.show("tzk1").parent, change["new"])
+        self.assertEqual(self.store.show("tkid").parent, "tpar")
+
+    def test_a_project_named_inbox_is_refused(self):
+        (self.todos / "projects" / "inbox.md").write_text("## Todo\n")
+        with self.assertRaises(ConvertError) as caught:
+            self.convert(dry_run=True)
+        self.assertIn(str(self.todos / "projects" / "inbox.md"), str(caught.exception))
+
+    def test_space_indents_keep_their_nesting(self):
+        (self.todos / "projects" / "zeta.md").write_text(
+            "## Todo\n\n- [ ] Two spaces ^tzk2\n  Body\n  - [ ] item\n    - nested\n"
+        )
+        self.convert()
+        self.assertEqual(self.store.show("tzk2").body, ["Body", "- [ ] item", "  - nested"])
+
+    def test_data_with_an_unknown_name_is_reported(self):
+        (self.todos / ".herdboard" / "log" / "notes-old.md").write_text("- x\n")
+        (self.todos / ".herdboard" / "attachments" / "misc").mkdir()
+        result = self.convert()
+        self.assertEqual(result["data_without_card"], ["misc", "notes-old", "tgon"])
 
     def test_old_settings_are_read_from_the_config_file(self):
         config_file = self.root / "config.toml"
@@ -260,6 +336,13 @@ class ConvertCliTests(ConvertTestCase):
         out = self.run_cli("convert-store", "--dry-run", running=["tpar"])
         self.assertIn("Would convert", out)
         self.assertIn("Stop the agents, planners and reviewers of tpar before the conversion", out)
+
+    def test_a_dry_run_names_the_left_over_folder_and_the_data_of_a_new_id(self):
+        (self.todos / "boards.tmp").mkdir()
+        (self.todos / "projects" / "zeta.md").write_text("## Todo\n\n- [ ] Same ID as acme ^tpar\n")
+        out = self.run_cli("convert-store", "--dry-run")
+        self.assertIn(f"{self.todos / 'boards.tmp'} is left over from a failed conversion", out)
+        self.assertIn("    The log and attachments of tpar go to tpar on acme-api\n", out)
 
     def test_doctor_reports_the_old_layout(self):
         result = json.loads(self.run_cli("--json", "doctor", "--offline", expect=1))

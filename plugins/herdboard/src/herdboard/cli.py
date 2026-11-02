@@ -903,7 +903,7 @@ def _cmd_move(ctx: _Context) -> dict:
         if args.position or args.state:
             raise UsageError("--position and --state do not work with --board")
         target = ctx.store.ensure_inbox() if args.board == "inbox" else ctx.store.resolve_board(args.board)
-        return {"card": ctx.store.move_to_board(args.ref, target, args.column)}
+        return {"card": ctx.store.move_to_board(args.ref, target, args.column, blocked=start_module.archive_blocker)}
     if args.column is None:
         raise UsageError("Give a column, or --board to move the todo to another board")
     if LINEAR_REF.match(args.ref):
@@ -1006,12 +1006,12 @@ def _cmd_delete(ctx: _Context) -> dict:
         raise LinearDeleteError("Delete Linear issues in Linear; herdboard deletes only todos.")
     card = ctx.store.show(args.ref)
     if args.yes:
-        return {"deleted": ctx.store.delete(args.ref)}
+        return {"deleted": ctx.store.delete(args.ref, blocked=start_module.archive_blocker)}
     if args.json or not _interactive():
         raise ConfirmationRequired(f"Deleting {card.ref} needs --yes without a terminal.")
     if not _confirm(f"Delete {card.ref}: {card.title} ({card.board} / {card.column})? [y/N] "):
         return {"deleted": None}
-    return {"deleted": ctx.store.delete(args.ref)}
+    return {"deleted": ctx.store.delete(args.ref, blocked=start_module.archive_blocker)}
 
 
 class LinearArchiveError(HerdboardError):
@@ -1371,8 +1371,13 @@ def _render_convert(result: dict) -> None:
         print(f"{verb} {board['source']}: {cards} cards, {board['archived']} archived")
         for change in board["new_ids"]:
             print(f"  New ID {change['new']} for {change['title']!r} (was {change['old'] or 'none'})")
+            if change["data_stays_with"]:
+                old, board_name = change["old"], change["data_stays_with"]
+                print(f"    The log and attachments of {old} go to {old} on {board_name}")
     for ref in result["data_without_card"]:
         print(f"Log or attachments of {ref} have no card; they stay in the backup")
+    if result["left_over"]:
+        print(f"{result['left_over']} is left over from a failed conversion; the conversion removes it")
     if result["running"]:
         print(f"Stop the agents, planners and reviewers of {', '.join(result['running'])} before the conversion")
     if result.get("backup"):

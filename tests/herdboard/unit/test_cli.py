@@ -283,6 +283,20 @@ class CommandTests(CliTestCase):
         data = self.run_json("move", card["ref"], "Review", "--board", "inbox", directory=self.plain)
         self.assertEqual((data["card"]["board"], data["card"]["column"]), ("inbox", "Review"))
 
+    def test_move_to_another_board_refuses_an_active_card(self):
+        from herdboard import start as start_module
+
+        board = self.init_repo_board()
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        with mock.patch.object(start_module, "archive_blocker", return_value="its agent still runs") as blocker:
+            data = self.run_json("move", card["ref"], "--board", Path(board).stem, directory=self.plain, expect=1)
+        blocker.assert_called_once_with(card["ref"])
+        self.assertEqual(
+            data["error"],
+            {"code": "card_active", "message": f"Cannot move {card['ref']} to another board: its agent still runs"},
+        )
+        self.assertEqual(self.run_json("show", card["ref"])["card"]["board"], "inbox")
+
     def test_move_up_and_down(self):
         refs = [self.run_json("add", t, directory=self.plain)["card"]["ref"] for t in ("a", "b", "c")]
         self.run_json("move", refs[2], "--up", directory=self.plain)
@@ -357,6 +371,18 @@ class CommandTests(CliTestCase):
         ):
             self.run_cli("delete", card["ref"], directory=self.plain)
         self.assertEqual(self.run_json("list", directory=self.plain)["cards"], [])
+
+    def test_delete_refuses_an_active_card(self):
+        from herdboard import start as start_module
+
+        card = self.run_json("add", "buy milk", directory=self.plain)["card"]
+        with mock.patch.object(start_module, "archive_blocker", return_value="its agent still runs") as blocker:
+            data = self.run_json("delete", card["ref"], "--yes", directory=self.plain, expect=1)
+        blocker.assert_called_once_with(card["ref"])
+        self.assertEqual(
+            data["error"], {"code": "card_active", "message": f"Cannot delete {card['ref']}: its agent still runs"}
+        )
+        self.assertEqual(len(self.run_json("list", directory=self.plain)["cards"]), 1)
 
     def test_delete_refuses_a_linear_issue(self):
         data = self.run_json("delete", "ENG-12", "--yes", directory=self.plain, expect=1)

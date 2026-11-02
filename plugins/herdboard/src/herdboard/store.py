@@ -360,7 +360,8 @@ class Store:
         if self.boards_dir.is_dir():
             raise OldFormatError(
                 f"{old[0]} is a board file of the old format, but {self.boards_dir} exists. "
-                "An old herdboard copy wrote it after the conversion: move its cards by hand, then remove it"
+                "An old herdboard copy wrote it after the conversion, or convert-store could not remove it. "
+                "Move the cards that are not on the boards by hand, then remove it"
             )
         raise OldFormatError(f"{todos} has boards in the old format. Run `herdboard convert-store` to convert them")
 
@@ -967,13 +968,17 @@ class Store:
 
         return self._modify(ref, change)
 
-    def delete(self, ref: str) -> CardView:
+    def delete(self, ref: str, blocked: Callable[[str], str | None] | None = None) -> CardView:
         """Remove a card with its folder: its log and attachments too. Returns the card as it was.
 
-        The ID leaves `board.toml` first, then the folder goes: a crash between them leaves
-        an orphan, which shows again.
+        `blocked` names why the card must stay, such as a running agent that writes to the
+        folder, or returns None. The ID leaves `board.toml` first, then the folder goes: a
+        crash between them leaves an orphan, which shows again.
         """
         located = self._resolve(ref)
+        reason = blocked(ref) if blocked is not None else None
+        if reason:
+            raise CardActiveError(f"Cannot delete {ref}: {reason}")
         with self._lock():
             board = self._read(located.path)
             card = self._find(board, located)
