@@ -225,6 +225,14 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(raised.exception.code, "usage")
         self.assertEqual(self.workers, [])
 
+    def test_a_failed_start_leaves_no_running_factory(self):
+        self.fake.fail = "agent start"
+        with self.assertRaises(start.StartError):
+            self.starter.start(self.card.ref, agent="claude", factory=True)
+        self.assertEqual(self.record()["factory"]["status"], "stopped")
+        self.assertFalse(factory.factory_running(self.card.ref))
+        self.assertEqual(self.workers, [])
+
     def test_a_second_run_is_refused_while_the_first_runs(self):
         self.start_factory()
         self.fake.agent = False
@@ -376,6 +384,13 @@ class WorkerTests(FactoryTestCase):
         self.assertIn("Factory stopped by the user.", self.log())
         self.assertEqual(self.fake.reviewers, {})
         self.assertEqual(self.fake.prompts, [])
+
+    def test_a_failure_during_a_round_closes_the_reviewers(self):
+        with patch.object(factory, "wait_round", side_effect=start.StartError("broken", "herdr_error")):
+            self.assertEqual(self.wait(), 1)
+        self.assertIn("Factory stopped: broken", self.log())
+        self.assertEqual(self.state()["status"], "stopped")
+        self.assertEqual(self.fake.reviewers, {})
 
     def test_the_approver_verdict_is_attached_and_logged(self):
         self.fake.verdict = "Verdict: changes needed\n\n## Plan steps not done\n- Step 2.\n"

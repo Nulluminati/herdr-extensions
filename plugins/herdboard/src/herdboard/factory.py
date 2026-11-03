@@ -337,7 +337,7 @@ def builder_message(ref, round_folder: Path, command: str) -> str:
 
 def send_to_builder(store, ref, record, round_folder: Path, config_file: Path | None) -> None:
     """Move the card to In progress, wait for the builder to be idle, then prompt it with the round."""
-    store.move(ref, store.config.start_column)
+    start_module.card_changed(store.move(ref, store.config.start_column))
     timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000
     result = start_module.command(
         [
@@ -491,6 +491,9 @@ def _builder_status(record) -> str | None:
 
 
 def _end(store, ref, folder: Path, status: str, message: str, title: str) -> int:
+    state = factory_state(ref)
+    if state and Path(state["folder"]) == folder:
+        _close(state.get("panes") or [])
     update(ref, folder, status=status, panes=[])
     try:
         activity.append(store, ref, message, "herdboard")

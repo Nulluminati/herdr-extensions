@@ -1673,4 +1673,11 @@ class Starter:
                 return result
             except HerdboardError as error:
                 error.steps_done = list(record.get("steps_done", []))
+                if factory and record["factory"]["status"] != "stopped":
+                    # A run without its worker must not block the next start.
+                    record["factory"]["status"] = "stopped"
+                    try:
+                        persist()
+                    except HerdboardError:
+                        pass
                 raise
