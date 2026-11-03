@@ -108,6 +108,8 @@ herdboard --json plan tep3 --no-repo          # plan in the card folder, without
 herdboard --json pin ENG-123                  # show the issue on this repository's board
 herdboard --json pin ENG-123 --remove         # remove the pin
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
+herdboard --json start tep3 --factory --rounds 2   # lens reviewers check each move to Review, then an approver
+herdboard --json factory tep3                 # the factory run's status and round; --stop stops it
 herdboard --json plan tep3 --agent claude --model opus   # a planner asks the user questions, then writes plan.md
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
 herdboard --json details --open tep3          # reopen the card's details pane above its agent or planner

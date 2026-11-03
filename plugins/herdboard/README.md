@@ -468,6 +468,37 @@ For a card without a repository, `finish` closes the card's workspace, deletes t
 
 The board never runs `finish` itself.
 
+### Factory runs
+
+A factory run chains the card stages: the planner, the work agent (the builder), lens reviewers, and an approver. Start one with `herdboard start <id> --factory`, or press `F` on the board and choose the agent and the model.
+
+1. Plan the card with `P` first. The plan is the spec. The planner adds a `Review lenses:` line under Decisions, such as `Review lenses: security, code`.
+2. `start --factory` starts the builder as `start` does. Its brief tells it that reviewers check each move to Review. A background worker (`herdboard factory-wait`) watches the card.
+3. When the builder moves the card to Review and goes idle, the worker starts one review round. One sandboxed reviewer per lens opens in a split to the right of the builder, as `hb-<id>-<lens>`. Each lens gets its own instruction:
+   - `security`: injection, authentication, secrets, unsafe file and shell use, sandbox escapes.
+   - `ux`: flows, error messages, defaults, keyboard and mouse use, user documentation.
+   - `ui`: layout, consistency with the existing interface, `mockup-*.png` attachments, themes.
+   - `code`: bugs, missing tests, readability, the style of the surrounding code.
+4. The worker merges the findings of all lenses into one round file. A lens that fails gets a section that says so. The round continues without it.
+5. The worker moves the card to In progress and sends the round file to the builder. For each finding, the builder fixes it or logs why it disagrees. It writes its answers as a table (`responses.md`), commits, and moves the card to Review again.
+6. The next round's reviewers read the earlier findings and answers. They do not raise a finding again that the builder disagreed with, unless they have new evidence.
+
+The loop stops when one of these is true:
+
+- A round has no confirmed problems. Risks and questions go to the builder, but they do not start another round.
+- The builder made no new commits since the last round.
+- The round was the last one: `--rounds N`, else `factory_max_rounds` (default 3).
+
+Then an approver checks the work against `plan.md`, the rounds and the log. It writes a verdict: `Verdict: approve` or `Verdict: changes needed`, with the plan steps not done, the disagreements, the findings left at the round limit, and the testing. herdboard attaches it to the card as `factory-verdict.md`, logs `Factory done: <verdict>.`, and shows a notification. The card stays in Review. You merge it with `m`; the approver never merges.
+
+A branch with no change ends the run with `Factory: no change to review.` and starts no reviewer.
+
+`herdboard factory <id>` shows the run's status and round. `herdboard factory <id> --stop` stops it and closes its reviewers. `show --json` has a `factory` object. The run also stops when the builder's pane is gone, the card leaves the board or is finished, or the worktree is removed. While a run goes on, `review --agent` and `merge` refuse with `factory_running`. `merge --force` still merges.
+
+The lens agents come from `[factory.lenses]` in the config, see [Configuration](#configuration). Each lens uses its configured agent, also when it is the builder's agent. The approver uses `[factory] approver`, else the card reviewer of the builder's agent (pi for Claude, Codex for pi, Claude for Codex).
+
+Limits: a factory run needs a herdboard card with a repository. It refuses `--no-agent`, `--no-repo`, `--new-repo`, Linear issues, and a card whose agent already runs. One round can start four reviewers at the same time.
+
 ### Agent permissions
 
 Each role gets the same permissions in Claude, pi and Codex. The work agent and the planner run with you in the tab, so each agent's automatic judge decides on risky actions. Reviewers run unattended, so no judge runs: an operating system sandbox is the limit.
@@ -477,6 +508,8 @@ Each role gets the same permissions in Claude, pi and Codex. The work agent and 
 | Work agent (`start`) | `--permission-mode auto` | Approval Mode (pi's default) | `workspace-write` with network, approvals `on-request` with auto-review, `web_search="live"` |
 | Planner (`plan`) | as the work agent, plus `--add-dir` for the attachments folder | as the work agent, with all its tools | as the work agent, plus `--add-dir` for the attachments folder |
 | Card reviewer (`review --agent`) | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser |
+| Factory builder (`start --factory`) | as the work agent, plus `--add-dir` for the factory folder | as the work agent | as the work agent, plus `--add-dir` for the factory folder |
+| Factory lens reviewer and approver | as the card reviewer, writes its lens or approver folder | as the card reviewer | as the card reviewer |
 | PR writer (`merge --pr`) | sandbox, writes the description folder | sandbox, writes the description folder | sandbox, writes the description folder |
 | PR reviewer (`pr-review`) | sandbox, writes nothing, Hunk | sandbox, writes nothing, Hunk | sandbox, writes nothing, Hunk (the global `terminal-browser` rule still applies) |
 
@@ -664,6 +697,12 @@ By default the agent follows the usual rules: it does not push or merge. With `-
 
 This is an instruction in the brief only. herdboard does not change the agent's tools or permissions, so the agent still asks before it runs `gh pr merge` when its permission mode asks for that command.
 
+### Factory runs
+
+With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line applies. The planner of a factory automation writes that line. The run uses `factory_max_rounds`. `--no-factory` turns it off.
+
+A factory automation needs a repository board: herdboard refuses it on `inbox`. Each run can start up to four reviewers in each round, and an approver, so it costs more than a plain run. `--factory` and `--may-merge-prs` work together.
+
 ### Plan an automation
 
 `herdboard automation plan <id>`, or `P` in the Automations tab, starts a planner, as `plan` does for a card. For a repository board, it runs in a temporary worktree on the branch `auto/<id>-plan`, from the main checkout's branch. For an inbox automation, it runs in `.herdboard/work/<id>/`. The planner writes `plan.md` to the automation's attachments, so each run gets the plan. When the planner ends, herdboard removes the temporary worktree and branch if they are clean, and logs that it kept them if not. A second `plan` revises the plan.
@@ -842,7 +881,8 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard delete <id> [--yes]` | Delete a todo: its card folder, with its log and attachments. A started card cannot be deleted |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
-| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first |
+| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH] [--factory [--rounds N]]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first. `--factory` starts a [factory run](#factory-runs) |
+| `herdboard factory <id> [--stop]` | Show a card's factory run, or stop it |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi\|codex] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
 | `herdboard pr-sync <id> [--fetch]` | Push the card branch, then replace the open pull request's title and description with `pr.md`. `--fetch` writes the GitHub text to a new `pr.md` instead, and changes nothing |
@@ -862,8 +902,8 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard doctor [--fix] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
 | `herdboard convert-store [--dry-run]` | Convert the old Markdown boards to board folders, once. See [Convert old boards](#convert-old-boards) |
 | `herdboard automation list` | List the automations, with the next due time and the last run |
-| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
-| `herdboard automation edit <aid> [the add options] [--no-merge-prs]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
+| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs] [--factory]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
+| `herdboard automation edit <aid> [the add options] [--no-merge-prs] [--no-factory]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
 | `herdboard automation remove <aid> [--yes]` | Remove an automation. Its cards stay |
 | `herdboard automation pause\|resume <aid>` | Stop or restart the scheduled runs |
 | `herdboard automation run <aid>` | Spawn and start one card now |
@@ -938,6 +978,16 @@ icon_style = "plain"       # text labels; "nerd" adds Nerd Font icons
 types = ["bug", "feature", "chore", "docs", "refactor"]   # card types: the `type` field of a card
 details_pane = true        # a card details pane on top of each card agent and planner
 details_pane_ratio = 0.25  # its share of the agent pane's height, from 0.1 to 0.6
+factory_max_rounds = 3     # the most review rounds of a factory run, from 1 to 10
+
+[factory]
+# approver = "pi"          # default: the card reviewer of the builder's agent
+
+[factory.lenses]           # the reviewer of each lens; model and thinking are optional
+security = { agent = "codex" }
+code = { agent = "pi" }
+ux = { agent = "claude" }
+ui = { agent = "claude" }   # such as { agent = "claude", model = "opus", thinking = "high" }
 
 [thinking]
 # "zai/glm-5.3" = "high"   # pi only: the level that herdboard last chose for this model
