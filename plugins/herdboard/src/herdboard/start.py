@@ -1550,8 +1550,6 @@ class Starter:
                 raise StartError(
                     "A factory run needs a repository branch to review: leave out --no-repo and --new-repo", "usage"
                 )
-            if LINEAR_REF.match(ref):
-                raise StartError("A factory run works on herdboard cards, not Linear issues", "usage")
             rounds = self.config.factory_max_rounds if rounds is None else rounds
             low, high = FACTORY_ROUNDS
             if isinstance(rounds, bool) or not isinstance(rounds, int) or not low <= rounds <= high:

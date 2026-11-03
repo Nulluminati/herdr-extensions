@@ -1,11 +1,13 @@
 """Run a started card as a software factory: lens reviews, builder fixes, and an approver's verdict.
 
-`start --factory` starts the builder (the card's agent) and a background worker. Each time the builder
-moves the card to Review and goes idle, the worker runs one review round: one sandboxed reviewer per
+`start --factory` starts the builder (the card's agent) and a background worker. While the run goes on,
+the builder's `move <id> Review` does not change the column: it records a local ready signal. Each time
+the builder signals and goes idle, the worker runs one review round: one sandboxed reviewer per
 lens (security, ux, ui, code), side by side. It gives the findings to the builder, which fixes them or
 logs why it disagrees, and moves the card to Review again. The loop ends when a round has no confirmed
 problems, when the builder made no new commits, or at the round limit. An approver then checks the
-work against the plan and writes a verdict. The card stays in Review: the user merges it.
+work against the plan and writes a verdict. Only then does the card move to Review, so Review means
+"ready for the user" for a todo and for a Linear issue alike. The user merges it.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ from .agent_review import (
     request_text,
 )
 from .config import LENSES
+from .linear_cards import LINEAR_REF
+from .linear_states import refuse
 from .model import HerdboardError, NotFoundError
 from .review import ReviewError
 from .start import REVIEW_COLUMN, _lock, _read, _write, find_record, herdr, safe_key, state_dir
@@ -178,7 +182,29 @@ def new_state(key: str, rounds: int) -> dict:
         "status": "building",
         "heads": [],
         "panes": [],
+        "ready": False,
     }
+
+
+def signal_ready(ref) -> dict | None:
+    """The builder's move to Review while a factory runs: record that the work is ready for a round.
+
+    Returns the run's summary, or None when no factory runs, so the move goes ahead."""
+    path = state_dir() / "starts.json"
+    with _lock(wait=2):
+        found = find_record(ref)
+        if found is None:
+            return None
+        key, record = found
+        state = record.get("factory")
+        if not state or state.get("status") not in ACTIVE:
+            return None
+        if state["status"] in ("building", "fixing"):
+            state["ready"] = True
+            records = _read(path)
+            records[key] = record
+            _write(path, records)
+        return summary(state)
 
 
 def stop(store, ref) -> dict:
@@ -336,8 +362,7 @@ def builder_message(ref, round_folder: Path, command: str) -> str:
 
 
 def send_to_builder(store, ref, record, round_folder: Path, config_file: Path | None) -> None:
-    """Move the card to In progress, wait for the builder to be idle, then prompt it with the round."""
-    start_module.card_changed(store.move(ref, store.config.start_column))
+    """Wait for the builder to be idle, then prompt it with the round. The card stays in its column."""
     timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000
     result = start_module.command(
         [
@@ -490,11 +515,28 @@ def _builder_status(record) -> str | None:
     return _reviewer_status(record["pane_id"])
 
 
-def _end(store, ref, folder: Path, status: str, message: str, title: str) -> int:
+def _move_to_review(store, ref, writer) -> None:
+    """Move the card to Review: the work is ready for the user. A failure is logged; the run still ends."""
+    try:
+        if LINEAR_REF.match(ref):
+            if writer is None:
+                raise FactoryError("Linear writes are unavailable", "linear_disabled")
+            # The worker cannot answer a question about the state, so a stored answer or one state must do.
+            writer.move(ref, REVIEW_COLUMN, ask=refuse)
+        else:
+            start_module.card_changed(store.move(ref, REVIEW_COLUMN))
+    except HerdboardError as error:
+        print(f"herdboard: {error}", file=sys.stderr)
+        activity.append(store, ref, f"Factory: the card did not move to Review: {error}", "herdboard")
+
+
+def _end(store, ref, folder: Path, status: str, message: str, title: str, writer=None) -> int:
     state = factory_state(ref)
     if state and Path(state["folder"]) == folder:
         _close(state.get("panes") or [])
-    update(ref, folder, status=status, panes=[])
+    update(ref, folder, status=status, panes=[], ready=False)
+    if status == "done":
+        _move_to_review(store, ref, writer)
     try:
         activity.append(store, ref, message, "herdboard")
     except HerdboardError as error:
@@ -503,8 +545,10 @@ def _end(store, ref, folder: Path, status: str, message: str, title: str) -> int
     return 0 if status == "done" else 1
 
 
-def _stop_reason(store, ref, folder: Path) -> tuple[str | None, dict | None, object]:
-    """Why the run must stop now, else None, with the start record and the card."""
+def _stop_reason(store, ref, folder: Path, linear_card=None) -> tuple[str | None, dict | None, object]:
+    """Why the run must stop now, else None, with the start record and the card.
+
+    A Linear issue is not read again: its card is `linear_card`, read once when the worker started."""
     found = find_record(ref)
     if found is None:
         return "Factory stopped: the card was finished.", None, None
@@ -514,12 +558,15 @@ def _stop_reason(store, ref, folder: Path) -> tuple[str | None, dict | None, obj
         return "Factory stopped: a newer factory run replaced it.", None, None
     if state.get("status") == "stopped":
         return "stopped", record, None
-    try:
-        card = store.show(ref)
-    except NotFoundError:
-        return "Factory stopped: the card left the board.", record, None
-    if card.checked or card.archived:
-        return "Factory stopped: the card was finished.", record, card
+    if LINEAR_REF.match(ref):
+        card = linear_card
+    else:
+        try:
+            card = store.show(ref)
+        except NotFoundError:
+            return "Factory stopped: the card left the board.", record, None
+        if card.checked or card.archived:
+            return "Factory stopped: the card was finished.", record, card
     if not Path(record["worktree_path"]).exists():
         return "Factory stopped: the worktree was removed.", record, card
     return None, record, card
@@ -529,9 +576,16 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
     """The background worker: drive the factory run of `ref` until a verdict, a stop or a limit."""
     folder = Path(folder)
     update(ref, folder, pid=os.getpid())
+    linear_card = None
+    if LINEAR_REF.match(ref):
+        try:
+            linear_card = start_module.fetch_linear_card(writer, store.config, ref)
+        except HerdboardError as error:
+            # The requests then name the issue by its ID only.
+            print(f"herdboard: cannot read {ref} from Linear: {error}", file=sys.stderr)
     waited_since = time.monotonic()
     while True:
-        reason, record, card = _stop_reason(store, ref, folder)
+        reason, record, card = _stop_reason(store, ref, folder, linear_card)
         if reason == "stopped":
             _close((record.get("factory") or {}).get("panes") or [])
             return 1
@@ -549,19 +603,20 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
             return _end(
                 store, ref, folder, "stopped", "Factory stopped: the card's agent is gone.", f"Factory of {ref} stopped"
             )
-        if card.column.casefold() != REVIEW_COLUMN.casefold() or builder not in ("idle", "done"):
+        if not record["factory"].get("ready") or builder not in ("idle", "done"):
             if time.monotonic() - waited_since >= BUILDER_TIMEOUT_SECONDS:
                 return _end(
                     store,
                     ref,
                     folder,
                     "stopped",
-                    f"Factory stopped: the card's agent did not move the card to Review in "
+                    f"Factory stopped: the card's agent did not signal that the work is ready in "
                     f"{BUILDER_TIMEOUT_SECONDS // 3600} hours.",
                     f"Factory of {ref} stopped",
                 )
             time.sleep(POLL_SECONDS)
             continue
+        update(ref, folder, ready=False)
         try:
             code = _step(store, ref, folder, record, card, config_file, writer)
         except (HerdboardError, OSError, subprocess.TimeoutExpired) as error:
@@ -573,7 +628,8 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
 
 
 def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | None:
-    """One decision with the card in Review and the builder idle. Returns an exit code when the run ends."""
+    """One decision after the builder's ready signal, with the builder idle. Returns an exit code when the run
+    ends."""
     state = record["factory"]
     number, rounds = state.get("round", 0), state["rounds"]
     worktree = Path(record["worktree_path"])
@@ -583,7 +639,7 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
     except ReviewError as error:
         if error.code != "nothing_to_review":
             raise
-        return _end(store, ref, folder, "done", "Factory: no change to review.", f"Factory of {ref} done")
+        return _end(store, ref, folder, "done", "Factory: no change to review.", f"Factory of {ref} done", writer)
     if number:
         last = folder / f"round-{number}" / "findings.md"
         confirmed = count_confirmed(last.read_text(encoding="utf-8")) if last.exists() else 0
@@ -632,7 +688,7 @@ def _approve(store, ref, folder: Path, record, card, writer) -> int:
         return _end(
             store, ref, folder, "stopped", f"Factory approver failed: {result['error']}", f"Factory of {ref} failed"
         )
-    return _end(store, ref, folder, "done", f"Factory done: {result['verdict']}.", f"Factory of {ref} done")
+    return _end(store, ref, folder, "done", f"Factory done: {result['verdict']}.", f"Factory of {ref} done", writer)
 
 
 def summary(state: dict | None) -> dict | None:

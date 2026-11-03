@@ -1,15 +1,18 @@
 """Factory runs: lens reviewers check each move to Review, the builder fixes, an approver gives a verdict."""
 
 import contextlib
+import dataclasses
 import io
 import json
 import os
 import re
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
-from herdboard import agent_review, attachments, factory, start
+from herdboard import activity, agent_review, attachments, factory, start
 from herdboard.config import Config
+from herdboard.linear_states import refuse
+from herdboard.model import HerdboardError
 from support.herdboard_cli import CliTestCase
 from support.herdboard_merge import GitHerdr, MergeTestCase
 
@@ -110,8 +113,9 @@ class FactoryTestCase(MergeTestCase):
     def state(self):
         return self.record()["factory"]
 
-    def to_review(self):
-        self.store.move(self.card.ref, "Review")
+    def ready(self):
+        """The builder's `move <id> Review` while the factory runs: a ready signal."""
+        self.assertIsNotNone(factory.signal_ready(self.card.ref))
 
     def write_plan(self, text):
         path = attachments.plan_path(self.config, self.card.ref)
@@ -120,11 +124,13 @@ class FactoryTestCase(MergeTestCase):
 
     def builder_fixes(self, commit=True):
         """The builder answers a round: it commits a fix and moves the card to Review."""
+        self.columns = []
 
         def answer(message):
+            self.columns.append(self.store.show(self.card.ref).column)
             if commit:
                 self.commit(self.worktree, f"fix{len(self.fake.prompts)}.txt", "x\n", "fix: a finding")
-            self.to_review()
+            self.ready()
 
         self.fake.on_prompt = answer
 
@@ -308,7 +314,7 @@ class WorkerTests(FactoryTestCase):
         self.write_plan("Review lenses: code\n")
         self.start_factory(rounds=3)
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
-        self.to_review()
+        self.ready()
 
     def test_no_confirmed_problems_after_a_fix_goes_to_the_approver(self):
         self.fake.findings["code"] = "## Risks and questions\n- a.txt:1: why?\n"
@@ -325,6 +331,8 @@ class WorkerTests(FactoryTestCase):
         self.assertIn("| Lens | # | Finding | Agree/Disagree | What you did |", prompt)
         self.assertNotIn("\n", prompt)
         self.assertIn(factory.VERDICT_NAME, [e["name"] for e in attachments.listing(self.config, self.card.ref)])
+        # The card stays in In progress during the rounds: Review means ready for the user.
+        self.assertEqual(self.columns, ["In progress"])
         self.assertEqual(self.store.show(self.card.ref).column, "Review")
         self.assertEqual(self.state()["status"], "done")
         self.assertTrue(any(c[2] == f"Factory of {self.card.ref} done" for c in self.calls("notification", "show")))
@@ -358,12 +366,14 @@ class WorkerTests(FactoryTestCase):
         self.assertEqual(self.lens_starts(), [])
         self.assertFalse(any(c[2].endswith("-approver") for c in self.calls("agent", "start")))
         self.assertEqual(self.state()["status"], "done")
+        self.assertEqual(self.store.show(self.card.ref).column, "Review")
 
     def test_a_gone_builder_stops_the_run(self):
         self.fake.builder_status = None
         self.assertEqual(self.wait(), 1)
         self.assertIn("Factory stopped: the card's agent is gone.", self.log())
         self.assertEqual(self.state()["status"], "stopped")
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
 
     def test_a_finished_card_stops_the_run(self):
         self.store.done(self.card.ref)
@@ -384,6 +394,21 @@ class WorkerTests(FactoryTestCase):
         self.assertIn("Factory stopped by the user.", self.log())
         self.assertEqual(self.fake.reviewers, {})
         self.assertEqual(self.fake.prompts, [])
+
+    def test_the_worker_waits_for_the_ready_signal_not_the_column(self):
+        factory.update(self.card.ref, self.folder, ready=False)
+        self.store.move(self.card.ref, "Review")
+        with patch.object(factory, "BUILDER_TIMEOUT_SECONDS", 0):
+            self.assertEqual(self.wait(), 1)
+        self.assertEqual(self.lens_starts(), [])
+        self.assertIn("did not signal that the work is ready", self.log()[-1])
+
+    def test_the_last_round_goes_to_the_approver_and_review_only_then(self):
+        self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n"
+        self.builder_fixes()
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertEqual(self.columns, ["In progress"] * 3)
+        self.assertEqual(self.store.show(self.card.ref).column, "Review")
 
     def test_a_failure_during_a_round_closes_the_reviewers(self):
         with patch.object(factory, "wait_round", side_effect=start.StartError("broken", "herdr_error")):
@@ -463,6 +488,19 @@ class FactoryCliTests(CliTestCase):
             shown, {"round": 1, "rounds": 3, "status": "building", "lenses": ["code"], "folder": str(folder)}
         )
 
+    def test_move_to_review_is_a_ready_signal_while_a_factory_runs(self):
+        self.run_json("move", self.ref, "In progress", directory=self.repo)
+        self.write_state()
+        result = self.run_json("move", self.ref, "Review", directory=self.repo)
+        self.assertEqual(result["factory"]["status"], "building")
+        self.assertIn("stays in In progress", result["hint"])
+        self.assertEqual(self.run_json("show", self.ref, directory=self.repo)["card"]["column"], "In progress")
+        self.assertTrue(json.loads((start.state_dir() / "starts.json").read_text())[self.ref]["factory"]["ready"])
+        out, _ = self.run_cli("move", self.ref, "Review", directory=self.repo)
+        self.assertIn("stays in In progress", out)
+        self.run_json("factory", self.ref, "--stop", directory=self.repo)
+        self.assertEqual(self.run_json("move", self.ref, "Review", directory=self.repo)["card"]["column"], "Review")
+
     def test_factory_shows_and_stops_the_run(self):
         self.run_json("factory", self.ref, directory=self.repo, expect=1)
         self.write_state()
@@ -473,3 +511,57 @@ class FactoryCliTests(CliTestCase):
             json.loads((start.state_dir() / "starts.json").read_text())[self.ref]["factory"]["status"], "stopped"
         )
         self.run_json("factory", self.ref, "--stop", directory=self.repo, expect=1)
+
+
+class ReadySignalTests(FactoryTestCase):
+    def test_a_signal_needs_a_building_or_fixing_run(self):
+        self.assertIsNone(factory.signal_ready(self.card.ref))
+        self.start_factory()
+        self.assertEqual(factory.signal_ready(self.card.ref)["status"], "building")
+        self.assertTrue(self.state()["ready"])
+        factory.update(self.card.ref, self.folder, status="done", ready=False)
+        self.assertIsNone(factory.signal_ready(self.card.ref))
+        self.assertFalse(self.state()["ready"])
+
+
+class LinearFactoryTests(FactoryTestCase):
+    """A Linear issue runs as a todo does, and the worker writes to Linear only at the end."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_plan("Review lenses: code\n")
+        self.start_factory()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        records = json.loads((start.state_dir() / "starts.json").read_text())
+        record = records.pop(self.card.ref)
+        records["issue-uuid"] = {**record, "ref": "ENG-7"}
+        start._write(start.state_dir() / "starts.json", records)
+        source = attachments.plan_path(self.config, self.card.ref)
+        target = attachments.plan_path(self.config, "ENG-7")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text())
+        self.writer = MagicMock()
+        self.enterContext(
+            patch.object(
+                start, "fetch_linear_card", return_value=dataclasses.replace(self.card, ref="ENG-7", source="linear")
+            )
+        )
+        self.enterContext(patch.object(self.store, "show", side_effect=AssertionError("no board read")))
+
+    def test_the_run_moves_the_issue_to_review_once_at_the_end(self):
+        self.assertIsNotNone(factory.signal_ready("ENG-7"))
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code = factory.wait(self.store, "ENG-7", self.folder, writer=self.writer)
+        self.assertEqual(code, 0, errors.getvalue())
+        self.assertEqual(self.writer.move.call_args_list, [call("ENG-7", "Review", ask=refuse)])
+        self.assertIn("Factory done: approve.", [e["message"] for e in activity.read(self.config, "ENG-7")])
+
+    def test_a_failed_move_is_logged_and_the_verdict_stays(self):
+        self.writer.move.side_effect = HerdboardError("Team ENG has no workflow state for column 'Review'")
+        factory.signal_ready("ENG-7")
+        with contextlib.redirect_stderr(io.StringIO()):
+            factory.wait(self.store, "ENG-7", self.folder, writer=self.writer)
+        log = [e["message"] for e in activity.read(self.config, "ENG-7")]
+        self.assertTrue(any(m.startswith("Factory: the card did not move to Review: Team ENG") for m in log), log)
+        self.assertIn(factory.VERDICT_NAME, [e["name"] for e in attachments.listing(self.config, "ENG-7")])

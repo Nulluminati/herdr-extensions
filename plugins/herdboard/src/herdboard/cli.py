@@ -813,6 +813,7 @@ def _cmd_show(ctx: _Context) -> dict:
             "linear": result,
             "log": _card_log(ctx, card),
             "attachments": _card_attachments(ctx, card),
+            "factory": factory.summary(factory.factory_state(card.ref)),
         }
     card = ctx.store.show(ref, archived=True)
     return {
@@ -939,6 +940,18 @@ def _cmd_move(ctx: _Context) -> dict:
         return {"card": ctx.store.move_to_board(args.ref, target, args.column, blocked=start_module.archive_blocker)}
     if args.column is None:
         raise UsageError("Give a column, or --board to move the todo to another board")
+    if args.column.casefold() == start_module.REVIEW_COLUMN.casefold():
+        ref = args.ref.upper() if LINEAR_REF.match(args.ref) else ctx.store.show(args.ref).ref
+        # While a factory runs, Review means "every round is done": the move only signals a round.
+        state = factory.signal_ready(ref)
+        if state is not None:
+            return {
+                "ref": ref,
+                "factory": state,
+                "factory_ready": True,
+                "hint": f"{ref} runs as a factory, so it stays in In progress. The reviewers check the work "
+                "now. herdboard moves the card to Review when every round is done.",
+            }
     if LINEAR_REF.match(args.ref):
         issue = ctx.writer.move(args.ref, args.column, args.position, ctx.ask(), args.state)
         return {"card": ctx.linear_card(issue)}
@@ -1178,12 +1191,18 @@ def _cmd_factory_wait(ctx: _Context) -> dict:
     ref = ctx.args.ref
     return {
         "ref": ref,
-        "exit_code": factory.wait(ctx.store, ref, ctx.args.folder, config_file=config_path(ctx.args.config)),
+        "exit_code": factory.wait(
+            ctx.store,
+            ref,
+            ctx.args.folder,
+            writer=ctx.writer if LINEAR_REF.match(ref) else None,
+            config_file=config_path(ctx.args.config),
+        ),
     }
 
 
 def _cmd_factory(ctx: _Context) -> dict:
-    ref = ctx.store.show(ctx.args.ref).ref
+    ref = ctx.args.ref.upper() if LINEAR_REF.match(ctx.args.ref) else ctx.store.show(ctx.args.ref).ref
     if ctx.args.stop:
         return factory.stop(ctx.store, ref)
     state = factory.summary(factory.factory_state(ref))
@@ -2010,6 +2029,12 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             _emit_json(_automation_json(result))
         elif "exit_code" not in result:
             print(_automation_text(action, result))
+        return
+    if command == "move" and result.get("factory_ready"):
+        if as_json:
+            _emit_json({"ref": result["ref"], "factory": result["factory"], "hint": result["hint"]})
+        else:
+            print(result["hint"])
         return
     if command == "factory":
         if as_json:

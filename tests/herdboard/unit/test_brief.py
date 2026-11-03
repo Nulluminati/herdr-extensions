@@ -56,7 +56,8 @@ class BriefTests(unittest.TestCase):
         text = brief_text(
             todo(), repository="r", worktree="/w", branch="b", base="main", command="herdboard", factory=True
         )
-        self.assertIn("This card runs as a factory. When you move it to Review, reviewers check it", text)
+        self.assertIn("This card runs as a factory. When you move it to Review, the card stays in In progress", text)
+        self.assertIn("herdboard moves the card to Review when every round is done", text)
         self.assertLess(text.index("When the work is ready"), text.index("runs as a factory"))
         self.assertNotIn("runs as a factory", self.brief(todo()))
 

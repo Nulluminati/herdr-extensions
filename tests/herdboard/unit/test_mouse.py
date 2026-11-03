@@ -38,7 +38,8 @@ class CardActionTests(MouseTestCase):
 
     def test_a_linear_card(self):
         self.assertEqual(
-            self.actions(self.first, source="linear", ref="ENG-1"), ["detail", "done", "start", "choose_agent", "plan"]
+            self.actions(self.first, source="linear", ref="ENG-1"),
+            ["detail", "done", "start", "choose_agent", "factory_start", "plan"],
         )
         self.assertEqual(
             self.actions(self.first, source="linear", ref="ENG-1", worktree=True),

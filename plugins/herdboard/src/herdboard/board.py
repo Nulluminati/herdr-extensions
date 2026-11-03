@@ -2158,9 +2158,9 @@ def card_actions(card: CardView) -> list[tuple[str, str]]:
             # `start` stays: it resumes a start that has steps left.
             wanted |= {"go", "review", "merge", "finish", "start"}
         else:
-            wanted |= {"start", "choose_agent", "plan"}
+            wanted |= {"start", "choose_agent", "factory_start", "plan"}
             if todo:
-                wanted |= {"archive", "factory_start"}
+                wanted.add("archive")
         if promote_refusal(card) is None:
             wanted.add("promote")
         if card.checked and card.worktree_left:
@@ -6719,9 +6719,6 @@ class HerdboardApp(App):
     def action_factory_start(self) -> None:
         card = self.current_card()
         if card is None:
-            return
-        if card.source == "linear":
-            self.notify("A factory run works on herdboard cards, not Linear issues.", severity="warning")
             return
         ref = card.ref
         self.push_screen(AgentScreen(), lambda agent: self._chosen_agent(ref, agent, factory=True))

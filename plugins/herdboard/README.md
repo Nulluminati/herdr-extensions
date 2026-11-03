@@ -473,14 +473,14 @@ The board never runs `finish` itself.
 A factory run chains the card stages: the planner, the work agent (the builder), lens reviewers, and an approver. Start one with `herdboard start <id> --factory`, or press `F` on the board and choose the agent and the model.
 
 1. Plan the card with `P` first. The plan is the spec. The planner adds a `Review lenses:` line under Decisions, such as `Review lenses: security, code`.
-2. `start --factory` starts the builder as `start` does. Its brief tells it that reviewers check each move to Review. A background worker (`herdboard factory-wait`) watches the card.
-3. When the builder moves the card to Review and goes idle, the worker starts one review round. One sandboxed reviewer per lens opens in a split to the right of the builder, as `hb-<id>-<lens>`. Each lens gets its own instruction:
+2. `start --factory` starts the builder as `start` does. A background worker (`herdboard factory-wait`) watches the run.
+3. While the run goes on, the card stays in In progress. When the builder runs `herdboard move <id> Review`, the column does not change: the move records a ready signal in the local start record. When the builder has signalled and is idle, the worker starts one review round. One sandboxed reviewer per lens opens in a split to the right of the builder, as `hb-<id>-<lens>`. Each lens gets its own instruction:
    - `security`: injection, authentication, secrets, unsafe file and shell use, sandbox escapes.
    - `ux`: flows, error messages, defaults, keyboard and mouse use, user documentation.
    - `ui`: layout, consistency with the existing interface, `mockup-*.png` attachments, themes.
    - `code`: bugs, missing tests, readability, the style of the surrounding code.
 4. The worker merges the findings of all lenses into one round file. A lens that fails gets a section that says so. The round continues without it.
-5. The worker moves the card to In progress and sends the round file to the builder. For each finding, the builder fixes it or logs why it disagrees. It writes its answers as a table (`responses.md`), commits, and moves the card to Review again.
+5. The worker sends the round file to the builder. For each finding, the builder fixes it or logs why it disagrees. It writes its answers as a table (`responses.md`), commits, and runs `move <id> Review` again to signal the next round.
 6. The next round's reviewers read the earlier findings and answers. They do not raise a finding again that the builder disagreed with, unless they have new evidence.
 
 The loop stops when one of these is true:
@@ -489,15 +489,19 @@ The loop stops when one of these is true:
 - The builder made no new commits since the last round.
 - The round was the last one: `--rounds N`, else `factory_max_rounds` (default 3).
 
-Then an approver checks the work against `plan.md`, the rounds and the log. It writes a verdict: `Verdict: approve` or `Verdict: changes needed`, with the plan steps not done, the disagreements, the findings left at the round limit, and the testing. herdboard attaches it to the card as `factory-verdict.md`, logs `Factory done: <verdict>.`, and shows a notification. The card stays in Review. You merge it with `m`; the approver never merges.
+Then an approver checks the work against `plan.md`, the rounds and the log. It writes a verdict: `Verdict: approve` or `Verdict: changes needed`, with the plan steps not done, the disagreements, the findings left at the round limit, and the testing. herdboard attaches it to the card as `factory-verdict.md`, logs `Factory done: <verdict>.`, and shows a notification. Then it moves the card to Review. For a factory card, Review means that every round is done and the work is ready for you. You merge it with `m`; the approver never merges.
 
-A branch with no change ends the run with `Factory: no change to review.` and starts no reviewer.
+A branch with no change ends the run with `Factory: no change to review.`, starts no reviewer, and moves the card to Review.
+
+A Linear issue runs the same way. The ready signal is local, so the rounds make no Linear calls. The worker reads the issue once when it starts, and writes to Linear once: the final move to Review. That move cannot ask which state to use. When no state maps to Review, or several do and you have not chosen one before, the move fails. The log then says `Factory: the card did not move to Review: <reason>`, the verdict stays attached, and you move the issue by hand. See [Workflow states](#workflow-states).
+
+A stopped run leaves the card in In progress. A move on the board itself (not with `herdboard move`) still changes the column.
 
 `herdboard factory <id>` shows the run's status and round. `herdboard factory <id> --stop` stops it and closes its reviewers. `show --json` has a `factory` object. The run also stops when the builder's pane is gone, the card leaves the board or is finished, or the worktree is removed. While a run goes on, `review --agent` and `merge` refuse with `factory_running`. `merge --force` still merges.
 
 The lens agents come from `[factory.lenses]` in the config, see [Configuration](#configuration). Each lens uses its configured agent, also when it is the builder's agent. The approver uses `[factory] approver`, else the card reviewer of the builder's agent (pi for Claude, Codex for pi, Claude for Codex).
 
-Limits: a factory run needs a herdboard card with a repository. It refuses `--no-agent`, `--no-repo`, `--new-repo`, Linear issues, and a card whose agent already runs. One round can start four reviewers at the same time.
+Limits: a factory run needs a card with a repository. It refuses `--no-agent`, `--no-repo`, `--new-repo`, and a card whose agent already runs. One round can start four reviewers at the same time.
 
 ### Agent permissions
 

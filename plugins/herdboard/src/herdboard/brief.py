@@ -20,8 +20,9 @@ def _one_line(text: str) -> str:
 
 
 FACTORY_RULE = (
-    "- This card runs as a factory. When you move it to Review, reviewers check it and send you their "
-    "findings. Move it to Review only when the work is complete and committed."
+    "- This card runs as a factory. When you move it to Review, the card stays in In progress: reviewers "
+    "check your work and send you their findings. herdboard moves the card to Review when every round "
+    "is done. Move it to Review only when the work is complete and committed."
 )
 
 
