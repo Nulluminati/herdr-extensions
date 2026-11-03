@@ -4288,6 +4288,7 @@ class AutomationFormScreen(ModalBase):
             "codex": codex_model_choices(config)[1],
         }
         self.agent = item.agent if item and item.agent else "default"
+        self.max_rounds = config.factory_max_rounds
 
     def _model_options(self, agent: str) -> list[tuple[str, str]]:
         """The models of `agent` after "default". The saved model stays a choice for the saved agent."""
@@ -4391,6 +4392,17 @@ class AutomationFormScreen(ModalBase):
                 id="automation-merge-help",
                 classes="dim",
             )
+            yield Checkbox(
+                "Run as a factory (lens reviews and approver)",
+                value=bool(item and item.factory),
+                id="automation-factory",
+            )
+            yield Label(
+                "Needs a repository board. Each run costs up to 4 reviewers per round, "
+                f"for up to {self.max_rounds} rounds, and an approver",
+                id="automation-factory-help",
+                classes="dim",
+            )
             yield titled(
                 TextArea(
                     item.body if item else "", id="automation-body", placeholder="What the agent does on each run"
@@ -4419,6 +4431,7 @@ class AutomationFormScreen(ModalBase):
             "model": choice("model"),
             "thinking": choice("thinking"),
             "may_merge_prs": self.query_one("#automation-merge", Checkbox).value,
+            "factory": self.query_one("#automation-factory", Checkbox).value,
             "body": self.query_one("#automation-body", TextArea).text.rstrip("\n"),
         }
 
@@ -4484,6 +4497,7 @@ class AutomationDetailScreen(ModalBase):
             ("Tags", ", ".join(entry["tags"]) or "none"),
             ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
             ("May merge other PRs (instruction)", "yes" if entry["may_merge_prs"] else "no"),
+            ("Factory", "yes" if entry["factory"] else "no"),
             ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
             ("Last result", entry["last_result"] or "-"),
         ]
@@ -5103,7 +5117,7 @@ class HerdboardApp(App):
     #pr-list { height: 1fr; scrollbar-size-vertical: 1; }
     #automation-status { height: 1; padding: 0 1; color: $text-muted; }
     #automation-list { height: 1fr; scrollbar-size-vertical: 1; }
-    #automation-merge { width: 100%; border: none; padding: 0 1; }
+    #automation-merge, #automation-factory { width: 100%; border: none; padding: 0 1; }
     .pr-row { height: auto; padding: 0 1; }
     """
         + pr_row_css()

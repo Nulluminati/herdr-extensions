@@ -353,6 +353,50 @@ class RepositoryRunTests(AutomationTestCase):
         self.assertEqual(self.store.show(result["card"]).board, board.stem)
 
 
+class FactoryAutomationTests(AutomationTestCase):
+    def repo_board(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "init"],
+        ):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        start.register_checkout(repo)
+        return self.store.init_board(repo_identity(repo)).stem
+
+    def test_factory_round_trips_with_may_merge_prs(self):
+        added = self.add(board=self.repo_board(), factory=True, may_merge_prs=True)
+        data = tomllib.loads(automations.definitions_path(self.config).read_text(encoding="utf-8"))
+        self.assertIs(data["automation"][0]["factory"], True)
+        self.assertEqual(automations.load(self.config), [added])
+        self.assertTrue(added.factory and added.may_merge_prs)
+
+    def test_factory_is_refused_on_the_inbox(self):
+        with self.assertRaises(HerdboardError) as raised:
+            self.add(factory=True)
+        self.assertEqual(raised.exception.code, "usage")
+        self.assertIn("A factory automation needs a repository board.", str(raised.exception))
+        plain = self.add()
+        with self.assertRaises(HerdboardError):
+            automations.edit(self.store, plain.id, factory=True)
+        board = self.repo_board()
+        factory_item = self.add(board=board, factory=True)
+        with self.assertRaises(HerdboardError) as raised:
+            automations.edit(self.store, factory_item.id, board="inbox")
+        self.assertEqual(raised.exception.code, "usage")
+
+    def test_spawn_starts_the_card_as_a_factory(self):
+        added = self.add(board=self.repo_board(), factory=True)
+        with patch.object(start.Starter, "start", return_value={"ref": "x"}) as started:
+            automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+        self.assertIs(started.call_args.kwargs["factory"], True)
+        plain = self.add()
+        with patch.object(start.Starter, "start", return_value={"ref": "x"}) as started:
+            automations.run(self.store, plain, local(2026, 10, 23, 9, 0))
+        self.assertIs(started.call_args.kwargs["factory"], False)
+
+
 class TickTests(AutomationTestCase):
     def test_no_run_before_the_first_due_time(self):
         self.add(created=local(2026, 10, 23, 10, 0))
@@ -615,6 +659,17 @@ class CliTests(CliTestCase):
         removed = self.run_json("automation", "remove", added["id"], "--yes")["removed"]
         self.assertEqual(removed["id"], added["id"])
         self.assertEqual(self.run_json("automation", "list")["automations"], [])
+
+    def test_factory_flags(self):
+        board = self.init_repo_board()
+        name = Path(board).stem
+        added = self.run_json(
+            "automation", "add", "--title", "Fix lint", "--schedule", "every day", "--board", name, "--factory"
+        )["automation"]
+        self.assertIs(added["factory"], True)
+        edited = self.run_json("automation", "edit", added["id"], "--no-factory")["automation"]
+        self.assertIs(edited["factory"], False)
+        self.run_json("automation", "add", "--title", "x", "--schedule", "every day", "--factory", expect=1)
 
     def test_text_output(self):
         self.run_cli("automation", "add", "--title", "Check alerts", "--schedule", "every day")
@@ -930,6 +985,17 @@ class PlanAutomationTests(LocalTime):
         ):
             self.assertIn(part, brief)
         self.assertIn("Planning started", self.log(added.id)[0])
+
+    def test_a_factory_automation_brief_asks_for_review_lenses(self):
+        added = automations.add(self.store, title="Fix lint", schedule="every day", board=self.board.stem, factory=True)
+        self.planner.plan(added.id)
+        brief = self.brief()
+        self.assertIn("Each run of this automation is a factory run", brief)
+        self.assertIn("Review lenses: security, ux, ui, code", brief)
+        self.fake.calls.clear()
+        plain = self.add(self.board.stem)
+        self.planner.plan(plain.id)
+        self.assertNotIn("factory run", self.brief())
 
     def test_an_inbox_automation_plans_in_its_folder(self):
         added = self.add("inbox")

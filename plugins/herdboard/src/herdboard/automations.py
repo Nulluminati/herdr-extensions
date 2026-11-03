@@ -196,6 +196,8 @@ class Automation:
     model: str | None = None
     thinking: str | None = None
     may_merge_prs: bool = False
+    # Each spawned card starts as a factory run (`start --factory`). Needs a repository board.
+    factory: bool = False
     # When the automation was added: the first run is the first due time after it.
     created: str | None = None
 
@@ -208,7 +210,7 @@ class Automation:
 
 
 STRING_FIELDS = ("id", "title", "schedule", "board", "body", "type", "agent", "model", "thinking", "created")
-BOOL_FIELDS = ("enabled", "may_merge_prs")
+BOOL_FIELDS = ("enabled", "may_merge_prs", "factory")
 
 
 def definitions_path(config: Config) -> Path:
@@ -330,6 +332,8 @@ def _check(store, item: Automation) -> Automation:
         if not tag or any(ch.isspace() or ch == "#" for ch in tag):
             raise AutomationError(f"Tag {tag!r} must be one word without #")
     kind = config.type_named(item.type) if item.type else None
+    if item.factory and item.board == "inbox":
+        raise AutomationError("A factory automation needs a repository board.", "usage")
     if item.board != "inbox":
         try:
             store.resolve_board(item.board)
@@ -360,6 +364,7 @@ def add(
     model: str | None = None,
     thinking: str | None = None,
     may_merge_prs: bool = False,
+    factory: bool = False,
     enabled: bool = True,
     created: datetime | None = None,
 ) -> Automation:
@@ -381,6 +386,7 @@ def add(
                 model=model,
                 thinking=thinking,
                 may_merge_prs=may_merge_prs,
+                factory=factory,
                 created=created.isoformat(timespec="seconds"),
             ),
         )
@@ -521,6 +527,7 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0, confi
             thinking=automation.thinking,
             no_repo=automation.board == "inbox",
             may_merge_prs=automation.may_merge_prs,
+            factory=automation.factory,
         )
     except HerdboardError as error:
         result = f"start_failed: {error}"

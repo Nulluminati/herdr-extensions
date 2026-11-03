@@ -552,6 +552,20 @@ class FormTests(AutomationsBoardTestCase):
             self.assertTrue(form.query_one(".dialog").content_region.contains_region(checkbox.region))
             self.assertIn("no extra permissions", str(form.query_one("#automation-merge-help").render()))
 
+    async def test_the_factory_checkbox_is_refused_on_the_inbox(self):
+        app = self.app()
+        async with app.run_test(size=(160, 40)) as pilot:
+            form = await self.open_form(app, pilot)
+            self.assertIn("4 reviewers per round", str(form.query_one("#automation-factory-help").render()))
+            form.query_one("#automation-title", Input).value = "Fix lint"
+            form.query_one("#automation-schedule", Input).value = "every day"
+            form.query_one("#automation-factory").value = True
+            await pilot.press("ctrl+s")
+            await self.settle(app, pilot)
+            self.assertIs(app.screen, form)
+            self.assertIn("A factory automation needs a repository board.", form.error_text())
+            self.assertEqual(automations.load(self.store.config), [])
+
     async def test_edit_keeps_the_fields_and_saves_changes(self):
         added = self.add(tags=["security"], may_merge_prs=True, body="Look")
         app = self.app()

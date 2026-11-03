@@ -19,7 +19,7 @@ from .agent_review import start_worker
 from .brief import _one_line
 from .config import AGENTS, thinking_levels
 from .model import HerdboardError
-from .plan import PLAN_FORMAT, PlanError, _mtime, _planner_pane, _plans_path, planner_arguments
+from .plan import FACTORY_LENSES_RULE, PLAN_FORMAT, PlanError, _mtime, _planner_pane, _plans_path, planner_arguments
 from .start import (
     Starter,
     StartError,
@@ -89,6 +89,13 @@ def brief_text(
             "code change, with `gh pr merge`.",
             "",
         ]
+    if item.factory:
+        lines += [
+            "Each run of this automation is a factory run: lens reviewers check the agent's work, the agent "
+            "fixes their findings, and an approver gives a verdict. Write the `Review lenses:` line in the "
+            "plan.",
+            "",
+        ]
     if plan and plan.strip():
         lines += ["## The current plan", "", "A plan exists. Revise it with the user.", "", plan.strip("\n"), ""]
     others = [entry for entry in files if entry["name"] != attachments.PLAN_NAME]
@@ -123,6 +130,8 @@ def brief_text(
         "",
         PLAN_FORMAT,
     ]
+    if item.factory:
+        lines += [FACTORY_LENSES_RULE, ""]
     return "\n".join(lines)
 
 

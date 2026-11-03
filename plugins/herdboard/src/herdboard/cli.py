@@ -419,6 +419,21 @@ def build_parser() -> argparse.ArgumentParser:
             const=False,
             help="the agent merges no pull request (the default)",
         )
+        run_as = found.add_mutually_exclusive_group()
+        run_as.add_argument(
+            "--factory",
+            dest="factory",
+            action="store_const",
+            const=True,
+            help="start each spawned card as a factory run: lens reviews, then an approver; needs a repository board",
+        )
+        run_as.add_argument(
+            "--no-factory",
+            dest="factory",
+            action="store_const",
+            const=False,
+            help="start each spawned card with only its agent (the default)",
+        )
 
     action("list", "list the automations with their next and last runs")
     automation_fields(action("add", "add an automation"), adding=True)
@@ -1749,7 +1764,7 @@ def _automation_changes(ctx: _Context, adding: bool) -> dict:
             changes[key] = value or None
     if args.tag is not None:
         changes["tags"] = [tag.lstrip("#") for tag in args.tag if tag.strip()]
-    for key in ("board", "schedule", "may_merge_prs"):
+    for key in ("board", "schedule", "may_merge_prs", "factory"):
         if getattr(args, key) is not None:
             changes[key] = getattr(args, key)
     if not adding and not changes:
