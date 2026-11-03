@@ -1091,7 +1091,7 @@ Ask finance for the columns.
 - `title` is the only field that a card must have.
 - `type`, `tags` and `due` are the card's type, tags and due date.
 - `parent` makes the card a sub-card of another card on the same board. Sub-cards go one level deep.
-- `promoted` is the Linear identifier after `promote`. `archived` is the time of the archive. `created` is the time of the add.
+- `promoted` is the Linear identifier after `promote`. `archived` is the time of the archive. `created` is the time of the add. Both times need a UTC offset, such as `2026-11-15T09:30:00+01:00`.
 - A top-level `- [ ]` line of the details is a checklist item.
 - IDs are unique across all boards, in `cards/` and `archive/`.
 - herdboard keeps keys and comments of `board.toml` and `card.md` that it does not know.
@@ -1105,7 +1105,7 @@ Earlier versions of herdboard kept boards as Markdown files in the Obsidian Kanb
 - Cards without an ID, or with an ID that another card already has, get a new ID. Their sub-cards follow the new ID. The report lists them. The log and attachments of a shared ID go to the card that keeps the ID, and the report names that card.
 - The report lists logs and attachments that have no card. They stay in the backup.
 - The command refuses `projects/inbox.md`, because the inbox has that name. Rename the file first.
-- The command refuses to run while an agent, planner or reviewer works on a card.
+- The command refuses to run while an agent, planner or reviewer works on a card, a Linear issue or an automation.
 
 Convert your real todos in this order:
 

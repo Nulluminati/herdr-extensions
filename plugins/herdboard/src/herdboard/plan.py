@@ -448,6 +448,12 @@ def _planner_pane(record) -> str | None:
     return pane if _pane_exists(pane) else None
 
 
+def planned_refs() -> list[str]:
+    """The refs that have a planner record, running or not."""
+    with _lock(wait=2):
+        return list(_read(_plans_path()))
+
+
 def running_planner(ref: str) -> str | None:
     """The pane of the card's planner while it still runs, else None."""
     with _lock(wait=2):

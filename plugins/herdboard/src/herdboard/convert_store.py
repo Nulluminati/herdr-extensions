@@ -189,10 +189,10 @@ def first_log_time(path: Path) -> datetime | None:
     return None
 
 
-def _new_id(taken: set[str]) -> str:
+def _new_id(taken: set[str], reserved: frozenset[str] = frozenset()) -> str:
     while True:
         candidate = "t" + "".join(secrets.choice(ID_ALPHABET) for _ in range(3))
-        if candidate not in taken:
+        if candidate not in taken and candidate not in reserved:
             taken.add(candidate)
             return candidate
 
@@ -207,8 +207,13 @@ def convert_board(
     markers: list[str],
     archive_titles: tuple[str, ...],
     created_for=lambda ref: None,
+    reserved: frozenset[str] = frozenset(),
 ) -> ConvertedBoard:
-    """Convert one old board file. `taken` holds the IDs in use and gets the new ones."""
+    """Convert one old board file. `taken` holds the IDs in use and gets the new ones.
+
+    `reserved` holds the IDs of every old card, so that a new ID never takes the ID
+    of a card that comes later.
+    """
     board = kanban_md.parse(text.replace("\r\n", "\n"), archive_titles)
     data = _frontmatter(board.frontmatter, path)
     file = card_file.new_board([])
@@ -234,7 +239,7 @@ def convert_board(
         if old is not None and is_card_id(old) and old not in taken:
             taken.add(old)
             return old
-        new = _new_id(taken)
+        new = _new_id(taken, reserved)
         converted.new_ids.append((old, new, card.title))
         return new
 
@@ -266,6 +271,21 @@ def convert_board(
         if card.parent in renamed:
             card.parent = renamed[card.parent]
     return converted
+
+
+def block_ids(text: str, archive_titles: tuple[str, ...]) -> set[str]:
+    """The card IDs of an old board file, in its columns and its archive."""
+    board = kanban_md.parse(text.replace("\r\n", "\n"), archive_titles)
+    cards = [card for column in board.columns for card in column.cards]
+    cards += board.archive.cards if board.archive is not None else []
+    return {card.block_id for card in cards if card.block_id is not None and is_card_id(card.block_id)}
+
+
+def planned_refs() -> list[str]:
+    """The cards, Linear issues and automations that have a planner record."""
+    from .plan import planned_refs
+
+    return planned_refs()
 
 
 def running_cards(refs: list[str]) -> list[str]:
@@ -310,12 +330,15 @@ def convert_store(
     with store._lock():
         temp = todos / "boards.tmp"
         taken: set[str] = set()
-        boards = []
+        texts = []
         for name, path in sources:
             try:
-                text = path.read_bytes().decode("utf-8")
+                texts.append((name, path, path.read_bytes().decode("utf-8")))
             except (OSError, UnicodeDecodeError) as error:
                 raise ConvertError(f"{path}: cannot read: {error}") from error
+        reserved = frozenset(ref for _, _, text in texts for ref in block_ids(text, titles))
+        boards = []
+        for name, path, text in texts:
             boards.append(
                 convert_board(
                     name,
@@ -326,20 +349,24 @@ def convert_store(
                     markers=markers,
                     archive_titles=titles,
                     created_for=lambda ref: first_log_time(old_logs / f"{ref}.md"),
+                    reserved=reserved,
                 )
             )
+        data_refs = sorted(
+            {p.stem for p in old_logs.glob("*.md")} | {p.name for p in old_files.glob("*") if p.is_dir()}
+        )
+        # Linear issues and automations: their data moves too, and a planner keeps the old path.
+        others = [ref for ref in [*data_refs, *planned_refs()] if LOG_REF.match(ref) and not TODO_REF.match(ref)]
         refs = [ref for board in boards for ref in [*board.cards, *board.archive]]
+        refs = list(dict.fromkeys([*refs, *others]))
         running = (busy or running_cards)(refs)
         # A dry run writes nothing, so it names the running cards instead of refusing.
         if running and not dry_run:
             raise ConvertError(
-                f"Stop the agents, planners and reviewers of {', '.join(running)} first: their card folders move"
+                f"Stop the agents, planners and reviewers of {', '.join(running)} first: their folders move"
             )
         homes = {ref: (board.name, "cards") for board in boards for ref in board.cards}
         homes.update({ref: (board.name, "archive") for board in boards for ref in board.archive})
-        data_refs = sorted(
-            {p.stem for p in old_logs.glob("*.md")} | {p.name for p in old_files.glob("*") if p.is_dir()}
-        )
         moves, dropped = [], []
         for ref in data_refs:
             if not LOG_REF.match(ref) or (TODO_REF.match(ref) and ref not in homes):

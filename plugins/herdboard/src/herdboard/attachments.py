@@ -131,7 +131,8 @@ def add(store, ref: str, source: Path, name: str | None = None) -> dict:
         finally:
             if temp is not None:
                 Path(temp).unlink(missing_ok=True)
-    return _entry(target)
+        # Under the lock: a move after it renames the folder.
+        return _entry(target)
 
 
 def _read(reader, source: Path) -> bytes:

@@ -296,6 +296,16 @@ class EditTest(StoreTestCase):
         self.assertEqual(caught.exception.exit_code, 2)
         self.assertEqual(self.store.show("tabc").title, "changed")
 
+    def test_conflict_when_tags_type_or_due_changed_on_disk(self):
+        self.put("p")
+        for field, value in (("tags", ["other"]), ("type", "bug"), ("due", "2026-12-01")):
+            with self.subTest(field=field):
+                seen = self.store.show("tabc")
+                Store(self.config).edit("tabc", **{field: value})
+                with self.assertRaises(ConflictError):
+                    self.store.edit("tabc", title="mine", expected=seen, tags=[], type=None, due=None)
+                self.assertEqual(getattr(self.store.show("tabc"), field), value)
+
     def test_conflict_when_the_column_changed_after_the_read(self):
         path = self.put("p")
 

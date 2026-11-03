@@ -192,6 +192,9 @@ def _check_card(doc: tomlkit.TOMLDocument, path: Path) -> None:
     for key in ("created", "archived"):
         if key in doc and not isinstance(doc[key], datetime):
             raise FormatError(f"{path}: {key!r} must be a date and time")
+        # Archive sorts compare these times, and a time without an offset cannot be compared.
+        if key in doc and doc[key].tzinfo is None:
+            raise FormatError(f"{path}: {key!r} needs a UTC offset, such as 2026-11-15T09:30:00+01:00")
 
 
 def parse_card(text: str, path: Path) -> CardFile:

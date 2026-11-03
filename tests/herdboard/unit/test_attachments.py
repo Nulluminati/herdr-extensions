@@ -1,5 +1,6 @@
 """Card attachments: large documents, such as a plan, in the card folder next to the activity log."""
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,6 +37,19 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(added, {"name": "spec.md", "path": str(path), "size": 19})
         self.assertEqual(path.read_text(encoding="utf-8"), "# Spec\n\nLong text.\n")
         self.assertTrue(self.doc.exists())
+
+    def test_add_reports_the_attachment_when_the_card_moves_after_the_lock(self):
+        real_lock = self.store._lock
+
+        @contextlib.contextmanager
+        def lock():
+            with real_lock():
+                yield
+            Store(self.store.config).archive("t3m9")
+
+        with mock.patch.object(self.store, "_lock", lock):
+            added = attachments.add(self.store, "t3m9", self.doc)
+        self.assertEqual((added["name"], added["size"]), ("spec.md", 19))
 
     def test_add_takes_another_name(self):
         attachments.add(self.store, "ENG-12", self.doc, name="design.md")

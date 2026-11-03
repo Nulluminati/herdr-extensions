@@ -2189,6 +2189,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(render(result))
             return 1 if result["summary"]["error"] else 0
         ctx = _Context(args)
+        # Every command reads or writes the store, so none may run on the old layout. Only
+        # the conversion itself and doctor (above) work with it.
+        if args.command != "convert-store":
+            ctx.store.check_layout()
         # Add validates its input first. Migration previews write nothing. The sidebar refresh
         # runs from the plugin folder at Herdr startup and needs no board. The details pane
         # only reads.

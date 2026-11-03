@@ -951,6 +951,9 @@ class Store:
             if expected is not None and (
                 file.title != expected.title
                 or file.body != expected.body
+                or file.tags != expected.tags
+                or file.type != expected.type
+                or file.due != expected.due
                 or (column is self._done_or_none(board.file)) != expected.checked
                 or column.name != expected.column
             ):

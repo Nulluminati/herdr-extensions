@@ -267,6 +267,30 @@ class ConvertStoreTests(ConvertTestCase):
         self.assertEqual(self.store.show("tzk1").parent, change["new"])
         self.assertEqual(self.store.show("tkid").parent, "tpar")
 
+    def test_a_new_id_never_takes_the_id_of_a_later_card(self):
+        (self.todos / "projects" / "aaa.md").write_text("## Todo\n\n- [ ] No ID, before acme\n")
+        letters = iter("parzzz")
+        real = convert_store.secrets.choice
+        with mock.patch.object(
+            convert_store.secrets, "choice", side_effect=lambda seq: next(letters, None) or real(seq)
+        ):
+            result = self.convert()
+        self.assertEqual(result["boards"][1]["new_ids"][0]["new"], "tzzz")
+        self.assertEqual(self.store.show("tpar").title, "Billing v2")
+        self.assertEqual(self.store.show("tkid").parent, "tpar")
+        self.assertEqual([e["message"] for e in activity.read(self.config, "tpar")], ["Started."])
+
+    def test_the_running_check_covers_linear_issues_and_automations(self):
+        with mock.patch.object(convert_store, "planned_refs", return_value=["ENG-99", "tpar"]):
+            for ref in ("ENG-12", "a7k2", "ENG-99"):
+                with self.subTest(ref=ref), self.assertRaises(ConvertError) as caught:
+                    self.convert(busy=lambda refs, ref=ref: [r for r in refs if r == ref])
+                self.assertIn(ref, str(caught.exception))
+            seen = []
+            self.convert(dry_run=True, busy=lambda refs: seen.extend(refs) or [])
+        self.assertEqual(len(seen), len(set(seen)))
+        self.assertFalse((self.todos / "boards").exists())
+
     def test_a_project_named_inbox_is_refused(self):
         (self.todos / "projects" / "inbox.md").write_text("## Todo\n")
         with self.assertRaises(ConvertError) as caught:
@@ -343,6 +367,15 @@ class ConvertCliTests(ConvertTestCase):
         out = self.run_cli("convert-store", "--dry-run")
         self.assertIn(f"{self.todos / 'boards.tmp'} is left over from a failed conversion", out)
         self.assertIn("    The log and attachments of tpar go to tpar on acme-api\n", out)
+
+    def test_log_and_attach_outside_a_repository_refuse_the_old_layout(self):
+        (self.root / "spec.md").write_text("spec")
+        for args in (("log", "ENG-12", "note"), ("attach", "ENG-12", str(self.root / "spec.md")), ("log", "a7k2", "x")):
+            with self.subTest(args=args):
+                error = json.loads(self.run_cli("--json", *args, expect=1))["error"]
+                self.assertEqual(error["code"], "old_format")
+        self.assertFalse((self.todos / ".herdboard" / "linear").exists())
+        self.assertFalse((self.todos / ".herdboard" / "automations").exists())
 
     def test_doctor_reports_the_old_layout(self):
         result = json.loads(self.run_cli("--json", "doctor", "--offline", expect=1))

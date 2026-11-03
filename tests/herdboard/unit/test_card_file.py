@@ -118,6 +118,8 @@ class CardFileTest(unittest.TestCase):
             "+++\ntitle = 'x'\ndue = 'tomorrow'\n+++\n",
             "+++\ntitle = 'x'\nparent = 3\n+++\n",
             "+++\ntitle = 'x'\nparent = '../../x'\n+++\n",
+            "+++\ntitle = 'x'\narchived = 2026-01-02T03:04:05\n+++\n",
+            "+++\ntitle = 'x'\ncreated = 2026-01-02T03:04:05\n+++\n",
         ]
         for text in bad:
             with self.subTest(text=text), self.assertRaises(FormatError) as caught:
