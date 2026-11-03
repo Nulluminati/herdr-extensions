@@ -825,3 +825,19 @@ def timer(action: str, config_file: Path | None = None) -> dict:
     raise AutomationError(
         f"Automations need systemd (Linux) or launchd (macOS), not {sys.platform}", "unsupported_platform"
     )
+
+
+# The notice that the board and `doctor` show when automations are on but the timer does not run.
+TIMER_INSTALL = "herdboard automation timer install"
+
+
+def timer_problem() -> str | None:
+    """Why automations do not run on their own, or None when the timer is active. The board's Automations
+    tab and `doctor` both show this text, so the two stay the same."""
+    try:
+        status = timer("status")
+    except HerdboardError as error:
+        return f"Automations do not run on their own: {error}"
+    if not status["active"]:
+        return f"Automations do not run on their own: the {status['backend']} timer is {status['state']}."
+    return None

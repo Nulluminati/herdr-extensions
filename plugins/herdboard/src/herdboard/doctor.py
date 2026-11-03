@@ -536,22 +536,9 @@ def check_automations(store):
                     )
                 )
     if any(item.enabled for item in items):
-        try:
-            status = automations.timer("status")
-        except HerdboardError as error:
-            findings.append(
-                finding("warning", "automation_timer_inactive", f"Automations do not run on their own: {error}")
-            )
-        else:
-            if not status["active"]:
-                findings.append(
-                    finding(
-                        "warning",
-                        "automation_timer_inactive",
-                        f"Automations do not run on their own: the {status['backend']} timer is {status['state']}.",
-                        fix="herdboard automation timer install",
-                    )
-                )
+        problem = automations.timer_problem()
+        if problem is not None:
+            findings.append(finding("warning", "automation_timer_inactive", problem, fix=automations.TIMER_INSTALL))
     return findings
 
 

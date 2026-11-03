@@ -263,6 +263,118 @@ class ListTests(AutomationsBoardTestCase):
                 plan.assert_called_once_with(added.id, agent="codex", model="gpt-6.1", thinking="ultra")
 
 
+class TimerNoticeTests(AutomationsBoardTestCase):
+    """The notice in the status line when the OS timer that runs the tick is not active."""
+
+    def timer(self, active=True, backend="systemd", state="active"):
+        return {
+            "backend": backend,
+            "active": active,
+            "state": state,
+            "installed": active,
+            "files": [],
+        }
+
+    def status(self, **options):
+        return patch.object(automations, "timer", return_value=self.timer(**options), create=True)
+
+    async def test_an_active_timer_shows_no_notice(self):
+        self.add()
+        app = self.app()
+        with self.status():
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                self.assertNotIn("do not run on their own", screen.status_text())
+                self.assertIn("1 automation", screen.status_text())
+
+    async def test_an_inactive_timer_shows_the_notice_and_its_fix(self):
+        self.add()
+        app = self.app()
+        with self.status(active=False, state="inactive"):
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                text = screen.status_text()
+                self.assertIn("Automations do not run on their own", text)
+                self.assertIn("the systemd timer is inactive", text)
+                self.assertIn("herdboard automation timer install", text)
+
+    async def test_a_timer_status_error_shows_the_notice(self):
+        self.add()
+        app = self.app()
+        error = automations.AutomationError(
+            "Automations need systemd (Linux) or launchd (macOS)", "unsupported_platform"
+        )
+        with patch.object(automations, "timer", side_effect=error, create=True):
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                text = screen.status_text()
+                self.assertIn("Automations do not run on their own", text)
+                self.assertIn("need systemd", text)
+                self.assertIn("herdboard automation timer install", text)
+
+    async def test_a_paused_automation_alone_shows_no_notice(self):
+        paused = self.add()
+        automations.set_enabled(self.store, paused.id, False)
+        app = self.app()
+        with self.status(active=False, state="inactive"):
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                self.assertNotIn("do not run on their own", screen.status_text())
+
+    async def test_the_notice_stays_when_the_list_is_read_again(self):
+        self.add()
+        app = self.app()
+        with self.status(active=False, state="inactive") as timer:
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                reads = timer.call_count
+                await pilot.press("r")
+                await self.settle(app, pilot)
+                self.assertIn("do not run on their own", screen.status_text())
+                # A reload does not run systemctl again: the status is checked on mount and on resume.
+                self.assertEqual(timer.call_count, reads)
+
+    async def test_the_timer_is_read_again_when_the_tab_comes_back(self):
+        self.add()
+        app = self.app()
+        with self.status(active=False, state="inactive") as timer:
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                await pilot.press("escape")
+                await self.settle(app, pilot)
+                await pilot.press("G", "G", "G")
+                await self.settle(app, pilot)
+                self.assertIs(app.screen, screen)
+                self.assertGreater(timer.call_count, 1)
+                self.assertIn("do not run on their own", screen.status_text())
+
+    async def test_i_installs_the_timer_after_confirm(self):
+        self.add()
+        app = self.app()
+        self.actions = []
+        state = {"installed": False}
+
+        def timer(action, config_file=None):
+            self.actions.append(action)
+            if action == "install":
+                state["installed"] = True
+            active = state["installed"]
+            return self.timer(active=active, state="active" if active else "inactive")
+
+        with patch.object(automations, "timer", side_effect=timer, create=True):
+            async with app.run_test(size=(160, 30)) as pilot:
+                screen = await self.open_tab(app, pilot)
+                self.assertIn("do not run on their own", screen.status_text())
+                await pilot.press("i")
+                await self.settle(app, pilot)
+                self.assertIsInstance(app.screen, ConfirmScreen)
+                await pilot.press("y")
+                await self.settle(app, pilot)
+                self.assertIn("install", self.actions)
+                self.assertEqual(self.actions[-1], "status")
+                self.assertNotIn("do not run on their own", screen.status_text())
+
+
 class FormTests(AutomationsBoardTestCase):
     async def test_long_board_names_fit_the_choice_and_dropdown(self):
         name = "nulluminati-herdr-extensions"

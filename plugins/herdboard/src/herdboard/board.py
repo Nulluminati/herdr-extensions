@@ -278,6 +278,7 @@ HELP_SECTIONS = [
             ("P", "plan the automation with an agent; the plan goes into each spawned card's brief"),
             ("space", "pause or resume; a resumed automation waits for its next due time"),
             ("n", "run now: spawn a card and start its agent, after you confirm"),
+            ("i", "install the automations timer, after you confirm; it runs the tick every 5 minutes"),
             ("x", "remove the automation, after you confirm; its cards stay"),
             ("r", "read the automations again"),
             ("escape, G", "go back to the board"),
@@ -4541,6 +4542,7 @@ class AutomationsScreen(Screen):
         Binding("P", "plan", "Plan"),
         Binding("space", "toggle", "Pause/resume"),
         Binding("n", "run", "Run now"),
+        Binding("i", "install_timer", "Install timer"),
         Binding("x", "remove", "Remove"),
         Binding("r", "load", "Reload"),
         Binding("down,j", "cursor(1)", "Next", show=False),
@@ -4555,6 +4557,11 @@ class AutomationsScreen(Screen):
         self.entries: list[dict] = []
         # One run or plan starts at a time.
         self.busy = False
+        # Why automations do not run on their own, or None when the OS timer is active. The status is read
+        # on mount and on resume, not on every reload: `systemctl` / `launchctl` can be slow.
+        self.timer_problem: str | None = None
+        # The status line without the timer notice, so a reload keeps the notice.
+        self.summary = ""
 
     def compose(self) -> ComposeResult:
         yield HeaderBar("Automations", self.app.view)
@@ -4567,6 +4574,7 @@ class AutomationsScreen(Screen):
             yield KeyBar()
 
     def on_mount(self) -> None:
+        self._read_timer()
         self.action_load()
         # A tick of the timer changes the next and last runs while the tab is open.
         self.timer = self.set_interval(AUTOMATION_SECONDS, self.action_load)
@@ -4577,6 +4585,7 @@ class AutomationsScreen(Screen):
 
     def on_screen_resume(self) -> None:
         self.timer.resume()
+        self._read_timer()
         self.action_load()
 
     @property
@@ -4602,6 +4611,8 @@ class AutomationsScreen(Screen):
         """False for a key that has nothing to act on: the key bar dims it."""
         if action in ("detail", "edit", "plan", "toggle", "run", "remove"):
             return self.current() is not None
+        if action == "install_timer":
+            return self.timer_problem is not None
         return True
 
     def _row(self, entry: dict) -> list[Text]:
@@ -4655,9 +4666,28 @@ class AutomationsScreen(Screen):
                 + (f", {paused} paused" if paused else "")
                 + f" · {automations.definitions_path(self.store.config)}"
             )
+            self._add_timer_notice()
         self.refresh_bindings()
 
+    def _read_timer(self) -> None:
+        """Read the OS timer once. A status error is a notice as well, never a crash."""
+        self.timer_problem = automations.timer_problem()
+
+    def _add_timer_notice(self) -> None:
+        """Say that no automation runs when the timer is not active, and name the command that installs it.
+        A paused automation alone needs no timer, so it gets no notice."""
+        if self.timer_problem is None or not any(entry["enabled"] for entry in self.entries):
+            return
+        text = Text(self.summary, style="dim")
+        text.append(" · ", style="dim")
+        text.append(self.timer_problem, style="yellow")
+        text.append(f" Fix: {automations.TIMER_INSTALL} (i).", style="dim")
+        status = self.query_one("#automation-status", Static)
+        status.plain = text.plain
+        status.update(text)
+
     def _status(self, text: str) -> None:
+        self.summary = text
         status = self.query_one("#automation-status", Static)
         status.plain = text
         status.update(Text(text))
@@ -4755,6 +4785,28 @@ class AutomationsScreen(Screen):
                 f"Remove automation {entry['id']}: {entry['title']}?", "Its spawned cards stay on their boards."
             ),
             answered,
+        )
+
+    def action_install_timer(self) -> None:
+        """Install the OS timer that runs the tick, after you confirm."""
+        if self.timer_problem is None:
+            self.app.notify("The timer runs: automations run on their own.")
+            return
+
+        def answered(answer: bool | None) -> None:
+            if not answer:
+                return
+            try:
+                status = automations.timer("install", self.app.config_file)
+            except HerdboardError as error:
+                self.app.notify(str(error), severity="error")
+                return
+            self.app.notify(f"The {status['backend']} timer is {status['state']}")
+            self._read_timer()
+            self.action_load()
+
+        self.app.push_screen(
+            ConfirmScreen("Install the automations timer?", f"This runs {automations.TIMER_INSTALL}."), answered
         )
 
     def _call(self, function, *args, **options) -> None:

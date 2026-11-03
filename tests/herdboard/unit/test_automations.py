@@ -839,6 +839,24 @@ class TimerTests(unittest.TestCase):
             automations.timer("install")
         self.assertEqual(raised.exception.code, "unsupported_platform")
 
+    # The timer notice that the board's Automations tab and `doctor` share.
+    def test_an_active_timer_has_no_problem(self):
+        self.platform("linux")
+        self.assertIsNone(automations.timer_problem())
+
+    def test_an_inactive_timer_says_so_with_the_command_that_installs_it(self):
+        self.platform("linux")
+        self.system.state = "inactive"
+        self.assertEqual(
+            automations.timer_problem(), "Automations do not run on their own: the systemd timer is inactive."
+        )
+        self.assertEqual(automations.TIMER_INSTALL, "herdboard automation timer install")
+
+    def test_a_status_error_is_a_problem_and_not_a_crash(self):
+        self.platform("win32")
+        problem = automations.timer_problem()
+        self.assertTrue(problem.startswith("Automations do not run on their own: Automations need systemd"))
+
 
 class PlanAutomationTests(LocalTime):
     def setUp(self):

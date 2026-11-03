@@ -669,6 +669,8 @@ This is an instruction in the brief only. herdboard does not change the agent's 
 
 The tab lists each automation: on or paused, ID, title, board, schedule, next run, and last run with its card and result.
 
+When at least one automation is on and the timer is not active, the status line says that automations do not run on their own and gives the command that installs the timer. A status error, such as an unsupported platform, shows the same way. The tab checks the timer once when it opens and again when you come back to it, not on every reload.
+
 | Key | Action |
 |---|---|
 | `enter` | Details: the fields, attachments and last result. `o` opens an attachment |
@@ -676,6 +678,7 @@ The tab lists each automation: on or paused, ID, title, board, schedule, next ru
 | `P` | Plan the automation with an agent |
 | `space` | Pause or resume |
 | `n` | Run now: spawn and start one card, after you confirm |
+| `i` | Install the automations timer, after you confirm. The key is dim when the timer runs |
 | `x` | Remove the automation, after you confirm. Its cards stay |
 | `r` | Read the automations again. The tab also reads them every 30 seconds |
 | `escape`, `G` | Back to the board |
