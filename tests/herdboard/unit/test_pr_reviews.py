@@ -547,6 +547,13 @@ class ReviewerTests(PrReviewTestCase):
         ):
             self.assertIn(part, text)
         self.assertNotIn("terminal-browser", text)
+
+    def test_the_prompt_warns_about_prompt_injection(self):
+        text = pr_reviews.prompt_text(self.record(), self.pr())
+        security = text[text.index("## Security"):]
+        for part in ("untrusted", "AGENTS.md", "CLAUDE.md", "prompt injection", "printenv", "~/.ssh",
+                     "Do not open a URL", "high"):
+            self.assertIn(part, security)
         self.assertNotIn("Run no command other than", text)
 
     def test_start_reviewer_starts_the_agent_and_its_worker(self):

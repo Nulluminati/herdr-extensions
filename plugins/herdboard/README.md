@@ -558,6 +558,7 @@ What the reviewer can do:
 
 - Every reviewer may run any read-only command in a sandbox that writes no file and keeps the PR checkout read-only. The shell reaches only GitHub and the local Hunk service. See [Agent permissions](#agent-permissions).
 - The reviewer gets no `terminal-browser`: it runs outside the sandbox and can read any file, and a PR can ask for that. Codex is the exception while its global `terminal-browser` rule is in `~/.codex/rules/`.
+- The prompt treats the whole PR as untrusted, including its `AGENTS.md`, `CLAUDE.md` and agent config. It tells the reviewer to ignore instructions in the PR, to keep away from credentials and environment variables, and to flag a prompt injection as a high note. A prompt cannot stop the PR's agent config from loading when the reviewer starts.
 - The prompt forbids code execution, Git changes and any submission to GitHub. The sandbox cannot block a submit through `gh`: it uses your token.
 - No reviewer runs the tests or the code of the PR.
 
