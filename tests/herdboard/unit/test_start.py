@@ -506,9 +506,9 @@ class StartTests(unittest.TestCase):
             with self.subTest(code=code):
                 card = self.store.add(self.board, code)
 
-                def runner(argv, timeout=120):
+                def runner(argv, timeout=120, code=code):
                     if argv[1:3] == ["agent", "start"]:
-                        return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": code}}))  # noqa: B023  called only in this iteration
+                        return subprocess.CompletedProcess(argv, 1, "", json.dumps({"error": {"code": code}}))
                     return normal(argv, timeout)
 
                 with patch.object(start, "command", runner):
@@ -1058,11 +1058,11 @@ class StartTests(unittest.TestCase):
         for target in ("w9:p2", "hb-" + self.card.ref):
             with self.subTest(target=target):
 
-                def runner(argv, timeout=120):
+                def runner(argv, timeout=120, target=target):
                     if argv[1:3] == ["workspace", "get"]:
                         return subprocess.CompletedProcess(argv, 0, '{"result":{"root_pane":{"pane_id":"w9:p2"}}}', "")
                     if argv[1:3] == ["agent", "get"]:
-                        if argv[3] == target:  # noqa: B023  called only in this iteration
+                        if argv[3] == target:
                             return subprocess.CompletedProcess(argv, 0, '{"result":{"agent":{"pane_id":"w9:p2"}}}', "")
                         return subprocess.CompletedProcess(argv, 1, "", '{"error":{"code":"agent_not_found"}}')
                     return normal(argv, timeout)
@@ -1086,9 +1086,9 @@ class StartTests(unittest.TestCase):
         for operation, value in cases:
             with self.subTest(operation=operation):
 
-                def runner(argv, timeout=120):
-                    if argv[1:3] == operation:  # noqa: B023  called only in this iteration
-                        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": value}), "")  # noqa: B023  called only in this iteration
+                def runner(argv, timeout=120, operation=operation, value=value):
+                    if argv[1:3] == operation:
+                        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": value}), "")
                     return normal(argv, timeout)
 
                 with patch.object(start, "command", runner):

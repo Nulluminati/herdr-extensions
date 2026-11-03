@@ -1,5 +1,6 @@
 import contextlib
 import fcntl
+import functools
 import io
 import json
 import re
@@ -224,7 +225,7 @@ class ErrorTests(MigrateCliTestCase):
         self.todos.mkdir(parents=True, exist_ok=True)
         with open(self.todos / ".herdboard.lock", "a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
-            fast = lambda config: Store(config, lock_timeout=0.05)  # noqa: E731
+            fast = functools.partial(Store, lock_timeout=0.05)
             with mock.patch.object(cli, "Store", side_effect=fast):
                 data = self.migrate_json("migrate", str(self.todo), "--yes", expect=2)
         self.assertEqual(data["error"]["code"], "conflict")

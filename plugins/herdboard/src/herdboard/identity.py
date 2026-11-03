@@ -70,7 +70,7 @@ def _split_remote(url: str) -> tuple[str, tuple[str, ...]]:
         if parts.scheme == "file" or not parts.hostname:
             raise IdentityError(f"Remote URL is a local path: {url!r}")
         try:
-            parts.port  # noqa: B018  reading the port raises ValueError for a bad one
+            _ = parts.port  # reading the port raises ValueError for a bad one
         except ValueError as error:
             raise IdentityError(f"Cannot parse remote URL: {url!r}") from error
         return parts.hostname.lower(), _segments(parts.path, url)

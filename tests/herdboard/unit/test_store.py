@@ -492,7 +492,7 @@ class LockTest(StoreTestCase):
             def run():
                 try:
                     target()
-                except BaseException as error:  # noqa: BLE001
+                except BaseException as error:
                     errors.append(error)
 
             return run

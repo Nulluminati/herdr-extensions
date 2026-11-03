@@ -230,9 +230,9 @@ class AddLinearTests(WriteCliCase):
             for missing in (False, True):
                 with self.subTest(reconciled=reconciled, missing=missing):
 
-                    def create(client, **kwargs):
+                    def create(client, reconciled=reconciled, **kwargs):
                         issue = create_issue(client, **kwargs)
-                        if reconciled:  # noqa: B023  called only in this iteration
+                        if reconciled:
                             raise LinearWriteUnknownError("Response lost after creation")
                         return issue
 
