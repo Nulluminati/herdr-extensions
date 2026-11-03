@@ -104,9 +104,10 @@ def launch_reviewer(
     split_from: str,
     direction: str,
     name: str,
+    output: str = "findings.md",
 ) -> str:
     """Write `request` to `folder/request.md`, split a pane from `split_from` and start a sandboxed reviewer
-    in it. The reviewer writes only `folder/findings.md`. Returns the new pane's ID.
+    in it. The reviewer writes only `folder/<output>`. Returns the new pane's ID.
     Writes nothing to the start record."""
     try:
         (folder / "request.md").write_text(request, encoding="utf-8")
@@ -117,7 +118,8 @@ def launch_reviewer(
     ]
     prompt = (
         f"Read {folder / 'request.md'} and do the review it asks for. "
-        f"Write your findings to {folder / 'findings.md'} and nowhere else."
+        f"Write your {'findings' if output == 'findings.md' else 'result'} to {folder / output} "
+        "and nowhere else."
     )
     # A startup prompt (such as Claude's folder trust check) waits for the user,
     # and a reviewer busy with its first message never looks ready: the worker watches it.

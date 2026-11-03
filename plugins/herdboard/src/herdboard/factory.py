@@ -479,6 +479,7 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
         record["pane_id"],
         "right",
         f"hb-{ref.lower()}-approver",
+        output="verdict.md",
     )
     update(ref, folder, status="approving", panes=[pane])
     verdict_file = approver_folder / "verdict.md"

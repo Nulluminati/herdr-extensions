@@ -197,6 +197,10 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(log, self.folder / "worker.log")
         self.assertIn("Factory started: up to 2 review rounds.", self.log())
 
+    def test_one_round_is_named_in_the_singular(self):
+        self.start_factory(rounds=1)
+        self.assertIn("Factory started: up to 1 review round.", self.log())
+
     def test_the_rounds_default_to_the_config(self):
         self.config.factory_max_rounds = 4
         self.start_factory()
@@ -425,6 +429,10 @@ class WorkerTests(FactoryTestCase):
         self.assertIn("Step 2.", verdict.read_text())
         call = next(c for c in self.calls("agent", "start") if c[2].endswith("-approver"))
         self.assertEqual(call[call.index("--kind") + 1], "pi")
+        # The first prompt names the verdict file: a reviewer writes the file that its prompt names.
+        prompt = next(arg for arg in call if "request.md" in arg)
+        self.assertIn(str(self.folder / "approver" / "verdict.md"), prompt)
+        self.assertNotIn("findings.md", prompt)
         request = (self.folder / "approver" / "request.md").read_text()
         self.assertIn(str(attachments.plan_path(self.config, self.card.ref)), request)
         self.assertIn(str(self.folder / "round-1" / "findings.md"), request)

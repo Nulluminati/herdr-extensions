@@ -1238,7 +1238,12 @@ class Starter:
             factory_module.update(ref, folder, status="stopped")
             activity_append(self.store, ref, f"Factory failed: the worker did not start: {error}", "herdboard")
             raise StartError(f"The factory worker did not start: {error}", "worker_failed") from error
-        activity_append(self.store, ref, f"Factory started: up to {state['rounds']} review rounds.", "herdboard")
+        activity_append(
+            self.store,
+            ref,
+            f"Factory started: up to {state['rounds']} review round{'' if state['rounds'] == 1 else 's'}.",
+            "herdboard",
+        )
 
     def _repoless_workspace(self, ref, folder, record, focus=True):
         """Open the card folder as a Herdr workspace, reusing the open one that the record names."""
