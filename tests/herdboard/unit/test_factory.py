@@ -181,6 +181,9 @@ class LensTests(FactoryTestCase):
         self.assertEqual(factory.count_questions(text), 1)
         self.assertEqual(factory.count_confirmed("## Risks and questions\n- a.py:3: why?\n"), 0)
         self.assertEqual(factory.count_confirmed("No findings.\n"), 0)
+        # A reviewer may write "- None." in an empty section.
+        self.assertEqual(factory.count_questions("## Confirmed problems\n- None.\n## Risks and questions\n- None\n"), 0)
+        self.assertEqual(factory.count_confirmed("## Confirmed problems\n- none.\n"), 0)
         merged = "# security (codex)\n\n" + text + "\n# code (pi)\n\n## Confirmed problems\n- [low] b.py:1: x.\n"
         self.assertEqual(factory.count_confirmed(merged), 3)
 

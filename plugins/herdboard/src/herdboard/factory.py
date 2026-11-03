@@ -100,7 +100,8 @@ def _section(text: str, heading: str) -> list[str]:
         if line.startswith("#"):
             inside = line.lstrip("#").strip().casefold() == heading.casefold()
             continue
-        if inside and line.startswith("- "):
+        # A reviewer may write "- None." in an empty section.
+        if inside and line.startswith("- ") and line[2:].strip().rstrip(".").casefold() != "none":
             lines.append(line)
     return lines
 
