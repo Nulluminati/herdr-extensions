@@ -158,9 +158,15 @@ class RequestTests(AgentReviewTestCase):
 
     def test_a_request_with_a_focus_and_history_replaces_the_review_line(self):
         record = {"ref": self.card.ref, "worktree_path": str(self.repo), "branch": "test"}
-        text = agent_review.request_text(self.card, record, "main", self.root, [],
-                                         focus="Review this change for security only.",
-                                         history="## Earlier rounds\n- round 1 answers")
+        text = agent_review.request_text(
+            self.card,
+            record,
+            "main",
+            self.root,
+            [],
+            focus="Review this change for security only.",
+            history="## Earlier rounds\n- round 1 answers",
+        )
         self.assertIn("Review this change for security only.", text)
         self.assertNotIn(agent_review.DEFAULT_FOCUS, text)
         self.assertLess(text.index("## Earlier rounds"), text.index("Write your findings"))

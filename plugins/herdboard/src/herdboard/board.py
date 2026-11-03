@@ -216,6 +216,11 @@ HELP_SECTIONS = [
         [
             ("s", "start work with the default agent"),
             ("S", "choose claude, pi or codex (and the model and thinking level), then start work"),
+            (
+                "F",
+                "start as a factory: choose the agent, then lens reviewers check each move to Review "
+                "until an approver gives a verdict",
+            ),
             ("P", "plan the card with an agent in a tab in its worktree, or in its card folder without a repository"),
             ("g", "go to the started card's Herdr workspace"),
             ("R", "review a started card: in Hunk next to its agent, by another agent, or both"),
@@ -2092,6 +2097,7 @@ MENU_ENTRIES = [
     ("promote", "T", "Promote to Linear"),
     ("start", "s", "Start"),
     ("choose_agent", "S", "Choose agent"),
+    ("factory_start", "F", "Start as factory"),
     ("go", "g", "Go to workspace"),
     ("review", "R", "Review"),
     ("plan", "P", "Plan"),
@@ -2154,7 +2160,7 @@ def card_actions(card: CardView) -> list[tuple[str, str]]:
         else:
             wanted |= {"start", "choose_agent", "plan"}
             if todo:
-                wanted.add("archive")
+                wanted |= {"archive", "factory_start"}
         if promote_refusal(card) is None:
             wanted.add("promote")
         if card.checked and card.worktree_left:
@@ -5167,6 +5173,7 @@ class HerdboardApp(App):
         Binding("T", "promote", "Promote", show=False),
         Binding("s", "start", "Start"),
         Binding("S", "choose_agent", "Choose agent", show=False),
+        Binding("F", "factory_start", "Factory", show=False),
         Binding("g", "go", "Go to workspace"),
         Binding("R", "review", "Review"),
         Binding("P", "plan", "Plan"),
@@ -6297,8 +6304,10 @@ class HerdboardApp(App):
         repo: Path | None = None,
         no_repo: bool = False,
         new_repo: Path | None = None,
+        factory: bool = False,
     ) -> None:
-        """Start a card in a thread. `repo` is a board that names the card's repository."""
+        """Start a card in a thread. `repo` is a board that names the card's repository.
+        `factory` runs it as a factory."""
         # A dict, so a target chosen later adds one option.
         request = {
             "kind": "start",
@@ -6309,6 +6318,7 @@ class HerdboardApp(App):
             "repo": repo,
             "no_repo": no_repo,
             "new_repo": new_repo,
+            "factory": factory,
         }
 
         def guarded():
@@ -6322,6 +6332,8 @@ class HerdboardApp(App):
                         options["no_repo"] = True
                     if new_repo is not None:
                         options["new_repo"] = new_repo
+                    if factory:
+                        options["factory"] = True
                     return self.start_card(ref, agent, **options), None
                 starter = Starter(
                     self.store,
@@ -6333,7 +6345,14 @@ class HerdboardApp(App):
                 )
                 board = repo or (self.repo_board if self.view == "repo" else None)
                 return starter.start(
-                    ref, agent=agent, repo=board, model=model, thinking=thinking, no_repo=no_repo, new_repo=new_repo
+                    ref,
+                    agent=agent,
+                    repo=board,
+                    model=model,
+                    thinking=thinking,
+                    no_repo=no_repo,
+                    new_repo=new_repo,
+                    factory=factory,
                 ), None
             except HerdboardError as error:
                 return None, error
@@ -6386,7 +6405,7 @@ class HerdboardApp(App):
             if request["kind"] == "plan":
                 self._plan(ref, **arguments)
             else:
-                self._start_card(ref, **arguments)
+                self._start_card(ref, **arguments, factory=request.get("factory", False))
 
         self.push_screen(TargetScreen(ref, options, default, linear=linear), chosen)
         return True
@@ -6683,16 +6702,26 @@ class HerdboardApp(App):
             ref = card.ref
             self.push_screen(AgentScreen(), lambda agent: self._chosen_agent(ref, agent))
 
-    def _chosen_agent(self, ref: str, agent: str | None) -> None:
+    def action_factory_start(self) -> None:
+        card = self.current_card()
+        if card is None:
+            return
+        if card.source == "linear":
+            self.notify("A factory run works on herdboard cards, not Linear issues.", severity="warning")
+            return
+        ref = card.ref
+        self.push_screen(AgentScreen(), lambda agent: self._chosen_agent(ref, agent, factory=True))
+
+    def _chosen_agent(self, ref: str, agent: str | None, factory: bool = False) -> None:
         if agent is None:
             return
         if agent == "claude":
-            self._start_card(ref, agent)
+            self._start_card(ref, agent, factory=factory)
             return
 
         def chosen(choice: tuple[str | None, str | None] | None) -> None:
             if choice is not None:
-                self._start_card(ref, agent, *choice)
+                self._start_card(ref, agent, *choice, factory=factory)
 
         screen = (
             ModelScreen(*codex_model_choices(self.store.config), agent=agent)

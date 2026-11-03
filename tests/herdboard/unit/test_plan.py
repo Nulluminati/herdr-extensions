@@ -218,8 +218,10 @@ class RequestTests(PlanTestCase):
     def test_the_brief_asks_for_review_lenses_after_the_plan_format(self):
         self.planner.plan(self.card.ref)
         text = self.brief()
-        self.assertIn("When the card may run as a factory, add a line `Review lenses: security, ux, ui, code` "
-                      "under Decisions.", text)
+        self.assertIn(
+            "When the card may run as a factory, add a line `Review lenses: security, ux, ui, code` under Decisions.",
+            text,
+        )
         self.assertLess(text.index("## Open questions"), text.index("Review lenses:"))
 
     def test_the_brief_offers_mockups_before_how_to_plan(self):

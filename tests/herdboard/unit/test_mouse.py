@@ -24,6 +24,7 @@ class CardActionTests(MouseTestCase):
                 "promote",
                 "start",
                 "choose_agent",
+                "factory_start",
                 "plan",
                 "parent",
             ],

@@ -835,41 +835,50 @@ started = "Doing"
     def test_factory_defaults(self):
         config = load_config()
         self.assertEqual(config.factory_max_rounds, 3)
-        self.assertEqual(config.factory_lenses, {
-            "security": {"agent": "codex"}, "code": {"agent": "pi"},
-            "ux": {"agent": "claude"}, "ui": {"agent": "claude"}})
+        self.assertEqual(
+            config.factory_lenses,
+            {
+                "security": {"agent": "codex"},
+                "code": {"agent": "pi"},
+                "ux": {"agent": "claude"},
+                "ui": {"agent": "claude"},
+            },
+        )
         self.assertIsNone(config.factory_approver)
 
     def test_factory_settings_from_file(self):
-        path = self.write(self.dir / "f.toml", 'factory_max_rounds = 5\n[factory]\napprover = "pi"\n'
-                          '[factory.lenses]\nsecurity = { agent = "claude", model = "opus", thinking = "high" }\n'
-                          'ux = { agent = "pi" }\n')
+        path = self.write(
+            self.dir / "f.toml",
+            'factory_max_rounds = 5\n[factory]\napprover = "pi"\n'
+            '[factory.lenses]\nsecurity = { agent = "claude", model = "opus", thinking = "high" }\n'
+            'ux = { agent = "pi" }\n',
+        )
         config = load_config(path)
         self.assertEqual(config.factory_max_rounds, 5)
         self.assertEqual(config.factory_approver, "pi")
-        self.assertEqual(config.factory_lenses["security"],
-                         {"agent": "claude", "model": "opus", "thinking": "high"})
+        self.assertEqual(config.factory_lenses["security"], {"agent": "claude", "model": "opus", "thinking": "high"})
         self.assertEqual(config.factory_lenses["ux"], {"agent": "pi"})
         # A lens that the file leaves out keeps its default.
         self.assertEqual(config.factory_lenses["code"], {"agent": "pi"})
 
     def test_factory_settings_must_be_valid(self):
         for text, message in (
-                ("factory_max_rounds = 0", "factory_max_rounds"),
-                ("factory_max_rounds = 11", "factory_max_rounds"),
-                ('factory_max_rounds = "3"', "factory_max_rounds"),
-                ("factory_max_rounds = true", "factory_max_rounds"),
-                ('factory = 1', "factory must be a table"),
-                ('[factory]\napprover = "gpt"', "factory.approver"),
-                ('[factory]\nlenses = 1', "factory.lenses"),
-                ('[factory.lenses]\nperf = { agent = "pi" }', "unknown lens.*perf"),
-                ('[factory.lenses]\nux = "pi"', "factory.lenses.ux"),
-                ('[factory.lenses]\nux = { agent = "gpt" }', "factory.lenses.ux.agent"),
-                ('[factory.lenses]\nux = { model = "opus" }', "factory.lenses.ux.agent"),
-                ('[factory.lenses]\nux = { agent = "pi", model = "two words" }', "factory.lenses.ux.model"),
-                ('[factory.lenses]\nux = { agent = "pi", thinking = "huge" }', "factory.lenses.ux.thinking"),
-                ('[factory.lenses]\nux = { agent = "claude", thinking = "off" }', "factory.lenses.ux.thinking"),
-                ('[factory.lenses]\nux = { agent = "pi", colour = "red" }', "factory.lenses.ux.*colour")):
+            ("factory_max_rounds = 0", "factory_max_rounds"),
+            ("factory_max_rounds = 11", "factory_max_rounds"),
+            ('factory_max_rounds = "3"', "factory_max_rounds"),
+            ("factory_max_rounds = true", "factory_max_rounds"),
+            ("factory = 1", "factory must be a table"),
+            ('[factory]\napprover = "gpt"', "factory.approver"),
+            ("[factory]\nlenses = 1", "factory.lenses"),
+            ('[factory.lenses]\nperf = { agent = "pi" }', "unknown lens.*perf"),
+            ('[factory.lenses]\nux = "pi"', "factory.lenses.ux"),
+            ('[factory.lenses]\nux = { agent = "gpt" }', "factory.lenses.ux.agent"),
+            ('[factory.lenses]\nux = { model = "opus" }', "factory.lenses.ux.agent"),
+            ('[factory.lenses]\nux = { agent = "pi", model = "two words" }', "factory.lenses.ux.model"),
+            ('[factory.lenses]\nux = { agent = "pi", thinking = "huge" }', "factory.lenses.ux.thinking"),
+            ('[factory.lenses]\nux = { agent = "claude", thinking = "off" }', "factory.lenses.ux.thinking"),
+            ('[factory.lenses]\nux = { agent = "pi", colour = "red" }', "factory.lenses.ux.*colour"),
+        ):
             with self.subTest(text=text):
                 path = self.write(self.dir / "f.toml", text + "\n")
                 with self.assertRaisesRegex(HerdboardError, message):

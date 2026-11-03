@@ -124,6 +124,20 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.callback.assert_called_with(self.card.ref, "pi")
 
+    async def test_factory_key_chooses_the_agent_then_starts_a_factory(self):
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("F")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, AgentScreen)
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ModelScreen)
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            self.callback.assert_called_with(self.card.ref, "pi", factory=True)
+
     async def test_pi_model_dialog_ignores_codex_only_saved_levels(self):
         self.store.config.thinking = {"pi/default": "ultra"}
         app = self.app()
