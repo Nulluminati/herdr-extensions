@@ -66,6 +66,10 @@ PLAN_FORMAT = """    # Plan: <title>
     ## Open questions
     What is still unknown. Write "None." when nothing is.
 """
+# A factory run (`start --factory`) reads this line from the plan to choose its review lenses.
+FACTORY_LENSES_RULE = ("When the card may run as a factory, add a line `Review lenses: security, ux, ui, code` "
+                       "under Decisions. Leave out lenses that do not apply, such as ux and ui for a change "
+                       "with no user interface.")
 
 
 class PlanError(HerdboardError):
@@ -220,6 +224,8 @@ def brief_text(
         "",
         PLAN_FORMAT,
     ]
+    if not (repoless or new_repo_path is not None):
+        lines += [FACTORY_LENSES_RULE, ""]
     return "\n".join(lines)
 
 

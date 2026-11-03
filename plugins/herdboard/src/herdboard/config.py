@@ -43,6 +43,11 @@ TAG_STYLES = ("outline", "round", "block")
 CARD_STYLES = ("full", "compact")
 
 
+# The review lenses of a factory run, and the agent kind that each lens uses by default.
+LENSES = ("security", "ux", "ui", "code")
+DEFAULT_FACTORY_LENSES = {"security": "codex", "code": "pi", "ux": "claude", "ui": "claude"}
+FACTORY_ROUNDS = (1, 10)
+
 KEY_COMMAND_TIMEOUT = 30
 # The share of the agent pane's height that the details pane takes. Herdr splits panes by ratio.
 DETAILS_PANE_RATIOS = (0.1, 0.6)
@@ -155,6 +160,13 @@ class Config:
     # Open a read-only card details pane on top of each card agent and planner.
     details_pane: bool = True
     details_pane_ratio: float = 0.25
+    # The most review rounds of a factory run (`start --factory`).
+    factory_max_rounds: int = 3
+    # Each lens's reviewer: {"agent": kind, "model": name, "thinking": level}; model and thinking are optional.
+    factory_lenses: dict[str, dict] = field(
+        default_factory=lambda: {lens: {"agent": kind} for lens, kind in DEFAULT_FACTORY_LENSES.items()})
+    # The approver's agent kind; None uses the card reviewer of the builder's kind.
+    factory_approver: str | None = None
 
     def __post_init__(self):
         if self.start_column is None:
@@ -474,6 +486,47 @@ def _load_thinking(path: Path, data: dict) -> dict[str, str]:
     return dict(table)
 
 
+def _load_factory(path: Path, data: dict, config: Config) -> None:
+    """`factory_max_rounds` and the `[factory]` table: the approver and the `[factory.lenses]` reviewers."""
+    if "factory_max_rounds" in data:
+        rounds = data["factory_max_rounds"]
+        low, high = FACTORY_ROUNDS
+        if isinstance(rounds, bool) or not isinstance(rounds, int) or not low <= rounds <= high:
+            raise HerdboardError(f"{path}: factory_max_rounds must be an integer from {low} to {high}")
+        config.factory_max_rounds = rounds
+    table = data.get("factory", {})
+    if not isinstance(table, dict):
+        raise HerdboardError(f"{path}: factory must be a table")
+    if "approver" in table:
+        if table["approver"] not in AGENTS:
+            raise HerdboardError(f"{path}: factory.approver must be claude, pi or codex")
+        config.factory_approver = table["approver"]
+    lenses = table.get("lenses", {})
+    if not isinstance(lenses, dict):
+        raise HerdboardError(f"{path}: factory.lenses must be a table of lenses")
+    unknown = sorted(set(lenses) - set(LENSES))
+    if unknown:
+        raise HerdboardError(f"{path}: unknown lens in factory.lenses: {', '.join(unknown)}; "
+                             f"use {', '.join(LENSES)}")
+    for lens, value in lenses.items():
+        label = f"{path}: factory.lenses.{lens}"
+        if not isinstance(value, dict):
+            raise HerdboardError(f"{label} must be a table, such as {{ agent = \"pi\" }}")
+        extra = sorted(set(value) - {"agent", "model", "thinking"})
+        if extra:
+            raise HerdboardError(f"{label} has unknown keys: {', '.join(extra)}")
+        kind = value.get("agent")
+        if kind not in AGENTS:
+            raise HerdboardError(f"{label}.agent must be claude, pi or codex")
+        model = value.get("model")
+        if model is not None and (not isinstance(model, str) or not model or any(ch.isspace() for ch in model)):
+            raise HerdboardError(f"{label}.model must be one model name, such as zai/glm-5.3")
+        thinking = value.get("thinking")
+        if thinking is not None and thinking not in thinking_levels(kind):
+            raise HerdboardError(f"{label}.thinking must be one of {', '.join(thinking_levels(kind))}")
+        config.factory_lenses[lens] = dict(value)
+
+
 def load_config(path: Path | None = None) -> Config:
     path = config_path(path)
     config = Config()
@@ -562,4 +615,5 @@ def load_config(path: Path | None = None) -> Config:
     if "details_pane_ratio" in data:
         _check_details_ratio(data["details_pane_ratio"], f"{path}: details_pane_ratio")
         config.details_pane_ratio = float(data["details_pane_ratio"])
+    _load_factory(path, data, config)
     return config

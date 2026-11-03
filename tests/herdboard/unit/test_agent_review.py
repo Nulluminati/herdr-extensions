@@ -156,6 +156,18 @@ class RequestTests(AgentReviewTestCase):
                     else:
                         self.assertNotIn("terminal-browser", text)
 
+    def test_a_request_with_a_focus_and_history_replaces_the_review_line(self):
+        record = {"ref": self.card.ref, "worktree_path": str(self.repo), "branch": "test"}
+        text = agent_review.request_text(self.card, record, "main", self.root, [],
+                                         focus="Review this change for security only.",
+                                         history="## Earlier rounds\n- round 1 answers")
+        self.assertIn("Review this change for security only.", text)
+        self.assertNotIn(agent_review.DEFAULT_FOCUS, text)
+        self.assertLess(text.index("## Earlier rounds"), text.index("Write your findings"))
+        plain = agent_review.request_text(self.card, record, "main", self.root, [])
+        self.assertIn(agent_review.DEFAULT_FOCUS, plain)
+        self.assertNotIn("Earlier rounds", plain)
+
     def test_codex_reviewer_rejects_pi_only_thinking(self):
         self.started()
         with self.assertRaises(review.ReviewError) as raised:

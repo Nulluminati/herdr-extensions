@@ -65,6 +65,78 @@ def _git(worktree: Path, *args: str) -> str:
     return result.stdout
 
 
+def read_change(worktree: Path, base: str) -> tuple[str, str, list[str], str]:
+    """The branch diff since `base`, the uncommitted diff, the untracked files and HEAD.
+    Raises `nothing_to_review` when the branch has no change."""
+    branch_diff = _git(worktree, "diff", f"{base}...HEAD")
+    uncommitted = _git(worktree, "diff", "HEAD")
+    untracked = _git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
+    if not (branch_diff or uncommitted or untracked):
+        raise ReviewError(
+            f"{worktree.name} has no commits since {base} and no uncommitted changes", "nothing_to_review"
+        )
+    return branch_diff, uncommitted, untracked, _git(worktree, "rev-parse", "HEAD").strip()
+
+
+def write_change(folder: Path, branch_diff: str, uncommitted: str) -> None:
+    (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
+    (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
+
+
+def capture_change(worktree: Path, base: str, folder: Path) -> tuple[list[str], str]:
+    """Write the branch and uncommitted diffs into `folder`. Returns the untracked files and HEAD."""
+    branch_diff, uncommitted, untracked, head = read_change(worktree, base)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        write_change(folder, branch_diff, uncommitted)
+    except OSError as error:
+        raise ReviewError(f"{folder}: cannot write the change: {error}", "io") from error
+    return untracked, head
+
+
+def launch_reviewer(
+    worktree: Path,
+    kind: str,
+    model: str | None,
+    thinking: str | None,
+    request: str,
+    folder: Path,
+    split_from: str,
+    direction: str,
+    name: str,
+) -> str:
+    """Write `request` to `folder/request.md`, split a pane from `split_from` and start a sandboxed reviewer
+    in it. The reviewer writes only `folder/findings.md`. Returns the new pane's ID.
+    Writes nothing to the start record."""
+    try:
+        (folder / "request.md").write_text(request, encoding="utf-8")
+    except OSError as error:
+        raise ReviewError(f"{folder}: cannot write the review request: {error}", "io") from error
+    pane = herdr("pane", "split", split_from, "--direction", direction, "--cwd", str(worktree), "--no-focus")["pane"][
+        "pane_id"
+    ]
+    prompt = (
+        f"Read {folder / 'request.md'} and do the review it asks for. "
+        f"Write your findings to {folder / 'findings.md'} and nowhere else."
+    )
+    # A startup prompt (such as Claude's folder trust check) waits for the user,
+    # and a reviewer busy with its first message never looks ready: the worker watches it.
+    herdr(
+        "agent",
+        "start",
+        name,
+        "--kind",
+        kind,
+        "--pane",
+        pane,
+        "--",
+        *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
+        tolerated=("timeout", "agent_not_ready"),
+    )
+    activity.record_pane_agent(pane, kind)
+    return pane
+
+
 def reviewer_arguments(
     kind: str,
     prompt: str,
@@ -99,9 +171,23 @@ def reviewer_arguments(
     ]
 
 
+# The review instruction of a card review. A factory lens replaces it with its own focus.
+DEFAULT_FOCUS = "Review this change for bugs, security problems and missing tests."
+
+
 def request_text(
-    card, record, base: str, folder: Path, untracked: list[str], files: list[dict] = (), browser: bool = True
+    card,
+    record,
+    base: str,
+    folder: Path,
+    untracked: list[str],
+    files: list[dict] = (),
+    browser: bool = True,
+    focus: str | None = None,
+    history: str = "",
 ) -> str:
+    """The review request. `focus` replaces the default review instruction, and `history` (the earlier
+    rounds' findings and answers of a factory run) goes before the findings format."""
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
     plan = next((entry for entry in files if entry["name"] == attachments.PLAN_NAME), None)
     others = [entry for entry in files if entry is not plan]
@@ -113,6 +199,7 @@ def request_text(
     if card_files:
         card_files += "\n"
     body = "\n".join(card.body).strip() if card is not None else ""
+    history_block = f"\n{history.strip()}\n" if history.strip() else ""
     return f"""# Review request
 
 Card {record["ref"]}: {card.title if card is not None else record["ref"]}
@@ -126,11 +213,11 @@ Card {record["ref"]}: {card.title if card is not None else record["ref"]}
 - New untracked files (read them from the repository):
 {untracked_list}
 
-{card_files}Review this change for bugs, security problems and missing tests.
+{card_files}{focus or DEFAULT_FOCUS}
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
 Do not change any file in the repository.
-{REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}
+{REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}{history_block}
 Write your findings to `{folder / "findings.md"}` in this format:
 
     ## Confirmed problems
@@ -240,14 +327,14 @@ class AgentReviewer(Reviewer):
             else:
                 # A record from before bases were recorded compares with the branch upstream, as merge does.
                 base = record.get("base") or "@{upstream}"
-                branch_diff = _git(worktree, "diff", f"{base}...HEAD")
-                uncommitted = _git(worktree, "diff", "HEAD")
-                untracked = _git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
-                if not (branch_diff or uncommitted or untracked):
+                try:
+                    branch_diff, uncommitted, untracked, head = read_change(worktree, base)
+                except ReviewError as error:
+                    if error.code != "nothing_to_review":
+                        raise
                     raise ReviewError(
                         f"{ref} has no commits since {base} and no uncommitted changes", "nothing_to_review"
-                    )
-                head = _git(worktree, "rev-parse", "HEAD").strip()
+                    ) from None
             # The review runs in the background: the user stays where they are.
             self._ready_agent(card, ref, key, record, persist, focus=False)
             if card is None:
@@ -262,34 +349,13 @@ class AgentReviewer(Reviewer):
                 if record.get("mode") == REPOLESS:
                     request = repoless_request_text(card, record, folder, files, browser=True)
                 else:
-                    (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
-                    (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
+                    write_change(folder, branch_diff, uncommitted)
                     request = request_text(card, record, base, folder, untracked, files, browser=True)
-                (folder / "request.md").write_text(request, encoding="utf-8")
             except OSError as error:
                 raise ReviewError(f"{reviews}: cannot write the review request: {error}", "io") from error
-            pane = herdr(
-                "pane", "split", record["pane_id"], "--direction", "right", "--cwd", str(worktree), "--no-focus"
-            )["pane"]["pane_id"]
-            prompt = (
-                f"Read {folder / 'request.md'} and do the review it asks for. "
-                f"Write your findings to {folder / 'findings.md'} and nowhere else."
+            pane = launch_reviewer(
+                worktree, kind, model, thinking, request, folder, record["pane_id"], "right", f"hb-{ref.lower()}-review"
             )
-            # A startup prompt (such as Claude's folder trust check) waits for the user,
-            # and a reviewer busy with its first message never looks ready: the worker watches it.
-            herdr(
-                "agent",
-                "start",
-                f"hb-{ref.lower()}-review",
-                "--kind",
-                kind,
-                "--pane",
-                pane,
-                "--",
-                *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
-                tolerated=("timeout", "agent_not_ready"),
-            )
-            activity.record_pane_agent(pane, kind)
             record["agent_review"] = {
                 "folder": str(folder),
                 "pane_id": pane,

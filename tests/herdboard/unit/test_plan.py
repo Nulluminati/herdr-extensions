@@ -215,6 +215,13 @@ class RequestTests(PlanTestCase):
         self.assertNotIn("## Changes already in the worktree", text)
         self.assertNotIn("work agent works in this worktree", text)
 
+    def test_the_brief_asks_for_review_lenses_after_the_plan_format(self):
+        self.planner.plan(self.card.ref)
+        text = self.brief()
+        self.assertIn("When the card may run as a factory, add a line `Review lenses: security, ux, ui, code` "
+                      "under Decisions.", text)
+        self.assertLess(text.index("## Open questions"), text.index("Review lenses:"))
+
     def test_the_brief_offers_mockups_before_how_to_plan(self):
         self.planner.plan(self.card.ref)
         text = self.brief()
@@ -575,6 +582,10 @@ class NoRepositoryPlanTests(PlanTestCase):
         with self.assertRaises(review.ReviewError) as raised:
             agent_review.AgentReviewer(self.store, self.repo).request(self.inbox_card.ref)
         self.assertEqual(raised.exception.code, "not_started")
+
+    def test_the_new_repository_plan_brief_has_no_review_lenses(self):
+        self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
+        self.assertNotIn("Review lenses:", self.brief_for(self.inbox_card.ref))
 
     def test_the_new_repository_plan_brief_does_not_promise_a_finished_folder(self):
         self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
