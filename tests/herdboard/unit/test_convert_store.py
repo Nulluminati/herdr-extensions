@@ -291,6 +291,36 @@ class ConvertStoreTests(ConvertTestCase):
         self.assertEqual(len(seen), len(set(seen)))
         self.assertFalse((self.todos / "boards").exists())
 
+    def test_a_review_counts_as_running_only_while_its_reviewer_pane_lives(self):
+        from herdboard import agent_review, plan, start
+
+        record = {"ref": "tpar", "agent_review": {"pane_id": "p7"}}
+        self.enterContext(mock.patch.object(start, "find_record", return_value=("tpar", record)))
+        self.enterContext(mock.patch.object(start, "agent_live", return_value=False))
+        self.enterContext(mock.patch.object(plan, "running_planner", return_value=None))
+        with mock.patch.object(agent_review, "_reviewer_status", return_value=None) as status:
+            self.assertEqual(convert_store.running_cards(["tpar"]), [])
+        status.assert_called_once_with("p7")
+        with mock.patch.object(agent_review, "_reviewer_status", return_value="working"):
+            self.assertEqual(convert_store.running_cards(["tpar"]), ["tpar"])
+
+    def test_configured_complete_markers_replace_complete(self):
+        config_file = self.root / "config.toml"
+        config_file.write_text('complete_markers = ["Fertig"]\n')
+        self.convert(config_file=config_file)
+        self.assertEqual(
+            [c.completed for c in self.store.snapshot(self.board("acme-api")).columns], [False, False, False]
+        )
+
+    def test_a_failure_removes_the_data_folders_it_made_in_existing_folders(self):
+        (self.todos / ".herdboard" / "automations").mkdir()
+        (self.todos / ".herdboard" / "linear" / "ENG-1").mkdir(parents=True)
+        with mock.patch("herdboard.convert_store.os.rename", side_effect=OSError("disk full")):
+            with self.assertRaises(ConvertError):
+                self.convert()
+        self.assertEqual(list((self.todos / ".herdboard" / "automations").iterdir()), [])
+        self.assertEqual([p.name for p in (self.todos / ".herdboard" / "linear").iterdir()], ["ENG-1"])
+
     def test_a_project_named_inbox_is_refused(self):
         (self.todos / "projects" / "inbox.md").write_text("## Todo\n")
         with self.assertRaises(ConvertError) as caught:

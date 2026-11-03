@@ -76,9 +76,10 @@ def old_settings(config_file: Path | None) -> tuple[list[str], tuple[str, ...]]:
         data = tomllib.loads(config_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return markers, titles
-    extra = data.get("complete_markers")
-    if isinstance(extra, list) and all(isinstance(m, str) for m in extra):
-        markers = ["Complete", *extra]
+    configured = data.get("complete_markers")
+    # The old config replaced the default marker list.
+    if isinstance(configured, list) and all(isinstance(m, str) for m in configured):
+        markers = list(configured)
     archive = data.get("archive_titles")
     if isinstance(archive, list) and all(isinstance(t, str) for t in archive):
         titles = ("Archive", *(t for t in archive if t != "Archive"))
@@ -290,14 +291,20 @@ def planned_refs() -> list[str]:
 
 def running_cards(refs: list[str]) -> list[str]:
     """The cards among `refs` whose agent, planner or agent reviewer still runs."""
+    from .agent_review import _reviewer_status
     from .plan import running_planner
     from .start import agent_live, find_record
+
+    def reviewing(record) -> bool:
+        # A review whose reviewer pane is gone, after a worker that died, runs no more.
+        review = record.get("agent_review")
+        return isinstance(review, dict) and _reviewer_status(review.get("pane_id")) is not None
 
     busy = []
     for ref in refs:
         found = find_record(ref)
         record = found[1] if found else {}
-        if running_planner(ref) or record.get("agent_review") or (found and agent_live(record)):
+        if running_planner(ref) or reviewing(record) or (found and agent_live(record)):
             busy.append(ref)
     return busy
 

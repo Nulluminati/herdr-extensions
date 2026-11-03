@@ -702,6 +702,8 @@ def _cmd_add(ctx: _Context) -> dict:
         raise UsageError("--linear and --board cannot be used together")
     if not args.linear and (args.team or args.project or args.label or args.state):
         raise UsageError("--team, --project, --label and --state work only with --linear")
+    if args.linear and (args.tag or args.due):
+        raise UsageError("--tag and --due work only for todos, not with --linear")
     body = args.body
     if args.body_file is not None:
         path = args.body_file if args.body_file.is_absolute() else ctx.directory / args.body_file

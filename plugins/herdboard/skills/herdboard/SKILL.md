@@ -20,7 +20,7 @@ Always pass `--json` (before the command name or after it). Read stdout as JSON.
 ## Cards
 
 - A card reference is a todo ID (`tep3`) or a Linear identifier (`ENG-123`). Use the `ref` field from `list` output.
-- A card has `title`, `column`, `checked`, `due`, `tags`, `type`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. `read_only: true` means you cannot change it. `archived: true` means the todo is in its board's archive. `stale: true` means the Linear data comes from the cache.
+- A card has `title`, `column`, `checked`, `due`, `tags`, `type`, `body`, `board`, `source` (`todo` or `linear`), `url`, `state` and `team`. A todo's `path` is its board folder, such as `~/todos/boards/inbox`, not a file. `read_only: true` means you cannot change it. `archived: true` means the todo is in its board's archive. `stale: true` means the Linear data comes from the cache.
 - Columns: `list --json` returns `boards`, with every column of each listed board (`title`, `limit`, `done`), also the empty ones. Move a todo only to a column of its own board. A Linear issue can move to any column that one of its team's workflow states maps to; the defaults are Backlog, Todo, In progress, Review and Done. When no state fits, the error is `no_state`.
 - Tags, the due date and the type are fields, not title text: use `--tag`, `--due` and `--type`. A `#` or a date in a title is plain text.
 - The `type` field holds the type, such as `bug`. The `types` setting lists the types (default: bug, feature, chore, docs, refactor). A Linear issue's type is its first label that names a type.
@@ -210,6 +210,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `card_active` | The card's worktree still exists, or its agent or planner still runs. `move --board` and `delete` refuse a started card too. Tell the user the message. |
 | `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
 | `linear_archive` | herdboard archives only todos. Tell the user. |
+| `duplicate_id` | Two card folders have the same todo ID. Tell the user to run `herdboard doctor`. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |
 | `conflict` | The card changed, or another write holds the lock. Run `show` again, then retry once. |
 | `ambiguous_state` | Several Linear states match the column. The error lists `candidates`. Ask the user which one, then run the command again with `--state NAME`. |

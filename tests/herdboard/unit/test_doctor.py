@@ -188,6 +188,12 @@ class DoctorTests(unittest.TestCase):
         self.board(done=False)
         self.assertEqual(self.findings("done_column_missing")[0]["level"], "warning")
 
+    def test_a_board_without_columns_is_an_error(self):
+        self.board(columns=[])
+        found = self.findings("board_no_columns", expect=1)
+        self.assertEqual(found[0]["level"], "error")
+        self.assertIn("t123", found[0]["message"])
+
     def test_a_done_flag_or_the_name_done_counts_as_done(self):
         self.board(columns=[("Todo", ["t123"], {}), ("Shipped", [], {"done": True})])
         self.board("b", cards=[], columns=[("Todo", [], {}), ("done", [], {})])

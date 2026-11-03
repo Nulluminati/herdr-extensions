@@ -39,6 +39,12 @@ class CommandTests(CliTestCase):
         self.assertIn("2026-02-30", data["error"]["message"])
         self.assertEqual(self.run_json("list")["cards"], [])
 
+    def test_tags_and_due_work_only_for_todos(self):
+        for args in (("--tag", "home"), ("--due", "2026-01-02")):
+            with self.subTest(args=args):
+                data = self.run_json("add", "x", "--linear", *args, directory=self.plain, expect=1)
+                self.assertEqual(data["error"]["code"], "usage")
+
     def test_a_title_is_plain_text(self):
         card = self.run_json("add", "fix #42 📅 later")["card"]
         self.assertEqual((card["title"], card["tags"], card["due"]), ("fix #42 📅 later", [], None))

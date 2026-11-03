@@ -8,7 +8,7 @@ from unittest import mock
 
 from herdboard import activity, attachments
 from herdboard.config import load_config
-from herdboard.model import HerdboardError, NotFoundError
+from herdboard.model import DuplicateIdError, HerdboardError, NotFoundError
 from herdboard.store import Store
 from support.herdboard_cli import CliTestCase
 from support.herdboard_store import write_board
@@ -50,6 +50,13 @@ class AttachmentTests(unittest.TestCase):
         with mock.patch.object(self.store, "_lock", lock):
             added = attachments.add(self.store, "t3m9", self.doc)
         self.assertEqual((added["name"], added["size"]), ("spec.md", 19))
+
+    def test_a_duplicate_card_id_is_refused(self):
+        other = write_board(self.root / "todos", "other", [("Todo", [{"id": "t3m9", "title": "Copy"}])])
+        self.assertTrue((other / "cards" / "t3m9").is_dir())
+        with self.assertRaises(DuplicateIdError):
+            attachments.add(self.store, "t3m9", self.doc)
+        self.assertFalse((self.homes["t3m9"] / "attachments").exists())
 
     def test_add_takes_another_name(self):
         attachments.add(self.store, "ENG-12", self.doc, name="design.md")

@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 from .config import Config
-from .model import HerdboardError, NotFoundError
+from .model import DuplicateIdError, HerdboardError, NotFoundError
 
 # A todo ID (`t3m9`), an automation ID (`a7k2`) or a Linear identifier (`ENG-123`): all are safe file names.
 LOG_REF = re.compile(r"^(t[0-9a-z]{3}|a[0-9a-z]{3}|[A-Z][A-Z0-9]*-\d+)$")
@@ -37,7 +37,8 @@ def todo_dirs(config: Config, ref: str) -> list[Path]:
 
 
 def card_dir(config: Config, ref: str) -> Path:
-    """The folder of the card `ref`. Raises NotFoundError for a todo that has no folder."""
+    """The folder of the card `ref`. Raises NotFoundError for a todo that has no folder,
+    and DuplicateIdError for a todo ID that names two folders."""
     if not LOG_REF.match(ref):
         raise LogUsageError(f"{ref!r} is not a card ID: use a todo ID or a Linear identifier")
     if AUTOMATION_REF.match(ref):
@@ -47,4 +48,7 @@ def card_dir(config: Config, ref: str) -> Path:
     found = todo_dirs(config, ref)
     if not found:
         raise NotFoundError(f"No card {ref}")
+    if len(found) > 1:
+        folders = ", ".join(str(path.parent) for path in found)
+        raise DuplicateIdError(f"{ref} names more than one card folder: {folders}. Run `herdboard doctor`")
     return found[0].parent

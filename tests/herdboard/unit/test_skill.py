@@ -11,6 +11,7 @@ from herdboard.model import (
     ArchivedError,
     CardActiveError,
     ConflictError,
+    DuplicateIdError,
     IoError,
     NotFoundError,
     OldFormatError,
@@ -136,6 +137,7 @@ class SkillTests(unittest.TestCase):
                 IoError,
                 OldFormatError,
                 ConvertError,
+                DuplicateIdError,
             )
         }
         known.add(cli.UsageError.code)

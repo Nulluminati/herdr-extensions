@@ -15,7 +15,7 @@ from . import activity, attachments
 from .config import Config
 from .linear_cards import LINEAR_REF
 from .linear_source import state_dir
-from .model import HerdboardError, NotFoundError
+from .model import DuplicateIdError, HerdboardError, NotFoundError
 from .paths import card_dir
 from .start import REPOLESS, _read, find_record, herdr
 
@@ -85,7 +85,8 @@ def watched_paths(config: Config, ref: str, board_path: Path | None) -> list[Pat
     if activity.LOG_REF.match(ref):
         try:
             folder = card_dir(config, ref)
-        except NotFoundError:
+        except (NotFoundError, DuplicateIdError):
+            # The pane still shows the card; `doctor` reports a duplicate ID.
             folder = None
         if folder is not None:
             paths += [folder / "card.md", folder / "log.md", folder / "attachments"]

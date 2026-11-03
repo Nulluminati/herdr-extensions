@@ -132,6 +132,12 @@ def check_board(store, board):
                 board_path,
             )
         )
+    if not file.columns:
+        # No column can show the cards, and --fix has no column to add them to.
+        cards = ", ".join(board.cards) or "none"
+        message = f"Board {path.name} has no columns, so it shows no cards (cards: {cards}). Add a [[column]] table."
+        findings.append(finding("error", "board_no_columns", message, board_path))
+        return findings
     try:
         store._done_column(file, path)
     except HerdboardError as error:
