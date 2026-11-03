@@ -550,9 +550,17 @@ class ReviewerTests(PrReviewTestCase):
 
     def test_the_prompt_warns_about_prompt_injection(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
-        security = text[text.index("## Security"):]
-        for part in ("untrusted", "AGENTS.md", "CLAUDE.md", "prompt injection", "printenv", "~/.ssh",
-                     "Do not open a URL", "high"):
+        security = text[text.index("## Security") :]
+        for part in (
+            "untrusted",
+            "AGENTS.md",
+            "CLAUDE.md",
+            "prompt injection",
+            "printenv",
+            "~/.ssh",
+            "Do not open a URL",
+            "high",
+        ):
             self.assertIn(part, security)
         self.assertNotIn("Run no command other than", text)
 
