@@ -128,6 +128,10 @@ def factory_running(ref) -> bool:
     state = factory_state(ref)
     if not state or state.get("status") not in ACTIVE:
         return False
+    return _worker_alive(state)
+
+
+def _worker_alive(state: dict) -> bool:
     pid = state.get("pid")
     if pid is None:
         return True  # The worker has not written its process ID yet.
@@ -161,6 +165,9 @@ def update(ref, folder: Path, **changes) -> dict | None:
         state = record.get("factory")
         if not state or Path(state["folder"]) != Path(folder):
             return None
+        if state.get("status") == "stopped":
+            # A stop is final: a worker that started a reviewer at the same time must not undo it.
+            changes.pop("status", None)
         state.update(changes)
         records = _read(path)
         records[key] = record
@@ -200,6 +207,13 @@ def signal_ready(ref) -> dict | None:
         state = record.get("factory")
         if not state or state.get("status") not in ACTIVE:
             return None
+        if not _worker_alive(state):
+            # The worker died: free the card, so the move goes ahead.
+            state.update(status="stopped", ready=False)
+            records = _read(path)
+            records[key] = record
+            _write(path, records)
+            return None
         if state["status"] in ("building", "fixing"):
             state["ready"] = True
             records = _read(path)
@@ -220,7 +234,7 @@ def stop(store, ref) -> dict:
 
 
 def _close(panes) -> None:
-    for pane in panes:
+    for pane in filter(None, panes):
         try:
             herdr("pane", "close", pane, tolerated=("pane_not_found",))
         except HerdboardError as error:
@@ -228,6 +242,22 @@ def _close(panes) -> None:
 
 
 # One review round.
+
+
+def _cancelled(store, ref, folder: Path) -> dict | None:
+    """{"stopped": True, ...} when the run must stop now, else None.
+
+    Without `store`, only the user's stop and a newer run count; with it, the card's end counts too."""
+    state = factory_state(ref)
+    if not state or Path(state["folder"]) != folder or state.get("status") == "stopped":
+        return {"stopped": True}
+    if store is not None:
+        reason = _stop_reason(store, ref, folder)[0]
+        if reason == "stopped":
+            return {"stopped": True}
+        if reason is not None:
+            return {"stopped": True, "reason": reason}
+    return None
 
 
 def history_text(folder: Path, done: int) -> str:
@@ -266,6 +296,8 @@ def run_round(store, ref, record, card, number: int) -> dict:
     history = history_text(folder, number - 1)
     reviewers, split_from, direction = [], record["pane_id"], "right"
     for lens in lenses:
+        if (factory_state(ref) or {}).get("status") == "stopped":
+            break
         kind, model, thinking = lens_kind(store.config, lens)
         lens_folder = round_folder / lens
         lens_folder.mkdir(parents=True, exist_ok=True)
@@ -274,30 +306,53 @@ def run_round(store, ref, record, card, number: int) -> dict:
         request = request_text(
             card, record, base, lens_folder, untracked, files, browser=True, focus=LENS_FOCUS[lens], history=history
         )
-        pane = launch_reviewer(
-            worktree, kind, model, thinking, request, lens_folder, split_from, direction, f"hb-{ref.lower()}-{lens}"
-        )
+        try:
+            pane = launch_reviewer(
+                worktree, kind, model, thinking, request, lens_folder, split_from, direction, f"hb-{ref.lower()}-{lens}"
+            )
+        except HerdboardError as error:
+            # One lens that does not start fails alone; the round goes on with the others.
+            print(f"herdboard: the {lens} reviewer did not start: {error}", file=sys.stderr)
+            reviewers.append(
+                {
+                    "lens": lens,
+                    "kind": kind,
+                    "model": model,
+                    "pane_id": None,
+                    "error": f"The {kind} reviewer did not start: {error}",
+                }
+            )
+            continue
         reviewers.append({"lens": lens, "kind": kind, "model": model, "pane_id": pane})
-        update(ref, folder, panes=[entry["pane_id"] for entry in reviewers])
+        update(ref, folder, panes=[entry["pane_id"] for entry in reviewers if entry["pane_id"]])
         split_from, direction = pane, "down"
+    if reviewers and not any(entry["pane_id"] for entry in reviewers):
+        raise FactoryError(
+            "No reviewer of round {} started: {}".format(number, " ".join(entry["error"] for entry in reviewers)),
+            "launch_failed",
+        )
     update(ref, folder, round=number, lenses=list(lenses), heads=[*state.get("heads", []), head], status="reviewing")
     return {"folder": round_folder, "reviewers": reviewers, "head": head}
 
 
-def wait_round(ref, state_folder: Path, review: dict) -> dict:
+def wait_round(ref, state_folder: Path, review: dict, store=None) -> dict:
     """Wait for every lens's findings, close the reviewer panes, and write the round's `findings.md`.
 
     A lens that fails gets a section that says so; it does not stop the round. Returns the counts,
-    or None in "stopped" when the user stopped the run."""
+    or True in "stopped" when the run must stop, with the reason in "reason" when it is not the user's stop.
+    With `store`, the card's end (finished, gone, worktree removed) stops the run too."""
     round_folder, reviewers = review["folder"], review["reviewers"]
     deadline = time.monotonic() + REVIEW_TIMEOUT_SECONDS
-    pending = {entry["lens"]: entry for entry in reviewers}
-    seen, failures = set(), {}
-    while pending:
-        state = factory_state(ref)
-        if not state or Path(state["folder"]) != state_folder or state.get("status") == "stopped":
+    failures = {entry["lens"]: entry["error"] for entry in reviewers if "error" in entry}
+    pending = {entry["lens"]: entry for entry in reviewers if "error" not in entry}
+    seen = set()
+    while True:
+        stopped = _cancelled(store, ref, state_folder)
+        if stopped is not None:
             _close([entry["pane_id"] for entry in reviewers])
-            return {"stopped": True}
+            return stopped
+        if not pending:
+            break
         for lens, entry in list(pending.items()):
             findings = round_folder / lens / "findings.md"
             status = _reviewer_status(entry["pane_id"])
@@ -470,6 +525,9 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
     request = approver_request(
         card, record, folder, approver_folder, plan if plan.exists() else None, state.get("round", 0)
     )
+    stopped = _cancelled(store, ref, folder)
+    if stopped is not None:
+        return stopped
     pane = launch_reviewer(
         worktree,
         kind,
@@ -487,10 +545,10 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
     deadline = time.monotonic() + REVIEW_TIMEOUT_SECONDS
     seen, error = False, None
     while True:
-        current = factory_state(ref)
-        if not current or Path(current["folder"]) != folder or current.get("status") == "stopped":
+        stopped = _cancelled(store, ref, folder)
+        if stopped is not None:
             _close([pane])
-            return {"stopped": True}
+            return stopped
         status = _reviewer_status(pane)
         seen = seen or status is not None
         if verdict_file.exists() and status in (None, "idle", "done"):
@@ -517,6 +575,10 @@ def _builder_status(record) -> str | None:
     return _reviewer_status(record["pane_id"])
 
 
+def _pane_exists(pane: str) -> bool:
+    return herdr("pane", "get", pane, tolerated=("pane_not_found",)) is not None
+
+
 def _move_to_review(store, ref, writer) -> None:
     """Move the card to Review: the work is ready for the user. A failure is logged; the run still ends."""
     try:
@@ -536,7 +598,15 @@ def _end(store, ref, folder: Path, status: str, message: str, title: str, writer
     state = factory_state(ref)
     if state and Path(state["folder"]) == folder:
         _close(state.get("panes") or [])
-    update(ref, folder, status=status, panes=[], ready=False)
+    if status == "done":
+        # The card can end while the run works; then it must not move back to Review.
+        reason = _stop_reason(store, ref, folder)[0]
+        if reason == "stopped":
+            return 1  # The user stopped the run, and `stop` logged it.
+        if reason is not None:
+            status, message, title = "stopped", reason, f"Factory of {ref} stopped"
+    state = update(ref, folder, status=status, panes=[], ready=False)
+    status = state["status"] if state else "stopped"
     if status == "done":
         _move_to_review(store, ref, writer)
     try:
@@ -586,6 +656,7 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
             # The requests then name the issue by its ID only.
             print(f"herdboard: cannot read {ref} from Linear: {error}", file=sys.stderr)
     waited_since = time.monotonic()
+    builder_seen = False
     while True:
         reason, record, card = _stop_reason(store, ref, folder, linear_card)
         if reason == "stopped":
@@ -601,7 +672,10 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
                 return 1
             return _end(store, ref, folder, "stopped", reason, f"Factory of {ref} stopped")
         builder = _builder_status(record)
-        if builder is None:
+        builder_seen = builder_seen or builder is not None
+        # Herdr can take a moment to detect a new agent, or the agent waits at a folder trust prompt.
+        # So a builder not seen yet is gone only when its pane is gone.
+        if builder is None and (builder_seen or not _pane_exists(record["pane_id"])):
             return _end(
                 store, ref, folder, "stopped", "Factory stopped: the card's agent is gone.", f"Factory of {ref} stopped"
             )
@@ -665,14 +739,17 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
         + ".",
         "herdboard",
     )
-    result = wait_round(ref, folder, review)
+    result = wait_round(ref, folder, review, store)
     if result["stopped"]:
-        return 1
+        return _stopped(store, ref, folder, result)
     activity.append(store, ref, round_summary(number, rounds, result), "herdboard")
     if not result["confirmed"] and not result["questions"] and not result["failures"]:
         activity.append(store, ref, f"Factory: round {number} had no findings, approver next.", "herdboard")
         found = find_record(ref)
         return _approve(store, ref, folder, found[1] if found else record, card, writer)
+    stopped = _cancelled(store, ref, folder)
+    if stopped is not None:
+        return _stopped(store, ref, folder, stopped)
     found = find_record(ref)
     record = found[1] if found else record
     update(ref, folder, status="fixing")
@@ -680,12 +757,19 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
     return None
 
 
+def _stopped(store, ref, folder: Path, result: dict) -> int:
+    """End a run that a wait stopped: the user's stop ended it already; the card's end is logged here."""
+    if "reason" in result:
+        return _end(store, ref, folder, "stopped", result["reason"], f"Factory of {ref} stopped")
+    return 1
+
+
 def _approve(store, ref, folder: Path, record, card, writer) -> int:
     found = find_record(ref)
     record = found[1] if found else record
     result = run_approver(store, ref, record, card, writer)
     if result["stopped"]:
-        return 1
+        return _stopped(store, ref, folder, result)
     if "error" in result:
         return _end(
             store, ref, folder, "stopped", f"Factory approver failed: {result['error']}", f"Factory of {ref} failed"

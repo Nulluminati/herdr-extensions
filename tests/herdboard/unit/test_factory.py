@@ -32,6 +32,13 @@ class FactoryHerdr(GitHerdr):
         self.reviewer_states = {}
         self.on_prompt = None
         self.prompts = []
+        self.failed_starts = set()
+
+    def next_builder_status(self):
+        """`builder_status` is one status, or a list that the builder goes through, one per `agent get`."""
+        if isinstance(self.builder_status, list):
+            return self.builder_status.pop(0) if len(self.builder_status) > 1 else self.builder_status[0]
+        return self.builder_status
 
     def __call__(self, argv, timeout=120):
         args = argv[1:]
@@ -50,6 +57,11 @@ class FactoryHerdr(GitHerdr):
                     panes.remove(args[2])
             self.reviewers.pop(args[2], None)
             return self.reply(argv, {"type": "ok"})
+        if operation == "pane get":
+            self.calls.append(args)
+            if not any(args[2] in panes for panes in self.panes.values()):
+                return self.reply(argv, error="pane_not_found")
+            return self.reply(argv, {"pane": {"pane_id": args[2]}})
         if operation in ("notification show", "agent wait"):
             self.calls.append(args)
             return self.reply(argv, {"type": "ok"})
@@ -58,6 +70,8 @@ class FactoryHerdr(GitHerdr):
             pane = args[args.index("--pane") + 1]
             folder = next(Path(m.group(1)) for arg in args if (m := REQUEST.search(arg)))
             lens = args[2].rsplit("-", 1)[1]
+            if lens in self.failed_starts:
+                return self.reply(argv, error="agent_kind_unavailable")
             self.reviewers[pane] = {
                 "lens": lens,
                 "folder": folder,
@@ -80,9 +94,10 @@ class FactoryHerdr(GitHerdr):
             return self.reply(argv, {"agent": {"agent_status": state, "pane_id": args[2]}})
         if operation == "agent get" and self.agent and args[2].endswith(":p1"):
             self.calls.append(args)
-            if self.builder_status is None:
+            status = self.next_builder_status()
+            if status is None:
                 return self.reply(argv, error="agent_not_found")
-            return self.reply(argv, {"agent": {"agent_status": self.builder_status, "pane_id": args[2]}})
+            return self.reply(argv, {"agent": {"agent_status": status, "pane_id": args[2]}})
         if operation == "agent prompt":
             self.calls.append(args)
             self.prompts.append(args[3])
@@ -314,6 +329,40 @@ class RoundTests(FactoryTestCase):
         self.assertTrue({entry["pane_id"] for entry in review["reviewers"]} <= closed)
         self.assertEqual(self.state()["panes"], [])
 
+    def test_a_lens_that_does_not_launch_fails_alone(self):
+        self.write_plan("Review lenses: security, code\n")
+        self.start_factory()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.fake.failed_starts = {"security"}
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            review = factory.run_round(self.store, self.card.ref, self.record(), self.card, 1)
+        self.assertIn("the security reviewer did not start: agent_kind_unavailable", errors.getvalue())
+        # The pane that the failed launch split is closed; the code reviewer's pane stays.
+        closed = [c[2] for c in self.calls("pane", "close")]
+        self.assertEqual(len(closed), 1)
+        self.assertNotEqual(closed[0], review["reviewers"][1]["pane_id"])
+        self.assertEqual(self.state()["panes"], [review["reviewers"][1]["pane_id"]])
+        self.assertEqual([entry["lens"] for entry in review["reviewers"]], ["security", "code"])
+        failed = review["reviewers"][0]
+        self.assertIsNone(failed["pane_id"])
+        result = factory.wait_round(self.card.ref, self.folder, review)
+        self.assertEqual(list(result["failures"]), ["security"])
+        self.assertIn("did not start", result["failures"]["security"])
+        self.assertIn("code", result["counts"])
+        merged = (self.folder / "round-1" / "findings.md").read_text()
+        self.assertIn("# security", merged)
+        self.assertIn("This lens failed", merged)
+
+    def test_a_round_where_no_lens_launches_fails(self):
+        self.write_plan("Review lenses: security, code\n")
+        self.start_factory()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.fake.failed_starts = {"security", "code"}
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(HerdboardError) as raised:
+            factory.run_round(self.store, self.card.ref, self.record(), self.card, 1)
+        self.assertEqual(raised.exception.code, "launch_failed")
+
 
 class WorkerTests(FactoryTestCase):
     def setUp(self):
@@ -376,11 +425,84 @@ class WorkerTests(FactoryTestCase):
         self.assertEqual(self.store.show(self.card.ref).column, "Review")
 
     def test_a_gone_builder_stops_the_run(self):
-        self.fake.builder_status = None
+        self.fake.builder_status = ["working", None]
         self.assertEqual(self.wait(), 1)
         self.assertIn("Factory stopped: the card's agent is gone.", self.log())
         self.assertEqual(self.state()["status"], "stopped")
         self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+
+    def test_a_builder_that_herdr_does_not_see_yet_does_not_stop_the_run(self):
+        # Herdr can take a moment to detect a new agent, or the agent waits at a folder trust prompt.
+        self.fake.builder_status = [None, None, "idle"]
+        pane = self.record()["pane_id"]
+        self.fake.panes.setdefault(pane.split(":")[0], [pane])
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn("Factory done: approve.", self.log())
+
+    def test_a_builder_never_seen_whose_pane_is_gone_stops_the_run(self):
+        self.fake.builder_status = None
+        pane = self.record()["pane_id"]
+        self.assertFalse(any(pane in panes for panes in self.fake.panes.values()))
+        self.assertEqual(self.wait(), 1)
+        self.assertIn("Factory stopped: the card's agent is gone.", self.log())
+
+    def test_stop_during_a_reviewer_launch_holds(self):
+        self.write_plan("Review lenses: security, code\n")
+
+        def stop_at_launch(argv, timeout=120):
+            if argv[1:3] == ["agent", "start"] and argv[3].endswith("-security"):
+                factory.stop(self.store, self.card.ref)
+            return FactoryHerdr.__call__(self.fake, argv, timeout)
+
+        with patch.object(start, "command", stop_at_launch):
+            self.assertEqual(self.wait(), 1)
+        self.assertEqual(self.state()["status"], "stopped")
+        self.assertEqual([c[2].rsplit("-", 1)[1] for c in self.lens_starts()], ["security"])
+        self.assertEqual(self.fake.reviewers, {})
+        self.assertEqual(self.fake.prompts, [])
+
+    def test_stop_during_the_approver_launch_holds(self):
+        def stop_at_launch(argv, timeout=120):
+            if argv[1:3] == ["agent", "start"] and argv[3].endswith("-approver"):
+                factory.stop(self.store, self.card.ref)
+            return FactoryHerdr.__call__(self.fake, argv, timeout)
+
+        with patch.object(start, "command", stop_at_launch):
+            self.assertEqual(self.wait(), 1)
+        self.assertEqual(self.state()["status"], "stopped")
+        self.assertEqual(self.fake.reviewers, {})
+        self.assertNotIn(factory.VERDICT_NAME, [e["name"] for e in attachments.listing(self.config, self.card.ref)])
+        self.assertEqual(self.store.show(self.card.ref).column, "In progress")
+
+    def test_a_card_finished_during_approval_stays_finished(self):
+        def finish_during_approval(argv, timeout=120):
+            if argv[1:3] == ["agent", "get"] and self.fake.reviewers.get(argv[3], {}).get("lens") == "approver":
+                if not self.store.show(self.card.ref).checked:
+                    self.store.done(self.card.ref)
+            return FactoryHerdr.__call__(self.fake, argv, timeout)
+
+        with patch.object(start, "command", finish_during_approval):
+            self.assertEqual(self.wait(), 1)
+        self.assertIn("Factory stopped: the card was finished.", self.log())
+        self.assertTrue(self.store.show(self.card.ref).checked)
+        self.assertNotEqual(self.store.show(self.card.ref).column, "Review")
+        self.assertEqual(self.fake.reviewers, {})
+
+    def test_a_card_finished_during_a_round_stops_before_delivery(self):
+        self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n"
+
+        def finish_during_review(argv, timeout=120):
+            if argv[1:3] == ["agent", "get"] and self.fake.reviewers.get(argv[3], {}).get("lens") == "code":
+                if not self.store.show(self.card.ref).checked:
+                    self.store.done(self.card.ref)
+            return FactoryHerdr.__call__(self.fake, argv, timeout)
+
+        with patch.object(start, "command", finish_during_review):
+            self.assertEqual(self.wait(), 1)
+        self.assertIn("Factory stopped: the card was finished.", self.log())
+        self.assertEqual(self.fake.prompts, [])
+        self.assertEqual(self.fake.reviewers, {})
+        self.assertEqual(self.state()["status"], "stopped")
 
     def test_a_finished_card_stops_the_run(self):
         self.store.done(self.card.ref)
@@ -457,6 +579,10 @@ class RefusalTests(FactoryTestCase):
         self.start_factory()
         factory.update(self.card.ref, self.folder, pid=2**22 + 12345)
         self.assertFalse(factory.factory_running(self.card.ref))
+        # The builder's move to Review is then a plain move, and the stale run is stopped.
+        self.assertIsNone(factory.signal_ready(self.card.ref))
+        self.assertEqual(self.state()["status"], "stopped")
+        self.assertFalse(self.state()["ready"])
 
     def test_stop_without_a_run(self):
         with self.assertRaises(factory.FactoryError) as raised:

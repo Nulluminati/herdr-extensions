@@ -479,7 +479,7 @@ A factory run chains the card stages: the planner, the work agent (the builder),
    - `ux`: flows, error messages, defaults, keyboard and mouse use, user documentation.
    - `ui`: layout, consistency with the existing interface, `mockup-*.png` attachments, themes.
    - `code`: bugs, missing tests, readability, the style of the surrounding code.
-4. The worker merges the findings of all lenses into one round file. A lens that fails gets a section that says so. The round continues without it.
+4. The worker merges the findings of all lenses into one round file. A lens that fails, or whose reviewer does not start, gets a section that says so. The round continues without it. When no reviewer of a round starts, the run stops.
 5. The worker sends the round file to the builder. For each finding, the builder fixes it or logs why it disagrees. It writes its answers as a table (`responses.md`), commits, and runs `move <id> Review` again to signal the next round.
 6. The next round's reviewers read the earlier findings and answers. They do not raise a finding again that the builder disagreed with, unless they have new evidence.
 
@@ -497,7 +497,7 @@ A Linear issue runs the same way. The ready signal is local, so the rounds make 
 
 A stopped run leaves the card in In progress. A move on the board itself (not with `herdboard move`) still changes the column.
 
-`herdboard factory <id>` shows the run's status and round. `herdboard factory <id> --stop` stops it and closes its reviewers. `show --json` has a `factory` object. The run also stops when the builder's pane is gone, the card leaves the board or is finished, or the worktree is removed. While a run goes on, `review --agent` and `merge` refuse with `factory_running`. `merge --force` still merges.
+`herdboard factory <id>` shows the run's status and round. `herdboard factory <id> --stop` stops it and closes its reviewers. `show --json` has a `factory` object. The run also stops when the builder's pane is gone, the card leaves the board or is finished, or the worktree is removed. The worker checks this during the reviews and the approval too, so a finished card does not move back to Review. When the worker process died, the next `move <id> Review` stops the stale run and moves the card. While a run goes on, `review --agent` and `merge` refuse with `factory_running`. `merge --force` still merges.
 
 The lens agents come from `[factory.lenses]` in the config, see [Configuration](#configuration). Each lens uses its configured agent, also when it is the builder's agent. The approver uses `[factory] approver`, else the card reviewer of the builder's agent (pi for Claude, Codex for pi, Claude for Codex).
 

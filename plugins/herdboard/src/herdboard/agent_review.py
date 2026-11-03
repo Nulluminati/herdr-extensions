@@ -123,18 +123,23 @@ def launch_reviewer(
     )
     # A startup prompt (such as Claude's folder trust check) waits for the user,
     # and a reviewer busy with its first message never looks ready: the worker watches it.
-    herdr(
-        "agent",
-        "start",
-        name,
-        "--kind",
-        kind,
-        "--pane",
-        pane,
-        "--",
-        *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
-        tolerated=("timeout", "agent_not_ready"),
-    )
+    try:
+        herdr(
+            "agent",
+            "start",
+            name,
+            "--kind",
+            kind,
+            "--pane",
+            pane,
+            "--",
+            *reviewer_arguments(kind, prompt, folder, worktree, model, thinking, browser=True),
+            tolerated=("timeout", "agent_not_ready"),
+        )
+    except HerdboardError:
+        # A reviewer that did not start leaves no empty pane behind.
+        herdr("pane", "close", pane, tolerated=("pane_not_found",))
+        raise
     activity.record_pane_agent(pane, kind)
     return pane
 
