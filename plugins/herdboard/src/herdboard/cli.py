@@ -11,7 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import activity, agent_review, attachments, automations, mockup, plan, pr_reviews, pr_write
+from . import activity, agent_review, attachments, automations, factory, mockup, plan, pr_reviews, pr_write
 from . import start as start_module
 from .agent_review import AgentReviewer
 from .config import AGENTS, THINKING_LEVELS, config_path, load_config, thinking_levels
@@ -223,6 +223,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("--checkout", type=Path)
     sub.add_argument("--base", help="the local branch to start from and merge into; default: the checkout's branch")
+    sub.add_argument(
+        "--factory",
+        action="store_true",
+        help="run the card as a factory: lens reviewers check each move to Review, "
+        "the agent fixes, and an approver writes a verdict",
+    )
+    sub.add_argument("--rounds", type=int, help="the most review rounds of a factory run; default: factory_max_rounds")
+
+    sub = command("factory-wait", "drive a card's factory run until its verdict (run by start --factory)")
+    sub.add_argument("ref")
+    sub.add_argument("--folder", type=Path, required=True)
+
+    sub = command("factory", "show or stop a card's factory run")
+    sub.add_argument("ref")
+    sub.add_argument("--stop", action="store_true", help="stop the run and close its reviewers")
 
     sub = command(
         "plan",
@@ -789,6 +804,7 @@ def _cmd_show(ctx: _Context) -> dict:
         "card": card,
         "log": _card_log(ctx, card),
         "attachments": _card_attachments(ctx, card),
+        "factory": factory.summary(factory.factory_state(card.ref)),
     }
 
 
@@ -1138,7 +1154,27 @@ def _cmd_start(ctx: _Context) -> dict:
         base=args.base,
         no_repo=args.no_repo,
         new_repo=args.new_repo,
+        factory=args.factory,
+        rounds=args.rounds,
     )
+
+
+def _cmd_factory_wait(ctx: _Context) -> dict:
+    ref = ctx.args.ref
+    return {
+        "ref": ref,
+        "exit_code": factory.wait(ctx.store, ref, ctx.args.folder, config_file=config_path(ctx.args.config)),
+    }
+
+
+def _cmd_factory(ctx: _Context) -> dict:
+    ref = ctx.store.show(ctx.args.ref).ref
+    if ctx.args.stop:
+        return factory.stop(ctx.store, ref)
+    state = factory.summary(factory.factory_state(ref))
+    if state is None:
+        raise factory.FactoryError(f"{ref} has no factory run", "not_running")
+    return {"ref": ref, **state}
 
 
 def _cmd_plan(ctx: _Context) -> dict:
@@ -1852,6 +1888,8 @@ COMMANDS = {
     "details": _cmd_details,
     "promote": _cmd_promote,
     "start": _cmd_start,
+    "factory-wait": _cmd_factory_wait,
+    "factory": _cmd_factory,
     "plan": _cmd_plan,
     "plan-wait": _cmd_plan_wait,
     "sidebar-refresh": _cmd_sidebar_refresh,
@@ -1931,7 +1969,7 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             )
             print("Steps done: " + ", ".join(result["steps_done"]))
         return
-    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+    if command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view", "factory-wait"):
         return
     if command == "details":
         if "exit_code" in result:
@@ -1957,6 +1995,12 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
             _emit_json(_automation_json(result))
         elif "exit_code" not in result:
             print(_automation_text(action, result))
+        return
+    if command == "factory":
+        if as_json:
+            _emit_json(result)
+        else:
+            print(f"{result['ref']}: factory {result['status']}, round {result['round']} of {result['rounds']}")
         return
     if command == "pr-sync":
         if as_json:
@@ -2125,6 +2169,8 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
                 data["log"] = result["log"]
             if result.get("attachments") is not None:
                 data["attachments"] = result["attachments"]
+            if result.get("factory") is not None:
+                data["factory"] = result["factory"]
             if result.get("hint"):
                 data["hint"] = result["hint"]
             if linear is not None:
@@ -2203,7 +2249,7 @@ def main(argv: list[str] | None = None) -> int:
         result = COMMANDS[args.command](ctx)
         _update_sidebar(args.command, result)
         _render(args.command, result, as_json, getattr(args, "action", None))
-        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view"):
+        if args.command in ("review-wait", "pr-wait", "plan-wait", "pr-review-wait", "mockup-view", "factory-wait"):
             return result["exit_code"]
         if args.command == "details" and "exit_code" in result:
             return result["exit_code"]

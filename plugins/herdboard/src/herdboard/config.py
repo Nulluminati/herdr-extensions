@@ -164,7 +164,8 @@ class Config:
     factory_max_rounds: int = 3
     # Each lens's reviewer: {"agent": kind, "model": name, "thinking": level}; model and thinking are optional.
     factory_lenses: dict[str, dict] = field(
-        default_factory=lambda: {lens: {"agent": kind} for lens, kind in DEFAULT_FACTORY_LENSES.items()})
+        default_factory=lambda: {lens: {"agent": kind} for lens, kind in DEFAULT_FACTORY_LENSES.items()}
+    )
     # The approver's agent kind; None uses the card reviewer of the builder's kind.
     factory_approver: str | None = None
 
@@ -506,12 +507,11 @@ def _load_factory(path: Path, data: dict, config: Config) -> None:
         raise HerdboardError(f"{path}: factory.lenses must be a table of lenses")
     unknown = sorted(set(lenses) - set(LENSES))
     if unknown:
-        raise HerdboardError(f"{path}: unknown lens in factory.lenses: {', '.join(unknown)}; "
-                             f"use {', '.join(LENSES)}")
+        raise HerdboardError(f"{path}: unknown lens in factory.lenses: {', '.join(unknown)}; use {', '.join(LENSES)}")
     for lens, value in lenses.items():
         label = f"{path}: factory.lenses.{lens}"
         if not isinstance(value, dict):
-            raise HerdboardError(f"{label} must be a table, such as {{ agent = \"pi\" }}")
+            raise HerdboardError(f'{label} must be a table, such as {{ agent = "pi" }}')
         extra = sorted(set(value) - {"agent", "model", "thinking"})
         if extra:
             raise HerdboardError(f"{label} has unknown keys: {', '.join(extra)}")

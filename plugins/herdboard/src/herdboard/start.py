@@ -21,8 +21,9 @@ from pathlib import Path
 
 from . import attachments
 from .activity import LOG_REF, record_pane_agent
+from .activity import append as activity_append
 from .brief import agent_message, brief_text, card_token
-from .config import AGENTS, default_config_path, thinking_levels
+from .config import AGENTS, FACTORY_ROUNDS, default_config_path, thinking_levels
 from .identity import RepoIdentity, _canonical_identity, _git, repo_identity
 from .linear_cards import LINEAR_REF, issue_card
 from .linear_pins import add_pin
@@ -1171,6 +1172,9 @@ class Starter:
     def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False, note=None, log=()):
         """Start an agent in the record's pane, with a brief file for the card."""
         name = "hb-" + card.ref.lower()
+        running = record.get("factory") or {}
+        # A factory run's agent writes its answers to the review rounds in the factory folder.
+        factory_folder = running.get("folder") if running.get("status") in ("building", "fixing") else None
         # Herdr rejects line breaks in agent arguments, so the details
         # go to a brief file and the message is one line that names it.
         brief = write_brief(
@@ -1189,6 +1193,7 @@ class Starter:
                 repoless=record.get("mode") == REPOLESS,
                 attachments_dir=str(attachments.folder(self.config, card.ref)),
                 may_merge_prs=bool(record.get("may_merge_prs")),
+                factory=factory_folder is not None,
             ),
         )
         message = agent_message(card, brief)
@@ -1201,7 +1206,9 @@ class Starter:
         persist()
         args = agent_arguments(agent, message, model, thinking)
         if agent == "codex":
-            args = [*codex_auto_review_options(), *args]
+            args = [*codex_auto_review_options(), *(["--add-dir", factory_folder] if factory_folder else []), *args]
+        elif agent == "claude" and factory_folder:
+            args = [*args, "--add-dir", factory_folder]
         export_config(record["pane_id"], self.config_file)
         herdr(
             "agent",
@@ -1217,6 +1224,21 @@ class Starter:
         )
         record_pane_agent(record["pane_id"], agent)
         open_details_pane(card.ref, record["pane_id"], self.config, self.config_file)
+
+    def _start_factory_worker(self, ref, state):
+        # The factory module imports this one.
+        from . import factory as factory_module
+        from .agent_review import start_worker
+
+        folder = Path(state["folder"])
+        config = ["--config", str(self.config_file)] if self.config_file else []
+        try:
+            start_worker([*config, "factory-wait", ref, "--folder", str(folder)], folder / "worker.log")
+        except OSError as error:
+            factory_module.update(ref, folder, status="stopped")
+            activity_append(self.store, ref, f"Factory failed: the worker did not start: {error}", "herdboard")
+            raise StartError(f"The factory worker did not start: {error}", "worker_failed") from error
+        activity_append(self.store, ref, f"Factory started: up to {state['rounds']} review rounds.", "herdboard")
 
     def _repoless_workspace(self, ref, folder, record, focus=True):
         """Open the card folder as a Herdr workspace, reusing the open one that the record names."""
@@ -1508,12 +1530,34 @@ class Starter:
         no_repo=False,
         new_repo=None,
         may_merge_prs=False,
+        factory=False,
+        rounds=None,
     ):
         """Prepare the card, move it to the start column and start its agent.
 
         `may_merge_prs` (set by an automation) lets the agent merge other pull requests; the start
         record keeps it, so a later start of the card keeps it too.
+        `factory` runs the card as a factory: lens reviewers check each move to Review, for at most
+        `rounds` rounds (default `factory_max_rounds`), then an approver writes a verdict.
         """
+        # The factory module imports this one.
+        from . import factory as factory_module
+
+        if factory:
+            if no_agent:
+                raise StartError("A factory run needs an agent: leave out --no-agent", "usage")
+            if no_repo or new_repo:
+                raise StartError(
+                    "A factory run needs a repository branch to review: leave out --no-repo and --new-repo", "usage"
+                )
+            if LINEAR_REF.match(ref):
+                raise StartError("A factory run works on herdboard cards, not Linear issues", "usage")
+            rounds = self.config.factory_max_rounds if rounds is None else rounds
+            low, high = FACTORY_ROUNDS
+            if isinstance(rounds, bool) or not isinstance(rounds, int) or not low <= rounds <= high:
+                raise StartError(f"--rounds must be from {low} to {high}", "usage")
+        elif rounds is not None:
+            raise StartError("--rounds needs --factory", "usage")
         agent = agent or self.config.start_agent
         if agent not in AGENTS:
             raise StartError("Agent must be claude, pi or codex", "usage")
@@ -1544,6 +1588,17 @@ class Starter:
         lock_key = safe_key(key)
         with _lock(".start-" + lock_key + ".lock"):
             mode, target = self._target(card, repo, no_repo, new_repo, issue, checkout, base)
+            if factory:
+                if mode != REPO:
+                    raise StartError(f"{card.ref} has no repository, so a factory run has no branch to review", "usage")
+                factory_module.refuse_while_running(card.ref, "a new factory run")
+                found = find_record(card.ref)
+                if found is not None and agent_live(found[1]):
+                    raise StartError(
+                        f"The agent of {card.ref} already runs. A factory run starts its own agent: "
+                        "close the agent's pane first",
+                        "agent_running",
+                    )
             if mode == REPOLESS:
                 # The card has no worktree, so its folder workspace opens in front of the user.
                 record = self._prepare_workspace(card, key, REPOLESS, focus=True)
@@ -1558,6 +1613,8 @@ class Starter:
             state_name = record.pop("_state_name", None)
             if may_merge_prs:
                 record["may_merge_prs"] = True
+            if factory:
+                record["factory"] = factory_module.new_state(key, rounds)
             try:
 
                 def persist():
@@ -1610,6 +1667,9 @@ class Starter:
                 result["mode"] = record.get("mode") or REPO
                 record["steps_done"] = []
                 persist()
+                if factory:
+                    result["factory"] = factory_module.summary(record["factory"])
+                    self._start_factory_worker(card.ref, record["factory"])
                 return result
             except HerdboardError as error:
                 error.steps_done = list(record.get("steps_done", []))

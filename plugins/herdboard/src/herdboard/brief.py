@@ -19,6 +19,12 @@ def _one_line(text: str) -> str:
     return "".join(" " if unicodedata.category(ch) == "Cc" else ch for ch in text)
 
 
+FACTORY_RULE = (
+    "- This card runs as a factory. When you move it to Review, reviewers check it and send you their "
+    "findings. Move it to Review only when the work is complete and committed."
+)
+
+
 def brief_text(
     card: CardView,
     *,
@@ -34,6 +40,7 @@ def brief_text(
     repoless: bool = False,
     attachments_dir: str | None = None,
     may_merge_prs: bool = False,
+    factory: bool = False,
 ) -> str:
     """A Markdown brief: the task, where to work, and how to keep the card current.
 
@@ -183,6 +190,7 @@ def brief_text(
             else []
         ),
         f"- When the work is ready for the user to check, commit it, then run `{command} --json move {ref} Review`",
+        *([FACTORY_RULE] if factory else []),
         f'- When review feedback arrives, run `{command} --json move {ref} "In progress"`. '
         "Fix, commit, and move the card back to Review.",
         (

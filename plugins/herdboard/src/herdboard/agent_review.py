@@ -290,6 +290,10 @@ class AgentReviewer(Reviewer):
                 f"{ref} has no repository yet: `herdboard start {ref}` creates it. Start the card, then review it.",
                 "not_started",
             )
+        # The factory module imports this one.
+        from .factory import refuse_while_running
+
+        refuse_while_running(ref, "an agent review")
         if then_hunk and record.get("mode") == REPOLESS:
             raise ReviewError(
                 f"{ref} has no repository, so Hunk cannot open. Use `herdboard review {ref} --agent`.", "no_repository"

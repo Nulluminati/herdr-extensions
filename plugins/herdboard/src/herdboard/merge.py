@@ -262,6 +262,11 @@ class Merger:
                 f"Run `herdboard finish {ref}` to drop the card instead.",
                 "no_repository",
             )
+        if not force:
+            # The factory module imports start, which this module imports.
+            from .factory import refuse_while_running
+
+            refuse_while_running(ref, "the merge")
         if card is not None and not force:
             open_children = [child.ref for child in self.store.children(ref) if not child.checked]
             if open_children:

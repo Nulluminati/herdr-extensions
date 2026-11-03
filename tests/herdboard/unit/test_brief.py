@@ -52,6 +52,14 @@ class BriefTests(unittest.TestCase):
         ]:
             self.assertIn(part, text)
 
+    def test_a_factory_brief_says_reviewers_check_each_move_to_review(self):
+        text = brief_text(
+            todo(), repository="r", worktree="/w", branch="b", base="main", command="herdboard", factory=True
+        )
+        self.assertIn("This card runs as a factory. When you move it to Review, reviewers check it", text)
+        self.assertLess(text.index("When the work is ready"), text.index("runs as a factory"))
+        self.assertNotIn("runs as a factory", self.brief(todo()))
+
     def test_a_typed_card_names_its_type_and_commit_type(self):
         text = self.brief(todo(type="bug"))
         self.assertIn("- Type: bug", text)
