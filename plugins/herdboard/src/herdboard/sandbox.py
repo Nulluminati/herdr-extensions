@@ -1,7 +1,8 @@
 """Command-line options that put an unattended reviewer agent in an OS sandbox.
 
 A reviewer may run any shell command. The sandbox lets it read the whole disk except credentials, write
-only its own folder (or nothing), and reach only GitHub over the shell network. No approval judge runs: nobody
+only its own folder (or nothing), and reach only GitHub over the shell network. Its shell gets no
+environment variable that looks like a credential. No approval judge runs: nobody
 answers a prompt in a reviewer pane. Web tools (Claude WebFetch, pi web_fetch, Codex live web
 search) and documentation MCP servers run outside the sandbox and only read.
 """
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -50,6 +52,18 @@ PI_READ_TOOLS = (
 def secret_paths() -> list[str]:
     """The absolute paths of SECRETS. The sandbox skips a path that does not exist."""
     return [str(Path.home() / secret) for secret in SECRETS]
+
+
+def secret_env_names() -> list[str]:
+    """The environment variables whose names look like credentials, such as OPENAI_API_KEY.
+
+    Claude's sandbox takes exact names only, so the list comes from the environment at launch."""
+    return sorted(
+        name
+        for name in os.environ
+        if re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII)
+        and re.search(r"KEY|SECRET|TOKEN|PASSWORD", name, re.IGNORECASE)
+    )
 
 
 def hunk_port() -> int:
@@ -100,7 +114,13 @@ def claude_reviewer_options(writable: Path | None, read_only: Path, browser: boo
     deny = [rule for path in secret_paths() for rule in (f"Read(/{path})", f"Read(/{path}/**)")]
     settings = {
         "permissions": {"deny": deny},
-        "sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, **policy},
+        "sandbox": {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "allowUnsandboxedCommands": False,
+            "credentials": {"envVars": [{"name": name, "mode": "deny"} for name in secret_env_names()]},
+            **policy,
+        },
     }
     return ["--permission-mode", "dontAsk", "--settings", json.dumps(settings)]
 
@@ -139,6 +159,7 @@ def codex_reviewer_options(name: str, writable: Path | None, hunk: bool) -> list
     filesystem += "".join(f',{json.dumps(path, ensure_ascii=False)}="deny"' for path in secret_paths())
     domains = list(CODEX_GITHUB_DOMAINS) + [f"127.0.0.1:{hunk_port()}"] * hunk
     allowed = ",".join(f'{json.dumps(domain)}="allow"' for domain in domains)
+    # Codex's default excludes drop names with KEY, SECRET or TOKEN from the shell; PASSWORD is added.
     return [
         "-a",
         "never",
@@ -146,6 +167,10 @@ def codex_reviewer_options(name: str, writable: Path | None, hunk: bool) -> list
         "features.network_proxy=true",
         "-c",
         'web_search="live"',
+        "-c",
+        "shell_environment_policy.ignore_default_excludes=false",
+        "-c",
+        'shell_environment_policy.exclude=["*PASSWORD*"]',
         "-c",
         f'default_permissions="{name}"',
         "-c",

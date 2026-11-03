@@ -11,6 +11,7 @@ on the branch since its upstream, so committed agent work can be reviewed too.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -115,6 +116,16 @@ def secret_paths() -> list[str]:
     return [str(Path.home() / secret) for secret in SECRETS]
 
 
+def secret_env_names() -> list[str]:
+    """Environment variables whose names look like credentials. Claude's sandbox takes exact names only."""
+    return sorted(
+        name
+        for name in os.environ
+        if re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII)
+        and re.search(r"KEY|SECRET|TOKEN|PASSWORD", name, re.IGNORECASE)
+    )
+
+
 def shared_git_folder(path: Path) -> list[Path]:
     """The Git folder that a linked worktree shares with its main checkout, when it lies outside `path`."""
     try:
@@ -154,7 +165,8 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
         f"Write your findings to {review / 'findings.md'} and nowhere else."
     )
     # The reviewer may run any shell command in an OS sandbox: it reads the disk except SECRETS, writes only
-    # the review folder and reaches only GitHub. Nobody answers prompts, so no approval judge runs.
+    # the review folder and reaches only GitHub. Its shell gets no credential variables.
+    # Nobody answers prompts, so no approval judge runs.
     if reviewer == "pi":
         tools = ",".join((*PI_READ_TOOLS, "write"))
         return [
@@ -171,6 +183,7 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
         path = json.dumps(str(review), ensure_ascii=False)
         secrets = "".join(f',{json.dumps(secret, ensure_ascii=False)}="deny"' for secret in secret_paths())
         domains = ",".join(f'{json.dumps(domain)}="allow"' for domain in CODEX_GITHUB_DOMAINS)
+        # Codex's default excludes drop names with KEY, SECRET or TOKEN from the shell; PASSWORD is added.
         return [
             "-a",
             "never",
@@ -178,6 +191,10 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
             "features.network_proxy=true",
             "-c",
             'web_search="live"',
+            "-c",
+            "shell_environment_policy.ignore_default_excludes=false",
+            "-c",
+            'shell_environment_policy.exclude=["*PASSWORD*"]',
             "-c",
             'default_permissions="hb-review"',
             "-c",
@@ -194,6 +211,7 @@ def reviewer_arguments(reviewer: str, review: Path, repository: Path) -> list[st
             "enabled": True,
             "failIfUnavailable": True,
             "allowUnsandboxedCommands": False,
+            "credentials": {"envVars": [{"name": name, "mode": "deny"} for name in secret_env_names()]},
             **sandbox_policy(review, repository),
         },
     }

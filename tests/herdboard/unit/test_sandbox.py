@@ -59,6 +59,28 @@ class SecretTests(unittest.TestCase):
             self.assertIn(f"Read(/{path}/**)", deny)
 
 
+class SecretEnvironmentTests(unittest.TestCase):
+    ENV = {"OPENAI_API_KEY": "a", "gh_token": "b", "DB_PASSWORD": "c", "MY_SECRET": "d", "HOME": "/h",
+           "PATH": "/bin", "HUNK_MCP_PORT": "5000", "BAD-NAME_KEY": "e"}
+
+    def test_secret_env_names_are_credential_like_names(self):
+        with patch.dict(os.environ, self.ENV, clear=True):
+            self.assertEqual(sandbox.secret_env_names(), ["DB_PASSWORD", "MY_SECRET", "OPENAI_API_KEY", "gh_token"])
+
+    def test_claude_sandbox_denies_the_secret_variables(self):
+        with patch.dict(os.environ, self.ENV, clear=True):
+            settings = claude_settings(sandbox.claude_reviewer_options(None, REPO, browser=False, hunk=False))
+        self.assertEqual(settings["credentials"], {"envVars": [
+            {"name": name, "mode": "deny"} for name in ("DB_PASSWORD", "MY_SECRET", "OPENAI_API_KEY", "gh_token")]})
+
+    def test_codex_shell_drops_the_secret_variables(self):
+        args = sandbox.codex_reviewer_options("hb-review", None, hunk=False)
+        self.assertEqual(codex_value(args, "shell_environment_policy.ignore_default_excludes"),
+                         {"shell_environment_policy": {"ignore_default_excludes": False}})
+        self.assertEqual(codex_value(args, "shell_environment_policy.exclude"),
+                         {"shell_environment_policy": {"exclude": ["*PASSWORD*"]}})
+
+
 class PortTests(unittest.TestCase):
     def test_hunk_port_defaults_to_47657(self):
         with patch.dict(os.environ, {}, clear=True):
