@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 from . import activity, attachments
@@ -93,11 +94,21 @@ def approver_kind(config, builder: str) -> str:
     return config.factory_approver or REVIEWERS[builder]
 
 
+def _is_heading(line: str) -> bool:
+    """A section boundary: a `## ` heading, or a lens's `# <lens>` heading in a merged round file.
+
+    Another `#` line, such as a note or a shell comment, stays inside its section."""
+    if line.startswith("## "):
+        return True
+    words = line[2:].split() if line.startswith("# ") else []
+    return bool(words) and words[0] in LENSES
+
+
 def _section(text: str, heading: str) -> list[str]:
     """The `- ` lines under a `## heading`, up to the next heading."""
     lines, inside = [], False
     for line in text.splitlines():
-        if line.startswith("#"):
+        if _is_heading(line):
             inside = line.lstrip("#").strip().casefold() == heading.casefold()
             continue
         # A reviewer may write "- None." in an empty section.
@@ -427,8 +438,10 @@ def builder_message(ref, round_folder: Path, command: str) -> str:
 
 
 def send_to_builder(store, ref, record, round_folder: Path, config_file: Path | None) -> None:
-    """Wait for the builder to be idle, then prompt it with the round. The card stays in its column."""
-    timeout_ms = REVIEW_TIMEOUT_SECONDS * 1000
+    """Wait for the builder to be idle, then prompt it with the round. The card stays in its column.
+
+    The builder can be busy with other work, so it gets the builder's wait, not a reviewer's."""
+    timeout_ms = BUILDER_TIMEOUT_SECONDS * 1000
     result = start_module.command(
         [
             os.environ.get("HERDR_BIN_PATH") or "herdr",
@@ -442,7 +455,7 @@ def send_to_builder(store, ref, record, round_folder: Path, config_file: Path | 
             "--timeout",
             str(timeout_ms),
         ],
-        timeout=REVIEW_TIMEOUT_SECONDS + 60,
+        timeout=BUILDER_TIMEOUT_SECONDS + 60,
     )
     if result.returncode:
         raise FactoryError(f"Waiting for the card's agent failed: {result.stderr or result.stdout}", "delivery_failed")
@@ -710,6 +723,17 @@ def wait(store, ref, folder: Path, writer=None, config_file: Path | None = None)
         except (HerdboardError, OSError, subprocess.TimeoutExpired) as error:
             print(f"herdboard: {error}", file=sys.stderr)
             return _end(store, ref, folder, "stopped", f"Factory stopped: {error}", f"Factory of {ref} failed")
+        except Exception as error:
+            # A bug must not leave the run active with its reviewers open: the traceback goes to worker.log.
+            traceback.print_exc()
+            return _end(
+                store,
+                ref,
+                folder,
+                "stopped",
+                f"Factory stopped: an unexpected error: {type(error).__name__}: {error}",
+                f"Factory of {ref} failed",
+            )
         if code is not None:
             return code
         waited_since = time.monotonic()

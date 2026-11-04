@@ -205,6 +205,10 @@ class LensTests(FactoryTestCase):
         self.assertEqual(factory.count_confirmed("## Confirmed problems\n- none.\n"), 0)
         merged = "# security (codex)\n\n" + text + "\n# code (pi)\n\n## Confirmed problems\n- [low] b.py:1: x.\n"
         self.assertEqual(factory.count_confirmed(merged), 3)
+        # A "#" line that is not a section heading, such as a note or a shell comment, does not end the section.
+        noted = "## Confirmed problems\n- [high] a.py:1: bug.\n# Note: see below\n- [low] a.py:2: style.\n"
+        self.assertEqual(factory.count_confirmed(noted), 2)
+        self.assertEqual(factory.count_confirmed("## Confirmed problems\n- a\n### Detail\n- b\n"), 2)
 
 
 class StartFactoryTests(FactoryTestCase):
@@ -236,6 +240,18 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(call[-2:], ["--add-dir", str(self.folder)])
         brief = Path(re.search(r"(/\S+\.md)", " ".join(call)).group(1)).read_text()
         self.assertIn("This card runs as a factory.", brief)
+
+    def test_a_builder_restarted_during_a_review_round_gets_the_factory_folder(self):
+        # The worker prompts the builder after the round, so a restart in any active status needs the folder.
+        self.start_factory()
+        record = self.record()
+        for status in ("reviewing", "approving"):
+            with self.subTest(status=status):
+                factory.update(self.card.ref, self.folder, status=status)
+                record["factory"]["status"] = status
+                self.starter.launch_agent(self.card, record, "claude", None, None, None, lambda: None)
+                call = [c for c in self.calls("agent", "start") if c[2] == f"hb-{self.card.ref.lower()}"][-1]
+                self.assertEqual(call[-2:], ["--add-dir", str(self.folder)])
 
     def test_a_codex_builder_may_write_the_factory_folder(self):
         self.start_factory(agent="codex")
@@ -580,6 +596,21 @@ class WorkerTests(FactoryTestCase):
         self.assertEqual(self.wait(), 0, self.errors.getvalue())
         self.assertEqual(self.columns, ["In progress"] * 3)
         self.assertEqual(self.store.show(self.card.ref).column, "Review")
+
+    def test_an_unexpected_error_ends_the_run_and_closes_the_reviewers(self):
+        with patch.object(factory, "wait_round", side_effect=KeyError("lens")):
+            self.assertEqual(self.wait(), 1)
+        self.assertIn("Factory stopped: an unexpected error: KeyError: 'lens'", self.log())
+        self.assertIn("Traceback", self.errors.getvalue())
+        self.assertEqual(self.state()["status"], "stopped")
+        self.assertEqual(self.fake.reviewers, {})
+
+    def test_the_builder_has_the_builder_wait_to_turn_idle(self):
+        self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n"
+        self.builder_fixes(commit=False)
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        wait_call = self.calls("agent", "wait")[0]
+        self.assertEqual(wait_call[wait_call.index("--timeout") + 1], str(factory.BUILDER_TIMEOUT_SECONDS * 1000))
 
     def test_a_failure_during_a_round_closes_the_reviewers(self):
         with patch.object(factory, "wait_round", side_effect=start.StartError("broken", "herdr_error")):

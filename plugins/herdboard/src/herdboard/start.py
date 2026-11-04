@@ -1172,9 +1172,13 @@ class Starter:
     def launch_agent(self, card, record, agent, model, thinking, lock_key, persist, linear=False, note=None, log=()):
         """Start an agent in the record's pane, with a brief file for the card."""
         name = "hb-" + card.ref.lower()
+        # The factory module imports this one.
+        from .factory import ACTIVE as FACTORY_ACTIVE
+
         running = record.get("factory") or {}
-        # A factory run's agent writes its answers to the review rounds in the factory folder.
-        factory_folder = running.get("folder") if running.get("status") in ("building", "fixing") else None
+        # A factory run's agent writes its answers to the review rounds in the factory folder,
+        # so an agent restarted at any point of the run gets it.
+        factory_folder = running.get("folder") if running.get("status") in FACTORY_ACTIVE else None
         # Herdr rejects line breaks in agent arguments, so the details
         # go to a brief file and the message is one line that names it.
         brief = write_brief(
