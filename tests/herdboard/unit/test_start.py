@@ -627,7 +627,19 @@ class StartTests(unittest.TestCase):
             self.starter.start(self.card.ref, agent="pi")
         call = next(c for c in self.fake.calls if c[:2] == ["agent", "start"])
         self.assertEqual(
-            call[:-1], ["agent", "start", "hb-" + self.card.ref, "--kind", "pi", "--pane", "w9:p1", "--", "--"]
+            call[:-1],
+            [
+                "agent",
+                "start",
+                "hb-" + self.card.ref,
+                "--kind",
+                "pi",
+                "--pane",
+                "w9:p1",
+                "--",
+                *start.pi_approval_options(),
+                "--",
+            ],
         )
         message = call[-1]
         brief = start.state_dir() / "briefs" / f"{self.card.ref}.md"
@@ -822,9 +834,27 @@ class StartTests(unittest.TestCase):
 
     def test_pi_gets_the_model_and_thinking_level(self):
         self.starter.start(self.card.ref, agent="pi", model="openai-codex/gpt-6.1-sol", thinking="medium")
-        args = self.agent_args()
+        args = self.agent_args()[len(start.pi_approval_options()) :]
         self.assertEqual(args[:5], ["--model", "openai-codex/gpt-6.1-sol", "--thinking", "medium", "--"])
         self.assertTrue(args[5].startswith("Start work on herdboard card"))
+
+    def test_pi_work_agent_blocks_jev_rejects_without_a_dialog(self):
+        self.assertEqual(start.pi_approval_options(), ["--approval-reject", "block"])
+        self.starter.start(self.card.ref, agent="pi")
+        args = self.agent_args()
+        self.assertEqual(args[:2], start.pi_approval_options())
+        # pi reads options only before its own `--`.
+        self.assertLess(args.index("--approval-reject"), args.index("--"))
+
+    def test_only_the_pi_work_agent_gets_the_approval_options(self):
+        for agent in ("codex", "claude"):
+            with self.subTest(agent=agent):
+                self.fake.calls.clear()
+                card = self.store.add(self.board, f"Task for {agent}")
+                self.starter.start(card.ref, agent=agent)
+                self.assertNotIn("--approval-reject", self.agent_args())
+        # Reviewers build on agent_arguments and pass `--approval-mode off`.
+        self.assertNotIn("--approval-reject", start.agent_arguments("pi", "task", "zai/glm-5.3", "high"))
 
     def test_claude_gets_the_model_after_its_prompt(self):
         self.starter.start(self.card.ref, agent="claude", model="opus")
@@ -896,7 +926,8 @@ class StartTests(unittest.TestCase):
         self.store.config.start_model = "zai/glm-5.3"
         self.store.config.start_thinking = "low"
         self.starter.start(self.card.ref, agent="pi")
-        self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "low"])
+        args = self.agent_args()[len(start.pi_approval_options()) :]
+        self.assertEqual(args[:4], ["--model", "zai/glm-5.3", "--thinking", "low"])
 
     def test_the_last_thinking_level_of_a_model_is_used_again(self):
         self.store.config.start_agent = "pi"
@@ -904,7 +935,8 @@ class StartTests(unittest.TestCase):
         self.store.config.start_thinking = "low"
         self.store.config.thinking = {"zai/glm-5.3": "high", "openai/gpt-5": "minimal"}
         self.starter.start(self.card.ref, agent="pi")
-        self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "high"])
+        args = self.agent_args()[len(start.pi_approval_options()) :]
+        self.assertEqual(args[:4], ["--model", "zai/glm-5.3", "--thinking", "high"])
 
     def test_a_model_without_a_remembered_level_uses_the_config_default(self):
         self.store.config.start_agent = "pi"
@@ -912,7 +944,8 @@ class StartTests(unittest.TestCase):
         self.store.config.start_thinking = "low"
         self.store.config.thinking = {"zai/glm-5.3": "high"}
         self.starter.start(self.card.ref, agent="pi")
-        self.assertEqual(self.agent_args()[:4], ["--model", "openai/gpt-5", "--thinking", "low"])
+        args = self.agent_args()[len(start.pi_approval_options()) :]
+        self.assertEqual(args[:4], ["--model", "openai/gpt-5", "--thinking", "low"])
 
     def test_the_remembered_level_of_the_agents_own_default_model(self):
         home = Path(self.root) / "home"
@@ -929,17 +962,19 @@ class StartTests(unittest.TestCase):
         self.store.config.thinking = {"openai-codex/gpt-6.1-sol": "xhigh"}
         with patch.dict(os.environ, {"HOME": str(home)}):
             self.starter.start(self.card.ref, agent="pi")
-        self.assertEqual(self.agent_args()[0], "--thinking")
-        self.assertEqual(self.agent_args()[1], "xhigh")
+        args = self.agent_args()[len(start.pi_approval_options()) :]
+        self.assertEqual(args[0], "--thinking")
+        self.assertEqual(args[1], "xhigh")
 
     def test_an_explicit_thinking_level_wins_over_the_remembered_one(self):
         self.store.config.thinking = {"zai/glm-5.3": "high"}
         self.starter.start(self.card.ref, agent="pi", model="zai/glm-5.3", thinking="max")
-        self.assertEqual(self.agent_args()[:4], ["--model", "zai/glm-5.3", "--thinking", "max"])
+        args = self.agent_args()[len(start.pi_approval_options()) :]
+        self.assertEqual(args[:4], ["--model", "zai/glm-5.3", "--thinking", "max"])
 
     def test_no_model_keeps_the_agents_own_default(self):
         self.starter.start(self.card.ref, agent="pi")
-        self.assertEqual(self.agent_args()[0], "--")
+        self.assertEqual(self.agent_args()[len(start.pi_approval_options())], "--")
 
     def test_pi_model_choices_come_from_pi_settings(self):
         home = Path(self.root) / "home"

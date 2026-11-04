@@ -186,8 +186,12 @@ class RequestTests(PlanTestCase):
         call = self.planner_start()
         args = call[call.index("--") + 1 :]
         self.assertNotIn("--tools", args)
-        self.assertEqual(args[:-2], ["--model", "zai/glm-5.3", "--thinking", "high"])
+        self.assertEqual(args[:-2], [*start.pi_approval_options(), "--model", "zai/glm-5.3", "--thinking", "high"])
         self.assertEqual(args[-2], "--")
+
+    def test_pi_planner_blocks_jev_rejects_like_the_work_agent(self):
+        args = plan.planner_arguments("pi", "task", Path("/plans"), None, None)
+        self.assertEqual(args, [*start.pi_approval_options(), "--", "task"])
 
     def test_the_brief_has_the_card_where_to_write_and_how_to_plan(self):
         self.planner.plan(self.card.ref)

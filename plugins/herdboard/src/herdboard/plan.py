@@ -85,9 +85,10 @@ def planner_arguments(kind: str, prompt: str, folder: Path, model: str | None, t
     and writes the attachments.
 
     Each agent has the work agent's permissions plus the attachments folder: Claude auto mode, pi
-    Approval Mode with all its tools, Codex auto-review with network. The user is in the tab too."""
+    Approval Mode with all its tools that blocks Jev rejects, Codex auto-review with network. The user is
+    in the tab too."""
     if kind == "pi":
-        return start_module.agent_arguments(kind, prompt, model, thinking)
+        return [*start_module.pi_approval_options(), *start_module.agent_arguments(kind, prompt, model, thinking)]
     if kind == "codex":
         return [
             *start_module.codex_auto_review_options(),

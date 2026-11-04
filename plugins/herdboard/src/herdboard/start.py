@@ -263,6 +263,13 @@ def agent_arguments(agent: str, message: str, model: str | None, thinking: str |
     ]
 
 
+def pi_approval_options() -> list[str]:
+    """pi Approval Mode that returns a Jev reject to the model as blocked, with no dialog. Uncertain commands still ask.
+
+    For the work agent and the planner only: reviewers build on agent_arguments and pass `--approval-mode off`."""
+    return ["--approval-reject", "block"]
+
+
 def codex_auto_review_options() -> list[str]:
     """Codex in the workspace sandbox with network, and a reviewer model in place of approval prompts.
 
@@ -1209,6 +1216,8 @@ class Starter:
         # Record intent before Herdr can return an unknown startup result.
         persist()
         args = agent_arguments(agent, message, model, thinking)
+        if agent == "pi":
+            args = [*pi_approval_options(), *args]
         if agent == "codex":
             args = [*codex_auto_review_options(), *(["--add-dir", factory_folder] if factory_folder else []), *args]
         elif agent == "claude" and factory_folder:

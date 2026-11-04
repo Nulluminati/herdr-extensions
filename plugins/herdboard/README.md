@@ -308,6 +308,8 @@ When planning ends with a changed plan and the card's work agent still runs, the
 
 Codex planners use `workspace-write` with network access and the attachments folder as an extra writable directory. Writes there and in the worktree need no approval. Other approval requests go to Codex's automatic reviewer (`approvals_reviewer = "auto_review"`), which uses extra model calls. You stay in the tab for requests it denies. Codex work agents use the same options without the attachments folder. Codex keeps every `.git` folder read-only in `workspace-write`, so each `git add` and `git commit` of a work agent goes to the automatic reviewer.
 
+pi planners and work agents run Approval Mode with `--approval-reject block`. When Jev rejects a command, pi tells the agent that the command is blocked and shows no dialog. The agent takes another route. You still get the dialog for commands that Jev is uncertain about. pi has no sandbox in these sessions, so Approval Mode stays on.
+
 `--agent claude|pi|codex`, `--model`, `--thinking` and `--base BRANCH` choose the planner and its base. On the board, `P` asks for them.
 
 ### Mockups
@@ -511,7 +513,7 @@ Each role gets the same permissions in Claude, pi and Codex. The work agent and 
 
 | Role | Claude | pi | Codex |
 |---|---|---|---|
-| Work agent (`start`) | `--permission-mode auto` | Approval Mode (pi's default) | `workspace-write` with network, approvals `on-request` with auto-review, `web_search="live"` |
+| Work agent (`start`) | `--permission-mode auto` | Approval Mode with `--approval-reject block`: Jev rejects go back to the agent, uncertain commands ask | `workspace-write` with network, approvals `on-request` with auto-review, `web_search="live"` |
 | Planner (`plan`) | as the work agent, plus `--add-dir` for the attachments folder | as the work agent, with all its tools | as the work agent, plus `--add-dir` for the attachments folder |
 | Card reviewer (`review --agent`) | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser | sandbox, writes the review folder, browser |
 | Factory builder (`start --factory`) | as the work agent, plus `--add-dir` for the factory folder | as the work agent | as the work agent, plus `--add-dir` for the factory folder |
@@ -535,7 +537,7 @@ The reviewer sandbox:
 
 What each agent needs on your machine:
 
-- pi: the `worker-sandbox` and `approval-mode` extensions from pi-extensions, with the `--sandbox` and `--approval-mode` flags and the context7 and `code_search` tools in sandboxed sessions.
+- pi: the `worker-sandbox` and `approval-mode` extensions from pi-extensions, with the `--sandbox`, `--approval-mode` and `--approval-reject` flags and the context7 and `code_search` tools in sandboxed sessions. pi-extensions card `t8kr` added `--approval-reject`. Without it, pi refuses to start the work agent and the planner. Check with `pi --help | grep approval-reject`.
 - Codex reviewers: a rule in `~/.codex/rules/` that runs `terminal-browser` outside the sandbox (`prefix_rule(pattern=["terminal-browser"], decision="allow")`), and the `context7` and `grep_app` MCP servers in `~/.codex/config.toml`.
 - Codex work agents and planners: a rule in `~/.codex/rules/` that allows the safe `herdboard` subcommands (`show`, `list`, `log`, `attach`, `mockup`, `move`).
 
