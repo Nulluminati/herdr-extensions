@@ -41,14 +41,14 @@ Do not run `terminal-browser shutdown`: it closes every browser on the machine.
 """
 
 
-def start_worker(arguments: list[str], log: Path) -> None:
-    """Run herdboard detached, so the caller (the CLI or the board) returns at once."""
+def start_worker(arguments: list[str], log: Path) -> int:
+    """Run herdboard detached, so the caller (the CLI or the board) returns at once. Returns its process ID."""
     # A linked checkout can differ from the installed package. Workers must use the caller's code.
     environment = os.environ.copy()
     source = str(Path(__file__).resolve().parent.parent)
     environment["PYTHONPATH"] = os.pathsep.join(filter(None, (source, environment.get("PYTHONPATH"))))
     with log.open("a") as output:
-        subprocess.Popen(
+        process = subprocess.Popen(
             [sys.executable, "-m", "herdboard", *arguments],
             stdin=subprocess.DEVNULL,
             stdout=output,
@@ -56,6 +56,7 @@ def start_worker(arguments: list[str], log: Path) -> None:
             start_new_session=True,
             env=environment,
         )
+    return process.pid
 
 
 def _git(worktree: Path, *args: str) -> str:

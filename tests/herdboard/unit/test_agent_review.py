@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from herdboard import agent_review, attachments, review, sandbox, start
 from support.herdboard_agent_review import ReviewerHerdr
@@ -55,14 +55,17 @@ class WorkerTests(CliTestCase):
 
         def launch(argv, **options):
             captured.update(argv=argv, options=options)
+            return MagicMock(pid=4321)
 
         with (
             patch.dict(os.environ, {"PYTHONPATH": str(stale)}),
             patch.object(agent_review.subprocess, "Popen", side_effect=launch),
         ):
-            agent_review.start_worker(
+            pid = agent_review.start_worker(
                 ["--config", str(self.config), "review-wait", "t123", "--folder", str(folder)], folder / "worker.log"
             )
+        # The caller can record the worker's process ID at once.
+        self.assertEqual(pid, 4321)
         environment = captured["options"]["env"]
         self.assertEqual(environment["PYTHONPATH"].split(os.pathsep)[1:], [str(stale)])
         result = subprocess.run(

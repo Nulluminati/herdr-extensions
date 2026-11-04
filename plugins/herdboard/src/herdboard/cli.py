@@ -943,7 +943,7 @@ def _cmd_move(ctx: _Context) -> dict:
     if args.column.casefold() == start_module.REVIEW_COLUMN.casefold():
         ref = args.ref.upper() if LINEAR_REF.match(args.ref) else ctx.store.show(args.ref).ref
         # While a factory runs, Review means "every round is done": the move only signals a round.
-        state = factory.signal_ready(ref)
+        state = factory.signal_ready(ref, ctx.store)
         if state is not None:
             return {
                 "ref": ref,

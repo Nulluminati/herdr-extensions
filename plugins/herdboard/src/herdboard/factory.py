@@ -194,10 +194,12 @@ def new_state(key: str, rounds: int) -> dict:
     }
 
 
-def signal_ready(ref) -> dict | None:
+def signal_ready(ref, store=None) -> dict | None:
     """The builder's move to Review while a factory runs: record that the work is ready for a round.
 
-    Returns the run's summary, or None when no factory runs, so the move goes ahead."""
+    Returns the run's summary, or None when no factory runs, so the move goes ahead. A run whose worker
+    died is stopped here: its reviewer panes close, and with `store` the card's log says so."""
+    panes = None
     path = state_dir() / "starts.json"
     with _lock(wait=2):
         found = find_record(ref)
@@ -207,19 +209,26 @@ def signal_ready(ref) -> dict | None:
         state = record.get("factory")
         if not state or state.get("status") not in ACTIVE:
             return None
-        if not _worker_alive(state):
-            # The worker died: free the card, so the move goes ahead.
-            state.update(status="stopped", ready=False)
-            records = _read(path)
-            records[key] = record
-            _write(path, records)
-            return None
-        if state["status"] in ("building", "fixing"):
-            state["ready"] = True
-            records = _read(path)
-            records[key] = record
-            _write(path, records)
-        return summary(state)
+        if _worker_alive(state):
+            if state["status"] in ("building", "fixing"):
+                state["ready"] = True
+                records = _read(path)
+                records[key] = record
+                _write(path, records)
+            return summary(state)
+        # The worker died: free the card, so the move goes ahead.
+        panes = state.get("panes") or []
+        state.update(status="stopped", ready=False, panes=[])
+        records = _read(path)
+        records[key] = record
+        _write(path, records)
+    _close(panes)
+    if store is not None:
+        try:
+            activity.append(store, ref, "Factory stopped: its worker is gone.", "herdboard")
+        except HerdboardError as error:
+            print(f"herdboard: cannot log: {error}", file=sys.stderr)
+    return None
 
 
 def stop(store, ref) -> dict:
@@ -490,6 +499,9 @@ Write your verdict to `{approver_folder / "verdict.md"}` in this format:
     ## Findings left at the round limit
     - Lens, finding.
 
+    ## Lenses that failed
+    - Round, lens: a round file says that this lens failed, so it did not review the change.
+
     ## Testing
     What the log shows was tested.
 
@@ -711,7 +723,7 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
     worktree = Path(record["worktree_path"])
     base = record.get("base") or "@{upstream}"
     try:
-        head = read_change(worktree, base)[3]
+        _, uncommitted, untracked, head = read_change(worktree, base)
     except ReviewError as error:
         if error.code != "nothing_to_review":
             raise
@@ -719,12 +731,16 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
     if number:
         last = folder / f"round-{number}" / "findings.md"
         confirmed = count_confirmed(last.read_text(encoding="utf-8")) if last.exists() else 0
+        # A lens that failed did not review the change: its round does not count as clean.
+        failed = state.get("failed") or []
         reason = None
-        if head == state["heads"][-1]:
+        if head == state["heads"][-1] and not failed:
             reason = f"Factory: no new commits since round {number}, approver next."
+            if uncommitted.strip() or untracked:
+                reason += " The approver also reviews the uncommitted changes."
         elif number >= rounds:
             reason = f"Factory: round {number} of {rounds} was the last, approver next."
-        elif not confirmed:
+        elif not confirmed and not failed:
             reason = f"Factory: round {number} had no confirmed problems, approver next."
         if reason:
             activity.append(store, ref, reason, "herdboard")
@@ -742,9 +758,28 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
     result = wait_round(ref, folder, review, store)
     if result["stopped"]:
         return _stopped(store, ref, folder, result)
+    update(ref, folder, failed=list(result["failures"]))
     activity.append(store, ref, round_summary(number, rounds, result), "herdboard")
-    if not result["confirmed"] and not result["questions"] and not result["failures"]:
-        activity.append(store, ref, f"Factory: round {number} had no findings, approver next.", "herdboard")
+    if not result["confirmed"] and not result["questions"]:
+        failed = ", ".join(result["failures"])
+        if failed and number < rounds:
+            # Nothing for the builder to answer: the next round runs at once, so the failed lenses review.
+            activity.append(
+                store,
+                ref,
+                f"Factory: round {number} had no findings, but lenses failed ({failed}): round {number + 1} next.",
+                "herdboard",
+            )
+            update(ref, folder, ready=True)
+            return None
+        activity.append(
+            store,
+            ref,
+            f"Factory: round {number} had no findings"
+            + (f", but lenses failed ({failed})" if failed else "")
+            + ", approver next.",
+            "herdboard",
+        )
         found = find_record(ref)
         return _approve(store, ref, folder, found[1] if found else record, card, writer)
     stopped = _cancelled(store, ref, folder)

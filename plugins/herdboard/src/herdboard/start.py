@@ -1233,11 +1233,14 @@ class Starter:
         folder = Path(state["folder"])
         config = ["--config", str(self.config_file)] if self.config_file else []
         try:
-            start_worker([*config, "factory-wait", ref, "--folder", str(folder)], folder / "worker.log")
+            pid = start_worker([*config, "factory-wait", ref, "--folder", str(folder)], folder / "worker.log")
         except OSError as error:
             factory_module.update(ref, folder, status="stopped")
             activity_append(self.store, ref, f"Factory failed: the worker did not start: {error}", "herdboard")
             raise StartError(f"The factory worker did not start: {error}", "worker_failed") from error
+        # Recorded at once: a worker that dies before it writes its own process ID must not look alive.
+        if pid:
+            factory_module.update(ref, folder, pid=pid)
         activity_append(
             self.store,
             ref,

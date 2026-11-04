@@ -114,7 +114,11 @@ class FactoryTestCase(MergeTestCase):
         FactoryHerdr.__init__(self.fake, self.root)
         self.workers = []
         self.enterContext(
-            patch.object(agent_review, "start_worker", lambda arguments, log: self.workers.append((arguments, log)))
+            patch.object(
+                agent_review,
+                "start_worker",
+                lambda arguments, log: self.workers.append((arguments, log)) or os.getpid(),
+            )
         )
         self.enterContext(patch.object(factory, "POLL_SECONDS", 0))
         self.enterContext(patch.object(agent_review, "POLL_SECONDS", 0))
@@ -214,6 +218,8 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(arguments, ["factory-wait", self.card.ref, "--folder", str(self.folder)])
         self.assertEqual(log, self.folder / "worker.log")
         self.assertIn("Factory started: up to 2 review rounds.", self.log())
+        # The start records the worker's process ID, so a worker that dies at once does not look alive.
+        self.assertEqual(state["pid"], os.getpid())
 
     def test_one_round_is_named_in_the_singular(self):
         self.start_factory(rounds=1)
@@ -405,6 +411,42 @@ class WorkerTests(FactoryTestCase):
         self.assertIn("Factory: no new commits since round 1, approver next.", self.log())
         self.assertEqual(len(self.fake.prompts), 1)
 
+    def test_the_same_head_with_uncommitted_changes_says_so(self):
+        self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n"
+        self.columns = []
+
+        def fix_without_commit(message):
+            (self.worktree / "a.txt").write_text("fixed\n")
+            self.ready()
+
+        self.fake.on_prompt = fix_without_commit
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn(
+            "Factory: no new commits since round 1, approver next. The approver also reviews the uncommitted changes.",
+            self.log(),
+        )
+
+    def test_a_failed_lens_is_not_no_confirmed_problems(self):
+        # The failed lens never reviewed the change: the next round runs, without the builder.
+        self.fake.reviewer_states["code"] = ["working", None]
+        # The builder gets no prompt, so a wait for its signal would end the run at once.
+        self.enterContext(patch.object(factory, "BUILDER_TIMEOUT_SECONDS", 0))
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        log = self.log()
+        self.assertIn("Factory: round 1 had no findings, but lenses failed (code): round 2 next.", log)
+        self.assertNotIn("had no confirmed problems", log)
+        self.assertIn("Factory round 2 of 3 started: code (pi).", log)
+        self.assertEqual(self.fake.prompts, [])
+        self.assertIn("## Lenses that failed", (self.folder / "approver" / "request.md").read_text())
+
+    def test_failed_lenses_at_the_round_limit_go_to_the_approver_and_the_log_names_them(self):
+        self.fake.reviewer_states["code"] = ["working", None]
+        factory.update(self.card.ref, self.folder, rounds=1)
+        # The builder gets no prompt, so a wait for its signal would end the run at once.
+        self.enterContext(patch.object(factory, "BUILDER_TIMEOUT_SECONDS", 0))
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn("Factory: round 1 had no findings, but lenses failed (code), approver next.", self.log())
+
     def test_the_last_round_goes_to_the_approver(self):
         self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n"
         self.builder_fixes()
@@ -579,10 +621,14 @@ class RefusalTests(FactoryTestCase):
         self.start_factory()
         factory.update(self.card.ref, self.folder, pid=2**22 + 12345)
         self.assertFalse(factory.factory_running(self.card.ref))
+        factory.update(self.card.ref, self.folder, panes=["w9:p5"])
         # The builder's move to Review is then a plain move, and the stale run is stopped.
-        self.assertIsNone(factory.signal_ready(self.card.ref))
+        self.assertIsNone(factory.signal_ready(self.card.ref, self.store))
         self.assertEqual(self.state()["status"], "stopped")
         self.assertFalse(self.state()["ready"])
+        self.assertEqual(self.state()["panes"], [])
+        self.assertIn(["pane", "close", "w9:p5"], self.calls("pane", "close"))
+        self.assertIn("Factory stopped: its worker is gone.", self.log())
 
     def test_stop_without_a_run(self):
         with self.assertRaises(factory.FactoryError) as raised:
