@@ -401,15 +401,16 @@ class LinearBoardFixTests(LinearBoardCase):
             self.assertEqual(len(self.requests("Projects")), 1)
 
     async def test_one_fetch_runs_at_a_time_and_one_refresh_is_queued(self):
-        self.fake.delay = 0.2
+        # The gate holds the first fetch until all key presses are in.
+        self.gate = threading.Event()
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await pilot.pause()
+            self.assertTrue(app.linear_fetching)
             for _ in range(3):
                 await pilot.press("r")
-            await pilot.pause(0.1)
+            self.gate.set()
             await settle(pilot)
-            await pilot.pause(0.1)
             await settle(pilot)
             self.assertEqual(self.most_running, 1)
             self.assertEqual(self.fetches, 2)

@@ -630,8 +630,15 @@ class LinearWriteTests(unittest.TestCase):
     # Reuse fixtures without running the read tests a second time.
     def setUp(self):
         LinearTests.setUp(self)
-        self.client.timeout = 0.2
+        # A loaded test machine can take more than a second to validate a first query.
+        self.client.timeout = 5.0
         self.client.sleep = lambda seconds: None
+
+    def slow_mutation(self, failure):
+        """Make each write answer after the client gave up. Only the client timeout gets
+        short; the server delay stays longer, so load cannot make the write answer in time."""
+        self.client.timeout = 0.2
+        self.fake.mutation_failure, self.fake.mutation_delay = failure, 0.8
 
     def test_team_states(self):
         self.assertEqual(self.client.team_states("t0"), STATES)
@@ -800,7 +807,7 @@ class LinearWriteTests(unittest.TestCase):
         for failure, expected in (("timeout_before", 0.0), ("timeout_after", 99)):
             with self.subTest(failure=failure):
                 self.fake.requests.clear()
-                self.fake.mutation_failure = failure
+                self.slow_mutation(failure)
                 with self.assertRaises(LinearWriteUnknownError):
                     self.client.update_issue("i0", sort_order=99)
                 self.assertEqual(len(self.fake.requests), 1)
@@ -809,11 +816,12 @@ class LinearWriteTests(unittest.TestCase):
     def test_create_timeout_after_apply_lookup(self):
         from herdboard.linear import LinearWriteUnknownError
 
-        self.fake.mutation_failure = "timeout_after"
+        self.slow_mutation("timeout_after")
         with self.assertRaises(LinearWriteUnknownError):
             self.client.create_issue(issue_id="given", team_id="t0", title="Created")
         self.assertEqual(len(self.fake.requests), 1)
         self.fake.mutation_failure = None
+        self.client.timeout = 5.0
         self.assertEqual(self.client.issue_for_write("given")["title"], "Created")
 
     def test_mutation_rate_limit_not_retried(self):
