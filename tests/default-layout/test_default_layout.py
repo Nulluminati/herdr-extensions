@@ -29,9 +29,11 @@ class FakeHerdr:
         self.tabs = []
         self.panes = []
         self.busy = set()
+        self.shell_name = "fish"
         self.commands = []
         self.requests = []
         self.failing_workspace_labels = set()
+        self.failing_process_info = False
         self.failing_session_list = False
         self.session_name = "default"
         self.session_dir = None
@@ -119,7 +121,10 @@ class FakeHerdr:
             )
         if args[:3] == ["pane", "process-info", "--pane"]:
             pane_id = args[3]
-            name = "nvim" if pane_id in self.busy else "fish"
+            if self.failing_process_info:
+                error = {"error": {"code": "pane_not_found", "message": f"no pane {pane_id}"}}
+                return subprocess.CompletedProcess(argv, 1, json.dumps(error), "")
+            name = "nvim" if pane_id in self.busy else self.shell_name
             return self.ok(
                 {
                     "type": "pane_process_info",
@@ -586,6 +591,29 @@ class SessionDirTests(DefaultLayoutTestCase):
         self.assertEqual(default_layout.session_file(), self.dir / "xdg/herdr/session.json")
 
 
+class IdleShellTests(DefaultLayoutTestCase):
+    def pane_id(self):
+        self.fresh_home()
+        return self.herdr.panes[0]["pane_id"]
+
+    def test_an_idle_shell_of_any_name_is_idle(self):
+        pane_id = self.pane_id()
+        for name in ("tcsh", "csh", "mksh", "xonsh", "oksh", "busybox", "-mksh", "renamed"):
+            self.herdr.shell_name = name
+            with self.subTest(name=name):
+                self.assertTrue(default_layout.is_idle_shell(pane_id))
+
+    def test_a_foreground_program_is_not_idle(self):
+        pane_id = self.pane_id()
+        self.herdr.busy.add(pane_id)
+        self.assertFalse(default_layout.is_idle_shell(pane_id))
+
+    def test_a_pane_with_an_unreadable_process_info_is_not_idle(self):
+        pane_id = self.pane_id()
+        self.herdr.failing_process_info = True
+        self.assertFalse(default_layout.is_idle_shell(pane_id))
+
+
 class StartupTests(DefaultLayoutTestCase):
     def test_fresh_session_creates_every_missing_project(self):
         self.two_projects()
@@ -906,6 +934,13 @@ class RehydrateTests(DefaultLayoutTestCase):
         self.run_main("default_layout.py", "startup")
         self.assertEqual([p["tab_label"] for p in self.applies()], ["agents"])
         self.assertIn("default-layout: alpha/editor left alone: something is running in", self.stdout.getvalue())
+
+    def test_a_tab_of_any_shell_rehydrates(self):
+        self.restored()
+        self.herdr.shell_name = "mksh"
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["agents", "editor"])
+        self.assertIn("default-layout: rehydrated alpha/editor", self.stdout.getvalue())
 
     def test_shell_only_tab_is_skipped(self):
         self.restored()

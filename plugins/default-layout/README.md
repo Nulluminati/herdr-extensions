@@ -123,6 +123,8 @@ Herdr restores workspaces, tabs, splits and directories, but each pane comes bac
 - the file gives the tab a program or an agent, and
 - every pane of the tab is an idle shell.
 
+A pane is an idle shell when Herdr reports its shell as the only foreground process. Any shell counts, whatever its name.
+
 The plugin leaves a tab alone when it holds an agent, including an agent that Herdr will resume, or a running program. A tab of shells needs nothing, so the plugin skips it. The rebuilt tab keeps its place in the tab row.
 
 A restored session opens no workspace. A project that you closed stays closed until you start a fresh session or run `apply` in a workspace for it.

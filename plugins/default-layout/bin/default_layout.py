@@ -20,7 +20,6 @@ import tomllib
 from pathlib import Path
 
 PLUGIN_ID = "nulluminati.default-layout"
-SHELL_NAMES = {"bash", "zsh", "fish", "sh", "dash", "ksh", "nu", "elvish"}
 AGENT_NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 SPLITS = ("down", "right")
 MAX_PANES = 4
@@ -412,16 +411,22 @@ def project_for_workspace(projects: list[dict], workspace: dict, snap: dict) -> 
 
 
 def is_idle_shell(pane_id: str) -> bool:
-    """True when a pane sits at a shell prompt with nothing running."""
+    """True when a pane sits at a shell prompt with nothing running.
+
+    Herdr reports the pane's shell pid. At a prompt the shell is the only
+    foreground process, and it leads the foreground process group. A running
+    program leaves both behind. The check reads that state, not a list of
+    shell names, so it holds for any shell the user starts.
+    """
     try:
         info = herdr("pane", "process-info", "--pane", pane_id)["process_info"]
     except (HerdrError, KeyError):
         return False
     foreground = info.get("foreground_processes") or []
-    if len(foreground) != 1:
+    shell_pid = info.get("shell_pid")
+    if shell_pid is None or len(foreground) != 1:
         return False
-    name = (foreground[0].get("name") or "").lstrip("-")
-    return name in SHELL_NAMES and info.get("foreground_process_group_id") == info.get("shell_pid")
+    return foreground[0].get("pid") == shell_pid and info.get("foreground_process_group_id") == shell_pid
 
 
 def settles_to_idle_shell(pane_id: str) -> bool:
