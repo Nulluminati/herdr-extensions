@@ -259,6 +259,28 @@ class DefaultLayoutTestCase(unittest.TestCase):
         """Write the session file that Herdr restores a session from."""
         self.session_file.write_text("{}")
 
+    def aged_marker(self, key):
+        """A claim left behind by a run that died."""
+        self.state_dir.mkdir(exist_ok=True)
+        marker = self.state_dir / f"building-{key}"
+        marker.touch()
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(marker, (old, old))
+        return marker
+
+    def race_once(self, method, marker, error):
+        """Make the first call of `method` on `marker` fail, as a racing release would."""
+        real = getattr(Path, method)
+        raced = []
+
+        def fail_once(path, *args, **kwargs):
+            if Path(path) == marker and not raced:
+                raced.append(path)
+                raise error
+            return real(path, *args, **kwargs)
+
+        return patch.object(Path, method, fail_once)
+
 
 class SpecTests(DefaultLayoutTestCase):
     def problems(self, text):
@@ -769,17 +791,35 @@ class StartupTests(DefaultLayoutTestCase):
         self.assertIn("default-layout: alpha failed: no state directory", self.stdout.getvalue())
         self.assertIn("default-layout: built beta (1 tabs)", self.stdout.getvalue())
 
+    def test_a_marker_that_vanishes_during_the_stat_still_builds(self):
+        self.two_projects()
+        self.fresh_home()
+        marker = self.aged_marker("alpha")
+        gone = FileNotFoundError(2, "No such file or directory", str(marker))
+        with self.race_once("stat", marker, gone):
+            self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
+    def test_a_marker_that_vanishes_before_the_touch_still_builds(self):
+        self.two_projects()
+        self.fresh_home()
+        marker = self.aged_marker("alpha")
+        gone = FileNotFoundError(2, "No such file or directory", str(marker))
+        with self.race_once("touch", marker, gone):
+            self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
+    def test_an_unreadable_marker_does_not_block_the_build(self):
+        self.two_projects()
+        self.fresh_home()
+        marker = self.aged_marker("alpha")
+        denied = PermissionError(13, "Permission denied", str(marker))
+        with self.race_once("touch", marker, denied):
+            self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
 
 class ClaimTests(DefaultLayoutTestCase):
-    def aged_marker(self, key):
-        """A claim left behind by a run that died."""
-        self.state_dir.mkdir()
-        marker = self.state_dir / f"building-{key}"
-        marker.touch()
-        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
-        os.utime(marker, (old, old))
-        return marker
-
     def test_a_fresh_marker_blocks_the_claim(self):
         self.state_dir.mkdir()
         (self.state_dir / "building-alpha").touch()
@@ -801,6 +841,25 @@ class ClaimTests(DefaultLayoutTestCase):
 
         with patch.object(Path, "stat", stat_after_release):
             self.assertTrue(default_layout.claim("alpha"))
+        self.assertTrue(marker.exists(), "a won claim must leave a marker")
+
+    def test_a_claim_that_never_gets_its_marker_is_lost(self):
+        marker = self.aged_marker("alpha")
+        real_stat = Path.stat
+        real_open = os.open
+
+        def stat_after_release(path, *args, **kwargs):
+            if Path(path) == marker:
+                marker.unlink(missing_ok=True)
+            return real_stat(path, *args, **kwargs)
+
+        def open_always_taken(path, *args, **kwargs):
+            if Path(path) == marker:
+                raise FileExistsError(17, "File exists", str(path))
+            return real_open(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", stat_after_release), patch.object(os, "open", open_always_taken):
+            self.assertFalse(default_layout.claim("alpha"))
 
 
 class RehydrateTests(DefaultLayoutTestCase):

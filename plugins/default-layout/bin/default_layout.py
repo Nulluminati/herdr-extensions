@@ -500,23 +500,31 @@ def claim(key: str) -> bool:
 
     A claim ages out after CLAIM_TTL_SECONDS, so a run that died holding one
     does not block later runs. A marker that vanishes during the check belonged
-    to a run that has just released it, so this run takes the claim.
+    to a run that has released it, so the claim is free: create the marker
+    again. A guard that cannot write or read its marker never blocks the work.
     """
     try:
         marker = claim_path(key)
-        os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-        return True
-    except FileExistsError:
-        pass
     except OSError:
-        return True  # No writable state directory; do not let the guard block the work.
-    try:
-        if time.time() - marker.stat().st_mtime < CLAIM_TTL_SECONDS:
-            return False
-        marker.touch()
-        return True
-    except FileNotFoundError:
-        return True
+        return True  # No usable state directory; do not let the guard block the work.
+    for _ in range(2):
+        try:
+            os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            pass
+        except OSError:
+            return True  # The marker cannot be written; do not let the guard block the work.
+        try:
+            if time.time() - marker.stat().st_mtime < CLAIM_TTL_SECONDS:
+                return False  # Another run holds a claim that has not aged out.
+            marker.touch()
+            return True
+        except FileNotFoundError:
+            continue  # The owner released it; take the claim with a fresh marker.
+        except OSError:
+            return True  # The marker cannot be read or touched; do not block the work.
+    return False  # Two runs released the claim under us; leave the build to the next pass.
 
 
 def release(key: str) -> None:
