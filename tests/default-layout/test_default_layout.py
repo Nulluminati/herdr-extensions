@@ -290,10 +290,13 @@ class DefaultLayoutTestCase(unittest.TestCase):
         """Write the session file that Herdr restores a session from."""
         self.session_file.write_text("{}")
 
+    def project_key(self, number, path):
+        """The claim key of the project at `number` in the layout file."""
+        return default_layout.claim_key(number, {"path": str(path)})
+
     def aged_marker(self, key):
         """A claim left behind by a run that died."""
-        self.state_dir.mkdir(exist_ok=True)
-        marker = self.state_dir / f"building-{key}"
+        marker = default_layout.claim_path(key)
         marker.touch()
         old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
         os.utime(marker, (old, old))
@@ -331,6 +334,22 @@ class SpecTests(DefaultLayoutTestCase):
         self.two_projects()
         spec = default_layout.load_layout()
         self.assertEqual([p["label"] for p in spec["projects"]], ["alpha", "beta"])
+
+    def test_a_duplicate_label_is_an_error(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "work"
+            path = "/tmp/dup/a"
+            [[projects.tabs]]
+            name = "shell"
+
+            [[projects]]
+            label = "work"
+            path = "/tmp/dup/b"
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.assertEqual(problems, ["work: label is already used by project 1"])
 
     def test_command_with_panes_is_an_error(self):
         problems = self.problems("""
@@ -856,19 +875,61 @@ class StartupTests(DefaultLayoutTestCase):
     def test_a_claimed_project_is_skipped(self):
         self.two_projects()
         self.fresh_home()
-        self.state_dir.mkdir()
-        (self.state_dir / "building-alpha").touch()
+        default_layout.claim_path(self.project_key(1, self.project_a)).touch()
         self.run_main("default_layout.py", "startup")
         self.assertEqual([argv[6] for argv in self.created()], ["beta"])
 
     def test_a_claim_held_elsewhere_survives_the_skip(self):
         self.two_projects()
         self.fresh_home()
-        self.state_dir.mkdir()
-        marker = self.state_dir / "building-alpha"
+        marker = default_layout.claim_path(self.project_key(1, self.project_a))
         marker.touch()
         self.run_main("default_layout.py", "startup")
         self.assertTrue(marker.exists())
+
+    def test_a_claim_on_one_project_does_not_skip_a_lookalike_label(self):
+        self.write_layout(f"""
+            [[projects]]
+            label = "my proj"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "shell"
+
+            [[projects]]
+            label = "my_proj"
+            path = "{self.project_b}"
+
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.fresh_home()
+        # Another run holds the claim on the first project.
+        default_layout.claim_path(self.project_key(1, self.project_a)).touch()
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["my_proj"])
+        self.assertIn("default-layout: my proj is already being built", self.stdout.getvalue())
+
+    def test_a_duplicate_label_builds_nothing(self):
+        self.write_layout(f"""
+            [[projects]]
+            label = "work"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "shell"
+
+            [[projects]]
+            label = "work"
+            path = "{self.project_b}"
+
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.fresh_home()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
+        self.assertIn("  work: label is already used by project 1", self.stderr.getvalue())
+        self.assertEqual(self.created(), [])
 
     def test_a_failing_claim_does_not_stop_the_others(self):
         self.two_projects()
@@ -876,7 +937,7 @@ class StartupTests(DefaultLayoutTestCase):
         real_claim = default_layout.claim
 
         def failing_claim(key):
-            if key == "alpha":
+            if key == self.project_key(1, self.project_a):
                 raise OSError("no state directory")
             return real_claim(key)
 
@@ -889,7 +950,7 @@ class StartupTests(DefaultLayoutTestCase):
     def test_a_marker_that_vanishes_during_the_stat_still_builds(self):
         self.two_projects()
         self.fresh_home()
-        marker = self.aged_marker("alpha")
+        marker = self.aged_marker(self.project_key(1, self.project_a))
         gone = FileNotFoundError(2, "No such file or directory", str(marker))
         with self.race_once("stat", marker, gone):
             self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
@@ -898,7 +959,7 @@ class StartupTests(DefaultLayoutTestCase):
     def test_a_marker_that_vanishes_before_the_touch_still_builds(self):
         self.two_projects()
         self.fresh_home()
-        marker = self.aged_marker("alpha")
+        marker = self.aged_marker(self.project_key(1, self.project_a))
         gone = FileNotFoundError(2, "No such file or directory", str(marker))
         with self.race_once("touch", marker, gone):
             self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
@@ -907,7 +968,7 @@ class StartupTests(DefaultLayoutTestCase):
     def test_an_unreadable_marker_does_not_block_the_build(self):
         self.two_projects()
         self.fresh_home()
-        marker = self.aged_marker("alpha")
+        marker = self.aged_marker(self.project_key(1, self.project_a))
         denied = PermissionError(13, "Permission denied", str(marker))
         with self.race_once("touch", marker, denied):
             self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
@@ -915,6 +976,18 @@ class StartupTests(DefaultLayoutTestCase):
 
 
 class ClaimTests(DefaultLayoutTestCase):
+    def test_two_projects_with_one_label_get_their_own_claim(self):
+        first = default_layout.claim_key(1, {"path": "/tmp/a"})
+        second = default_layout.claim_key(2, {"path": "/tmp/b"})
+        self.assertNotEqual(first, second)
+        self.assertTrue(default_layout.claim(first))
+        self.assertTrue(default_layout.claim(second))
+
+    def test_the_claim_key_is_a_plain_file_name(self):
+        key = default_layout.claim_key(1, {"path": "~/my proj/api v2"})
+        self.assertRegex(key, r"^[A-Za-z0-9._-]+$")
+        self.assertEqual(default_layout.claim_path(key).name, f"building-{key}")
+
     def test_a_fresh_marker_blocks_the_claim(self):
         self.state_dir.mkdir()
         (self.state_dir / "building-alpha").touch()

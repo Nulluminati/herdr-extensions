@@ -13,6 +13,7 @@ default_layout.py apply leaves the focused tab alone when a program or an agent
 runs in it. --force replaces the tab anyway, which kills that work.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -275,6 +276,7 @@ def validate(spec: dict) -> list[str]:
     if not isinstance(projects, list) or not projects:
         return ["the file needs at least one [[projects]] table"]
     problems = []
+    used_labels: dict[str, int] = {}
     for number, project in enumerate(projects, 1):
         where = f"project {number}"
         if not isinstance(project, dict):
@@ -282,6 +284,11 @@ def validate(spec: dict) -> list[str]:
             continue
         if is_text(project.get("label")):
             where = project["label"]
+            # Two workspaces with one label look alike to every later run.
+            if where in used_labels:
+                problems.append(f"{where}: label is already used by project {used_labels[where]}")
+            else:
+                used_labels[where] = number
         else:
             problems.append(f"{where}: label is required")
         if not is_text(project.get("path")):
@@ -531,10 +538,20 @@ def session_problem(session: Path) -> str | None:
 # --------
 
 
+def claim_key(number: int, project: dict) -> str:
+    """A file-name-safe key for one project's claim.
+
+    The label cannot key the claim. Two labels can differ and still reduce to one
+    file name, such as `my proj` and `my_proj`, and the file can repeat a label.
+    The position in the file and the directory tell two projects apart.
+    """
+    return hashlib.sha256(f"{number}:{project_dir(project)}".encode()).hexdigest()
+
+
 def claim_path(key: str) -> Path:
     state_dir = Path(os.environ.get("HERDR_PLUGIN_STATE_DIR") or "/tmp")
     state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir / f"building-{re.sub(r'[^A-Za-z0-9._-]', '_', key)}"
+    return state_dir / f"building-{key}"
 
 
 def claim(key: str) -> bool:
@@ -678,15 +695,16 @@ def rehydrate(project: dict, workspace_id: str, snap: dict) -> int:
 
 def each_project(spec: dict, work) -> None:
     """Run `work` on every project whose directory exists, one failure at a time."""
-    for project in spec["projects"]:
+    for number, project in enumerate(spec["projects"], 1):
         label = project["label"]
         if not project_dir(project).is_dir():
             print(f"default-layout: skip {label}: no such directory {project_dir(project)}")
             continue
+        key = claim_key(number, project)
         # The claim itself can fail, and a lost claim must not end the pass.
         held = False
         try:
-            if not claim(label):
+            if not claim(key):
                 print(f"default-layout: {label} is already being built")
                 continue
             held = True
@@ -697,7 +715,7 @@ def each_project(spec: dict, work) -> None:
         finally:
             # Release only what this run took, never another run's marker.
             if held:
-                release(label)
+                release(key)
 
 
 def build_missing(spec: dict, open_workspaces: list[dict], snap: dict) -> None:

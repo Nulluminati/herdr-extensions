@@ -40,7 +40,7 @@ Each `[[projects]]` table is one workspace:
 
 | Key | Meaning |
 |---|---|
-| `label` | The workspace name. Required. |
+| `label` | The workspace name. Required. Unique in the file. |
 | `path` | The project directory. Required. `~` is expanded. |
 
 Each `[[projects.tabs]]` table is one tab, in file order. The first tab is the active tab.
@@ -95,7 +95,7 @@ working_dir = "plugins"
 
 This gives one workspace, `herdr-extensions`, with three tabs. The `agents` tab has pi on the left (60% of the width) and a shell on the right.
 
-The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions.
+The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions, and a repeated `label`, because two workspaces with one label cannot be told apart.
 
 ## When it runs
 
