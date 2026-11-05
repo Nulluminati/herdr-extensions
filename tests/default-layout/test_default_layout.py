@@ -351,6 +351,38 @@ class SpecTests(DefaultLayoutTestCase):
             """)
         self.assertEqual(problems, ["work: label is already used by project 1"])
 
+    def test_a_label_with_surrounding_space_is_an_error(self):
+        problems = self.problems("""
+            [[projects]]
+            label = " work "
+            path = "/tmp/one"
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.assertEqual(problems, ["work: label must not start or end with a space"])
+
+    def test_labels_that_differ_only_by_a_space_are_a_duplicate(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "work"
+            path = "/tmp/one"
+            [[projects.tabs]]
+            name = "shell"
+
+            [[projects]]
+            label = "work "
+            path = "/tmp/two"
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.assertEqual(
+            problems,
+            [
+                "work: label must not start or end with a space",
+                "work: label is already used by project 1",
+            ],
+        )
+
     def test_command_with_panes_is_an_error(self):
         problems = self.problems("""
             [[projects]]
@@ -983,10 +1015,22 @@ class ClaimTests(DefaultLayoutTestCase):
         self.assertTrue(default_layout.claim(first))
         self.assertTrue(default_layout.claim(second))
 
+    def test_the_claim_key_holds_the_project_position(self):
+        first = default_layout.claim_key(1, {"path": "/tmp/one"})
+        second = default_layout.claim_key(2, {"path": "/tmp/one"})
+        self.assertNotEqual(first, second)
+
     def test_the_claim_key_is_a_plain_file_name(self):
         key = default_layout.claim_key(1, {"path": "~/my proj/api v2"})
         self.assertRegex(key, r"^[A-Za-z0-9._-]+$")
         self.assertEqual(default_layout.claim_path(key).name, f"building-{key}")
+
+    def test_a_claim_key_outside_the_plain_characters_is_refused(self):
+        for key in ("../escape", "a/b", "", "my proj"):
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError) as caught:
+                    default_layout.claim_path(key)
+                self.assertIn("claim key", str(caught.exception))
 
     def test_a_fresh_marker_blocks_the_claim(self):
         self.state_dir.mkdir()

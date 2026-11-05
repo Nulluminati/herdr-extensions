@@ -4,8 +4,9 @@
 #   cp examples/layout.toml "$(herdr plugin config-dir nulluminati.default-layout)/layout.toml"
 #
 # [[projects]]          One workspace.
-#   label               The workspace name. A workspace with this label, or with
-#                       a pane in `path`, counts as the open project.
+#   label               The workspace name. Unique in the file. A workspace with
+#                       this label, or with a pane in `path`, counts as the open
+#                       project.
 #   path                The project directory. `~` is expanded. A project whose
 #                       directory does not exist is skipped.
 #

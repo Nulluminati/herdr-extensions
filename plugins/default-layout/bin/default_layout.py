@@ -26,6 +26,7 @@ from pathlib import Path
 
 PLUGIN_ID = "nulluminati.default-layout"
 AGENT_NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+CLAIM_KEY = re.compile(r"[A-Za-z0-9._-]+")
 SPLITS = ("down", "right")
 MAX_PANES = 4
 
@@ -283,7 +284,11 @@ def validate(spec: dict) -> list[str]:
             problems.append(f"{where}: must be a table")
             continue
         if is_text(project.get("label")):
-            where = project["label"]
+            label = project["label"]
+            # Space at either end is noise, and it hides a repeat of one name.
+            if label != label.strip():
+                problems.append(f"{label.strip()}: label must not start or end with a space")
+            where = label.strip()
             # Two workspaces with one label look alike to every later run.
             if where in used_labels:
                 problems.append(f"{where}: label is already used by project {used_labels[where]}")
@@ -549,6 +554,9 @@ def claim_key(number: int, project: dict) -> str:
 
 
 def claim_path(key: str) -> Path:
+    """The marker file for one claim, or ValueError when the key is not a plain file name."""
+    if not CLAIM_KEY.fullmatch(key):
+        raise ValueError(f"claim key must match {CLAIM_KEY.pattern}: {key!r}")
     state_dir = Path(os.environ.get("HERDR_PLUGIN_STATE_DIR") or "/tmp")
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir / f"building-{key}"
