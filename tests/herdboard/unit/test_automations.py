@@ -382,6 +382,13 @@ class FactoryAutomationTests(AutomationTestCase):
             with self.subTest(changes=changes), self.assertRaises(automations.AutomationError):
                 automations.edit(self.store, added.id, **changes)
 
+    def test_factory_preset_errors_explain_command_line_fixes(self):
+        with self.assertRaisesRegex(automations.AutomationError, "needs factory mode.*--factory"):
+            self.add(factory_preset="cheap")
+        with self.assertRaises(automations.AutomationError) as caught:
+            self.add(factory=True, factory_preset="cheap", agent="pi")
+        self.assertIn("--agent '' --model '' --thinking ''", str(caught.exception))
+
     def test_removed_preset_does_not_block_pause_or_unrelated_edits(self):
         from dataclasses import replace
 

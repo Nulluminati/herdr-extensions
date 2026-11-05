@@ -162,6 +162,50 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             self.assertIsInstance(app.screen, FactoryPresetScreen)
 
+    async def test_factory_custom_enter_in_save_name_starts_run(self):
+        app = self.app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("F", "c", "shift+tab")
+            await pilot.pause()
+            self.assertEqual(app.focused.id, "factory-save-name")
+            app.focused.value = "keyboard"
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertEqual(self.callback.call_args.kwargs["factory_run"].name, "keyboard")
+            self.assertIn("keyboard", load_config(self.config_file).factory_presets)
+
+    async def test_factory_custom_enter_in_rounds_checks_values(self):
+        from textual.widgets import Static
+
+        app = self.app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("F", "c", "shift+tab", "shift+tab")
+            await pilot.pause()
+            self.assertEqual(app.focused.id, "factory-rounds")
+            app.focused.value = "0"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIn("Rounds", str(app.screen.query_one("#factory-error", Static).render()))
+            self.callback.assert_not_called()
+
+    async def test_factory_custom_narrow_columns_and_spacing(self):
+        from textual.widgets import Label
+
+        app = self.app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("F", "c")
+            await pilot.pause()
+            form = app.screen
+            fields = form.query_one("#factory-fields")
+            self.assertEqual(fields.styles.scrollbar_size_vertical, 1)
+            self.assertEqual((fields.styles.margin.top, fields.styles.margin.bottom), (1, 1))
+            header = form.query_one(".factory-role-header > .factory-role-on", Label)
+            self.assertEqual(header.styles.content_align_horizontal, "center")
+            label = form.query_one("#factory-thinking-builder #label")
+            self.assertGreaterEqual(label.content_size.width, len("default"))
+            self.assertIn("enter: start", str(form.query_one("#factory-custom-hint", Label).render()))
+
     async def test_factory_custom_layout_and_error_stay_visible_in_small_pane(self):
         from textual.widgets import Checkbox, Label, Select, Static
 
@@ -204,12 +248,13 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("F", "c")
             await pilot.pause()
             form = app.screen
+            self.assertEqual(form.query_one("#factory-fields").max_scroll_y, 0)
             form.query_one("#factory-plan-lenses", Checkbox).value = False
             await pilot.pause()
             checkbox = form.query_one("#factory-on-code", Checkbox)
             checkbox.focus()
             await pilot.pause()
-            self.assertEqual(checkbox.styles.border_top[0], "tall")
+            self.assertEqual(checkbox.styles.border_top[0], "round")
             self.assertGreater(checkbox.styles.border_top[1].a, 0)
 
     async def test_factory_preset_summary_custom_reset_and_save(self):

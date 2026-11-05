@@ -1799,7 +1799,9 @@ class FactoryCustomScreen(ModalBase):
             with VerticalScroll(id="factory-fields", can_focus=False):
                 yield from self.compose_fields()
             yield Static("", id="factory-error", classes="error", markup=False)
-            yield Label("ctrl+s: start · tab: next field · escape: back", id="factory-custom-hint", classes="dim")
+            yield Label(
+                "ctrl+s or enter: start · tab: next field · escape: back", id="factory-custom-hint", classes="dim"
+            )
 
     def compose_fields(self) -> ComposeResult:
         with Horizontal(classes="factory-role-row factory-role-header"):
@@ -1872,6 +1874,10 @@ class FactoryCustomScreen(ModalBase):
             event.stop()
             for lens in LENSES:
                 self.query_one(f"#factory-on-{lens}", Checkbox).disabled = event.value
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.action_save()
 
     def action_save(self) -> None:
         error = self.query_one("#factory-error", Static)
@@ -5326,19 +5332,21 @@ class HerdboardApp(App):
     .dialog Label { width: 100%; }
     .factory-dialog { width: 90; max-width: 95%; max-height: 95%; }
     .factory-role-row { height: 3; }
-    .factory-custom-dialog { height: 34; }
-    #factory-fields { height: 1fr; }
+    .factory-custom-dialog { height: 35; }
+    #factory-fields { height: 1fr; scrollbar-size-vertical: 1; margin: 1 0; }
     .factory-role-row > Label { width: 12; height: 3; content-align: left middle; }
     .factory-role-header, .factory-role-header > Label { height: 1; }
-    .factory-role-header > .factory-role-value { padding-left: 3; }
+    .factory-role-header > .factory-role-value { padding-left: 2; }
+    .factory-role-header > .factory-role-on { content-align: center middle; }
     .factory-role-row > .factory-role-value { width: 1fr; }
     .factory-role-row > .factory-role-on { width: 7; }
     .factory-role-row > Select { width: 1fr; }
     .factory-role-row > Select.factory-role-model, .factory-role-row > Label.factory-role-model { width: 2fr; }
+    .factory-role-row SelectCurrent { padding: 0 1; }
     .factory-role-row SelectCurrent > #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
-    .factory-role-row > Checkbox { width: 7; height: 3; padding: 0; border: tall transparent;
+    .factory-role-row > Checkbox { width: 7; height: 3; padding: 0; border: round transparent;
                                    content-align: center middle; }
-    .factory-role-row > Checkbox:focus { border: tall $primary; }
+    .factory-role-row > Checkbox:focus { border: round $primary; }
     .factory-dialog Select, .factory-dialog Input { border: round $surface-lighten-2; }
     .factory-dialog Select > SelectCurrent { border: none; }
     .factory-dialog Select:focus-within, .factory-dialog Input:focus { border: round $primary; }

@@ -347,9 +347,15 @@ def _check(store, item: Automation, *, check_preset: bool = True) -> Automation:
     kind = config.type_named(item.type) if item.type else None
     if item.factory_preset is not None:
         if not item.factory:
-            raise AutomationError("factory_preset needs factory = true", "usage")
+            raise AutomationError(
+                "A factory preset needs factory mode (--factory; factory = true in the definition)", "usage"
+            )
         if any(value is not None for value in (item.agent, item.model, item.thinking)):
-            raise AutomationError("factory_preset cannot be combined with agent, model or thinking", "usage")
+            raise AutomationError(
+                "A factory preset sets the agent, model and thinking. "
+                "Clear overrides with --agent '' --model '' --thinking ''.",
+                "usage",
+            )
         if check_preset and item.factory_preset not in config.factory_presets:
             raise AutomationError(f"Unknown factory preset {item.factory_preset!r}", "usage")
     if item.factory and item.board == "inbox":
