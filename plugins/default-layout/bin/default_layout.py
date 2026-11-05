@@ -207,7 +207,9 @@ def load_layout() -> dict | None:
     """The parsed layout file, or None when there is none."""
     path = layout_path()
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
+    # FileNotFoundError is an OSError, so it must come first. UnicodeDecodeError is a ValueError,
+    # so it needs its own place in the tuple.
     except FileNotFoundError:
         return None
     except (OSError, UnicodeDecodeError) as error:
