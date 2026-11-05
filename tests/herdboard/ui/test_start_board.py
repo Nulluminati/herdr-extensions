@@ -162,6 +162,56 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             self.assertIsInstance(app.screen, FactoryPresetScreen)
 
+    async def test_factory_custom_layout_and_error_stay_visible_in_small_pane(self):
+        from textual.widgets import Checkbox, Label, Select, Static
+
+        app = self.app()
+        async with app.run_test(size=(90, 24)) as pilot:
+            await pilot.press("F", "c")
+            await pilot.pause()
+            form = app.screen
+            self.assertEqual(form.query_one(".factory-role-header").size.height, 1)
+            role_row = form.query_one("#factory-agent-builder", Select).parent
+            self.assertEqual(role_row.query_one(Label).size.height, 3)
+            checkbox = form.query_one("#factory-on-code", Checkbox)
+            self.assertEqual(checkbox.region.height, 3)
+            self.assertGreaterEqual(checkbox.content_size.width, 5)
+            save_name = form.query_one("#factory-save-name", Input)
+            self.assertTrue(save_name.parent.content_region.contains_region(save_name.region))
+            self.assertEqual(
+                form.query_one("#factory-rounds", Input).region.y,
+                form.query_one("#factory-rounds-label", Label).region.y,
+            )
+            self.assertEqual(
+                form.query_one("#factory-save-name", Input).region.y,
+                form.query_one("#factory-save-label", Label).region.y,
+            )
+            form.query_one("#factory-rounds", Input).value = "0"
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            error = form.query_one("#factory-error", Static)
+            self.assertIn("Rounds", str(error.render()))
+            self.assertTrue(form.query_one(".dialog").content_region.contains_region(error.region))
+            hint = form.query_one("#factory-custom-hint", Label)
+            self.assertTrue(form.query_one(".dialog").content_region.contains_region(hint.region))
+            self.callback.assert_not_called()
+
+    async def test_factory_custom_lens_checkbox_has_visible_focus(self):
+        from textual.widgets import Checkbox
+
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            await pilot.press("F", "c")
+            await pilot.pause()
+            form = app.screen
+            form.query_one("#factory-plan-lenses", Checkbox).value = False
+            await pilot.pause()
+            checkbox = form.query_one("#factory-on-code", Checkbox)
+            checkbox.focus()
+            await pilot.pause()
+            self.assertEqual(checkbox.styles.border_top[0], "tall")
+            self.assertGreater(checkbox.styles.border_top[1].a, 0)
+
     async def test_factory_preset_summary_custom_reset_and_save(self):
         from dataclasses import replace
 

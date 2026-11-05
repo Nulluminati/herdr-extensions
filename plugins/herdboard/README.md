@@ -489,7 +489,7 @@ The loop stops when one of these is true:
 
 - A round has no confirmed problems and no lens failed. Risks and questions go to the builder, but they do not start another round.
 - The builder made no new commits since the last round, and no lens failed. When uncommitted changes exist, the log says that the approver reviews them too.
-- The round was the last one: `--rounds N`, else `factory_max_rounds` (default 3).
+- The round reached the run's limit: the preset's or Custom form's `rounds`, `--rounds N`, else `factory_max_rounds` (default 3).
 
 A lens that failed did not review the change, so its round is not clean. When such a round has no findings for the builder, the next round starts at once.
 
@@ -507,7 +507,7 @@ Default runs take their lens agents from `[factory.lenses]` in the config, see [
 
 Use `herdboard start <id> --factory --preset cheap` to select a named preset. Do not combine `--preset` with `--agent`, `--model`, `--thinking` or `--rounds`. Each preset defines the builder, all four lens reviewers, the approver and the round limit. Optional `lenses_on` replaces the plan's lens selection. Without it, the plan decides.
 
-The `F` popup shows a summary of the highlighted run. Enter starts it. Press `c` to edit a copy in the Custom form. Set each role's agent, model and thinking level. Select the lenses, or let the plan choose them. Press `ctrl+s` to start. Leave the save name empty for a one-off run. A name saves a preset first; replacing a preset needs confirmation. Escape returns to the popup.
+The `F` popup shows a summary of the highlighted run. Enter starts it. Default uses `start_agent` and its configured model and thinking level. To choose a different builder, open the Custom form. Press `c` to edit a copy in the Custom form. Set each role's agent, model and thinking level. Select the lenses, or let the plan choose them. Press `ctrl+s` to start. Leave the save name empty for a one-off run. A name saves a preset first; replacing a preset needs confirmation. Escape returns to the popup.
 
 Preset names use `a-z`, `0-9` and `-`. The names `default` and `custom` are reserved. Each preset needs all six role agents and a round limit from 1 to 10. Model and thinking are optional on each role. Unknown keys are errors. Edit or delete presets in the config file.
 
@@ -715,7 +715,7 @@ This is an instruction in the brief only. herdboard does not change the agent's 
 
 ### Factory runs
 
-With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line applies. The planner of a factory automation writes that line. Default runs use `factory_max_rounds`. Add `--factory-preset cheap`, or choose a preset in the form, to use a named run. The definition stores `factory_preset = "cheap"`. A preset needs `factory = true` and cannot combine with `agent`, `model` or `thinking`. If the preset no longer exists, the run logs `start_failed`. `--no-factory` turns factory mode off.
+With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line applies. The planner of a factory automation writes that line. Default runs use `factory_max_rounds`. Add `--factory-preset cheap`, or choose a preset in the form, to use a named run. The definition stores `factory_preset = "cheap"`. A preset needs `factory = true` and cannot combine with `agent`, `model` or `thinking`. If the preset no longer exists, the run logs `start_failed`. `--no-factory` turns factory mode off and clears the automation's preset. Use `--factory-preset ''` to clear only the preset.
 
 A factory automation needs a repository board: herdboard refuses it on `inbox`. Each run can start up to four reviewers in each round, and an approver, so it costs more than a plain run. `--factory` and `--may-merge-prs` work together.
 
@@ -897,7 +897,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard delete <id> [--yes]` | Delete a todo: its card folder, with its log and attachments. A started card cannot be deleted |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
-| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH] [--factory [--rounds N | --preset NAME]]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first. `--factory` starts a [factory run](#factory-runs) |
+| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH] [--factory [--rounds N \| --preset NAME]]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first. `--factory` starts a [factory run](#factory-runs) |
 | `herdboard factory <id> [--stop]` | Show a card's factory run, or stop it |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi\|codex] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
@@ -919,7 +919,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard convert-store [--dry-run]` | Convert the old Markdown boards to board folders, once. See [Convert old boards](#convert-old-boards) |
 | `herdboard automation list` | List the automations, with the next due time and the last run |
 | `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs] [--factory [--factory-preset NAME]]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
-| `herdboard automation edit <aid> [the add options] [--no-merge-prs] [--no-factory]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
+| `herdboard automation edit <aid> [the add options] [--no-merge-prs] [--no-factory]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model`, `--thinking` or `--factory-preset` clears it |
 | `herdboard automation remove <aid> [--yes]` | Remove an automation. Its cards stay |
 | `herdboard automation pause\|resume <aid>` | Stop or restart the scheduled runs |
 | `herdboard automation run <aid>` | Spawn and start one card now |

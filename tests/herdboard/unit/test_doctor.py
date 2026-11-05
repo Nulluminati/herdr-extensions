@@ -477,6 +477,14 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "conflict")
         self.assertEqual((path / "board.toml").read_bytes(), before)
 
+    def test_invalid_preset_reports_its_key_path(self):
+        with self.config.open("a") as stream:
+            stream.write('[factory.presets.cheap]\nbuilder = { agent = "unknown" }\n')
+        found = self.findings("config_invalid", expect=1)
+        self.assertEqual(len(found), 1)
+        self.assertIn("factory.presets.cheap.builder.agent", found[0]["message"])
+        self.assertIn(str(self.config), found[0]["message"])
+
     def test_corrupt_promotions_reported_with_invalid_config(self):
         path = self.state_file("org/user/promotions.json", [])
         self.config.write_text("[")

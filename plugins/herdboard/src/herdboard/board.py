@@ -1794,56 +1794,62 @@ class FactoryCustomScreen(ModalBase):
         return [("default", ""), *((level, level) for level in thinking_levels(agent))]
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(classes="dialog factory-dialog", can_focus=False):
+        with Vertical(classes="dialog factory-dialog factory-custom-dialog"):
             yield Label(f"Custom factory run for {self.ref}")
-            with Horizontal(classes="factory-role-row"):
-                for title in ("Role", "Agent", "Model", "Thinking", "On"):
-                    classes = (
-                        "factory-role-name"
-                        if title == "Role"
-                        else "factory-role-on"
-                        if title == "On"
-                        else "factory-role-value"
-                    )
-                    yield Label(title, classes=classes + (" factory-role-model" if title == "Model" else ""))
-            for name in self.ROLES:
-                role = self.role(name)
-                with Horizontal(classes="factory-role-row"):
-                    yield Label(name.capitalize() if name not in LENSES else name)
-                    yield Select(
-                        [(agent, agent) for agent in AGENTS],
-                        value=role.agent,
-                        allow_blank=False,
-                        id=f"factory-agent-{name}",
-                    )
-                    yield Select(
-                        self.model_options(role.agent, role.model),
-                        value=role.model or "",
-                        allow_blank=False,
-                        id=f"factory-model-{name}",
-                        classes="factory-role-model",
-                    )
-                    yield Select(
-                        self.thinking_options(role.agent),
-                        value=role.thinking or "",
-                        allow_blank=False,
-                        id=f"factory-thinking-{name}",
-                    )
-                    if name in LENSES:
-                        yield Checkbox(
-                            value=self.run.lenses_on is None or name in self.run.lenses_on,
-                            disabled=self.run.lenses_on is None,
-                            id=f"factory-on-{name}",
-                        )
-                    else:
-                        yield Static("", classes="factory-role-spacer")
-            yield Checkbox("Let the plan choose the lenses", value=self.run.lenses_on is None, id="factory-plan-lenses")
-            yield Label("Rounds")
-            yield Input(str(self.run.rounds), id="factory-rounds", type="integer")
-            yield Label("Save as preset (optional)")
-            yield Input(placeholder="name, such as cheap", id="factory-save-name")
+            with VerticalScroll(id="factory-fields", can_focus=False):
+                yield from self.compose_fields()
             yield Static("", id="factory-error", classes="error", markup=False)
-            yield Label("ctrl+s: start · tab: next field · escape: back", classes="dim")
+            yield Label("ctrl+s: start · tab: next field · escape: back", id="factory-custom-hint", classes="dim")
+
+    def compose_fields(self) -> ComposeResult:
+        with Horizontal(classes="factory-role-row factory-role-header"):
+            for title in ("Role", "Agent", "Model", "Thinking", "On"):
+                classes = (
+                    "factory-role-name"
+                    if title == "Role"
+                    else "factory-role-on"
+                    if title == "On"
+                    else "factory-role-value"
+                )
+                yield Label(title, classes=classes + (" factory-role-model" if title == "Model" else ""))
+        for name in self.ROLES:
+            role = self.role(name)
+            with Horizontal(classes="factory-role-row"):
+                yield Label(name.capitalize() if name not in LENSES else name)
+                yield Select(
+                    [(agent, agent) for agent in AGENTS],
+                    value=role.agent,
+                    allow_blank=False,
+                    id=f"factory-agent-{name}",
+                )
+                yield Select(
+                    self.model_options(role.agent, role.model),
+                    value=role.model or "",
+                    allow_blank=False,
+                    id=f"factory-model-{name}",
+                    classes="factory-role-model",
+                )
+                yield Select(
+                    self.thinking_options(role.agent),
+                    value=role.thinking or "",
+                    allow_blank=False,
+                    id=f"factory-thinking-{name}",
+                )
+                if name in LENSES:
+                    yield Checkbox(
+                        value=self.run.lenses_on is None or name in self.run.lenses_on,
+                        disabled=self.run.lenses_on is None,
+                        id=f"factory-on-{name}",
+                    )
+                else:
+                    yield Static("", classes="factory-role-spacer")
+        yield Checkbox("Let the plan choose the lenses", value=self.run.lenses_on is None, id="factory-plan-lenses")
+        with Horizontal(classes="factory-field-row"):
+            yield Label("Rounds", id="factory-rounds-label")
+            yield Input(str(self.run.rounds), id="factory-rounds", type="integer")
+        with Horizontal(classes="factory-field-row"):
+            yield Label("Save as preset (optional)", id="factory-save-label")
+            yield Input(placeholder="name, such as cheap", id="factory-save-name")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         identity = event.select.id or ""
@@ -4521,6 +4527,7 @@ class AutomationFormScreen(ModalBase):
         }
         self.agent = item.agent if item and item.agent else "default"
         self.max_rounds = config.factory_max_rounds
+        self.preset_runs = dict(config.factory_presets)
         self.presets = sorted(config.factory_presets)
         if item and item.factory_preset and item.factory_preset not in self.presets:
             self.presets.append(item.factory_preset)
@@ -4632,6 +4639,12 @@ class AutomationFormScreen(ModalBase):
                 value=bool(item and item.factory),
                 id="automation-factory",
             )
+            yield Label(
+                "Needs a repository board. Each run costs up to 4 reviewers per round, "
+                f"for up to {self.max_rounds} rounds, and an approver",
+                id="automation-factory-help",
+                classes="dim",
+            )
             yield titled(
                 Select(
                     [("Default", "default"), *((name, name) for name in self.presets)],
@@ -4641,12 +4654,6 @@ class AutomationFormScreen(ModalBase):
                     id="automation-factory-preset",
                 ),
                 "Factory preset",
-            )
-            yield Label(
-                "Needs a repository board. Each run costs up to 4 reviewers per round, "
-                f"for up to {self.max_rounds} rounds, and an approver",
-                id="automation-factory-help",
-                classes="dim",
             )
             yield titled(
                 TextArea(
@@ -4692,8 +4699,18 @@ class AutomationFormScreen(ModalBase):
             self.update_preset_fields()
 
     def update_preset_fields(self) -> None:
+        preset = self.selected_preset()
         for name in ("agent", "model", "thinking"):
-            self.query_one(f"#automation-{name}", Select).disabled = self.selected_preset() is not None
+            select = self.query_one(f"#automation-{name}", Select)
+            if preset is not None:
+                select.value = "default"
+            select.disabled = preset is not None
+        run = self.preset_runs.get(preset)
+        rounds = run.rounds if run is not None else self.max_rounds
+        self.query_one("#automation-factory-help", Label).update(
+            "Needs a repository board. Each run costs up to 4 reviewers per round, "
+            f"for up to {rounds} rounds, and an approver"
+        )
 
     def error_text(self) -> str:
         return self.query_one("#automation-error", Static).plain
@@ -4762,7 +4779,7 @@ class AutomationDetailScreen(ModalBase):
             ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
             ("May merge other PRs (instruction)", "yes" if entry["may_merge_prs"] else "no"),
             ("Factory", "yes" if entry["factory"] else "no"),
-            ("Factory preset", entry.get("factory_preset") or "Default"),
+            ("Factory preset", (entry.get("factory_preset") or "Default") if entry["factory"] else "-"),
             ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
             ("Last result", entry["last_result"] or "-"),
         ]
@@ -5309,14 +5326,28 @@ class HerdboardApp(App):
     .dialog Label { width: 100%; }
     .factory-dialog { width: 90; max-width: 95%; max-height: 95%; }
     .factory-role-row { height: 3; }
-    .factory-role-row > Label { width: 12; content-align: left middle; }
+    .factory-custom-dialog { height: 34; }
+    #factory-fields { height: 1fr; }
+    .factory-role-row > Label { width: 12; height: 3; content-align: left middle; }
+    .factory-role-header, .factory-role-header > Label { height: 1; }
+    .factory-role-header > .factory-role-value { padding-left: 3; }
     .factory-role-row > .factory-role-value { width: 1fr; }
-    .factory-role-row > .factory-role-on { width: 6; }
+    .factory-role-row > .factory-role-on { width: 7; }
     .factory-role-row > Select { width: 1fr; }
     .factory-role-row > Select.factory-role-model, .factory-role-row > Label.factory-role-model { width: 2fr; }
     .factory-role-row SelectCurrent > #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
-    .factory-role-row > Checkbox { width: 6; padding: 0; border: none; content-align: center middle; }
-    .factory-role-row > .factory-role-spacer { width: 6; }
+    .factory-role-row > Checkbox { width: 7; height: 3; padding: 0; border: tall transparent;
+                                   content-align: center middle; }
+    .factory-role-row > Checkbox:focus { border: tall $primary; }
+    .factory-dialog Select, .factory-dialog Input { border: round $surface-lighten-2; }
+    .factory-dialog Select > SelectCurrent { border: none; }
+    .factory-dialog Select:focus-within, .factory-dialog Input:focus { border: round $primary; }
+    .factory-field-row { height: 3; }
+    .factory-field-row > Label { width: 28; height: 3; content-align: left middle; }
+    .factory-field-row > Input { width: 1fr; }
+    #factory-rounds-label, #factory-rounds { width: 10; }
+    #factory-plan-lenses { width: 100%; height: 1; border: none; padding: 0 1; }
+    .factory-role-row > .factory-role-spacer { width: 7; }
     #factory-summary { border: round $primary; padding: 0 1; margin: 1 0; height: auto; }
     #factory-presets { max-height: 10; }
     #factory-error { height: auto; color: $error; }
@@ -5351,13 +5382,13 @@ class HerdboardApp(App):
     #card-type:focus-within { border: round $primary; }
     #card-tags { width: 2fr; }
     #card-due { width: 1fr; }
-    #automation-board, #automation-type, #automation-agent, #automation-thinking {
+    #automation-board, #automation-type, #automation-agent, #automation-thinking, #automation-factory-preset {
         width: 1fr; border: round $surface-lighten-2; height: auto;
     }
     #automation-board > SelectCurrent, #automation-type > SelectCurrent, #automation-agent > SelectCurrent,
-    #automation-thinking > SelectCurrent { border: none; }
+    #automation-thinking > SelectCurrent, #automation-factory-preset > SelectCurrent { border: none; }
     #automation-board:focus-within, #automation-type:focus-within, #automation-agent:focus-within,
-    #automation-thinking:focus-within { border: round $primary; }
+    #automation-thinking:focus-within, #automation-factory-preset:focus-within { border: round $primary; }
     .automation-form { width: 120; max-width: 95%; scrollbar-size-vertical: 1; }
     #automation-board { width: 2fr; }
     #automation-schedule { width: 1fr; }
@@ -5434,7 +5465,9 @@ class HerdboardApp(App):
     .column .card.compact.selected { border: none; background: $accent; color: $text; }
     App:ansi .column .card.selected { background: ansi_default; border: heavy ansi_default; text-style: bold; }
     App:ansi .dialog { border: round $primary; }
-    App:ansi .detail-block { border: round ansi_bright_black; }
+    App:ansi .detail-block, App:ansi #factory-summary { border: round ansi_bright_black; }
+    App:ansi .factory-dialog Select, App:ansi .factory-dialog Input { border: round ansi_bright_black; }
+    App:ansi .factory-dialog Select:focus-within, App:ansi .factory-dialog Input:focus { border: round $primary; }
     App:ansi .card-form Input, App:ansi .card-form TextArea { border: round ansi_bright_black; }
     App:ansi .card-form Input:focus, App:ansi .card-form TextArea:focus { border: round $primary; }
     /* The column under a dragged card. */

@@ -335,7 +335,7 @@ def _new_id(config: Config, taken: set[str]) -> str:
             return candidate
 
 
-def _check(store, item: Automation) -> Automation:
+def _check(store, item: Automation, *, check_preset: bool = True) -> Automation:
     """Check every field before a write. Returns the automation with the type's configured name."""
     config = store.config
     title = " ".join(item.title.split())
@@ -350,7 +350,7 @@ def _check(store, item: Automation) -> Automation:
             raise AutomationError("factory_preset needs factory = true", "usage")
         if any(value is not None for value in (item.agent, item.model, item.thinking)):
             raise AutomationError("factory_preset cannot be combined with agent, model or thinking", "usage")
-        if item.factory_preset not in config.factory_presets:
+        if check_preset and item.factory_preset not in config.factory_presets:
             raise AutomationError(f"Unknown factory preset {item.factory_preset!r}", "usage")
     if item.factory and item.board == "inbox":
         raise AutomationError("A factory automation needs a repository board.", "usage")
@@ -423,7 +423,8 @@ def _change(store, automation_id: str, change, saved=None) -> tuple[Automation, 
         current = load(store.config)
         for index, item in enumerate(current):
             if item.id == automation_id:
-                changed = _check(store, change(item))
+                changed = change(item)
+                changed = _check(store, changed, check_preset=changed.factory_preset != item.factory_preset)
                 current[index] = changed
                 save(store.config, current)
                 if saved is not None:
@@ -434,6 +435,8 @@ def _change(store, automation_id: str, change, saved=None) -> tuple[Automation, 
 
 def edit(store, automation_id: str, now: datetime | None = None, **changes) -> Automation:
     """Change fields of an automation. A changed schedule starts with its next due time."""
+    if changes.get("factory") is False:
+        changes.setdefault("factory_preset", None)
     unknown = set(changes) - set(Automation.__dataclass_fields__) | ({"id", "created"} & set(changes))
     if unknown:
         raise AutomationError(f"Cannot change {', '.join(sorted(unknown))}")

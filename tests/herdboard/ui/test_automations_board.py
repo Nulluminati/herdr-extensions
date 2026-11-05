@@ -557,7 +557,9 @@ class FormTests(AutomationsBoardTestCase):
 
         from herdboard import factory
 
-        self.store.config.factory_presets["cheap"] = replace(factory.default_run(self.store.config), name="cheap")
+        self.store.config.factory_presets["cheap"] = replace(
+            factory.default_run(self.store.config), name="cheap", rounds=7
+        )
         app = self.app()
         async with app.run_test(size=(160, 40)) as pilot:
             form = await self.open_form(app, pilot)
@@ -566,8 +568,16 @@ class FormTests(AutomationsBoardTestCase):
             form.query_one("#automation-factory").value = True
             await pilot.pause()
             self.assertFalse(preset.disabled)
+            form.query_one("#automation-agent", Select).value = "claude"
+            await pilot.pause()
+            form.query_one("#automation-model", Select).value = "sonnet"
             preset.value = "cheap"
             await pilot.pause()
+            self.assertIn("7 rounds", str(form.query_one("#automation-factory-help").render()))
+            self.assertEqual(preset.border_title, "Factory preset")
+            self.assertEqual(preset.styles.border_top[0], "round")
+            self.assertEqual(form.query_one("#automation-agent", Select).value, "default")
+            self.assertEqual(form.query_one("#automation-model", Select).value, "default")
             self.assertEqual(form.values()["factory_preset"], "cheap")
             self.assertTrue(form.query_one("#automation-agent", Select).disabled)
             form.query_one("#automation-factory").value = False

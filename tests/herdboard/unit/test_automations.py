@@ -374,7 +374,6 @@ class FactoryAutomationTests(AutomationTestCase):
         added = self.add(board=self.repo_board(), factory=True, factory_preset="cheap")
         self.assertEqual(automations.load(self.config)[0].factory_preset, "cheap")
         for changes in (
-            {"factory": False},
             {"agent": "pi"},
             {"model": "opus"},
             {"thinking": "high"},
@@ -382,6 +381,24 @@ class FactoryAutomationTests(AutomationTestCase):
         ):
             with self.subTest(changes=changes), self.assertRaises(automations.AutomationError):
                 automations.edit(self.store, added.id, **changes)
+
+    def test_removed_preset_does_not_block_pause_or_unrelated_edits(self):
+        from dataclasses import replace
+
+        from herdboard import factory
+
+        self.config.factory_presets["cheap"] = replace(factory.default_run(self.config), name="cheap")
+        added = self.add(board=self.repo_board(), factory=True, factory_preset="cheap")
+        del self.config.factory_presets["cheap"]
+        self.assertFalse(automations.set_enabled(self.store, added.id, False).enabled)
+        self.assertTrue(automations.set_enabled(self.store, added.id, True).enabled)
+        edited = automations.edit(self.store, added.id, title="Paused preset")
+        self.assertEqual(edited.title, "Paused preset")
+        with self.assertRaises(automations.AutomationError):
+            automations.edit(self.store, added.id, factory_preset="missing")
+        disabled = automations.edit(self.store, added.id, factory=False)
+        self.assertFalse(disabled.factory)
+        self.assertIsNone(disabled.factory_preset)
 
     def test_run_resolves_preset_and_missing_preset_fails_start(self):
         from dataclasses import replace
@@ -696,6 +713,34 @@ class CliTests(CliTestCase):
         removed = self.run_json("automation", "remove", added["id"], "--yes")["removed"]
         self.assertEqual(removed["id"], added["id"])
         self.assertEqual(self.run_json("automation", "list")["automations"], [])
+
+    def test_no_factory_clears_saved_preset(self):
+        import tomlkit
+
+        from herdboard import factory
+        from herdboard.config import Config
+
+        value = factory.default_run(Config()).to_dict()
+        value.pop("name")
+        with self.config.open("a") as stream:
+            stream.write(tomlkit.dumps({"factory": {"presets": {"cheap": value}}}))
+        name = Path(self.init_repo_board()).stem
+        added = self.run_json(
+            "automation",
+            "add",
+            "--title",
+            "Preset",
+            "--schedule",
+            "every day",
+            "--board",
+            name,
+            "--factory",
+            "--factory-preset",
+            "cheap",
+        )["automation"]
+        changed = self.run_json("automation", "edit", added["id"], "--no-factory")["automation"]
+        self.assertFalse(changed["factory"])
+        self.assertIsNone(changed["factory_preset"])
 
     def test_factory_flags(self):
         board = self.init_repo_board()
