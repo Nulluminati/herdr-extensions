@@ -37,8 +37,8 @@ SETTLE_POLL_SECONDS = 0.2
 # How long the startup hook waits for the server to report its first pane.
 SNAPSHOT_WAIT_SECONDS = 5.0
 
-# How long one request may wait for Herdr, the same limit as the CLI.
-SOCKET_TIMEOUT_SECONDS = 30.0
+# How many seconds one Herdr request may take, for the CLI and the socket alike.
+REQUEST_TIMEOUT_SECONDS = 30.0
 
 # How long one run's claim on building a project stays valid.
 CLAIM_TTL_SECONDS = 60.0
@@ -59,7 +59,7 @@ class LayoutError(Exception):
 
 
 def command(argv: list[str]):
-    return subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    return subprocess.run(argv, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SECONDS)
 
 
 def herdr_bin() -> str:
@@ -145,25 +145,55 @@ def session_file() -> Path:
     return session_dir() / "session.json"
 
 
+def remaining(deadline: float) -> float:
+    """How long the request may still block: the budget that the whole request shares.
+
+    A zero timeout makes the socket non-blocking and raises BlockingIOError
+    rather than TimeoutError, so an expired budget gets the shortest timeout.
+    """
+    return max(deadline - time.monotonic(), 0.001)
+
+
+def read_line(connection: socket.socket, deadline: float) -> bytes:
+    """One newline-terminated reply, read within what is left of the request's budget.
+
+    A socket timeout covers one blocking call, so a single read under the budget
+    still lets a server that drips bytes hold the call for ever. Each read gets
+    only the time that remains.
+    """
+    line = b""
+    while not line.endswith(b"\n"):
+        connection.settimeout(remaining(deadline))
+        chunk = connection.recv(4096)
+        if not chunk:
+            return line
+        line += chunk
+    return line
+
+
 def call(method: str, params: dict) -> dict:
     """Send one newline-delimited JSON request over the socket.
 
     The CLI has no command for `layout.apply` or `tab.move`, so these go to the
-    socket directly. The socket carries the same limit as the CLI, so a server
-    that stalls cannot hold the startup hook for ever.
+    socket directly. The whole request carries the same limit as the CLI, so a
+    server that stalls cannot hold the startup hook for ever.
     """
     request = json.dumps({"id": f"default-layout:{method}", "method": method, "params": params})
+    deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+    stage = "connect"
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            # The timeout covers the connect as well as the wait for a reply.
-            connection.settimeout(SOCKET_TIMEOUT_SECONDS)
+            connection.settimeout(remaining(deadline))
             connection.connect(socket_path())
-            stream = connection.makefile("rwb")
-            stream.write(request.encode() + b"\n")
-            stream.flush()
-            line = stream.readline()
+            stage = "write"
+            with connection.makefile("rwb") as stream:
+                connection.settimeout(remaining(deadline))
+                stream.write(request.encode() + b"\n")
+                stream.flush()
+            stage = "reply"
+            line = read_line(connection, deadline)
     except TimeoutError as error:
-        raise HerdrError(f"{method}: no response from Herdr within {SOCKET_TIMEOUT_SECONDS:g} s") from error
+        raise HerdrError(f"{method}: Herdr did not answer within {REQUEST_TIMEOUT_SECONDS:g} s ({stage})") from error
     if not line:
         raise HerdrError(f"{method}: no response from Herdr")
     message = json.loads(line)

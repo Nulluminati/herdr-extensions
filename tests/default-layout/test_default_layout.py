@@ -741,8 +741,11 @@ class FakeSocketServer:
 
     "reply" writes `reply` as one newline-delimited JSON line. "stall" reads
     the request and then holds the connection without writing, as a stalled
-    Herdr does. "close" reads the request and ends the connection.
+    Herdr does. "drip" writes one byte at a time and never a newline. "close"
+    reads the request and ends the connection.
     """
+
+    drip_seconds = 0.05
 
     def __init__(self, path, mode="reply", reply=None):
         self.mode = mode
@@ -767,12 +770,23 @@ class FakeSocketServer:
             except OSError:
                 return
             self.requests.append(connection.recv(65536))
-            if self.mode == "stall":
+            if self.mode in ("stall", "drip"):
                 self.held.append(connection)
+                if self.mode == "drip":
+                    threading.Thread(target=self.drip, args=(connection,), daemon=True).start()
                 continue
             with connection:
                 if self.mode == "reply":
                     connection.sendall(self.reply)
+
+    def drip(self, connection):
+        """Send a byte now and then, so a single read can be held for ever."""
+        while not self.closed.is_set():
+            try:
+                connection.sendall(b" ")
+            except OSError:
+                return
+            self.closed.wait(self.drip_seconds)
 
     def close(self):
         self.closed.set()
@@ -798,9 +812,29 @@ class SocketCallTests(DefaultLayoutTestCase):
         return found
 
     def short_timeout(self, seconds=0.5):
-        replacement = patch.object(default_layout, "SOCKET_TIMEOUT_SECONDS", seconds)
+        replacement = patch.object(default_layout, "REQUEST_TIMEOUT_SECONDS", seconds)
         replacement.start()
         self.addCleanup(replacement.stop)
+
+    def run_with_watchdog(self, seconds, work):
+        """Run `work` in a thread, so a lost timeout fails the test instead of hanging it.
+
+        The repository has no pytest-timeout, so a regression in the socket limit
+        would block the whole run until Continuous Integration (CI) gives up.
+        """
+        found = {}
+
+        def run():
+            try:
+                found["value"] = work()
+            except Exception as error:
+                found["error"] = error
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(seconds)
+        self.assertFalse(worker.is_alive(), f"still blocked after {seconds} s")
+        return found
 
     def test_a_reply_comes_back_as_the_result(self):
         self.server(reply={"id": "x", "result": {"layout": {"tab_id": "w1:t2"}}})
@@ -822,24 +856,36 @@ class SocketCallTests(DefaultLayoutTestCase):
         server = self.server(mode="stall")
         self.short_timeout()
         started = time.monotonic()
-        with self.assertRaises(default_layout.HerdrError) as raised:
-            default_layout.call("layout.apply", {"workspace_id": "w1"})
+        found = self.run_with_watchdog(5, lambda: REAL_CALL("layout.apply", {"workspace_id": "w1"}))
         elapsed = time.monotonic() - started
-        self.assertIn("layout.apply: no response from Herdr", str(raised.exception))
+        # Only the timeout path names the limit and the stage that it gave up in.
+        self.assertEqual(str(found.get("error")), "layout.apply: Herdr did not answer within 0.5 s (reply)")
         self.assertLess(elapsed, 5)
         self.assertEqual(
             [json.loads(line) for line in server.requests],
             [{"id": "default-layout:layout.apply", "method": "layout.apply", "params": {"workspace_id": "w1"}}],
         )
 
+    def test_a_server_that_drips_gives_up_at_the_deadline(self):
+        # One timeout for the whole request, not one per read: bytes that arrive
+        # inside each read's limit must not hold the call past the deadline.
+        self.server(mode="drip")
+        self.short_timeout()
+        started = time.monotonic()
+        found = self.run_with_watchdog(5, lambda: REAL_CALL("layout.apply", {"workspace_id": "w1"}))
+        elapsed = time.monotonic() - started
+        self.assertEqual(str(found.get("error")), "layout.apply: Herdr did not answer within 0.5 s (reply)")
+        self.assertLess(elapsed, 5)
+
     def test_a_stalled_reply_does_not_stop_the_next_project(self):
         self.server(mode="stall")
         self.two_projects()
         self.fresh_home()
         self.short_timeout()
-        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
-        self.assertIn("default-layout: alpha failed: layout.apply: no response from Herdr", self.stdout.getvalue())
-        self.assertIn("default-layout: beta failed: layout.apply: no response from Herdr", self.stdout.getvalue())
+        found = self.run_with_watchdog(10, lambda: self.run_main("default_layout.py", "startup"))
+        self.assertEqual(found.get("value"), 0)
+        self.assertIn("default-layout: alpha failed: layout.apply: Herdr did not answer", self.stdout.getvalue())
+        self.assertIn("default-layout: beta failed: layout.apply: Herdr did not answer", self.stdout.getvalue())
         self.assertEqual(self.created()[-1][6], "beta")
         self.assertEqual(list(self.state_dir.glob("building-*")), [])
 
