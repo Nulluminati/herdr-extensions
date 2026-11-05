@@ -208,6 +208,30 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(form.query_one(".dialog").content_region.contains_region(error.region))
             self.callback.assert_not_called()
 
+    async def test_factory_custom_groups_the_four_reviewer_roles(self):
+        from textual.widgets import Label, Select
+
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            await pilot.press("F", "c")
+            await pilot.pause()
+            form = app.screen
+            heading = form.query_one("#factory-reviewers-heading", Label)
+            self.assertEqual(str(heading.render()), "Reviewers")
+            rows = list(form.query(".factory-reviewer-row"))
+            self.assertEqual([str(row.query_one(Label).render()) for row in rows], ["security", "ux", "ui", "code"])
+            for row in rows:
+                self.assertEqual(row.query_one(Label).styles.padding.left, 2)
+            builder = form.query_one("#factory-agent-builder", Select).parent
+            approver = form.query_one("#factory-agent-approver", Select).parent
+            self.assertNotIn("factory-reviewer-row", builder.classes)
+            self.assertNotIn("factory-reviewer-row", approver.classes)
+            fields = list(form.query_one("#factory-fields").children)
+            self.assertLess(fields.index(builder), fields.index(heading))
+            self.assertLess(fields.index(heading), fields.index(rows[0]))
+            self.assertLess(fields.index(rows[-1]), fields.index(approver))
+            self.assertEqual(form.query_one("#factory-fields").max_scroll_y, 0)
+
     async def test_factory_custom_narrow_columns_and_spacing(self):
         from textual.widgets import Label
 

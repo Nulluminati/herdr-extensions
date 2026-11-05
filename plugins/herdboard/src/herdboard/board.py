@@ -1818,7 +1818,10 @@ class FactoryCustomScreen(ModalBase):
                 yield Label(title, classes=classes + (" factory-role-model" if title == "Model" else ""))
         for name in self.ROLES:
             role = self.role(name)
-            with Horizontal(classes="factory-role-row"):
+            if name == LENSES[0]:
+                yield Label("Reviewers", id="factory-reviewers-heading")
+            classes = "factory-role-row" + (" factory-reviewer-row" if name in LENSES else "")
+            with Horizontal(classes=classes):
                 yield Label(name.capitalize() if name not in LENSES else name)
                 yield Select(
                     [(agent, agent) for agent in AGENTS],
@@ -5341,7 +5344,9 @@ class HerdboardApp(App):
     .dialog Label { width: 100%; }
     .factory-dialog { width: 90; max-width: 95%; max-height: 95%; }
     .factory-role-row { height: 3; }
-    .factory-custom-dialog { height: 35; }
+    .factory-custom-dialog { height: 36; }
+    #factory-reviewers-heading { height: 1; text-style: bold; }
+    .factory-reviewer-row > Label { padding-left: 2; }
     #factory-fields { height: 1fr; scrollbar-size-vertical: 1; margin: 1 0; }
     .factory-role-row > Label { width: 12; height: 3; content-align: left middle; }
     .factory-role-header, .factory-role-header > Label { height: 1; }
