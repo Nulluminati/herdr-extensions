@@ -330,6 +330,10 @@ def tab_problems(tab, where: str) -> list[str]:
     # `label` names a pane, and a tab with panes is named by `name`.
     if "label" in tab:
         problems.append(f"{where}: label is a pane key; name the tab with name")
+    # `split` and `ratio` describe the pane that splits, not the tab.
+    for key in ("split", "ratio"):
+        if key in tab:
+            problems.append(f"{where}: {key} belongs to a pane; set it on the pane that splits")
     # `working_dir` sets the directory that the panes below start in.
     if "working_dir" in tab and not is_text(tab["working_dir"]):
         problems.append(f"{where}: working_dir must be a non-empty string")
@@ -456,9 +460,11 @@ def tab_tree(tab: dict, project_path, where: str = "") -> dict:
     panes = tab.get("panes")
     if not panes:
         return pane_node(tab, project_path, where)
-    # A tab-level working_dir is the default directory of its panes. It is
-    # resolved once, so a directory that is not there is reported once.
-    default_cwd = pane_cwd(tab, project_path, where) if tab.get("working_dir") else None
+    # A tab-level working_dir is the default directory of its panes. Resolve it
+    # once, so a directory that is not there is reported once for the tab, and
+    # only when a pane needs it, so an unused directory is not reported.
+    needs_default = any(not pane.get("working_dir") for pane in panes)
+    default_cwd = pane_cwd(tab, project_path, where) if tab.get("working_dir") and needs_default else None
     node = pane_node(panes[0], project_path, where, default_cwd)
     for pane in panes[1:]:
         node = {

@@ -54,7 +54,7 @@ Each `[[projects.tabs]]` table is one tab, in file order. The first tab is the a
 
 A tab with none of these keys is one shell in the project directory.
 
-A tab with `panes` may not also set `command`, `agent` or `label`. The plugin reports that as a problem, because it would ignore the key. `label` names a pane, so name the tab with `name`.
+A tab with `panes` may not also set `command`, `agent`, `label`, `split` or `ratio`. The plugin reports that as a problem, because it would ignore the key. `label` names a pane, so name the tab with `name`. `split` and `ratio` belong to the pane that splits. An empty `panes = []` list is a tab without panes: the plugin builds one pane from the tab's own keys.
 
 Two tabs with one name are a natural way to write a second shell or a second agent in another directory. The plugin matches tabs by name in file order, so each open tab answers for one entry and a restored tab gets the program of its own entry. A name of only digits, such as `"1"`, is a problem: Herdr gives that label to a tab without a name, so the plugin cannot tell the two apart.
 
@@ -102,7 +102,7 @@ working_dir = "plugins"
 
 This gives one workspace, `herdr-extensions`, with three tabs. The `agents` tab has pi on the left (60% of the width) and a shell on the right.
 
-The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions. A repeated `label` is a problem too, because two workspaces with one label cannot be told apart, and so is a `label` with a space at either end. A key that the plugin would ignore is a problem as well, such as `label` on a tab with panes, or `split` or `ratio` on the first pane. A repeated tab `name` is not a problem. A `name` of only digits is a problem, because Herdr gives that label to an unnamed tab. An absolute `working_dir` may point anywhere, inside the project or not.
+The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions. A repeated `label` is a problem too, because two workspaces with one label cannot be told apart, and so is a `label` with a space at either end. A key that the plugin would ignore is a problem as well, such as `label`, `split` or `ratio` on a tab with panes, or `split` or `ratio` on the first pane. A repeated tab `name` is not a problem. A `name` of only digits is a problem, because Herdr gives that label to an unnamed tab. An absolute `working_dir` may point anywhere, inside the project or not.
 
 ## When it runs
 

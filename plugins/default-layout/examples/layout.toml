@@ -25,7 +25,8 @@
 #                       to the project path.
 #   A tab with none of these is one shell in the project directory.
 #
-#   A tab with panes may not also set `command`, `agent` or `label`.
+#   A tab with panes may not also set `command`, `agent`, `label`, `split` or
+#   `ratio`. An empty `panes = []` list is a tab without panes.
 #
 # [[projects.tabs.panes]]  Up to 4 panes, instead of the keys above.
 #   label               The pane name.
