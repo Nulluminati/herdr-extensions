@@ -162,6 +162,43 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             self.assertIsInstance(app.screen, FactoryPresetScreen)
 
+    async def test_factory_plan_choice_controls_manual_reviewer_boxes(self):
+        from textual.widgets import Checkbox, Select
+
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            await pilot.press("F", "c")
+            await pilot.pause()
+            form = app.screen
+            plan = form.query_one("#factory-plan-lenses", Checkbox)
+            code = form.query_one("#factory-on-code", Checkbox)
+            for lens in ("security", "ux", "ui", "code"):
+                checkbox = form.query_one(f"#factory-on-{lens}", Checkbox)
+                self.assertFalse(checkbox.visible)
+                self.assertTrue(checkbox.disabled)
+            fields = list(form.query_one("#factory-fields").children)
+            self.assertLess(fields.index(plan), fields.index(form.query_one("#factory-reviewers-heading")))
+            model_width = form.query_one("#factory-model-code", Select).region.width
+            await pilot.click("#factory-plan-lenses")
+            await pilot.pause()
+            self.assertTrue(code.visible)
+            self.assertFalse(code.disabled)
+            self.assertEqual(form.query_one("#factory-model-code", Select).region.width, model_width)
+            await pilot.click("#factory-on-code")
+            self.assertFalse(code.value)
+            await pilot.click("#factory-plan-lenses")
+            await pilot.pause()
+            self.assertFalse(code.visible)
+            self.assertFalse(code.value)
+            await pilot.click("#factory-plan-lenses")
+            await pilot.pause()
+            self.assertTrue(code.visible)
+            self.assertFalse(code.value)
+            await pilot.press("ctrl+s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertEqual(self.callback.call_args.kwargs["factory_run"].lenses_on, ("security", "ux", "ui"))
+
     async def test_factory_custom_enter_in_save_name_starts_run(self):
         app = self.app()
         async with app.run_test(size=(80, 24)) as pilot:
@@ -260,6 +297,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(form.query_one(".factory-role-header").size.height, 1)
             role_row = form.query_one("#factory-agent-builder", Select).parent
             self.assertEqual(role_row.query_one(Label).size.height, 3)
+            form.query_one("#factory-plan-lenses", Checkbox).value = False
+            await pilot.pause()
             checkbox = form.query_one("#factory-on-code", Checkbox)
             self.assertEqual(checkbox.region.height, 3)
             self.assertGreaterEqual(checkbox.content_size.width, 5)

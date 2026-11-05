@@ -1819,6 +1819,9 @@ class FactoryCustomScreen(ModalBase):
         for name in self.ROLES:
             role = self.role(name)
             if name == LENSES[0]:
+                yield Checkbox(
+                    "Let the plan choose the lenses", value=self.run.lenses_on is None, id="factory-plan-lenses"
+                )
                 yield Label("Reviewers", id="factory-reviewers-heading")
             classes = "factory-role-row" + (" factory-reviewer-row" if name in LENSES else "")
             with Horizontal(classes=classes):
@@ -1843,14 +1846,15 @@ class FactoryCustomScreen(ModalBase):
                     id=f"factory-thinking-{name}",
                 )
                 if name in LENSES:
-                    yield Checkbox(
+                    checkbox = Checkbox(
                         value=self.run.lenses_on is None or name in self.run.lenses_on,
                         disabled=self.run.lenses_on is None,
                         id=f"factory-on-{name}",
                     )
+                    checkbox.visible = self.run.lenses_on is not None
+                    yield checkbox
                 else:
                     yield Static("", classes="factory-role-spacer")
-        yield Checkbox("Let the plan choose the lenses", value=self.run.lenses_on is None, id="factory-plan-lenses")
         with Horizontal(classes="factory-field-row"):
             yield Label("Rounds", id="factory-rounds-label")
             yield Input(str(self.run.rounds), id="factory-rounds", type="integer")
@@ -1878,7 +1882,9 @@ class FactoryCustomScreen(ModalBase):
         if event.checkbox.id == "factory-plan-lenses":
             event.stop()
             for lens in LENSES:
-                self.query_one(f"#factory-on-{lens}", Checkbox).disabled = event.value
+                checkbox = self.query_one(f"#factory-on-{lens}", Checkbox)
+                checkbox.disabled = event.value
+                checkbox.visible = not event.value
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
