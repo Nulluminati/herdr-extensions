@@ -124,19 +124,112 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.callback.assert_called_with(self.card.ref, "pi")
 
-    async def test_factory_key_chooses_the_agent_then_starts_a_factory(self):
+    async def test_factory_key_opens_presets_and_starts_default(self):
+        from herdboard import factory
+        from herdboard.board import FactoryPresetScreen
+
         app = self.app()
         async with app.run_test() as pilot:
             await pilot.press("F")
             await pilot.pause()
-            self.assertIsInstance(app.screen, AgentScreen)
-            await pilot.press("down", "enter")
-            await pilot.pause()
-            self.assertIsInstance(app.screen, ModelScreen)
+            self.assertIsInstance(app.screen, FactoryPresetScreen)
             await pilot.press("enter")
             await app.workers.wait_for_complete()
             await pilot.pause()
-            self.callback.assert_called_with(self.card.ref, "pi", factory=True)
+            self.callback.assert_called_with(
+                self.card.ref, "claude", factory_run=factory.default_run(self.store.config)
+            )
+
+    async def test_factory_custom_lenses_validation_and_back(self):
+        from textual.widgets import Checkbox, Static
+
+        from herdboard.board import FactoryCustomScreen, FactoryPresetScreen
+
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            await pilot.press("F", "c")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, FactoryCustomScreen)
+            self.assertTrue(app.screen.query_one("#factory-on-code", Checkbox).disabled)
+            app.screen.query_one("#factory-plan-lenses", Checkbox).value = False
+            await pilot.pause()
+            for lens in ("security", "ux", "ui", "code"):
+                app.screen.query_one(f"#factory-on-{lens}", Checkbox).value = False
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            self.assertIn("lens", str(app.screen.query_one("#factory-error", Static).render()))
+            self.callback.assert_not_called()
+            await pilot.press("escape")
+            self.assertIsInstance(app.screen, FactoryPresetScreen)
+
+    async def test_factory_preset_summary_custom_reset_and_save(self):
+        from dataclasses import replace
+
+        from textual.widgets import Checkbox, OptionList, Select, Static
+
+        from herdboard import factory
+        from herdboard.board import ConfirmScreen, FactoryCustomScreen
+        from herdboard.config import Role
+
+        run = replace(
+            factory.default_run(self.store.config),
+            name="cheap",
+            builder=Role("claude", "sonnet", "high"),
+            rounds=2,
+            lenses_on=("code",),
+        )
+        self.store.config.factory_presets["cheap"] = run
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            await pilot.press("F", "down")
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#factory-presets", OptionList).highlighted, 1)
+            self.assertIn("sonnet", str(app.screen.query_one("#factory-summary", Static).render()))
+            await pilot.press("c")
+            await pilot.pause()
+            form = app.screen
+            self.assertIsInstance(form, FactoryCustomScreen)
+            self.assertEqual(app.focused.id, "factory-agent-builder")
+            await pilot.press("shift+tab")
+            self.assertEqual(app.focused.id, "factory-save-name")
+            await pilot.press("tab")
+            self.assertEqual(form.query_one("#factory-model-builder", Select).value, "sonnet")
+            self.assertFalse(form.query_one("#factory-plan-lenses", Checkbox).value)
+            self.assertFalse(form.query_one("#factory-on-security", Checkbox).value)
+            self.assertTrue(form.query_one("#factory-on-code", Checkbox).value)
+            self.assertGreaterEqual(form.query_one(".factory-role-row Label").size.width, 10)
+            form.query_one("#factory-agent-builder", Select).value = "codex"
+            await pilot.pause()
+            self.assertEqual(form.query_one("#factory-model-builder", Select).value, "")
+            self.assertEqual(form.query_one("#factory-thinking-builder", Select).value, "")
+            form.query_one("#factory-save-name", Input).value = "cheap"
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ConfirmScreen)
+            self.callback.assert_not_called()
+            await pilot.press("n")
+            await pilot.pause()
+            self.assertIs(app.screen, form)
+            await pilot.press("ctrl+s", "y")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            saved = load_config(self.config_file).factory_presets["cheap"]
+            self.assertEqual(saved.builder.agent, "codex")
+            self.assertEqual(self.callback.call_args.kwargs["factory_run"], saved)
+
+    async def test_factory_preset_enter_starts_named_run(self):
+        from dataclasses import replace
+
+        from herdboard import factory
+
+        run = replace(factory.default_run(self.store.config), name="cheap", rounds=2)
+        self.store.config.factory_presets["cheap"] = run
+        app = self.app()
+        async with app.run_test() as pilot:
+            await pilot.press("F", "down", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            self.callback.assert_called_with(self.card.ref, run.builder.agent, factory_run=run)
 
     async def test_pi_model_dialog_ignores_codex_only_saved_levels(self):
         self.store.config.thinking = {"pi/default": "ultra"}

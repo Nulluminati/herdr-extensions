@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 from . import activity, attachments
@@ -32,7 +33,7 @@ from .agent_review import (
     read_change,
     request_text,
 )
-from .config import LENSES
+from .config import LENSES, FactoryRun, Role
 from .linear_cards import LINEAR_REF
 from .linear_states import refuse
 from .model import HerdboardError, NotFoundError
@@ -78,12 +79,50 @@ def parse_lenses(plan_text: str | None) -> tuple[str, ...]:
     return LENSES
 
 
-def lens_kind(config, lens: str) -> tuple[str, str | None, str | None]:
+def default_run(config, builder=None, model=None, thinking=None) -> FactoryRun:
+    """Snapshot today's factory settings, including the chosen builder."""
+    builder = builder or config.start_agent
+    model = model or (config.start_model if builder == config.start_agent else None)
+    if builder == "pi":
+        model = start_module.agent_model(config, model)
+        thinking = start_module.thinking_level(config, model, thinking)
+    elif thinking is None and config.start_thinking in start_module.thinking_levels(builder):
+        thinking = config.start_thinking
+    return FactoryRun(
+        "default",
+        Role(builder, model, thinking),
+        Role(approver_kind(config, builder)),
+        {lens: Role.from_dict(entry) for lens, entry in config.factory_lenses.items()},
+        config.factory_max_rounds,
+    )
+
+
+def resolve_run(config, preset=None, builder=None, model=None, thinking=None) -> FactoryRun:
+    if preset is None:
+        return default_run(config, builder, model, thinking)
+    if preset not in config.factory_presets:
+        names = ", ".join(sorted(config.factory_presets)) or "none"
+        raise FactoryError(f"Unknown factory preset {preset!r}; known presets: {names}", "unknown_preset")
+    return config.factory_presets[preset]
+
+
+def record_run(config, record) -> FactoryRun:
+    """Read the snapshot, or use the settings of a record written before snapshots existed."""
+    state = record["factory"]
+    if "run" in state:
+        return FactoryRun.from_dict(state["run"])
+    return replace(
+        default_run(config, record.get("agent"), record.get("model"), record.get("thinking")),
+        rounds=state["rounds"],
+    )
+
+
+def lens_kind(config, lens: str, run: FactoryRun | None = None) -> tuple[str, str | None, str | None]:
     """The agent kind, model and thinking level of a lens's reviewer, from `[factory.lenses]`.
 
     A pi reviewer without a model or level resolves them as a card review does."""
-    entry = config.factory_lenses[lens]
-    kind, model, thinking = entry["agent"], entry.get("model"), entry.get("thinking")
+    role = run.lenses[lens] if run is not None else Role.from_dict(config.factory_lenses[lens])
+    kind, model, thinking = role.agent, role.model, role.thinking
     if kind == "pi":
         model = start_module.agent_model(config, model)
         thinking = start_module.thinking_level(config, model, thinking)
@@ -186,7 +225,7 @@ def update(ref, folder: Path, **changes) -> dict | None:
         return dict(state)
 
 
-def new_state(key: str, rounds: int) -> dict:
+def new_state(key: str, run: FactoryRun) -> dict:
     """The state of a new factory run, with its folder created."""
     folder = state_dir() / "factory" / f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
@@ -194,7 +233,8 @@ def new_state(key: str, rounds: int) -> dict:
     except OSError as error:
         raise FactoryError(f"{folder}: cannot create the factory folder: {error}", "io") from error
     return {
-        "rounds": rounds,
+        "run": run.to_dict(),
+        "rounds": run.rounds,
         "round": 0,
         "folder": str(folder),
         "lenses": [],
@@ -311,14 +351,15 @@ def run_round(store, ref, record, card, number: int) -> dict:
     worktree = Path(record["worktree_path"])
     base = record.get("base") or "@{upstream}"
     untracked, head = capture_change(worktree, base, round_folder)
-    lenses = parse_lenses(attachments.plan_text(store.config, ref))
+    run = record_run(store.config, record)
+    lenses = run.lenses_on if run.lenses_on is not None else parse_lenses(attachments.plan_text(store.config, ref))
     files = attachments.listing(store.config, ref)
     history = history_text(folder, number - 1)
     reviewers, split_from, direction = [], record["pane_id"], "right"
     for lens in lenses:
         if (factory_state(ref) or {}).get("status") == "stopped":
             break
-        kind, model, thinking = lens_kind(store.config, lens)
+        kind, model, thinking = lens_kind(store.config, lens, run)
         lens_folder = round_folder / lens
         lens_folder.mkdir(parents=True, exist_ok=True)
         for name in ("branch.patch", "uncommitted.patch"):
@@ -542,11 +583,11 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
         "".join(f"- {entry['time']} · {entry['author']} · {entry['message']}\n" for entry in log), encoding="utf-8"
     )
     plan = attachments.plan_path(store.config, ref)
-    kind = approver_kind(store.config, record.get("agent") or store.config.start_agent)
-    model = thinking = None
+    role = record_run(store.config, record).approver
+    kind, model, thinking = role.agent, role.model, role.thinking
     if kind == "pi":
-        model = start_module.agent_model(store.config, None)
-        thinking = start_module.thinking_level(store.config, model)
+        model = start_module.agent_model(store.config, model)
+        thinking = start_module.thinking_level(store.config, model, thinking)
     request = approver_request(
         card, record, folder, approver_folder, plan if plan.exists() else None, state.get("round", 0)
     )
@@ -840,4 +881,7 @@ def summary(state: dict | None) -> dict | None:
     """The factory state for `show --json`."""
     if not state:
         return None
-    return {key: state.get(key) for key in ("round", "rounds", "status", "lenses", "folder")}
+    return {
+        **{key: state.get(key) for key in ("round", "rounds", "status", "lenses", "folder")},
+        "preset": state.get("run", {}).get("name", "default"),
+    }

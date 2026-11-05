@@ -212,6 +212,63 @@ class LensTests(FactoryTestCase):
 
 
 class StartFactoryTests(FactoryTestCase):
+    def test_default_run_and_unknown_preset(self):
+        run = factory.default_run(self.config, "pi", "test/model", "high")
+        self.assertEqual(run.builder.agent, "pi")
+        self.assertEqual(run.builder.model, "test/model")
+        self.assertEqual(run.approver.agent, factory.approver_kind(self.config, "pi"))
+        self.assertEqual(run.rounds, self.config.factory_max_rounds)
+        self.assertIsNone(run.lenses_on)
+        with self.assertRaises(factory.FactoryError) as caught:
+            factory.resolve_run(self.config, "missing")
+        self.assertEqual(caught.exception.code, "unknown_preset")
+
+    def test_stored_run_controls_builder_and_lenses(self):
+        from herdboard.config import Role
+
+        run = dataclasses.replace(
+            factory.default_run(self.config),
+            name="cheap",
+            builder=Role("pi", "test/model", "high"),
+            lenses_on=("security",),
+            rounds=2,
+        )
+        self.start_factory(factory_run=run)
+        self.assertEqual(self.record()["agent"], "pi")
+        self.assertEqual(self.state()["run"], run.to_dict())
+        self.assertEqual(factory.summary(self.state())["preset"], "cheap")
+        self.commit(self.worktree, "change.txt", "change\n", "feat: change")
+        self.write_plan("Review lenses: code, ux")
+        review = factory.run_round(self.store, self.card.ref, self.record(), self.card, 1)
+        self.assertEqual([entry["lens"] for entry in review["reviewers"]], ["security"])
+
+    def test_stored_lens_and_approver_launch_settings(self):
+        from herdboard.config import Role
+
+        run = dataclasses.replace(
+            factory.default_run(self.config),
+            approver=Role("claude", "opus", "max"),
+            lenses={lens: Role("codex", "test-model", "high") for lens in ("security", "ux", "ui", "code")},
+            lenses_on=("code",),
+        )
+        self.start_factory(factory_run=run)
+        self.commit(self.worktree, "change.txt", "change\n", "feat: change")
+        self.assertEqual(factory.lens_kind(self.config, "code", run), ("codex", "test-model", "high"))
+        with patch.object(factory, "launch_reviewer", wraps=factory.launch_reviewer) as launch:
+            factory.run_round(self.store, self.card.ref, self.record(), self.card, 1)
+            self.assertEqual(launch.call_args.args[1:4], ("codex", "test-model", "high"))
+            factory.run_approver(self.store, self.card.ref, self.record(), self.card)
+            self.assertEqual(launch.call_args.args[1:4], ("claude", "opus", "max"))
+
+    def test_legacy_record_resolves_default_run(self):
+        self.start_factory(rounds=2)
+        record = self.record()
+        record["factory"].pop("run")
+        run = factory.record_run(self.config, record)
+        self.assertEqual(run.name, "default")
+        self.assertEqual(run.rounds, 2)
+        self.assertEqual(run.builder.agent, record["agent"])
+
     def test_start_writes_the_factory_state_and_starts_the_worker(self):
         result = self.start_factory(rounds=2)
         state = self.state()
@@ -221,13 +278,13 @@ class StartFactoryTests(FactoryTestCase):
         arguments, log = self.workers[-1]
         self.assertEqual(arguments, ["factory-wait", self.card.ref, "--folder", str(self.folder)])
         self.assertEqual(log, self.folder / "worker.log")
-        self.assertIn("Factory started: up to 2 review rounds.", self.log())
+        self.assertIn("Factory run: preset default (builder claude default; approver pi default; 2 rounds)", self.log())
         # The start records the worker's process ID, so a worker that dies at once does not look alive.
         self.assertEqual(state["pid"], os.getpid())
 
     def test_one_round_is_named_in_the_singular(self):
         self.start_factory(rounds=1)
-        self.assertIn("Factory started: up to 1 review round.", self.log())
+        self.assertIn("1 round)", self.log()[0])
 
     def test_the_rounds_default_to_the_config(self):
         self.config.factory_max_rounds = 4
@@ -689,6 +746,32 @@ class FactoryCliTests(CliTestCase):
         start._write(start.state_dir() / "starts.json", {self.ref: {"ref": self.ref, "factory": state}})
         return folder
 
+    def test_preset_usage_errors(self):
+        for flags in (("--agent", "pi"), ("--model", "opus"), ("--thinking", "high"), ("--rounds", "2")):
+            with self.subTest(flags=flags):
+                result = self.run_json(
+                    "start", self.ref, "--factory", "--preset", "cheap", *flags, directory=self.repo, expect=1
+                )
+                self.assertEqual(result["error"]["code"], "usage")
+        result = self.run_json("start", self.ref, "--preset", "cheap", directory=self.repo, expect=1)
+        self.assertEqual(result["error"]["code"], "usage")
+
+    def test_preset_passes_complete_run_to_starter(self):
+        import tomlkit
+
+        value = factory.default_run(Config()).to_dict()
+        value.pop("name")
+        value["builder"] = {"agent": "pi", "model": "test/model", "thinking": "high"}
+        with self.config.open("a") as stream:
+            stream.write(tomlkit.dumps({"factory": {"presets": {"cheap": value}}}))
+        with patch.object(start.Starter, "start", return_value={"ref": self.ref}) as started:
+            self.run_json("start", self.ref, "--factory", "--preset", "cheap", directory=self.repo)
+        run = started.call_args.kwargs["factory_run"]
+        self.assertEqual(
+            (run.name, run.builder.agent, run.builder.model, run.builder.thinking),
+            ("cheap", "pi", "test/model", "high"),
+        )
+
     def test_start_passes_factory_and_rounds(self):
         with patch.object(start.Starter, "start", return_value={"ref": self.ref}) as started:
             self.run_json("start", self.ref, "--factory", "--rounds", "2", directory=self.repo)
@@ -699,7 +782,15 @@ class FactoryCliTests(CliTestCase):
         folder = self.write_state()
         shown = self.run_json("show", self.ref, directory=self.repo)["factory"]
         self.assertEqual(
-            shown, {"round": 1, "rounds": 3, "status": "building", "lenses": ["code"], "folder": str(folder)}
+            shown,
+            {
+                "round": 1,
+                "rounds": 3,
+                "status": "building",
+                "lenses": ["code"],
+                "folder": str(folder),
+                "preset": "default",
+            },
         )
 
     def test_move_to_review_is_a_ready_signal_while_a_factory_runs(self):
@@ -719,7 +810,7 @@ class FactoryCliTests(CliTestCase):
         self.run_json("factory", self.ref, directory=self.repo, expect=1)
         self.write_state()
         out, _ = self.run_cli("factory", self.ref, directory=self.repo)
-        self.assertEqual(out, f"{self.ref}: factory building, round 1 of 3\n")
+        self.assertEqual(out, f"{self.ref}: factory building, round 1 of 3, preset default\n")
         self.assertEqual(self.run_json("factory", self.ref, "--stop", directory=self.repo)["status"], "stopped")
         self.assertEqual(
             json.loads((start.state_dir() / "starts.json").read_text())[self.ref]["factory"]["status"], "stopped"

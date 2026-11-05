@@ -109,7 +109,14 @@ herdboard --json pin ENG-123                  # show the issue on this repositor
 herdboard --json pin ENG-123 --remove         # remove the pin
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json start tep3 --factory --rounds 2   # lens reviewers check each move to Review, then an approver
-herdboard --json factory tep3                 # the factory run's status and round; --stop stops it
+# Board F: Default, named presets, or Custom…; c edits the highlighted run.
+# Custom ctrl+s starts; an optional save name writes a preset after overwrite confirmation.
+# [factory.presets.NAME] needs builder, approver, all four lenses and rounds (1–10).
+# Each role needs agent; model and thinking are optional. lenses_on overrides the plan when present.
+# Names use a-z, 0-9 and -; default and custom are reserved.
+# Automations: --factory --factory-preset NAME; cannot combine with agent/model/thinking overrides.
+herdboard --json start tep3 --factory --preset cheap  # complete named run; no agent/model/thinking/rounds flags
+herdboard --json factory tep3                 # status, round and preset; --stop stops it
 herdboard --json plan tep3 --agent claude --model opus   # a planner asks the user questions, then writes plan.md
 herdboard --json review tep3                  # open the card's branch diff in Hunk, next to its agent
 herdboard --json details --open tep3          # reopen the card's details pane above its agent or planner

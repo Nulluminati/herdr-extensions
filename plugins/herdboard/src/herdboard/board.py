@@ -47,16 +47,23 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from . import activity, agent_states, attachments, automations, notes, pr_reviews
+from . import activity, agent_states, attachments, automations, factory, notes, pr_reviews
 from . import merge as merge_module
 from . import start as start_module
 from .agent_review import AgentReviewer
 from .card_file import check_title, parse_due
 from .config import (
     AGENTS,
+    FACTORY_ROUNDS,
+    LENSES,
     THINKING_LEVELS,
+    FactoryRun,
+    Role,
+    check_factory_preset_name,
     check_global_config,
     check_thinking_levels,
+    config_path,
+    save_factory_preset,
     save_global_config,
     save_thinking_levels,
     thinking_levels,
@@ -218,7 +225,7 @@ HELP_SECTIONS = [
             ("S", "choose claude, pi or codex (and the model and thinking level), then start work"),
             (
                 "F",
-                "start as a factory: choose the agent, then lens reviewers check each move to Review "
+                "start as a factory: choose a preset or a custom run; lens reviewers check each move to Review "
                 "until an approver gives a verdict",
             ),
             ("P", "plan the card with an agent in a tab in its worktree, or in its card folder without a repository"),
@@ -1693,6 +1700,231 @@ class AgentScreen(ModalBase):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         self.dismiss(AGENTS[event.option_index])
+
+
+class FactoryPresetScreen(ModalBase):
+    """Choose a complete run, or edit a one-off copy of the highlighted run."""
+
+    BINDINGS = [Binding("c", "custom", "Custom")]
+
+    def __init__(self, ref: str, config, config_file: Path | None = None):
+        super().__init__()
+        self.ref, self.config, self.config_file = ref, config, config_file
+        self.runs = [
+            factory.default_run(config),
+            *(config.factory_presets[name] for name in sorted(config.factory_presets)),
+        ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog factory-dialog"):
+            yield Label(f"Start {self.ref} as a factory")
+            yield OptionList("Default", *(run.name for run in self.runs[1:]), "Custom…", id="factory-presets")
+            yield Static(self.run_summary(self.runs[0]), id="factory-summary", markup=False)
+            yield Label("enter: start · c: custom (prefilled) · escape: cancel", classes="dim")
+
+    @staticmethod
+    def run_summary(run: FactoryRun) -> str:
+        def role_line(label, role):
+            return f"{label:10} {role.agent} · {role.model or 'default'}" + (
+                f" · {role.thinking}" if role.thinking else ""
+            )
+
+        return "\n".join(
+            [
+                role_line("Builder", run.builder),
+                *(role_line(lens, run.lenses[lens]) for lens in LENSES),
+                f"{'Lenses':10} {', '.join(run.lenses_on) if run.lenses_on is not None else 'plan decides'}",
+                role_line("Approver", run.approver),
+                f"{'Rounds':10} {run.rounds}",
+            ]
+        )
+
+    def highlighted_run(self) -> FactoryRun:
+        index = self.query_one("#factory-presets", OptionList).highlighted or 0
+        return self.runs[index] if index < len(self.runs) else self.runs[0]
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        event.stop()
+        self.query_one("#factory-summary", Static).update(self.run_summary(self.highlighted_run()))
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        if event.option_index == len(self.runs):
+            self.action_custom()
+        else:
+            self.dismiss(self.runs[event.option_index])
+
+    def action_custom(self) -> None:
+        def chosen(run):
+            if run is not None:
+                self.dismiss(run)
+
+        self.app.push_screen(
+            FactoryCustomScreen(self.ref, self.config, self.highlighted_run(), self.config_file), chosen
+        )
+
+
+class FactoryCustomScreen(ModalBase):
+    """Edit every role without changing the defaults for later starts."""
+
+    BINDINGS = [Binding("ctrl+s", "save", "Start", priority=True)]
+    ROLES = ("builder", *LENSES, "approver")
+
+    def __init__(self, ref: str, config, run: FactoryRun, config_file: Path | None = None):
+        super().__init__()
+        self.ref, self.config, self.run = ref, config, run
+        self.config_file = config_path(config_file)
+        self.agents = {name: self.role(name).agent for name in self.ROLES}
+
+    def role(self, name: str) -> Role:
+        return self.run.lenses[name] if name in LENSES else getattr(self.run, name)
+
+    def model_options(self, agent: str, selected: str | None = None) -> list[tuple[str, str]]:
+        if agent == "pi":
+            _default, models = pi_model_choices(self.config)
+        elif agent == "codex":
+            _default, models = codex_model_choices(self.config)
+        else:
+            models = list(ClaudeModelScreen.MODELS[1:])
+        choices = list(dict.fromkeys([*models, *([selected] if selected else [])]))
+        return [("default", ""), *((model, model) for model in choices if model)]
+
+    @staticmethod
+    def thinking_options(agent: str) -> list[tuple[str, str]]:
+        return [("default", ""), *((level, level) for level in thinking_levels(agent))]
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(classes="dialog factory-dialog", can_focus=False):
+            yield Label(f"Custom factory run for {self.ref}")
+            with Horizontal(classes="factory-role-row"):
+                for title in ("Role", "Agent", "Model", "Thinking", "On"):
+                    classes = (
+                        "factory-role-name"
+                        if title == "Role"
+                        else "factory-role-on"
+                        if title == "On"
+                        else "factory-role-value"
+                    )
+                    yield Label(title, classes=classes + (" factory-role-model" if title == "Model" else ""))
+            for name in self.ROLES:
+                role = self.role(name)
+                with Horizontal(classes="factory-role-row"):
+                    yield Label(name.capitalize() if name not in LENSES else name)
+                    yield Select(
+                        [(agent, agent) for agent in AGENTS],
+                        value=role.agent,
+                        allow_blank=False,
+                        id=f"factory-agent-{name}",
+                    )
+                    yield Select(
+                        self.model_options(role.agent, role.model),
+                        value=role.model or "",
+                        allow_blank=False,
+                        id=f"factory-model-{name}",
+                        classes="factory-role-model",
+                    )
+                    yield Select(
+                        self.thinking_options(role.agent),
+                        value=role.thinking or "",
+                        allow_blank=False,
+                        id=f"factory-thinking-{name}",
+                    )
+                    if name in LENSES:
+                        yield Checkbox(
+                            value=self.run.lenses_on is None or name in self.run.lenses_on,
+                            disabled=self.run.lenses_on is None,
+                            id=f"factory-on-{name}",
+                        )
+                    else:
+                        yield Static("", classes="factory-role-spacer")
+            yield Checkbox("Let the plan choose the lenses", value=self.run.lenses_on is None, id="factory-plan-lenses")
+            yield Label("Rounds")
+            yield Input(str(self.run.rounds), id="factory-rounds", type="integer")
+            yield Label("Save as preset (optional)")
+            yield Input(placeholder="name, such as cheap", id="factory-save-name")
+            yield Static("", id="factory-error", classes="error", markup=False)
+            yield Label("ctrl+s: start · tab: next field · escape: back", classes="dim")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        identity = event.select.id or ""
+        if not identity.startswith("factory-agent-"):
+            return
+        event.stop()
+        name = identity.removeprefix("factory-agent-")
+        # Initial mount messages already match the prefilled row.
+        if event.value == self.agents[name]:
+            return
+        agent = self.agents[name] = str(event.value)
+        model = self.query_one(f"#factory-model-{name}", Select)
+        thinking = self.query_one(f"#factory-thinking-{name}", Select)
+        model.set_options(self.model_options(agent))
+        thinking.set_options(self.thinking_options(agent))
+        model.value = thinking.value = ""
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id == "factory-plan-lenses":
+            event.stop()
+            for lens in LENSES:
+                self.query_one(f"#factory-on-{lens}", Checkbox).disabled = event.value
+
+    def action_save(self) -> None:
+        error = self.query_one("#factory-error", Static)
+        try:
+            rounds = int(self.query_one("#factory-rounds", Input).value)
+            low, high = FACTORY_ROUNDS
+            if not low <= rounds <= high:
+                raise ValueError
+        except ValueError:
+            error.update(f"Rounds must be from {FACTORY_ROUNDS[0]} to {FACTORY_ROUNDS[1]}")
+            return
+        selected = None
+        if not self.query_one("#factory-plan-lenses", Checkbox).value:
+            selected = tuple(lens for lens in LENSES if self.query_one(f"#factory-on-{lens}", Checkbox).value)
+            if not selected:
+                error.update("Choose at least one lens")
+                return
+        roles = {}
+        for name in self.ROLES:
+            values = [
+                str(self.query_one(f"#factory-{field}-{name}", Select).value)
+                for field in ("agent", "model", "thinking")
+            ]
+            roles[name] = Role(values[0], values[1] or None, values[2] or None)
+        name = self.query_one("#factory-save-name", Input).value.strip()
+        run = FactoryRun(
+            name or "custom",
+            roles["builder"],
+            roles["approver"],
+            {lens: roles[lens] for lens in LENSES},
+            rounds,
+            selected,
+        )
+        if not name:
+            self.dismiss(run)
+            return
+        try:
+            check_factory_preset_name(name)
+        except HerdboardError as failure:
+            error.update(str(failure))
+            return
+
+        def save(confirmed=True):
+            if not confirmed:
+                return
+            try:
+                save_factory_preset(self.config_file, name, run)
+            except HerdboardError as failure:
+                error.update(str(failure))
+                return
+            self.config.factory_presets[name] = run
+            self.dismiss(run)
+
+        if name in self.config.factory_presets:
+            self.app.push_screen(
+                ConfirmScreen(f"Replace factory preset {name}?", "The saved preset will use these run settings."), save
+            )
+        else:
+            save()
 
 
 class ReviewKindScreen(ModalBase):
@@ -4289,6 +4521,9 @@ class AutomationFormScreen(ModalBase):
         }
         self.agent = item.agent if item and item.agent else "default"
         self.max_rounds = config.factory_max_rounds
+        self.presets = sorted(config.factory_presets)
+        if item and item.factory_preset and item.factory_preset not in self.presets:
+            self.presets.append(item.factory_preset)
 
     def _model_options(self, agent: str) -> list[tuple[str, str]]:
         """The models of `agent` after "default". The saved model stays a choice for the saved agent."""
@@ -4397,6 +4632,16 @@ class AutomationFormScreen(ModalBase):
                 value=bool(item and item.factory),
                 id="automation-factory",
             )
+            yield titled(
+                Select(
+                    [("Default", "default"), *((name, name) for name in self.presets)],
+                    value=item.factory_preset if item and item.factory_preset else "default",
+                    allow_blank=False,
+                    disabled=not bool(item and item.factory),
+                    id="automation-factory-preset",
+                ),
+                "Factory preset",
+            )
             yield Label(
                 "Needs a repository board. Each run costs up to 4 reviewers per round, "
                 f"for up to {self.max_rounds} rounds, and an approver",
@@ -4427,13 +4672,28 @@ class AutomationFormScreen(ModalBase):
             "schedule": self.query_one("#automation-schedule", Input).value.strip(),
             "type": choice("type"),
             "tags": plain_tags(parse_tags(self.query_one("#automation-tags", Input).value)),
-            "agent": choice("agent"),
-            "model": choice("model"),
-            "thinking": choice("thinking"),
+            "agent": None if self.selected_preset() else choice("agent"),
+            "model": None if self.selected_preset() else choice("model"),
+            "thinking": None if self.selected_preset() else choice("thinking"),
+            "factory_preset": self.selected_preset(),
             "may_merge_prs": self.query_one("#automation-merge", Checkbox).value,
             "factory": self.query_one("#automation-factory", Checkbox).value,
             "body": self.query_one("#automation-body", TextArea).text.rstrip("\n"),
         }
+
+    def selected_preset(self) -> str | None:
+        value = self.query_one("#automation-factory-preset", Select).value
+        return str(value) if self.query_one("#automation-factory", Checkbox).value and value != "default" else None
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id == "automation-factory":
+            event.stop()
+            self.query_one("#automation-factory-preset", Select).disabled = not event.value
+            self.update_preset_fields()
+
+    def update_preset_fields(self) -> None:
+        for name in ("agent", "model", "thinking"):
+            self.query_one(f"#automation-{name}", Select).disabled = self.selected_preset() is not None
 
     def error_text(self) -> str:
         return self.query_one("#automation-error", Static).plain
@@ -4445,6 +4705,10 @@ class AutomationFormScreen(ModalBase):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """A change of agent offers its own models and levels, and keeps only a choice that it takes."""
+        if event.select.id == "automation-factory-preset":
+            event.stop()
+            self.update_preset_fields()
+            return
         if event.select.id != "automation-agent" or event.value == self.agent:
             return
         event.stop()
@@ -4498,6 +4762,7 @@ class AutomationDetailScreen(ModalBase):
             ("Agent", " ".join(filter(None, (entry["agent"] or "default", entry["model"], entry["thinking"])))),
             ("May merge other PRs (instruction)", "yes" if entry["may_merge_prs"] else "no"),
             ("Factory", "yes" if entry["factory"] else "no"),
+            ("Factory preset", entry.get("factory_preset") or "Default"),
             ("Last run", " ".join(filter(None, (_short_time(entry["last_run"]), entry["last_card"]))) or "-"),
             ("Last result", entry["last_result"] or "-"),
         ]
@@ -5042,6 +5307,19 @@ class HerdboardApp(App):
               border: round $accent; background: $surface; }
     /* A Label is as wide as its text by default, so a long line runs past the dialog edge. */
     .dialog Label { width: 100%; }
+    .factory-dialog { width: 90; max-width: 95%; max-height: 95%; }
+    .factory-role-row { height: 3; }
+    .factory-role-row > Label { width: 12; content-align: left middle; }
+    .factory-role-row > .factory-role-value { width: 1fr; }
+    .factory-role-row > .factory-role-on { width: 6; }
+    .factory-role-row > Select { width: 1fr; }
+    .factory-role-row > Select.factory-role-model, .factory-role-row > Label.factory-role-model { width: 2fr; }
+    .factory-role-row SelectCurrent > #label { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
+    .factory-role-row > Checkbox { width: 6; padding: 0; border: none; content-align: center middle; }
+    .factory-role-row > .factory-role-spacer { width: 6; }
+    #factory-summary { border: round $primary; padding: 0 1; margin: 1 0; height: auto; }
+    #factory-presets { max-height: 10; }
+    #factory-error { height: auto; color: $error; }
     .help { width: 90; max-width: 95%; }
     .help-grid { layout: grid; grid-size: 2; grid-columns: 16 1fr; grid-rows: auto;
                  grid-gutter: 0 1; width: 100%; height: auto; }
@@ -6318,10 +6596,10 @@ class HerdboardApp(App):
         repo: Path | None = None,
         no_repo: bool = False,
         new_repo: Path | None = None,
-        factory: bool = False,
+        factory_run: FactoryRun | None = None,
     ) -> None:
         """Start a card in a thread. `repo` is a board that names the card's repository.
-        `factory` runs it as a factory."""
+        `factory_run` supplies a complete factory run."""
         # A dict, so a target chosen later adds one option.
         request = {
             "kind": "start",
@@ -6332,12 +6610,13 @@ class HerdboardApp(App):
             "repo": repo,
             "no_repo": no_repo,
             "new_repo": new_repo,
-            "factory": factory,
+            "factory_run": factory_run,
         }
 
         def guarded():
             try:
-                self.remember_thinking(agent, model, thinking)
+                if factory_run is None:
+                    self.remember_thinking(agent, model, thinking)
                 if self.start_card:
                     options = {"model": model, "thinking": thinking} if model or thinking else {}
                     if repo is not None:
@@ -6346,8 +6625,8 @@ class HerdboardApp(App):
                         options["no_repo"] = True
                     if new_repo is not None:
                         options["new_repo"] = new_repo
-                    if factory:
-                        options["factory"] = True
+                    if factory_run is not None:
+                        options["factory_run"] = factory_run
                     return self.start_card(ref, agent, **options), None
                 starter = Starter(
                     self.store,
@@ -6366,7 +6645,7 @@ class HerdboardApp(App):
                     thinking=thinking,
                     no_repo=no_repo,
                     new_repo=new_repo,
-                    factory=factory,
+                    factory_run=factory_run,
                 ), None
             except HerdboardError as error:
                 return None, error
@@ -6419,7 +6698,7 @@ class HerdboardApp(App):
             if request["kind"] == "plan":
                 self._plan(ref, **arguments)
             else:
-                self._start_card(ref, **arguments, factory=request.get("factory", False))
+                self._start_card(ref, **arguments, factory_run=request.get("factory_run"))
 
         self.push_screen(TargetScreen(ref, options, default, linear=linear), chosen)
         return True
@@ -6721,18 +7000,23 @@ class HerdboardApp(App):
         if card is None:
             return
         ref = card.ref
-        self.push_screen(AgentScreen(), lambda agent: self._chosen_agent(ref, agent, factory=True))
 
-    def _chosen_agent(self, ref: str, agent: str | None, factory: bool = False) -> None:
+        def chosen(run):
+            if run is not None:
+                self._start_card(ref, run.builder.agent, factory_run=run)
+
+        self.push_screen(FactoryPresetScreen(ref, self.store.config, self.config_file), chosen)
+
+    def _chosen_agent(self, ref: str, agent: str | None) -> None:
         if agent is None:
             return
         if agent == "claude":
-            self._start_card(ref, agent, factory=factory)
+            self._start_card(ref, agent)
             return
 
         def chosen(choice: tuple[str | None, str | None] | None) -> None:
             if choice is not None:
-                self._start_card(ref, agent, *choice, factory=factory)
+                self._start_card(ref, agent, *choice)
 
         screen = (
             ModelScreen(*codex_model_choices(self.store.config), agent=agent)

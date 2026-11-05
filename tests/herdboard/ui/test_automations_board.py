@@ -552,6 +552,29 @@ class FormTests(AutomationsBoardTestCase):
             self.assertTrue(form.query_one(".dialog").content_region.contains_region(checkbox.region))
             self.assertIn("no extra permissions", str(form.query_one("#automation-merge-help").render()))
 
+    async def test_factory_preset_select_follows_factory_checkbox(self):
+        from dataclasses import replace
+
+        from herdboard import factory
+
+        self.store.config.factory_presets["cheap"] = replace(factory.default_run(self.store.config), name="cheap")
+        app = self.app()
+        async with app.run_test(size=(160, 40)) as pilot:
+            form = await self.open_form(app, pilot)
+            preset = form.query_one("#automation-factory-preset", Select)
+            self.assertTrue(preset.disabled)
+            form.query_one("#automation-factory").value = True
+            await pilot.pause()
+            self.assertFalse(preset.disabled)
+            preset.value = "cheap"
+            await pilot.pause()
+            self.assertEqual(form.values()["factory_preset"], "cheap")
+            self.assertTrue(form.query_one("#automation-agent", Select).disabled)
+            form.query_one("#automation-factory").value = False
+            await pilot.pause()
+            self.assertTrue(preset.disabled)
+            self.assertIsNone(form.values()["factory_preset"])
+
     async def test_the_factory_checkbox_is_refused_on_the_inbox(self):
         app = self.app()
         async with app.run_test(size=(160, 40)) as pilot:

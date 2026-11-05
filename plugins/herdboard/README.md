@@ -472,7 +472,7 @@ The board never runs `finish` itself.
 
 ### Factory runs
 
-A factory run chains the card stages: the planner, the work agent (the builder), lens reviewers, and an approver. Start one with `herdboard start <id> --factory`, or press `F` on the board and choose the agent and the model.
+A factory run chains the card stages: the planner, the work agent (the builder), lens reviewers, and an approver. Start one with `herdboard start <id> --factory`, or press `F` on the board. Choose Default, a named preset, or Custom….
 
 1. Plan the card with `P` first. The plan is the spec. The planner adds a `Review lenses:` line under Decisions, such as `Review lenses: security, code`.
 2. `start --factory` starts the builder as `start` does. A background worker (`herdboard factory-wait`) watches the run.
@@ -501,9 +501,17 @@ A Linear issue runs the same way. The ready signal is local, so the rounds make 
 
 A stopped run leaves the card in In progress. A move on the board itself (not with `herdboard move`) still changes the column.
 
-`herdboard factory <id>` shows the run's status and round. `herdboard factory <id> --stop` stops it and closes its reviewers. `show --json` has a `factory` object. The run also stops when the builder's pane is gone, the card leaves the board or is finished, or the worktree is removed. The worker checks this during the reviews and the approval too, so a finished card does not move back to Review. When the worker process died, the next `move <id> Review` stops the stale run, closes its reviewers, logs `Factory stopped: its worker is gone.`, and moves the card. While a run goes on, `review --agent` and `merge` refuse with `factory_running`. `merge --force` still merges.
+`herdboard factory <id>` shows the run's status, round and preset. `herdboard factory <id> --stop` stops it and closes its reviewers. `show --json` has a `factory` object. The run also stops when the builder's pane is gone, the card leaves the board or is finished, or the worktree is removed. The worker checks this during the reviews and the approval too, so a finished card does not move back to Review. When the worker process died, the next `move <id> Review` stops the stale run, closes its reviewers, logs `Factory stopped: its worker is gone.`, and moves the card. While a run goes on, `review --agent` and `merge` refuse with `factory_running`. `merge --force` still merges.
 
-The lens agents come from `[factory.lenses]` in the config, see [Configuration](#configuration). Each lens uses its configured agent, also when it is the builder's agent. The approver uses `[factory] approver`, else the card reviewer of the builder's agent (pi for Claude, Codex for pi, Claude for Codex).
+Default runs take their lens agents from `[factory.lenses]` in the config, see [Configuration](#configuration). Each lens uses its configured agent, also when it is the builder's agent. The approver uses `[factory] approver`, else the card reviewer of the builder's agent (pi for Claude, Codex for pi, Claude for Codex).
+
+Use `herdboard start <id> --factory --preset cheap` to select a named preset. Do not combine `--preset` with `--agent`, `--model`, `--thinking` or `--rounds`. Each preset defines the builder, all four lens reviewers, the approver and the round limit. Optional `lenses_on` replaces the plan's lens selection. Without it, the plan decides.
+
+The `F` popup shows a summary of the highlighted run. Enter starts it. Press `c` to edit a copy in the Custom form. Set each role's agent, model and thinking level. Select the lenses, or let the plan choose them. Press `ctrl+s` to start. Leave the save name empty for a one-off run. A name saves a preset first; replacing a preset needs confirmation. Escape returns to the popup.
+
+Preset names use `a-z`, `0-9` and `-`. The names `default` and `custom` are reserved. Each preset needs all six role agents and a round limit from 1 to 10. Model and thinking are optional on each role. Unknown keys are errors. Edit or delete presets in the config file.
+
+The start record stores the run settings. Later config changes do not replace those settings. An omitted model or thinking level keeps the agent's default; pi resolves omitted values through its usual model and thinking settings.
 
 Limits: a factory run needs a card with a repository. It refuses `--no-agent`, `--no-repo`, `--new-repo`, and a card whose agent already runs. One round can start four reviewers at the same time.
 
@@ -707,7 +715,7 @@ This is an instruction in the brief only. herdboard does not change the agent's 
 
 ### Factory runs
 
-With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line applies. The planner of a factory automation writes that line. The run uses `factory_max_rounds`. `--no-factory` turns it off.
+With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line applies. The planner of a factory automation writes that line. Default runs use `factory_max_rounds`. Add `--factory-preset cheap`, or choose a preset in the form, to use a named run. The definition stores `factory_preset = "cheap"`. A preset needs `factory = true` and cannot combine with `agent`, `model` or `thinking`. If the preset no longer exists, the run logs `start_failed`. `--no-factory` turns factory mode off.
 
 A factory automation needs a repository board: herdboard refuses it on `inbox`. Each run can start up to four reviewers in each round, and an approver, so it costs more than a plain run. `--factory` and `--may-merge-prs` work together.
 
@@ -889,7 +897,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard delete <id> [--yes]` | Delete a todo: its card folder, with its log and attachments. A started card cannot be deleted |
 | `herdboard archive <id>` / `archive --done [--board NAME]` | Move a todo to its board's archive, or every card in the done column |
 | `herdboard unarchive <id> [--yes]` | Move an archived todo back to its board's done column. `--yes` also moves an archived parent back without a question |
-| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH] [--factory [--rounds N]]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first. `--factory` starts a [factory run](#factory-runs) |
+| `herdboard start <id> [--agent claude\|pi\|codex] [--model] [--thinking] [--no-agent] [--repo] [--no-repo] [--new-repo [PATH]] [--checkout PATH] [--base BRANCH] [--factory [--rounds N | --preset NAME]]` | Start work on a card. Without a repository: `--no-repo` runs it in a card folder, `--new-repo` creates a repository first. `--factory` starts a [factory run](#factory-runs) |
 | `herdboard factory <id> [--stop]` | Show a card's factory run, or stop it |
 | `herdboard review <id> [--human \| --agent \| --both] [--reviewer claude\|pi\|codex] [--model] [--thinking]` | Review a started card's work |
 | `herdboard merge <id> [--local \| --pr] [--rewrite] [--force]` | Merge the card branch, or open a draft pull request |
@@ -910,7 +918,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | `herdboard doctor [--fix] [--offline]` | Check the boards, the config, Linear, the automations and the state files |
 | `herdboard convert-store [--dry-run]` | Convert the old Markdown boards to board folders, once. See [Convert old boards](#convert-old-boards) |
 | `herdboard automation list` | List the automations, with the next due time and the last run |
-| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs] [--factory]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
+| `herdboard automation add --title T --schedule S [--board] [--body \| --body-file] [--type] [--tag ...] [--agent] [--model] [--thinking] [--may-merge-prs] [--factory [--factory-preset NAME]]` | Add an automation. Default board: `inbox`. `--agent` is claude, pi or codex; `--thinking` takes the agent's levels |
 | `herdboard automation edit <aid> [the add options] [--no-merge-prs] [--no-factory]` | Change an automation. `--tag` replaces the tags; an empty `--type`, `--agent`, `--model` or `--thinking` clears it |
 | `herdboard automation remove <aid> [--yes]` | Remove an automation. Its cards stay |
 | `herdboard automation pause\|resume <aid>` | Stop or restart the scheduled runs |
@@ -996,6 +1004,19 @@ security = { agent = "codex" }
 code = { agent = "pi" }
 ux = { agent = "claude" }
 ui = { agent = "claude" }   # such as { agent = "claude", model = "opus", thinking = "high" }
+
+# A preset is complete: no roles or round limit fall back to the Default run.
+[factory.presets.cheap]
+rounds = 2
+lenses_on = ["security", "code"]  # optional; absent means the plan decides
+builder = { agent = "pi", model = "zai/glm-5.3", thinking = "high" }
+approver = { agent = "claude", model = "opus" }
+
+[factory.presets.cheap.lenses]
+security = { agent = "codex" }
+ux = { agent = "claude", model = "sonnet" }
+ui = { agent = "claude", model = "sonnet" }
+code = { agent = "pi", model = "zai/glm-5.3", thinking = "medium" }
 
 [thinking]
 # "zai/glm-5.3" = "high"   # pi only: the level that herdboard last chose for this model

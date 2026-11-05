@@ -832,6 +832,93 @@ started = "Doing"
                 with self.assertRaisesRegex(HerdboardError, "done_days"):
                     load_config(path)
 
+    def factory_preset(self):
+        return {
+            "rounds": 2,
+            "builder": {"agent": "pi", "model": "zai/glm-5.3", "thinking": "high"},
+            "approver": {"agent": "claude", "model": "opus"},
+            "lenses": {lens: {"agent": "codex"} for lens in ("security", "ux", "ui", "code")},
+            "lenses_on": ["security", "code"],
+        }
+
+    def test_factory_preset_load_and_serialize(self):
+        import tomlkit
+
+        from herdboard.config import FactoryRun
+
+        path = self.write(
+            self.dir / "presets.toml", tomlkit.dumps({"factory": {"presets": {"cheap": self.factory_preset()}}})
+        )
+        run = load_config(path).factory_presets["cheap"]
+        self.assertEqual(run.name, "cheap")
+        self.assertEqual(run.builder.agent, "pi")
+        self.assertEqual(run.lenses_on, ("security", "code"))
+        self.assertEqual(FactoryRun.from_dict(run.to_dict()), run)
+        self.assertEqual(run.rounds, 2)
+
+    def test_factory_preset_validation(self):
+        import copy
+
+        import tomlkit
+
+        cases = []
+        for key in ("builder", "approver", "rounds"):
+            value = self.factory_preset()
+            del value[key]
+            cases.append(("cheap", value, key))
+        for lens in ("security", "ux", "ui", "code"):
+            value = self.factory_preset()
+            del value["lenses"][lens]["agent"]
+            cases.append(("cheap", value, f"lenses.{lens}.agent"))
+        for key, invalid in (
+            ("rounds", [0, 11, True, "2"]),
+            ("lenses_on", [[], ["code", "code"], ["unknown"], "code"]),
+            ("colour", ["red"]),
+        ):
+            for item in invalid:
+                value = self.factory_preset()
+                value[key] = item
+                cases.append(("cheap", value, key))
+        for key, item in (("agent", "gpt"), ("model", "two words"), ("thinking", "huge"), ("colour", "red")):
+            value = self.factory_preset()
+            value["builder"][key] = item
+            cases.append(("cheap", value, f"builder.*{key}"))
+        for name in ("default", "custom", "Bad", "two words", ""):
+            cases.append((name, copy.deepcopy(self.factory_preset()), "factory.presets"))
+        for name, value, message in cases:
+            with self.subTest(name=name, value=value):
+                path = self.write(self.dir / "presets.toml", tomlkit.dumps({"factory": {"presets": {name: value}}}))
+                with self.assertRaisesRegex(HerdboardError, message) as caught:
+                    load_config(path)
+                self.assertIn(str(path), str(caught.exception))
+
+    def test_save_factory_preset_preserves_config(self):
+        from herdboard.config import FactoryRun, save_factory_preset
+
+        path = self.write(self.dir / "presets.toml", '# keep this comment\nstart_agent = "codex"\n')
+        run = FactoryRun.from_dict({"name": "custom", **self.factory_preset()})
+        save_factory_preset(path, "cheap", run)
+        config = load_config(path)
+        self.assertEqual(config.factory_presets["cheap"].builder, run.builder)
+        self.assertEqual(config.start_agent, "codex")
+        self.assertIn("# keep this comment", path.read_text())
+        save_factory_preset(path, "cheap", run)
+        self.assertEqual(len(load_config(path).factory_presets), 1)
+        for name in ("default", "custom", "Bad Name"):
+            with self.assertRaises(HerdboardError):
+                save_factory_preset(path, name, run)
+
+    def test_save_factory_preset_reports_invalid_existing_tables(self):
+        from herdboard.config import FactoryRun, save_factory_preset
+
+        run = FactoryRun.from_dict({"name": "custom", **self.factory_preset()})
+        for text in ('factory = "invalid"\n', '[factory]\npresets = "invalid"\n'):
+            with self.subTest(text=text):
+                path = self.write(self.dir / "presets.toml", text)
+                with self.assertRaisesRegex(HerdboardError, "factory"):
+                    save_factory_preset(path, "cheap", run)
+                self.assertEqual(path.read_text(), text)
+
     def test_factory_defaults(self):
         config = load_config()
         self.assertEqual(config.factory_max_rounds, 3)

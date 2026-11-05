@@ -365,6 +365,43 @@ class FactoryAutomationTests(AutomationTestCase):
         start.register_checkout(repo)
         return self.store.init_board(repo_identity(repo)).stem
 
+    def test_factory_preset_round_trip_and_rules(self):
+        from dataclasses import replace
+
+        from herdboard import factory
+
+        self.config.factory_presets["cheap"] = replace(factory.default_run(self.config), name="cheap")
+        added = self.add(board=self.repo_board(), factory=True, factory_preset="cheap")
+        self.assertEqual(automations.load(self.config)[0].factory_preset, "cheap")
+        for changes in (
+            {"factory": False},
+            {"agent": "pi"},
+            {"model": "opus"},
+            {"thinking": "high"},
+            {"factory_preset": "missing"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(automations.AutomationError):
+                automations.edit(self.store, added.id, **changes)
+
+    def test_run_resolves_preset_and_missing_preset_fails_start(self):
+        from dataclasses import replace
+
+        from herdboard import factory
+
+        run = replace(factory.default_run(self.config), name="cheap", rounds=2)
+        self.config.factory_presets["cheap"] = run
+        added = self.add(board=self.repo_board(), factory=True, factory_preset="cheap")
+        with patch.object(start.Starter, "start", return_value={"ref": "x"}) as started:
+            result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+        self.assertEqual(result["result"], "started")
+        self.assertEqual(started.call_args.kwargs["factory_run"], run)
+        del self.config.factory_presets["cheap"]
+        with patch.object(start.Starter, "start") as started:
+            result = automations.run(self.store, added, local(2026, 10, 24, 9, 0))
+        started.assert_not_called()
+        self.assertIn("start_failed:", result["result"])
+        self.assertIn("cheap", result["result"])
+
     def test_factory_round_trips_with_may_merge_prs(self):
         added = self.add(board=self.repo_board(), factory=True, may_merge_prs=True)
         data = tomllib.loads(automations.definitions_path(self.config).read_text(encoding="utf-8"))

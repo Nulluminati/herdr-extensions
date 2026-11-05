@@ -124,6 +124,61 @@ class LinearConfig:
 OBSOLETE_KEYS = ("complete_markers", "vault_root", "archive_titles")
 
 
+@dataclass(frozen=True)
+class Role:
+    """The agent settings for one factory role. None keeps the agent's default."""
+
+    agent: str
+    model: str | None = None
+    thinking: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            key: value
+            for key, value in (("agent", self.agent), ("model", self.model), ("thinking", self.thinking))
+            if value is not None
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict) -> Role:
+        return cls(value["agent"], value.get("model"), value.get("thinking"))
+
+
+@dataclass(frozen=True)
+class FactoryRun:
+    """A complete snapshot of the settings for one factory run."""
+
+    name: str
+    builder: Role
+    approver: Role
+    lenses: dict[str, Role]
+    rounds: int
+    lenses_on: tuple[str, ...] | None = None
+
+    def to_dict(self) -> dict:
+        value = {
+            "name": self.name,
+            "builder": self.builder.to_dict(),
+            "approver": self.approver.to_dict(),
+            "lenses": {lens: role.to_dict() for lens, role in self.lenses.items()},
+            "rounds": self.rounds,
+        }
+        if self.lenses_on is not None:
+            value["lenses_on"] = list(self.lenses_on)
+        return value
+
+    @classmethod
+    def from_dict(cls, value: dict) -> FactoryRun:
+        return cls(
+            value["name"],
+            Role.from_dict(value["builder"]),
+            Role.from_dict(value["approver"]),
+            {lens: Role.from_dict(role) for lens, role in value["lenses"].items()},
+            value["rounds"],
+            tuple(value["lenses_on"]) if value.get("lenses_on") is not None else None,
+        )
+
+
 @dataclass
 class Config:
     todos_dir: Path = field(default_factory=lambda: Path("~/todos").expanduser())
@@ -168,6 +223,7 @@ class Config:
     )
     # The approver's agent kind; None uses the card reviewer of the builder's kind.
     factory_approver: str | None = None
+    factory_presets: dict[str, FactoryRun] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.start_column is None:
@@ -487,6 +543,83 @@ def _load_thinking(path: Path, data: dict) -> dict[str, str]:
     return dict(table)
 
 
+def check_factory_preset_name(name: str) -> None:
+    if not re.fullmatch(r"[a-z0-9-]+", name) or name in ("default", "custom"):
+        raise HerdboardError("Preset names must use a-z, 0-9 and -; default and custom are reserved")
+
+
+def _factory_role(label: str, value) -> Role:
+    if not isinstance(value, dict):
+        raise HerdboardError(f'{label} must be a table, such as {{ agent = "pi" }}')
+    extra = sorted(set(value) - {"agent", "model", "thinking"})
+    if extra:
+        raise HerdboardError(f"{label} has unknown keys: {', '.join(extra)}")
+    kind = value.get("agent")
+    if kind not in AGENTS:
+        raise HerdboardError(f"{label}.agent must be claude, pi or codex")
+    model = value.get("model")
+    if model is not None and (not isinstance(model, str) or not model or any(ch.isspace() for ch in model)):
+        raise HerdboardError(f"{label}.model must be one model name, such as zai/glm-5.3")
+    thinking = value.get("thinking")
+    if thinking is not None and thinking not in thinking_levels(kind):
+        raise HerdboardError(f"{label}.thinking must be one of {', '.join(thinking_levels(kind))}")
+    return Role(kind, model, thinking)
+
+
+def _factory_preset(path: Path, name: str, value) -> FactoryRun:
+    label = f"{path}: factory.presets.{name}"
+    try:
+        check_factory_preset_name(name)
+    except HerdboardError as error:
+        raise HerdboardError(f"{label}: {error}") from error
+    if not isinstance(value, dict):
+        raise HerdboardError(f"{label} must be a table")
+    extra = sorted(set(value) - {"builder", "approver", "lenses", "rounds", "lenses_on"})
+    if extra:
+        raise HerdboardError(f"{label} has unknown keys: {', '.join(extra)}")
+    builder = _factory_role(f"{label}.builder", value.get("builder"))
+    approver = _factory_role(f"{label}.approver", value.get("approver"))
+    rounds = value.get("rounds")
+    low, high = FACTORY_ROUNDS
+    if isinstance(rounds, bool) or not isinstance(rounds, int) or not low <= rounds <= high:
+        raise HerdboardError(f"{label}.rounds must be an integer from {low} to {high}")
+    lenses = value.get("lenses")
+    if not isinstance(lenses, dict):
+        raise HerdboardError(f"{label}.lenses must be a table")
+    unknown = sorted(set(lenses) - set(LENSES))
+    if unknown:
+        raise HerdboardError(f"{label}.lenses has unknown keys: {', '.join(unknown)}")
+    roles = {lens: _factory_role(f"{label}.lenses.{lens}", lenses.get(lens)) for lens in LENSES}
+    selected = value.get("lenses_on")
+    if "lenses_on" in value and (
+        not isinstance(selected, list)
+        or not selected
+        or any(lens not in LENSES for lens in selected)
+        or len(set(selected)) != len(selected)
+    ):
+        raise HerdboardError(f"{label}.lenses_on must be a non-empty list of unique lenses from {', '.join(LENSES)}")
+    return FactoryRun(name, builder, approver, roles, rounds, tuple(selected) if selected is not None else None)
+
+
+def save_factory_preset(path: Path, name: str, run: FactoryRun) -> None:
+    """Write a complete preset without changing other settings or comments."""
+    value = run.to_dict()
+    value.pop("name")
+    _factory_preset(path, name, value)
+
+    def change(document):
+        factory = document.setdefault("factory", {})
+        if not isinstance(factory, dict):
+            raise HerdboardError(f"{path}: factory must be a table")
+        presets = factory.setdefault("presets", {})
+        if not isinstance(presets, dict):
+            raise HerdboardError(f"{path}: factory.presets must be a table")
+        presets[name] = value
+        return True
+
+    _rewrite_config(path, change)
+
+
 def _load_factory(path: Path, data: dict, config: Config) -> None:
     """`factory_max_rounds` and the `[factory]` table: the approver and the `[factory.lenses]` reviewers."""
     if "factory_max_rounds" in data:
@@ -525,6 +658,10 @@ def _load_factory(path: Path, data: dict, config: Config) -> None:
         if thinking is not None and thinking not in thinking_levels(kind):
             raise HerdboardError(f"{label}.thinking must be one of {', '.join(thinking_levels(kind))}")
         config.factory_lenses[lens] = dict(value)
+    presets = table.get("presets", {})
+    if not isinstance(presets, dict):
+        raise HerdboardError(f"{path}: factory.presets must be a table")
+    config.factory_presets = {name: _factory_preset(path, name, value) for name, value in presets.items()}
 
 
 def load_config(path: Path | None = None) -> Config:

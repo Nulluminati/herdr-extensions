@@ -230,6 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
         "the agent fixes, and an approver writes a verdict",
     )
     sub.add_argument("--rounds", type=int, help="the most review rounds of a factory run; default: factory_max_rounds")
+    sub.add_argument("--preset", help="a named factory run preset; needs --factory")
 
     sub = command("factory-wait", "drive a card's factory run until its verdict (run by start --factory)")
     sub.add_argument("ref")
@@ -419,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
             const=False,
             help="the agent merges no pull request (the default)",
         )
+        found.add_argument("--factory-preset", help="a named factory preset; needs --factory")
         run_as = found.add_mutually_exclusive_group()
         run_as.add_argument(
             "--factory",
@@ -1162,6 +1164,12 @@ def _prompt_target(store):
 def _cmd_start(ctx: _Context) -> dict:
     args = ctx.args
     interactive = not args.json and _interactive()
+    if args.preset is not None:
+        if not args.factory:
+            raise UsageError("--preset needs --factory")
+        if any(value is not None for value in (args.agent, args.model, args.thinking, args.rounds)):
+            raise UsageError("--preset cannot be combined with --agent, --model, --thinking or --rounds")
+    run = factory.resolve_run(ctx.store.config, args.preset) if args.preset is not None else None
     starter = Starter(
         ctx.store,
         ctx.directory,
@@ -1184,6 +1192,7 @@ def _cmd_start(ctx: _Context) -> dict:
         new_repo=args.new_repo,
         factory=args.factory,
         rounds=args.rounds,
+        factory_run=run,
     )
 
 
@@ -1777,7 +1786,7 @@ def _automation_changes(ctx: _Context, adding: bool) -> dict:
         changes["body"] = _read_todo_file(path)
     elif args.body is not None:
         changes["body"] = args.body
-    for key in ("type", "agent", "model", "thinking"):
+    for key in ("type", "agent", "model", "thinking", "factory_preset"):
         value = getattr(args, key)
         if value is not None:
             changes[key] = value or None
@@ -2040,7 +2049,10 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
         if as_json:
             _emit_json(result)
         else:
-            print(f"{result['ref']}: factory {result['status']}, round {result['round']} of {result['rounds']}")
+            print(
+                f"{result['ref']}: factory {result['status']}, round {result['round']} of {result['rounds']}, "
+                f"preset {result['preset']}"
+            )
         return
     if command == "pr-sync":
         if as_json:

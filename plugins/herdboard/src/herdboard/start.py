@@ -1254,10 +1254,14 @@ class Starter:
         # Recorded at once: a worker that dies before it writes its own process ID must not look alive.
         if pid:
             factory_module.update(ref, folder, pid=pid)
+        run = state["run"]
+        builder, approver = run["builder"], run["approver"]
         activity_append(
             self.store,
             ref,
-            f"Factory started: up to {state['rounds']} review round{'' if state['rounds'] == 1 else 's'}.",
+            f"Factory run: preset {run['name']} (builder {builder['agent']} {builder.get('model') or 'default'}; "
+            f"approver {approver['agent']} {approver.get('model') or 'default'}; "
+            f"{state['rounds']} round{'' if state['rounds'] == 1 else 's'})",
             "herdboard",
         )
 
@@ -1553,6 +1557,7 @@ class Starter:
         may_merge_prs=False,
         factory=False,
         rounds=None,
+        factory_run=None,
     ):
         """Prepare the card, move it to the start column and start its agent.
 
@@ -1564,6 +1569,7 @@ class Starter:
         # The factory module imports this one.
         from . import factory as factory_module
 
+        factory = factory or factory_run is not None
         if factory:
             if no_agent:
                 raise StartError("A factory run needs an agent: leave out --no-agent", "usage")
@@ -1571,6 +1577,13 @@ class Starter:
                 raise StartError(
                     "A factory run needs a repository branch to review: leave out --no-repo and --new-repo", "usage"
                 )
+            if factory_run is not None:
+                agent, model, thinking = (
+                    factory_run.builder.agent,
+                    factory_run.builder.model,
+                    factory_run.builder.thinking,
+                )
+                rounds = factory_run.rounds
             rounds = self.config.factory_max_rounds if rounds is None else rounds
             low, high = FACTORY_ROUNDS
             if isinstance(rounds, bool) or not isinstance(rounds, int) or not low <= rounds <= high:
@@ -1585,10 +1598,13 @@ class Starter:
             raise StartError(f"Thinking must be one of {', '.join(levels)}", "usage")
         if model is not None and (not model or any(ch.isspace() for ch in model)):
             raise StartError("The model must be one name, such as zai/glm-5.3", "usage")
-        model = model or (self.config.start_model if agent == self.config.start_agent else None)
+        if factory_run is None:
+            model = model or (self.config.start_model if agent == self.config.start_agent else None)
         if agent == "pi":
+            if factory_run is not None:
+                model = agent_model(self.config, model)
             thinking = thinking_level(self.config, model, thinking)
-        elif thinking is None and self.config.start_thinking in levels:
+        elif factory_run is None and thinking is None and self.config.start_thinking in levels:
             thinking = self.config.start_thinking
         state_path = state_dir() / "starts.json"
         issue = None
@@ -1633,7 +1649,11 @@ class Starter:
             if may_merge_prs:
                 record["may_merge_prs"] = True
             if factory:
-                record["factory"] = factory_module.new_state(key, rounds)
+                if factory_run is None:
+                    factory_run = replace(
+                        factory_module.default_run(self.config, agent, model, thinking), rounds=rounds
+                    )
+                record["factory"] = factory_module.new_state(key, factory_run)
             try:
 
                 def persist():

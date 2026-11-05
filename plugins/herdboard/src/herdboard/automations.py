@@ -198,6 +198,7 @@ class Automation:
     may_merge_prs: bool = False
     # Each spawned card starts as a factory run (`start --factory`). Needs a repository board.
     factory: bool = False
+    factory_preset: str | None = None
     # When the automation was added: the first run is the first due time after it.
     created: str | None = None
 
@@ -209,7 +210,19 @@ class Automation:
         return created.date() if created else None
 
 
-STRING_FIELDS = ("id", "title", "schedule", "board", "body", "type", "agent", "model", "thinking", "created")
+STRING_FIELDS = (
+    "id",
+    "title",
+    "schedule",
+    "board",
+    "body",
+    "type",
+    "agent",
+    "model",
+    "thinking",
+    "factory_preset",
+    "created",
+)
 BOOL_FIELDS = ("enabled", "may_merge_prs", "factory")
 
 
@@ -332,6 +345,13 @@ def _check(store, item: Automation) -> Automation:
         if not tag or any(ch.isspace() or ch == "#" for ch in tag):
             raise AutomationError(f"Tag {tag!r} must be one word without #")
     kind = config.type_named(item.type) if item.type else None
+    if item.factory_preset is not None:
+        if not item.factory:
+            raise AutomationError("factory_preset needs factory = true", "usage")
+        if any(value is not None for value in (item.agent, item.model, item.thinking)):
+            raise AutomationError("factory_preset cannot be combined with agent, model or thinking", "usage")
+        if item.factory_preset not in config.factory_presets:
+            raise AutomationError(f"Unknown factory preset {item.factory_preset!r}", "usage")
     if item.factory and item.board == "inbox":
         raise AutomationError("A factory automation needs a repository board.", "usage")
     if item.board != "inbox":
@@ -365,6 +385,7 @@ def add(
     thinking: str | None = None,
     may_merge_prs: bool = False,
     factory: bool = False,
+    factory_preset: str | None = None,
     enabled: bool = True,
     created: datetime | None = None,
 ) -> Automation:
@@ -387,6 +408,7 @@ def add(
                 thinking=thinking,
                 may_merge_prs=may_merge_prs,
                 factory=factory,
+                factory_preset=factory_preset,
                 created=created.isoformat(timespec="seconds"),
             ),
         )
@@ -520,6 +542,15 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0, confi
         )
     starter = Starter(store, store.config.todos_dir, config_file=config_file)
     try:
+        from . import factory
+
+        run = (
+            factory.resolve_run(
+                store.config, automation.factory_preset, automation.agent, automation.model, automation.thinking
+            )
+            if automation.factory
+            else None
+        )
         starter.start(
             card.ref,
             agent=automation.agent,
@@ -528,6 +559,7 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0, confi
             no_repo=automation.board == "inbox",
             may_merge_prs=automation.may_merge_prs,
             factory=automation.factory,
+            factory_run=run,
         )
     except HerdboardError as error:
         result = f"start_failed: {error}"
