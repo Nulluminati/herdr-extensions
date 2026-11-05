@@ -19,8 +19,10 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path
@@ -45,6 +47,15 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 # How long a marker that holds no owner token, such as one an older run left
 # behind, keeps a claim.
 CLAIM_TTL_SECONDS = 60.0
+
+# Open a claim marker without following a symlink that another user planted at
+# its path, and without handing the descriptor to a child process.
+CLAIM_OPEN_FLAGS = os.O_RDWR | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+
+# What a run does with a marker that it cannot open or own.
+CLAIM_RETRY = "retry"  # The marker is gone; make one that this run owns.
+CLAIM_FREE = "free"  # The marker cannot be removed; do not block the work.
+CLAIM_BLOCK = "block"  # A young marker holds the claim until its age passes the TTL.
 
 
 class HerdrError(Exception):
@@ -599,13 +610,31 @@ def claim_key(number: int, project: dict) -> str:
     return hashlib.sha256(f"{number}:{project_dir(project)}".encode()).hexdigest()
 
 
+def claim_dir() -> Path:
+    """Make and return the directory that holds the claim markers, and nothing else.
+
+    Herdr names the state directory. A run with no state directory falls back to
+    one private directory per user, because the shared temporary directory lets
+    another user plant a marker at a path that this plugin can predict.
+    """
+    configured = os.environ.get("HERDR_PLUGIN_STATE_DIR")
+    if configured:
+        state_dir = Path(configured)
+        state_dir.mkdir(parents=True, exist_ok=True)
+        return state_dir
+    state_dir = Path(tempfile.gettempdir()) / f"default-layout-{os.getuid()}"
+    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # mkdir leaves the mode of a directory that an earlier run made alone, and
+    # another user may have made this one first. Only this user may write a marker.
+    state_dir.chmod(0o700)
+    return state_dir
+
+
 def claim_path(key: str) -> Path:
     """The marker file for one claim, or ValueError when the key is not a plain file name."""
     if not CLAIM_KEY.fullmatch(key):
         raise ValueError(f"claim key must match {CLAIM_KEY.pattern}: {key!r}")
-    state_dir = Path(os.environ.get("HERDR_PLUGIN_STATE_DIR") or "/tmp")
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir / f"building-{key}"
+    return claim_dir() / f"building-{key}"
 
 
 # The claims this run holds: the marker path and the open file that locks it.
@@ -659,6 +688,44 @@ def marker_is_fresh(fd: int) -> bool:
         return False
 
 
+def marker_is_ours(fd: int) -> bool:
+    """True for a marker this run may write: a plain file that this user owns."""
+    try:
+        found = os.fstat(fd)
+    except OSError:
+        return False
+    return stat.S_ISREG(found.st_mode) and found.st_uid == os.getuid()
+
+
+def marker_is_stale(marker: Path) -> bool:
+    """True when the marker path is old enough to take over, or names no file."""
+    try:
+        return time.time() - marker.stat().st_mtime >= CLAIM_TTL_SECONDS
+    except OSError:
+        return True  # The path is gone, or its age is unknown; neither blocks the work.
+
+
+def take_unreadable(marker: Path, reason: str) -> str:
+    """Decide what to do with a marker that this run cannot open or own, and say why.
+
+    A stale marker is removed, so this run can make one that it owns. A young one
+    blocks the claim, which lasts no longer than CLAIM_TTL_SECONDS. A marker that
+    cannot be removed must not block the work at all.
+    """
+    if not marker_is_stale(marker):
+        print(f"default-layout: cannot read the claim marker {marker}: {reason}")
+        return CLAIM_BLOCK
+    try:
+        marker.unlink()
+    except FileNotFoundError:
+        return CLAIM_RETRY  # The path is free now; make a marker that this run owns.
+    except OSError:
+        print(f"default-layout: cannot remove the claim marker {marker}: {reason}")
+        return CLAIM_FREE
+    print(f"default-layout: removed the stale claim marker {marker}: {reason}")
+    return CLAIM_RETRY
+
+
 def same_marker(fd: int, marker: Path) -> bool:
     """True when the open file is still the file at the marker path.
 
@@ -682,7 +749,8 @@ def claim(key: str) -> str | None:
     behind does not block later runs, and no run can take a claim from a run that
     still lives, even past CLAIM_TTL_SECONDS. A marker that holds no token comes
     from a run that does not lock it, so its age decides. A guard that cannot
-    write or lock its marker never blocks the work.
+    write or lock its marker never blocks the work, and a marker that this run
+    cannot read holds it for no longer than CLAIM_TTL_SECONDS.
     """
     try:
         marker = claim_path(key)
@@ -691,7 +759,7 @@ def claim(key: str) -> str | None:
     token = new_token()
     for _ in range(2):
         try:
-            fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_CLOEXEC, 0o600)
+            fd = os.open(marker, CLAIM_OPEN_FLAGS | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
             fd = None
         except OSError:
@@ -701,9 +769,20 @@ def claim(key: str) -> str | None:
         created = fd is not None
         if fd is None:
             try:
-                fd = os.open(marker, os.O_RDWR | os.O_CLOEXEC)
-            except OSError:
-                continue  # The owner released the marker; take it with a fresh one.
+                fd = os.open(marker, CLAIM_OPEN_FLAGS)
+            except OSError as error:
+                # A dangling symlink, a directory, or a file that another user owns.
+                # The age of the marker decides, so the block ends within the TTL.
+                decision = take_unreadable(marker, str(error))
+                if decision == CLAIM_RETRY:
+                    continue  # Make a marker that this run owns.
+                return token if decision == CLAIM_FREE else None
+            if not marker_is_ours(fd):
+                os.close(fd)
+                decision = take_unreadable(marker, "it is not a plain file that this user owns")
+                if decision == CLAIM_RETRY:
+                    continue  # Make a marker that this run owns.
+                return token if decision == CLAIM_FREE else None
         locked = lock_marker(fd)
         if locked is False or not same_marker(fd, marker):
             os.close(fd)
@@ -732,9 +811,12 @@ def release(key: str) -> None:
         return
     fd, token = found
     try:
-        # Unlink only the file this run opened, and only while it still holds this
-        # run's token. A marker that another run made at the same path stays.
-        if marker_owner(fd) == token and same_marker(fd, marker):
+        # Unlink only the file this run opened. It must still hold this run's token,
+        # or no token at all: this run holds the lock, so an empty marker is one
+        # whose token write failed, and no other run can own it. A marker that
+        # another run made at the same path stays.
+        owner = marker_owner(fd)
+        if (owner is None or owner == token) and same_marker(fd, marker):
             try:
                 marker.unlink()
             except OSError:

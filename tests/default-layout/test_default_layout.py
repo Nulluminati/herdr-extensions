@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -317,6 +318,34 @@ class DefaultLayoutTestCase(unittest.TestCase):
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.write(fd, b"0" * 32)
         return marker
+
+    def a_live_run_holds(self, key):
+        """Start a second process that holds the claim, and wait until it has it.
+
+        A lock in this process proves exclusion, but only a second process shows
+        that the kernel drops the lock when its owner dies.
+        """
+        marker = default_layout.claim_path(key)
+        script = textwrap.dedent(f"""
+            import fcntl, os, sys
+            fd = os.open({str(marker)!r}, os.O_CREAT | os.O_RDWR, 0o600)
+            os.write(fd, b"0" * 32)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            print("held", flush=True)
+            sys.stdin.read()  # Hold the lock until the test ends.
+            """)
+        process = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(process.stdin.close)
+        self.addCleanup(process.stdout.close)
+        self.addCleanup(process.wait)
+        self.addCleanup(process.kill)
+        self.assertEqual(process.stdout.readline().strip(), "held")
+        return process
 
     def race_once(self, method, marker, error):
         """Make the first call of `method` on `marker` fail, as a racing release would."""
@@ -1161,6 +1190,16 @@ class StartupTests(DefaultLayoutTestCase):
         self.assertEqual([argv[6] for argv in self.created()], ["beta"])
         self.assertIn("default-layout: alpha is already being built", self.stdout.getvalue())
 
+    def test_a_claim_held_by_another_process_skips_the_project(self):
+        # The kernel drops the lock when the owner dies, so a separate process
+        # proves the exclusion that the whole fix rests on.
+        self.two_projects()
+        self.fresh_home()
+        self.a_live_run_holds(self.project_key(1, self.project_a))
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["beta"])
+        self.assertIn("default-layout: alpha is already being built", self.stdout.getvalue())
+
     def test_a_claim_on_one_project_does_not_skip_a_lookalike_label(self):
         self.write_layout(f"""
             [[projects]]
@@ -1277,6 +1316,16 @@ class ClaimTests(DefaultLayoutTestCase):
         self.addCleanup(default_layout.release, first)
         self.addCleanup(default_layout.release, second)
 
+    def test_a_run_with_no_state_directory_keeps_a_private_one(self):
+        # The shared temporary directory lets another user plant a marker first.
+        with (
+            patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": ""}),
+            patch.object(tempfile, "tempdir", str(self.dir / "tmp")),
+        ):
+            marker = default_layout.claim_path("alpha")
+        self.assertEqual(marker.parent, self.dir / "tmp" / f"default-layout-{os.getuid()}")
+        self.assertEqual(marker.parent.stat().st_mode & 0o777, 0o700)
+
     def test_the_claim_key_holds_the_project_position(self):
         first = default_layout.claim_key(1, {"path": "/tmp/one"})
         second = default_layout.claim_key(2, {"path": "/tmp/one"})
@@ -1337,6 +1386,49 @@ class ClaimTests(DefaultLayoutTestCase):
         marker.write_text("f" * 32)  # Another run has taken the claim over.
         default_layout.release("alpha")
         self.assertTrue(marker.exists(), "a release must leave another run's marker alone")
+
+    def test_a_planted_symlink_is_not_followed(self):
+        target = self.dir / "target"
+        target.write_text("keep me")
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(target, (old, old))
+        self.state_dir.mkdir()
+        marker = self.state_dir / "building-alpha"
+        marker.symlink_to(target)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
+        self.assertEqual(target.read_text(), "keep me", "a claim must not truncate the link target")
+        self.assertFalse(marker.is_symlink(), "a claim must replace the planted link")
+        self.assertIn("removed the stale claim marker", out.getvalue())
+
+    def test_a_marker_that_cannot_be_opened_holds_only_until_the_ttl(self):
+        # A directory at the marker path cannot be opened, and cannot be removed.
+        marker = default_layout.claim_path("alpha")
+        marker.mkdir()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertIsNone(default_layout.claim("alpha"), "a young marker holds the claim")
+        self.assertIn("cannot read the claim marker", out.getvalue())
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(marker, (old, old))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertIsNotNone(default_layout.claim("alpha"), "an old marker must not block")
+        self.addCleanup(default_layout.release, "alpha")
+        self.assertIn("cannot remove the claim marker", out.getvalue())
+
+    def test_a_release_removes_a_marker_that_holds_no_token(self):
+        # A full disk can make the token write fail, and the claim must still end.
+        with patch.object(default_layout, "write_owner", lambda fd, token: None):
+            self.assertIsNotNone(default_layout.claim("alpha"))
+        marker = default_layout.claim_path("alpha")
+        self.assertEqual(marker.read_text(), "")
+        default_layout.release("alpha")
+        self.assertFalse(marker.exists(), "a marker with no token still belongs to this run")
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
 
     def test_a_release_leaves_a_marker_that_replaced_its_own(self):
         self.assertIsNotNone(default_layout.claim("alpha"))
