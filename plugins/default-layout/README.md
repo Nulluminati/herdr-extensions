@@ -108,7 +108,8 @@ A client attach, a config reload and a `herdr plugin link` do not run it. New wo
 
 A fresh session has one workspace with one tab that holds one idle shell. The plugin opens each project in the file:
 
-- A project is open when a workspace has its label, or has a pane in its directory.
+- A project is open when a workspace has its label, or has a pane in its directory or below it.
+- A workspace at the project directory wins over one that holds a pane lower down.
 - A project that is not open gets a new workspace with its label and its tabs.
 - When the fresh workspace is in a project's directory, the plugin builds that project into it.
 - An open project gets only the tabs whose names it does not have. The plugin removes no tab.
@@ -126,7 +127,9 @@ A restored session opens no workspace. A project that you closed stays closed un
 
 ### The apply action
 
-`apply` rebuilds the focused workspace from the project that matches it. It replaces the focused tab with the first tab in the file, and appends the other tabs after it. When no project matches the workspace, it does nothing and exits with status 1.
+`apply` rebuilds the focused workspace from the project that matches it. A project matches a workspace by its label first. Without a label match, the project that holds the workspace's own directory, or a pane directory inside it, matches. When two projects both hold it, the project with the longer path wins.
+
+It replaces the focused tab with the first tab in the file, and appends the other tabs after it. When no project matches the workspace, it does nothing and exits with status 1.
 
 Bind it in `~/.config/herdr/config.toml`:
 

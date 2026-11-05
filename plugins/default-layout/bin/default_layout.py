@@ -291,11 +291,26 @@ def starts_program(tab: dict) -> bool:
 # --------
 
 
-def same_dir(left, right) -> bool:
-    return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+def resolve_dir(path) -> Path:
+    return Path(path).expanduser().resolve()
+
+
+def dir_depth(path, project: dict) -> int | None:
+    """How far inside the project a directory sits: 0 at the root, more below it.
+
+    None when the directory is outside the project. A pane cwd is the live
+    shell directory, so a `cd` below the project root must still match: the
+    workspace is as much in the project as it is at the root.
+    """
+    root = resolve_dir(project["path"])
+    found = resolve_dir(path)
+    if not found.is_relative_to(root):
+        return None
+    return len(found.parts) - len(root.parts)
 
 
 def workspace_dirs(workspace: dict, snap: dict) -> list[str]:
+    """The workspace's own directory first, then the live directory of each pane."""
     dirs = [pane["cwd"] for pane in workspace_panes(snap, workspace["workspace_id"]) if pane.get("cwd")]
     worktree = workspace.get("worktree") or {}
     if worktree.get("checkout_path"):
@@ -303,25 +318,38 @@ def workspace_dirs(workspace: dict, snap: dict) -> list[str]:
     return dirs
 
 
+def workspace_depth(project: dict, workspace: dict, snap: dict) -> int | None:
+    """The shortest distance from the project root to a directory of the workspace."""
+    found = (dir_depth(cwd, project) for cwd in workspace_dirs(workspace, snap))
+    return min((depth for depth in found if depth is not None), default=None)
+
+
+def nearest(matches: list[tuple[int, dict]]) -> dict | None:
+    """The match closest to a project root; a tie keeps the first in list order."""
+    found = [(depth, candidate) for depth, candidate in matches if depth is not None]
+    if not found:
+        return None
+    return min(found, key=lambda match: match[0])[1]
+
+
 def match_project(project: dict, open_workspaces: list[dict], snap: dict) -> dict | None:
-    """The workspace that holds this project: by label first, then by directory."""
+    """The workspace that holds this project: by label first, then by directory.
+
+    A workspace whose directory is the project root wins over one that only
+    holds a pane below the root, so `apply` keeps choosing the same workspace.
+    """
     for workspace in open_workspaces:
         if workspace.get("label") == project["label"]:
             return workspace
-    for workspace in open_workspaces:
-        if any(same_dir(cwd, project["path"]) for cwd in workspace_dirs(workspace, snap)):
-            return workspace
-    return None
+    return nearest([(workspace_depth(project, workspace, snap), workspace) for workspace in open_workspaces])
 
 
 def project_for_workspace(projects: list[dict], workspace: dict, snap: dict) -> dict | None:
+    """The project that the workspace sits in: by label first, then by the nearest directory."""
     for project in projects:
         if workspace.get("label") == project["label"]:
             return project
-    for project in projects:
-        if match_project(project, [workspace], snap):
-            return project
-    return None
+    return nearest([(workspace_depth(project, workspace, snap), project) for project in projects])
 
 
 # Pane state

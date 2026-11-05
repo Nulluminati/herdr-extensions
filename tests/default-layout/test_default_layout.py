@@ -451,6 +451,67 @@ class MatchTests(DefaultLayoutTestCase):
             )
         )
 
+    def test_pane_in_a_subdirectory_matches(self):
+        sub = self.project_a / "pkg" / "src"
+        sub.mkdir(parents=True)
+        workspace_id = self.herdr.add_workspace("x", {"t": [{"cwd": str(sub)}]})
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
+        self.assertEqual(found["workspace_id"], workspace_id)
+
+    def test_exact_match_wins_over_a_subdirectory_match(self):
+        sub = self.project_a / "pkg"
+        sub.mkdir()
+        self.herdr.add_workspace("sub", {"t": [{"cwd": str(sub)}]})
+        root = self.herdr.add_workspace("root", {"t": [{"cwd": str(self.project_a)}]})
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
+        self.assertEqual(found["workspace_id"], root)
+
+    def test_the_workspace_nearest_the_root_wins_when_no_pane_sits_at_it(self):
+        shallow = self.herdr.add_workspace("shallow", {"t": [{"cwd": str(self.project_a / "docs")}]})
+        self.herdr.add_workspace("deep", {"t": [{"cwd": str(self.project_a / "pkg" / "src")}]})
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
+        self.assertEqual(found["workspace_id"], shallow)
+
+    def test_a_sibling_with_the_same_name_prefix_does_not_match(self):
+        sibling = self.dir / "alpha-notes"
+        sibling.mkdir()
+        self.herdr.add_workspace("x", {"t": [{"cwd": str(sibling)}]})
+        self.assertIsNone(
+            default_layout.match_project(
+                self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+            )
+        )
+
+    def test_worktree_checkout_path_beats_a_pane_below_the_root(self):
+        self.herdr.add_workspace("sub", {"t": [{"cwd": str(self.project_a / "pkg")}]})
+        worktree = self.herdr.add_workspace("x", {"t": [{"cwd": "/nowhere"}]}, worktree=str(self.project_a))
+        found = default_layout.match_project(
+            self.project("alpha", self.project_a), self.herdr.workspaces, self.herdr.snapshot()
+        )
+        self.assertEqual(found["workspace_id"], worktree)
+
+    def test_project_for_workspace_picks_the_nearest_project(self):
+        nested = self.project_a / "pkg"
+        nested.mkdir()
+        projects = [self.project("alpha", self.project_a), self.project("pkg", nested)]
+        workspace_id = self.herdr.add_workspace("x", {"t": [{"cwd": str(nested / "src")}]})
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "pkg")
+
+    def test_project_for_workspace_still_prefers_the_label(self):
+        projects = [self.project("alpha", self.project_a)]
+        workspace_id = self.herdr.add_workspace("alpha", {"t": [{"cwd": "/nowhere"}]})
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "alpha")
+
 
 class StartupTests(DefaultLayoutTestCase):
     def test_fresh_session_creates_every_missing_project(self):
@@ -678,6 +739,16 @@ class ApplyTests(DefaultLayoutTestCase):
         os.environ["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"workspace_id": workspace_id})
         self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
         self.assertEqual(self.herdr.tab_labels(workspace_id), ["editor"])
+
+    def test_apply_finds_the_project_after_a_cd_into_a_subdirectory(self):
+        self.two_projects()
+        sub = self.project_a / "pkg"
+        sub.mkdir()
+        workspace_id = self.herdr.add_workspace("scratch", {"t": [{"cwd": str(sub)}]})
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["agents", "editor", "shell"])
+        self.assertIn("default-layout: applied alpha (3 tabs)", self.stdout.getvalue())
 
     def test_apply_without_a_matching_project_exits_1(self):
         self.two_projects()
