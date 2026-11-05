@@ -294,6 +294,10 @@ def tab_problems(tab, where: str) -> list[str]:
     problems = []
     if is_text(tab.get("name")):
         where = f"{where.rsplit('/', 1)[0]}/{tab['name']}"
+        # Herdr labels an unnamed tab with its position, so a name of only digits
+        # cannot be told apart from one.
+        if tab["name"].isdigit():
+            problems.append(f"{where}: name must not be a bare number, which Herdr gives to an unnamed tab")
     else:
         problems.append(f"{where}: name is required")
     panes = tab.get("panes")
@@ -763,12 +767,16 @@ def rehydrate(project: dict, workspace_id: str, snap: dict) -> int:
     unused = list(project["tabs"])
     rebuilt = 0
     for index, open_tab in enumerate(workspace_tabs(snap, workspace_id)):
-        tab = next((entry for entry in unused if entry["name"] == open_tab.get("label")), None)
-        if tab is None:
+        found = next(
+            ((place, entry) for place, entry in enumerate(unused) if entry["name"] == open_tab.get("label")),
+            None,
+        )
+        if found is None:
             continue
+        place, tab = found
         # A tab of shells looks the same after a restore, so it has nothing to relaunch.
         # It still answers for its file entry, so a later tab gets the next entry.
-        unused.remove(tab)
+        unused.pop(place)
         if not starts_program(tab):
             continue
         where = f"{project['label']}/{tab['name']}"

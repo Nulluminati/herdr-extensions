@@ -72,7 +72,9 @@ class FakeHerdr:
 
     def add_tab(self, workspace_id, label):
         tab_id = self.next_id(f"{workspace_id}:t")
-        self.tabs.append({"tab_id": tab_id, "workspace_id": workspace_id, "label": label})
+        # Herdr numbers the tabs of a workspace from 1, in tab order.
+        number = 1 + len([tab for tab in self.tabs if tab["workspace_id"] == workspace_id])
+        self.tabs.append({"tab_id": tab_id, "workspace_id": workspace_id, "label": label, "number": number})
         return tab_id
 
     def tab_ids(self, workspace_id):
@@ -368,6 +370,19 @@ class SpecTests(DefaultLayoutTestCase):
             command = "nvim"
             """)
         self.assertEqual(problems, [])
+
+    def test_a_tab_named_with_a_bare_number_is_an_error(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "work"
+            path = "/tmp/dup/a"
+            [[projects.tabs]]
+            name = "1"
+            command = "nvim"
+            [[projects.tabs]]
+            name = "logs"
+            """)
+        self.assertEqual(problems, ["work/1: name must not be a bare number, which Herdr gives to an unnamed tab"])
 
     def test_a_label_with_surrounding_space_is_an_error(self):
         problems = self.problems("""
@@ -1081,26 +1096,18 @@ class StartupTests(DefaultLayoutTestCase):
         self.assertEqual(self.herdr.tab_labels(workspace_id), ["shell", "shell"])
         self.assertIn("default-layout: added 1 tab(s) to alpha", self.stdout.getvalue())
 
-    def test_a_tab_named_like_a_herdr_default_label_is_not_open(self):
-        self.write_layout(f"""
-            [[projects]]
-            label = "alpha"
-            path = "{self.project_a}"
+    def test_a_tab_labelled_like_its_own_number_is_unnamed(self):
+        # Herdr keeps the number of a moved tab, so its label still matches it.
+        self.assertTrue(default_layout.unnamed_tab({"label": "1", "number": 1}, 2))
+        # A tab labelled "1" in the second place carries a name of its own.
+        self.assertFalse(default_layout.unnamed_tab({"label": "1", "number": 2}, 2))
 
-            [[projects.tabs]]
-            name = "1"
-            command = "nvim"
-
-            [[projects.tabs]]
-            name = "logs"
-            """)
-        # Herdr labels an unnamed tab after its position, so this is its default tab.
-        workspace_id = self.herdr.add_workspace("alpha", {"1": [{"cwd": "/x"}]})
-        self.herdr.busy.add(self.herdr.panes[0]["pane_id"])
-        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
-        self.assertEqual([p["tab_label"] for p in self.applies()], ["1", "logs"])
-        self.assertEqual(self.applies()[0]["root"]["command"], wrapped("nvim"))
-        self.assertEqual(self.herdr.tab_labels(workspace_id), ["1", "1", "logs"])
+    def test_a_tab_number_counts_within_its_workspace(self):
+        self.herdr.add_workspace("first", {"mine": [{"cwd": "/x"}]})
+        second = self.herdr.add_workspace("alpha", {"1": [{"cwd": "/x"}], "shell": [{"cwd": "/x"}]})
+        tabs = default_layout.workspace_tabs(self.herdr.snapshot(), second)
+        self.assertEqual([tab["number"] for tab in tabs], [1, 2])
+        self.assertEqual(default_layout.named_tab_counts(tabs), {"shell": 1})
 
     def test_missing_directory_skips_one_project(self):
         self.two_projects()
@@ -1399,6 +1406,36 @@ class RehydrateTests(DefaultLayoutTestCase):
         self.run_main("default_layout.py", "startup")
         self.assertEqual([p["tab_id"] for p in self.applies()], [second_tab])
         self.assertEqual([p["root"]["command"] for p in self.applies()], [wrapped("nvim")])
+
+    def test_a_busy_same_named_tab_still_takes_its_file_entry(self):
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "shell"
+            command = "htop"
+
+            [[projects.tabs]]
+            name = "shell"
+            command = "nvim"
+            """)
+        self.saved_session()
+        cwd = str(self.project_a)
+        workspace_id = self.herdr.add_workspace("alpha", {"shell": [{"cwd": cwd}]})
+        first_tab = self.herdr.tab_ids(workspace_id)[0]
+        second_tab = self.herdr.add_tab(workspace_id, "shell")
+        self.herdr.panes.append({"pane_id": "w1:p2", "tab_id": second_tab, "workspace_id": workspace_id, "cwd": cwd})
+        first_pane = next(p for p in self.herdr.panes if p["tab_id"] == first_tab)
+        first_pane["agent_session"] = {"agent": "pi", "value": "x"}
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([p["tab_id"] for p in self.applies()], [second_tab])
+        self.assertEqual([p["root"]["command"] for p in self.applies()], [wrapped("nvim")])
+        self.assertIn(
+            f"default-layout: alpha/shell left alone: agent in {first_pane['pane_id']}",
+            self.stdout.getvalue(),
+        )
 
     def test_one_workspace_restore_rehydrates_and_builds_no_workspace(self):
         self.two_projects()

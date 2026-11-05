@@ -12,8 +12,9 @@
 #
 # [[projects.tabs]]     One tab, in the order given. The first tab is active.
 #   name                The tab label. Required. Two tabs may share a name; the
-#                       plugin matches tabs by name in file order. Do not use a
-#                       bare number, which Herdr gives to an unnamed tab.
+#                       plugin matches tabs by name in file order. A name of
+#                       only digits is an error, because Herdr gives such a
+#                       label to a tab without a name.
 #   command             A program for a one-pane tab, such as "nvim".
 #   agent               An agent for a one-pane tab, such as "claude" or "pi".
 #   working_dir         A directory for a one-pane tab. A relative path is
