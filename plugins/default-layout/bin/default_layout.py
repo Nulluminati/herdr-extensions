@@ -368,6 +368,20 @@ def project_dir(project: dict) -> Path:
     return Path(project["path"]).expanduser()
 
 
+def outside_project(working_dir: str, root: Path) -> bool:
+    """True when a relative working_dir climbs out of the project path.
+
+    An absolute working_dir may point anywhere, because the user names that
+    directory on purpose. A relative one that leaves the project is a typo, so
+    the pane falls back to the project path instead. Both sides are resolved
+    first, so a symbolic link inside the project cannot lead a pane outside it.
+    """
+    found = Path(working_dir).expanduser()
+    if found.is_absolute():
+        return False
+    return not (root / found).resolve().is_relative_to(root.resolve())
+
+
 # Layout trees
 # --------
 
@@ -380,36 +394,56 @@ def pane_command(pane: dict) -> list[str] | None:
     return ["sh", "-c", program + "; exec ${SHELL:-/bin/sh}"]
 
 
-def pane_node(pane: dict, project_path) -> dict:
+def pane_cwd(pane: dict, project_path, where: str) -> Path:
+    """The directory a pane starts in.
+
+    Herdr does not refuse a cwd that does not exist. It opens the pane in the
+    user's home directory instead, with no error, which hides a wrong
+    working_dir. A directory that is not there, and a relative one that climbs
+    out of the project, therefore fall back to the project path, with one line
+    in the plugin log. The plugin never sends Herdr a cwd it cannot use.
+    """
+    root = Path(project_path)
+    if not pane.get("working_dir"):
+        return root
+    # An absolute working_dir replaces the project path in the join.
+    cwd = root / Path(pane["working_dir"]).expanduser()
+    prefix = f"{where}: " if where else ""
+    if outside_project(pane["working_dir"], root):
+        print(f"default-layout: {prefix}working_dir {pane['working_dir']} is outside the project; using {root}")
+        return root
+    if cwd.is_dir():
+        return cwd
+    print(f"default-layout: {prefix}no such directory {cwd}; using {root}")
+    return root
+
+
+def pane_node(pane: dict, project_path, where: str = "") -> dict:
     node = {"type": "pane"}
     if pane.get("label"):
         node["label"] = pane["label"]
-    cwd = Path(project_path)
-    if pane.get("working_dir"):
-        # An absolute working_dir replaces the project path in the join.
-        cwd = cwd / Path(pane["working_dir"]).expanduser()
-    node["cwd"] = str(cwd)
+    node["cwd"] = str(pane_cwd(pane, project_path, where))
     program = pane_command(pane)
     if program:
         node["command"] = program
     return node
 
 
-def tab_tree(tab: dict, project_path) -> dict:
+def tab_tree(tab: dict, project_path, where: str = "") -> dict:
     """Fold a tab's pane list into a `layout.apply` tree.
 
     Each pane splits the whole layout built so far, so the first pane ends up
     innermost. A tab without panes is one pane built from the tab's own keys.
     """
     panes = tab.get("panes") or [tab]
-    node = pane_node(panes[0], project_path)
+    node = pane_node(panes[0], project_path, where)
     for pane in panes[1:]:
         node = {
             "type": "split",
             "direction": pane.get("split", "down"),
             "ratio": pane.get("ratio", 0.5),
             "first": node,
-            "second": pane_node(pane, project_path),
+            "second": pane_node(pane, project_path, where),
         }
     return node
 
@@ -833,7 +867,8 @@ def release(key: str) -> None:
 def apply_tab(tab: dict, project: dict, *, tab_id: str | None = None, workspace_id: str | None = None) -> str:
     """Build one tab with `layout.apply`. Herdr takes either tab_id or workspace_id, not both."""
     params = {"tab_id": tab_id} if tab_id else {"workspace_id": workspace_id}
-    params.update({"tab_label": tab["name"], "focus": False, "root": tab_tree(tab, project_dir(project))})
+    where = f"{project['label']}/{tab['name']}"
+    params.update({"tab_label": tab["name"], "focus": False, "root": tab_tree(tab, project_dir(project), where)})
     return call("layout.apply", params)["layout"]["tab_id"]
 
 
@@ -1110,7 +1145,7 @@ def main(argv: list[str]) -> int:
         if action == "startup":
             return cmd_startup(spec)
         return cmd_apply(spec, force="--force" in flags)
-    except (HerdrError, OSError, ValueError) as error:
+    except (HerdrError, OSError, RuntimeError, ValueError) as error:
         print(f"default-layout: {error}", file=sys.stderr)
         return 1
 

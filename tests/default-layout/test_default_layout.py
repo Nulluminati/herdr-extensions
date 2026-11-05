@@ -515,6 +515,53 @@ class SpecTests(DefaultLayoutTestCase):
             ],
         )
 
+    def test_a_working_dir_that_leaves_the_project_is_not_a_problem(self):
+        # A typo that climbs out of the project falls back at build time, so it
+        # must not stop the whole file from building.
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp/proj"
+            [[projects.tabs]]
+            name = "t"
+            working_dir = "../etc"
+            [[projects.tabs]]
+            name = "panes"
+            [[projects.tabs.panes]]
+            [[projects.tabs.panes]]
+            working_dir = "../../../etc"
+            [[projects.tabs.panes]]
+            working_dir = ".."
+            """)
+        self.assertEqual(problems, [])
+
+    def test_a_working_dir_inside_the_project_is_accepted(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp/proj"
+            [[projects.tabs]]
+            name = "one"
+            working_dir = "docs"
+            [[projects.tabs]]
+            name = "two"
+            [[projects.tabs.panes]]
+            [[projects.tabs.panes]]
+            working_dir = "docs/../plugins"
+            """)
+        self.assertEqual(problems, [])
+
+    def test_an_absolute_working_dir_may_point_outside_the_project(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp/proj"
+            [[projects.tabs]]
+            name = "t"
+            working_dir = "/elsewhere/plugins"
+            """)
+        self.assertEqual(problems, [])
+
     def test_every_problem_is_reported_in_one_run(self):
         self.write_layout("""
             [[projects]]
@@ -634,10 +681,86 @@ class TreeTests(unittest.TestCase):
         self.assertNotIn("command", default_layout.pane_node({}, "/p"))
 
     def test_relative_working_dir_resolves_against_the_project(self):
-        node = default_layout.pane_node({"working_dir": "docs"}, "/p")
-        self.assertEqual(node["cwd"], "/p/docs")
-        node = default_layout.pane_node({"working_dir": "/elsewhere"}, "/p")
-        self.assertEqual(node["cwd"], "/elsewhere")
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "docs").mkdir()
+            node = default_layout.pane_node({"working_dir": "docs"}, root)
+            self.assertEqual(node["cwd"], str(Path(root) / "docs"))
+
+    def test_an_absolute_working_dir_replaces_the_project(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as elsewhere:
+            node = default_layout.pane_node({"working_dir": elsewhere}, root)
+            self.assertEqual(node["cwd"], elsewhere)
+
+    def test_a_missing_working_dir_falls_back_to_the_project(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                node = default_layout.pane_node({"working_dir": "docs"}, root, "alpha/git")
+            self.assertEqual(node["cwd"], root)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [f"default-layout: alpha/git: no such directory {Path(root) / 'docs'}; using {root}"],
+            )
+
+    def test_a_working_dir_that_is_a_file_falls_back_to_the_project(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "docs").write_text("")
+            with contextlib.redirect_stdout(io.StringIO()):
+                node = default_layout.pane_node({"working_dir": "docs"}, root)
+            self.assertEqual(node["cwd"], root)
+
+    def test_a_missing_working_dir_moves_only_its_own_pane(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "plugins").mkdir()
+            with contextlib.redirect_stdout(io.StringIO()):
+                tree = default_layout.tab_tree(
+                    {"name": "t", "panes": [{"working_dir": "plugins"}, {"working_dir": "docs"}]}, root
+                )
+            self.assertEqual(tree["first"]["cwd"], str(Path(root) / "plugins"))
+            self.assertEqual(tree["second"]["cwd"], root)
+
+    def test_a_relative_working_dir_that_leaves_the_project_falls_back(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                node = default_layout.pane_node({"working_dir": "../../../etc"}, root, "alpha/git")
+            self.assertEqual(node["cwd"], root)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [f"default-layout: alpha/git: working_dir ../../../etc is outside the project; using {root}"],
+            )
+
+    def test_a_relative_working_dir_that_leaves_a_one_pane_tab_falls_back(self):
+        # A tab without [[projects.tabs.panes]] tables is its own pane.
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                tree = default_layout.tab_tree({"name": "t", "working_dir": "../etc"}, root, "alpha/t")
+            self.assertEqual(tree["cwd"], root)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [f"default-layout: alpha/t: working_dir ../etc is outside the project; using {root}"],
+            )
+
+    def test_a_symlink_that_leads_out_of_the_project_falls_back(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as elsewhere:
+            (Path(root) / "link").symlink_to(elsewhere)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                node = default_layout.pane_node({"working_dir": "link"}, root)
+            self.assertEqual(node["cwd"], root)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [f"default-layout: working_dir link is outside the project; using {root}"],
+            )
+
+    def test_the_project_root_is_a_working_dir(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                node = default_layout.pane_node({"working_dir": "."}, root)
+            self.assertEqual(node["cwd"], root)
+            self.assertEqual(output.getvalue(), "")
 
 
 class MatchTests(DefaultLayoutTestCase):
@@ -1147,6 +1270,48 @@ class StartupTests(DefaultLayoutTestCase):
         tabs = default_layout.workspace_tabs(self.herdr.snapshot(), second)
         self.assertEqual([tab["number"] for tab in tabs], [1, 2])
         self.assertEqual(default_layout.named_tab_counts(tabs), {"shell": 1})
+
+    def test_a_missing_working_dir_falls_back_to_the_project(self):
+        (self.project_a / "plugins").mkdir()
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "git"
+            working_dir = "docs"
+
+            [[projects.tabs]]
+            name = "code"
+            working_dir = "plugins"
+            """)
+        self.fresh_home()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual(
+            [(params["tab_label"], params["root"]["cwd"]) for params in self.applies()],
+            [("git", str(self.project_a)), ("code", str(self.project_a / "plugins"))],
+        )
+        self.assertIn(
+            f"default-layout: alpha/git: no such directory {self.project_a / 'docs'}; using {self.project_a}",
+            self.stdout.getvalue(),
+        )
+        self.assertIn("default-layout: built alpha (2 tabs)", self.stdout.getvalue())
+
+    def test_a_home_directory_that_does_not_resolve_is_a_message(self):
+        # Path.expanduser raises RuntimeError for an unknown ~user, and the
+        # startup hook has no one to show a traceback to.
+        self.write_layout("""
+            [[projects]]
+            label = "alpha"
+            path = "~nosuchuser/alpha"
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.fresh_home()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
+        self.assertEqual(self.stderr.getvalue().splitlines(), ["default-layout: Could not determine home directory."])
+        self.assertEqual(self.created(), [])
 
     def test_missing_directory_skips_one_project(self):
         self.two_projects()

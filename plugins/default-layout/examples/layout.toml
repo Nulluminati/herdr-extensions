@@ -18,7 +18,10 @@
 #   command             A program for a one-pane tab, such as "nvim".
 #   agent               An agent for a one-pane tab, such as "claude" or "pi".
 #   working_dir         A directory for a one-pane tab. A relative path is
-#                       relative to the project `path`.
+#                       relative to the project `path`. An absolute path may
+#                       point anywhere. A path that is not a directory, or a
+#                       relative path that climbs out of the project, falls back
+#                       to the project path.
 #   A tab with none of these is one shell in the project directory.
 #
 # [[projects.tabs.panes]]  Up to 4 panes, instead of the keys above.
