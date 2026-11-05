@@ -82,6 +82,11 @@ def socket_path() -> str:
     return os.environ.get("HERDR_SOCKET_PATH") or str(Path.home() / ".config/herdr/herdr.sock")
 
 
+def session_file() -> Path:
+    """The saved session that Herdr restores this server from."""
+    return Path(socket_path()).parent / "session.json"
+
+
 def call(method: str, params: dict) -> dict:
     """Send one newline-delimited JSON request over the socket.
 
@@ -403,7 +408,18 @@ def is_empty(snap: dict, workspace_id: str) -> bool:
 
 
 def is_fresh(snap: dict) -> bool:
-    """A fresh server holds one workspace with one tab and one idle shell."""
+    """True when Herdr started a new session rather than restoring a saved one.
+
+    Herdr gives a startup hook no restore flag, and a restored session with one
+    workspace, one tab and one idle shell has the same shape as a fresh server.
+    Herdr restores the session from session.json beside the API socket, so that
+    file is there at startup only after a restore. A server with no workspace
+    at all is fresh, so a headless start still builds the projects.
+    """
+    if not snap["workspaces"]:
+        return True
+    if session_file().is_file():
+        return False
     return len(snap["workspaces"]) == 1 and is_empty(snap, snap["workspaces"][0]["workspace_id"])
 
 

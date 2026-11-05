@@ -152,6 +152,9 @@ class DefaultLayoutTestCase(unittest.TestCase):
         self.config_dir = self.dir / "config"
         self.config_dir.mkdir()
         self.state_dir = self.dir / "state"
+        self.session_dir = self.dir / "session"
+        self.session_dir.mkdir()
+        self.session_file = self.session_dir / "session.json"
         self.project_a = self.dir / "alpha"
         self.project_a.mkdir()
         self.project_b = self.dir / "beta"
@@ -161,6 +164,7 @@ class DefaultLayoutTestCase(unittest.TestCase):
             {
                 "HERDR_PLUGIN_CONFIG_DIR": str(self.config_dir),
                 "HERDR_PLUGIN_STATE_DIR": str(self.state_dir),
+                "HERDR_SOCKET_PATH": str(self.session_dir / "herdr.sock"),
                 "HERDR_BIN_PATH": "herdr",
             },
             clear=False,
@@ -226,6 +230,10 @@ class DefaultLayoutTestCase(unittest.TestCase):
 
     def fresh_home(self, cwd=None):
         return self.herdr.add_workspace("home", {"shell": [{"cwd": str(cwd or self.dir)}]})
+
+    def saved_session(self):
+        """Write the session file that Herdr restores a session from."""
+        self.session_file.write_text("{}")
 
 
 class SpecTests(DefaultLayoutTestCase):
@@ -592,6 +600,22 @@ class StartupTests(DefaultLayoutTestCase):
         self.herdr.add_workspace("second", {"t": [{"cwd": "/x"}]})
         self.assertFalse(default_layout.is_fresh(self.herdr.snapshot()))
 
+    def test_saved_session_file_marks_a_restore(self):
+        self.fresh_home()
+        self.assertTrue(default_layout.is_fresh(self.herdr.snapshot()))
+        self.saved_session()
+        self.assertFalse(default_layout.is_fresh(self.herdr.snapshot()))
+
+    def test_a_server_with_no_workspace_is_fresh(self):
+        self.saved_session()
+        self.assertTrue(default_layout.is_fresh(self.herdr.snapshot()))
+
+    def test_headless_fresh_session_creates_every_missing_project(self):
+        self.two_projects()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+        self.assertIn("default-layout: built alpha (3 tabs)", self.stdout.getvalue())
+
     def test_busy_or_agent_home_pane_is_not_fresh(self):
         home = self.fresh_home()
         pane_id = self.herdr.panes[0]["pane_id"]
@@ -663,6 +687,7 @@ class StartupTests(DefaultLayoutTestCase):
 class RehydrateTests(DefaultLayoutTestCase):
     def restored(self):
         self.two_projects()
+        self.saved_session()
         cwd = str(self.project_a)
         workspace_id = self.herdr.add_workspace(
             "alpha",
@@ -714,6 +739,25 @@ class RehydrateTests(DefaultLayoutTestCase):
         self.run_main("default_layout.py", "startup")
         self.assertEqual(self.created(), [])
         self.assertNotIn("beta", self.stdout.getvalue())
+
+    def test_one_workspace_restore_rehydrates_and_builds_no_workspace(self):
+        self.two_projects()
+        self.saved_session()
+        cwd = str(self.project_a)
+        workspace_id = self.herdr.add_workspace(
+            "alpha",
+            {
+                "agents": [{"cwd": cwd}, {"cwd": cwd}],
+                "editor": [{"cwd": cwd}],
+                "shell": [{"cwd": cwd}],
+            },
+        )
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual(self.created(), [])
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["agents", "editor"])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["agents", "editor", "shell"])
+        self.assertIn("default-layout: rehydrated alpha/editor", self.stdout.getvalue())
+        self.assertNotIn("default-layout: built", self.stdout.getvalue())
 
 
 class ApplyTests(DefaultLayoutTestCase):

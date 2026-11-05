@@ -106,7 +106,7 @@ A client attach, a config reload and a `herdr plugin link` do not run it. New wo
 
 ### A fresh session
 
-A fresh session has one workspace with one tab that holds one idle shell. The plugin opens each project in the file:
+A fresh session has no saved session to restore. Herdr saves a session in `session.json` in the session directory, next to the API socket. The plugin treats a session as fresh when the server has no workspace, or when that file is missing. It opens each project in the file:
 
 - A project is open when a workspace has its label, or has a pane in its directory or below it.
 - A workspace at the project directory wins over one that holds a pane lower down.
@@ -116,7 +116,7 @@ A fresh session has one workspace with one tab that holds one idle shell. The pl
 
 ### A restored session
 
-Herdr restores workspaces, tabs, splits and directories, but each pane comes back as a bare shell. In each open project, the plugin rebuilds a tab from the file when:
+Herdr restores workspaces, tabs, splits and directories, but each pane comes back as a bare shell. A restore leaves `session.json` in place, so the plugin treats a session that has that file as restored. In each open project, the plugin rebuilds a tab from the file when:
 
 - the file gives the tab a program or an agent, and
 - every pane of the tab is an idle shell.
@@ -144,6 +144,7 @@ description = "default layout: apply to this workspace"
 ## Known limits
 
 - A tab holds at most four panes.
+- The plugin tells a fresh session from a restored one by `session.json` beside the API socket, because Herdr gives a startup hook no restore flag.
 - The plugin does not hook `workspace.created`.
 - The plugin does not change focus.
 - The plugin never removes, renames or reorders a tab that it did not build.
