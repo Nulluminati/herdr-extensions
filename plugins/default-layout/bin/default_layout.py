@@ -54,10 +54,14 @@ def command(argv: list[str]):
     return subprocess.run(argv, capture_output=True, text=True, timeout=30)
 
 
+def herdr_bin() -> str:
+    return os.environ.get("HERDR_BIN_PATH") or "herdr"
+
+
 def herdr(*args: str) -> dict:
     """Run one Herdr CLI command and return its `result` object."""
     try:
-        result = command([os.environ.get("HERDR_BIN_PATH") or "herdr", *args])
+        result = command([herdr_bin(), *args])
     except (OSError, subprocess.TimeoutExpired) as error:
         raise HerdrError(f"Herdr is not reachable: {error}") from error
     output = result.stdout if result.stdout.strip() else result.stderr
@@ -82,9 +86,55 @@ def socket_path() -> str:
     return os.environ.get("HERDR_SOCKET_PATH") or str(Path.home() / ".config/herdr/herdr.sock")
 
 
+def herdr_config_dir() -> Path:
+    """The Herdr config directory, which holds the default session."""
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / "herdr"
+    return Path.home() / ".config/herdr"
+
+
+def sessions() -> list[dict]:
+    """The sessions Herdr knows, each with the directory that holds its files.
+
+    `herdr session list --json` answers with bare JSON, so it does not go
+    through `herdr()`, which unwraps a `result` envelope.
+    """
+    try:
+        result = command([herdr_bin(), "session", "list", "--json"])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise HerdrError(f"Herdr is not reachable: {error}") from error
+    try:
+        data = json.loads(result.stdout or result.stderr)
+    except (ValueError, TypeError) as error:
+        raise HerdrError(f"Herdr returned no valid JSON: {result.stdout or result.stderr}") from error
+    found = data.get("sessions") if isinstance(data, dict) else None
+    if result.returncode or not isinstance(found, list):
+        raise HerdrError(f"Unexpected Herdr session list: {data}")
+    return found
+
+
+def session_dir() -> Path:
+    """The directory that holds this session's files, its saved session included.
+
+    A named session has its own directory below the config directory; the
+    default session uses the config directory itself. `HERDR_SOCKET_PATH` can
+    move the socket without moving these files, so ask Herdr for the directory.
+    """
+    name = os.environ.get("HERDR_SESSION") or "default"
+    try:
+        for session in sessions():
+            if session.get("name") == name:
+                return Path(session["session_dir"])
+    except (HerdrError, KeyError, TypeError):
+        pass
+    base = herdr_config_dir()
+    return base if name == "default" else base / "sessions" / name
+
+
 def session_file() -> Path:
     """The saved session that Herdr restores this server from."""
-    return Path(socket_path()).parent / "session.json"
+    return session_dir() / "session.json"
 
 
 def call(method: str, params: dict) -> dict:
@@ -407,20 +457,32 @@ def is_empty(snap: dict, workspace_id: str) -> bool:
     return len(workspace_tabs(snap, workspace_id)) == 1 and len(panes) == 1 and in_use_reason(panes) is None
 
 
-def is_fresh(snap: dict) -> bool:
+def is_fresh(session: Path) -> bool:
     """True when Herdr started a new session rather than restoring a saved one.
 
     Herdr gives a startup hook no restore flag, and a restored session with one
-    workspace, one tab and one idle shell has the same shape as a fresh server.
-    Herdr restores the session from session.json beside the API socket, so that
-    file is there at startup only after a restore. A server with no workspace
-    at all is fresh, so a headless start still builds the projects.
+    workspace, one tab and one idle shell looks exactly like a fresh one, so
+    the shape of the session says nothing. Herdr restores from the saved
+    session file when it is there, and a fresh server writes that file seconds
+    after startup. Read it at the start of the hook, before any wait.
     """
-    if not snap["workspaces"]:
-        return True
-    if session_file().is_file():
-        return False
-    return len(snap["workspaces"]) == 1 and is_empty(snap, snap["workspaces"][0]["workspace_id"])
+    return not session.is_file()
+
+
+def session_problem(session: Path) -> str | None:
+    """Why this run cannot use the saved session, or None when it can.
+
+    Herdr keeps a file that it could not read. The plugin still counts that
+    file as a restore, because Herdr restores from it, so report the file that
+    gave no usable snapshot.
+    """
+    try:
+        json.loads(session.read_text())
+    except OSError as error:
+        return str(error)
+    except ValueError:
+        return "not valid JSON"
+    return None
 
 
 # Claims
@@ -578,9 +640,15 @@ def rehydrate_open(spec: dict, open_workspaces: list[dict], snap: dict) -> None:
 
 
 def cmd_startup(spec: dict) -> int:
+    session = session_file()
+    fresh = is_fresh(session)
+    if not fresh:
+        problem = session_problem(session)
+        if problem:
+            print(f"default-layout: cannot use the saved session at {session}: {problem}")
     snap = wait_for_panes()
     open_workspaces = workspaces()
-    if is_fresh(snap):
+    if fresh or not open_workspaces:
         build_missing(spec, open_workspaces, snap)
     else:
         rehydrate_open(spec, open_workspaces, snap)

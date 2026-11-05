@@ -31,6 +31,9 @@ class FakeHerdr:
         self.commands = []
         self.requests = []
         self.failing_workspace_labels = set()
+        self.failing_session_list = False
+        self.session_name = "default"
+        self.session_dir = None
         self.counter = 0
 
     def next_id(self, prefix):
@@ -83,6 +86,19 @@ class FakeHerdr:
             return self.ok({"type": "session_snapshot", "snapshot": self.snapshot()})
         if args == ["workspace", "list"]:
             return self.ok({"type": "workspace_list", "workspaces": [dict(w) for w in self.workspaces]})
+        if args == ["session", "list", "--json"]:
+            if self.failing_session_list:
+                return subprocess.CompletedProcess(argv, 1, "", "session list failed")
+            sessions = {
+                "sessions": [
+                    {
+                        "name": self.session_name,
+                        "session_dir": str(self.session_dir),
+                        "socket_path": "/nowhere/herdr.sock",
+                    }
+                ]
+            }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(sessions), "")
         if args[:2] == ["workspace", "create"]:
             label = args[args.index("--label") + 1]
             if label in self.failing_workspace_labels:
@@ -171,9 +187,16 @@ class DefaultLayoutTestCase(unittest.TestCase):
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)
-        for name in ("HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PLUGIN_CONTEXT_JSON"):
+        for name in (
+            "HERDR_WORKSPACE_ID",
+            "HERDR_TAB_ID",
+            "HERDR_PLUGIN_CONTEXT_JSON",
+            "HERDR_SESSION",
+            "XDG_CONFIG_HOME",
+        ):
             os.environ.pop(name, None)
         self.herdr = FakeHerdr()
+        self.herdr.session_dir = self.session_dir
         for target, fake in (
             ("command", self.herdr.command),
             ("call", self.herdr.call),
@@ -521,6 +544,25 @@ class MatchTests(DefaultLayoutTestCase):
         self.assertEqual(found["label"], "alpha")
 
 
+class SessionDirTests(DefaultLayoutTestCase):
+    def test_the_session_directory_comes_from_herdr(self):
+        self.herdr.session_name = "work"
+        os.environ["HERDR_SESSION"] = "work"
+        self.assertEqual(default_layout.session_file(), self.session_file)
+
+    def test_a_named_session_falls_back_to_the_config_directory(self):
+        self.herdr.failing_session_list = True
+        os.environ["HERDR_SESSION"] = "work"
+        os.environ["XDG_CONFIG_HOME"] = str(self.dir / "xdg")
+        expected = self.dir / "xdg/herdr/sessions/work/session.json"
+        self.assertEqual(default_layout.session_file(), expected)
+
+    def test_the_default_session_falls_back_to_the_config_directory(self):
+        self.herdr.failing_session_list = True
+        os.environ["XDG_CONFIG_HOME"] = str(self.dir / "xdg")
+        self.assertEqual(default_layout.session_file(), self.dir / "xdg/herdr/session.json")
+
+
 class StartupTests(DefaultLayoutTestCase):
     def test_fresh_session_creates_every_missing_project(self):
         self.two_projects()
@@ -595,20 +637,9 @@ class StartupTests(DefaultLayoutTestCase):
         self.assertEqual(self.herdr.tab_labels(home), ["agents", "editor", "shell"])
 
     def test_fresh_detection(self):
-        self.fresh_home()
-        self.assertTrue(default_layout.is_fresh(self.herdr.snapshot()))
-        self.herdr.add_workspace("second", {"t": [{"cwd": "/x"}]})
-        self.assertFalse(default_layout.is_fresh(self.herdr.snapshot()))
-
-    def test_saved_session_file_marks_a_restore(self):
-        self.fresh_home()
-        self.assertTrue(default_layout.is_fresh(self.herdr.snapshot()))
+        self.assertTrue(default_layout.is_fresh(self.session_file))
         self.saved_session()
-        self.assertFalse(default_layout.is_fresh(self.herdr.snapshot()))
-
-    def test_a_server_with_no_workspace_is_fresh(self):
-        self.saved_session()
-        self.assertTrue(default_layout.is_fresh(self.herdr.snapshot()))
+        self.assertFalse(default_layout.is_fresh(self.session_file))
 
     def test_headless_fresh_session_creates_every_missing_project(self):
         self.two_projects()
@@ -616,18 +647,47 @@ class StartupTests(DefaultLayoutTestCase):
         self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
         self.assertIn("default-layout: built alpha (3 tabs)", self.stdout.getvalue())
 
-    def test_busy_or_agent_home_pane_is_not_fresh(self):
-        home = self.fresh_home()
-        pane_id = self.herdr.panes[0]["pane_id"]
-        self.herdr.busy.add(pane_id)
-        self.assertFalse(default_layout.is_fresh(self.herdr.snapshot()))
-        self.herdr.busy.clear()
-        self.herdr.panes[0]["agent"] = "claude"
-        self.assertFalse(default_layout.is_fresh(self.herdr.snapshot()))
-        self.assertTrue(home)
-
-    def test_restored_session_creates_no_workspace(self):
+    def test_fresh_start_with_a_second_workspace_still_builds(self):
         self.two_projects()
+        self.herdr.add_workspace("one", {"t": [{"cwd": "/x"}]})
+        self.herdr.add_workspace("two", {"t": [{"cwd": "/x"}]})
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
+    def test_a_busy_shell_does_not_stop_a_fresh_start(self):
+        self.two_projects()
+        self.fresh_home()
+        self.herdr.busy.add(self.herdr.panes[0]["pane_id"])
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
+    def test_a_restore_with_no_workspace_still_builds(self):
+        self.two_projects()
+        self.saved_session()
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
+    def test_a_socket_outside_the_session_directory_does_not_hide_the_restore(self):
+        self.two_projects()
+        self.saved_session()
+        self.herdr.add_workspace("alpha", {"shell": [{"cwd": str(self.project_a)}]})
+        os.environ["HERDR_SOCKET_PATH"] = str(self.dir / "elsewhere" / "herdr.sock")
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual(self.created(), [])
+        self.assertNotIn("default-layout: cannot use the saved session", self.stdout.getvalue())
+
+    def test_an_unreadable_session_file_is_reported_and_treated_as_a_restore(self):
+        self.two_projects()
+        self.session_file.write_text("{not json")
+        self.herdr.add_workspace("alpha", {"shell": [{"cwd": str(self.project_a)}]})
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual(self.created(), [])
+        self.assertIn("default-layout: cannot use the saved session at", self.stdout.getvalue())
+        self.assertIn("not valid JSON", self.stdout.getvalue())
+
+    def test_two_workspace_restore_creates_no_workspace(self):
+        self.two_projects()
+        self.saved_session()
         self.herdr.add_workspace("alpha", {"shell": [{"cwd": str(self.project_a)}]})
         self.herdr.add_workspace("other", {"t": [{"cwd": "/x"}]})
         self.run_main("default_layout.py", "startup")
