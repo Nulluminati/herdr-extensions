@@ -499,7 +499,8 @@ def claim(key: str) -> bool:
     """Take a short-lived claim, so two runs cannot build the same project.
 
     A claim ages out after CLAIM_TTL_SECONDS, so a run that died holding one
-    does not block later runs.
+    does not block later runs. A marker that vanishes during the check belonged
+    to a run that has just released it, so this run takes the claim.
     """
     try:
         marker = claim_path(key)
@@ -509,10 +510,13 @@ def claim(key: str) -> bool:
         pass
     except OSError:
         return True  # No writable state directory; do not let the guard block the work.
-    if time.time() - marker.stat().st_mtime < CLAIM_TTL_SECONDS:
-        return False
-    marker.touch()
-    return True
+    try:
+        if time.time() - marker.stat().st_mtime < CLAIM_TTL_SECONDS:
+            return False
+        marker.touch()
+        return True
+    except FileNotFoundError:
+        return True
 
 
 def release(key: str) -> None:
@@ -612,16 +616,21 @@ def each_project(spec: dict, work) -> None:
         if not project_dir(project).is_dir():
             print(f"default-layout: skip {label}: no such directory {project_dir(project)}")
             continue
-        if not claim(label):
-            print(f"default-layout: {label} is already being built")
-            continue
+        # The claim itself can fail, and a lost claim must not end the pass.
+        held = False
         try:
+            if not claim(label):
+                print(f"default-layout: {label} is already being built")
+                continue
+            held = True
             work(project)
         # A startup hook has no one to show an error to, so report it and go on.
         except Exception as error:
             print(f"default-layout: {label} failed: {error}")
         finally:
-            release(label)
+            # Release only what this run took, never another run's marker.
+            if held:
+                release(label)
 
 
 def build_missing(spec: dict, open_workspaces: list[dict], snap: dict) -> None:

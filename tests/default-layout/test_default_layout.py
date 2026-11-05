@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -742,6 +743,64 @@ class StartupTests(DefaultLayoutTestCase):
         (self.state_dir / "building-alpha").touch()
         self.run_main("default_layout.py", "startup")
         self.assertEqual([argv[6] for argv in self.created()], ["beta"])
+
+    def test_a_claim_held_elsewhere_survives_the_skip(self):
+        self.two_projects()
+        self.fresh_home()
+        self.state_dir.mkdir()
+        marker = self.state_dir / "building-alpha"
+        marker.touch()
+        self.run_main("default_layout.py", "startup")
+        self.assertTrue(marker.exists())
+
+    def test_a_failing_claim_does_not_stop_the_others(self):
+        self.two_projects()
+        self.fresh_home()
+        real_claim = default_layout.claim
+
+        def failing_claim(key):
+            if key == "alpha":
+                raise OSError("no state directory")
+            return real_claim(key)
+
+        with patch.object(default_layout, "claim", failing_claim):
+            self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual([argv[6] for argv in self.created()], ["beta"])
+        self.assertIn("default-layout: alpha failed: no state directory", self.stdout.getvalue())
+        self.assertIn("default-layout: built beta (1 tabs)", self.stdout.getvalue())
+
+
+class ClaimTests(DefaultLayoutTestCase):
+    def aged_marker(self, key):
+        """A claim left behind by a run that died."""
+        self.state_dir.mkdir()
+        marker = self.state_dir / f"building-{key}"
+        marker.touch()
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(marker, (old, old))
+        return marker
+
+    def test_a_fresh_marker_blocks_the_claim(self):
+        self.state_dir.mkdir()
+        (self.state_dir / "building-alpha").touch()
+        self.assertFalse(default_layout.claim("alpha"))
+
+    def test_an_aged_marker_is_taken_over(self):
+        self.aged_marker("alpha")
+        self.assertTrue(default_layout.claim("alpha"))
+
+    def test_a_marker_that_vanishes_mid_check_is_a_won_claim(self):
+        marker = self.aged_marker("alpha")
+        real_stat = Path.stat
+
+        def stat_after_release(path, *args, **kwargs):
+            # The run holding the aged claim finishes and releases it now.
+            if Path(path) == marker:
+                marker.unlink()
+            return real_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", stat_after_release):
+            self.assertTrue(default_layout.claim("alpha"))
 
 
 class RehydrateTests(DefaultLayoutTestCase):
