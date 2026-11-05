@@ -2,9 +2,11 @@ import contextlib
 import io
 import json
 import os
+import socket
 import subprocess
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -15,6 +17,8 @@ from support.scripts import load_script
 
 EXAMPLE = ROOT / "plugins/default-layout/examples/layout.toml"
 default_layout = load_script("default-layout", "default_layout")
+# The real socket transport, which the base test case replaces with a fake.
+REAL_CALL = default_layout.call
 
 
 def wrapped(program):
@@ -730,6 +734,114 @@ class IdleShellTests(DefaultLayoutTestCase):
         pane_id = self.pane_id()
         self.herdr.no_shell_pid.add(pane_id)
         self.assertFalse(default_layout.is_idle_shell(pane_id))
+
+
+class FakeSocketServer:
+    """A Unix socket server that answers every request the way `mode` says.
+
+    "reply" writes `reply` as one newline-delimited JSON line. "stall" reads
+    the request and then holds the connection without writing, as a stalled
+    Herdr does. "close" reads the request and ends the connection.
+    """
+
+    def __init__(self, path, mode="reply", reply=None):
+        self.mode = mode
+        self.reply = None if reply is None else json.dumps(reply).encode() + b"\n"
+        self.requests = []
+        self.closed = threading.Event()
+        self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.listener.bind(str(path))
+        self.listener.listen(8)
+        # A poll timeout is the only way to leave accept() when close() arrives.
+        self.listener.settimeout(0.05)
+        self.held = []
+        self.thread = threading.Thread(target=self.serve, daemon=True)
+        self.thread.start()
+
+    def serve(self):
+        while not self.closed.is_set():
+            try:
+                connection, _ = self.listener.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            self.requests.append(connection.recv(65536))
+            if self.mode == "stall":
+                self.held.append(connection)
+                continue
+            with connection:
+                if self.mode == "reply":
+                    connection.sendall(self.reply)
+
+    def close(self):
+        self.closed.set()
+        self.thread.join(timeout=5)
+        for connection in self.held:
+            connection.close()
+        self.listener.close()
+
+
+class SocketCallTests(DefaultLayoutTestCase):
+    """The real socket transport, against a server on a real Unix socket."""
+
+    def setUp(self):
+        super().setUp()
+        replacement = patch.object(default_layout, "call", REAL_CALL)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+
+    def server(self, mode="reply", reply=None):
+        """A server on the socket path that the environment points at."""
+        found = FakeSocketServer(self.session_dir / "herdr.sock", mode, reply)
+        self.addCleanup(found.close)
+        return found
+
+    def short_timeout(self, seconds=0.5):
+        replacement = patch.object(default_layout, "SOCKET_TIMEOUT_SECONDS", seconds)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+
+    def test_a_reply_comes_back_as_the_result(self):
+        self.server(reply={"id": "x", "result": {"layout": {"tab_id": "w1:t2"}}})
+        self.assertEqual(default_layout.call("layout.apply", {"workspace_id": "w1"}), {"layout": {"tab_id": "w1:t2"}})
+
+    def test_an_error_reply_raises_herdr_error(self):
+        self.server(reply={"id": "x", "error": {"code": "no_such_tab", "message": "no tab w1:t9"}})
+        with self.assertRaises(default_layout.HerdrError) as raised:
+            default_layout.call("tab.move", {"tab_id": "w1:t9", "insert_index": 0})
+        self.assertEqual(str(raised.exception), "tab.move: no tab w1:t9")
+
+    def test_a_server_that_closes_without_a_reply_raises(self):
+        self.server(mode="close")
+        with self.assertRaises(default_layout.HerdrError) as raised:
+            default_layout.call("layout.apply", {"workspace_id": "w1"})
+        self.assertEqual(str(raised.exception), "layout.apply: no response from Herdr")
+
+    def test_a_stalled_reply_gives_up_and_raises(self):
+        server = self.server(mode="stall")
+        self.short_timeout()
+        started = time.monotonic()
+        with self.assertRaises(default_layout.HerdrError) as raised:
+            default_layout.call("layout.apply", {"workspace_id": "w1"})
+        elapsed = time.monotonic() - started
+        self.assertIn("layout.apply: no response from Herdr", str(raised.exception))
+        self.assertLess(elapsed, 5)
+        self.assertEqual(
+            [json.loads(line) for line in server.requests],
+            [{"id": "default-layout:layout.apply", "method": "layout.apply", "params": {"workspace_id": "w1"}}],
+        )
+
+    def test_a_stalled_reply_does_not_stop_the_next_project(self):
+        self.server(mode="stall")
+        self.two_projects()
+        self.fresh_home()
+        self.short_timeout()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertIn("default-layout: alpha failed: layout.apply: no response from Herdr", self.stdout.getvalue())
+        self.assertIn("default-layout: beta failed: layout.apply: no response from Herdr", self.stdout.getvalue())
+        self.assertEqual(self.created()[-1][6], "beta")
+        self.assertEqual(list(self.state_dir.glob("building-*")), [])
 
 
 class StartupTests(DefaultLayoutTestCase):

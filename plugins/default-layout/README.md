@@ -176,6 +176,7 @@ description = "default layout: apply to this workspace"
 - The plugin does not change focus.
 - The plugin removes and reorders only a tab that it rebuilds: a tab that a restore rehydrates, or the tab that `apply` replaces. It never renames a tab.
 - A project whose directory does not exist is skipped, with one line in the plugin log.
+- A request to Herdr gives up after 30 seconds. A server that stalls fails that project with one line, and the run moves to the next project.
 - `herdr plugin log list --plugin nulluminati.default-layout` shows what each run did.
 
 ## Tests

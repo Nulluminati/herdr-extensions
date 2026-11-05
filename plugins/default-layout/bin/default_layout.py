@@ -37,6 +37,9 @@ SETTLE_POLL_SECONDS = 0.2
 # How long the startup hook waits for the server to report its first pane.
 SNAPSHOT_WAIT_SECONDS = 5.0
 
+# How long one request may wait for Herdr, the same limit as the CLI.
+SOCKET_TIMEOUT_SECONDS = 30.0
+
 # How long one run's claim on building a project stays valid.
 CLAIM_TTL_SECONDS = 60.0
 
@@ -146,15 +149,21 @@ def call(method: str, params: dict) -> dict:
     """Send one newline-delimited JSON request over the socket.
 
     The CLI has no command for `layout.apply` or `tab.move`, so these go to the
-    socket directly.
+    socket directly. The socket carries the same limit as the CLI, so a server
+    that stalls cannot hold the startup hook for ever.
     """
     request = json.dumps({"id": f"default-layout:{method}", "method": method, "params": params})
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.connect(socket_path())
-        stream = connection.makefile("rwb")
-        stream.write(request.encode() + b"\n")
-        stream.flush()
-        line = stream.readline()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            # The timeout covers the connect as well as the wait for a reply.
+            connection.settimeout(SOCKET_TIMEOUT_SECONDS)
+            connection.connect(socket_path())
+            stream = connection.makefile("rwb")
+            stream.write(request.encode() + b"\n")
+            stream.flush()
+            line = stream.readline()
+    except TimeoutError as error:
+        raise HerdrError(f"{method}: no response from Herdr within {SOCKET_TIMEOUT_SECONDS:g} s") from error
     if not line:
         raise HerdrError(f"{method}: no response from Herdr")
     message = json.loads(line)
