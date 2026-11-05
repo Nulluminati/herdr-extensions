@@ -1,4 +1,5 @@
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -301,11 +302,20 @@ class DefaultLayoutTestCase(unittest.TestCase):
         return default_layout.claim_key(number, {"path": str(path)})
 
     def aged_marker(self, key):
-        """A claim left behind by a run that died."""
+        """A marker left behind by a run that holds no lock on it, such as an older plugin."""
         marker = default_layout.claim_path(key)
         marker.touch()
         old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
         os.utime(marker, (old, old))
+        return marker
+
+    def other_run_holds(self, key):
+        """A claim that another live run holds: a marker locked by its own open file."""
+        marker = default_layout.claim_path(key)
+        fd = os.open(marker, os.O_CREAT | os.O_RDWR, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(fd, b"0" * 32)
         return marker
 
     def race_once(self, method, marker, error):
@@ -1129,17 +1139,27 @@ class StartupTests(DefaultLayoutTestCase):
     def test_a_claimed_project_is_skipped(self):
         self.two_projects()
         self.fresh_home()
-        default_layout.claim_path(self.project_key(1, self.project_a)).touch()
+        self.other_run_holds(self.project_key(1, self.project_a))
         self.run_main("default_layout.py", "startup")
         self.assertEqual([argv[6] for argv in self.created()], ["beta"])
+        self.assertIn("default-layout: alpha is already being built", self.stdout.getvalue())
 
     def test_a_claim_held_elsewhere_survives_the_skip(self):
         self.two_projects()
         self.fresh_home()
-        marker = default_layout.claim_path(self.project_key(1, self.project_a))
-        marker.touch()
+        marker = self.other_run_holds(self.project_key(1, self.project_a))
         self.run_main("default_layout.py", "startup")
         self.assertTrue(marker.exists())
+
+    def test_a_live_claim_holds_a_project_past_the_ttl(self):
+        self.two_projects()
+        self.fresh_home()
+        marker = self.other_run_holds(self.project_key(1, self.project_a))
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(marker, (old, old))
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["beta"])
+        self.assertIn("default-layout: alpha is already being built", self.stdout.getvalue())
 
     def test_a_claim_on_one_project_does_not_skip_a_lookalike_label(self):
         self.write_layout(f"""
@@ -1159,7 +1179,7 @@ class StartupTests(DefaultLayoutTestCase):
             """)
         self.fresh_home()
         # Another run holds the claim on the first project.
-        default_layout.claim_path(self.project_key(1, self.project_a)).touch()
+        self.other_run_holds(self.project_key(1, self.project_a))
         self.run_main("default_layout.py", "startup")
         self.assertEqual([argv[6] for argv in self.created()], ["my_proj"])
         self.assertIn("default-layout: my proj is already being built", self.stdout.getvalue())
@@ -1210,23 +1230,41 @@ class StartupTests(DefaultLayoutTestCase):
             self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
         self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
 
-    def test_a_marker_that_vanishes_before_the_touch_still_builds(self):
+    def test_a_marker_released_under_the_lock_is_taken_again(self):
         self.two_projects()
         self.fresh_home()
         marker = self.aged_marker(self.project_key(1, self.project_a))
-        gone = FileNotFoundError(2, "No such file or directory", str(marker))
-        with self.race_once("touch", marker, gone):
+        real_lock = default_layout.lock_marker
+        raced = []
+
+        def release_once(fd):
+            # The run holding the aged claim finishes and releases it now.
+            if not raced:
+                raced.append(fd)
+                marker.unlink()
+            return real_lock(fd)
+
+        with patch.object(default_layout, "lock_marker", release_once):
             self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
         self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
 
-    def test_an_unreadable_marker_does_not_block_the_build(self):
+    def test_an_unlocked_file_system_does_not_block_the_build(self):
         self.two_projects()
         self.fresh_home()
-        marker = self.aged_marker(self.project_key(1, self.project_a))
-        denied = PermissionError(13, "Permission denied", str(marker))
-        with self.race_once("touch", marker, denied):
+        self.aged_marker(self.project_key(1, self.project_a))
+        denied = PermissionError(13, "Permission denied")
+        with patch.object(fcntl, "flock", side_effect=denied):
             self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
         self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
+    def test_an_unlocked_file_system_keeps_a_fresh_marker(self):
+        self.two_projects()
+        self.fresh_home()
+        default_layout.claim_path(self.project_key(1, self.project_a)).touch()
+        denied = PermissionError(13, "Permission denied")
+        with patch.object(fcntl, "flock", side_effect=denied):
+            self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual([argv[6] for argv in self.created()], ["beta"])
 
 
 class ClaimTests(DefaultLayoutTestCase):
@@ -1234,8 +1272,10 @@ class ClaimTests(DefaultLayoutTestCase):
         first = default_layout.claim_key(1, {"path": "/tmp/a"})
         second = default_layout.claim_key(2, {"path": "/tmp/b"})
         self.assertNotEqual(first, second)
-        self.assertTrue(default_layout.claim(first))
-        self.assertTrue(default_layout.claim(second))
+        self.assertIsNotNone(default_layout.claim(first))
+        self.assertIsNotNone(default_layout.claim(second))
+        self.addCleanup(default_layout.release, first)
+        self.addCleanup(default_layout.release, second)
 
     def test_the_claim_key_holds_the_project_position(self):
         first = default_layout.claim_key(1, {"path": "/tmp/one"})
@@ -1254,36 +1294,100 @@ class ClaimTests(DefaultLayoutTestCase):
                     default_layout.claim_path(key)
                 self.assertIn("claim key", str(caught.exception))
 
-    def test_a_fresh_marker_blocks_the_claim(self):
+    def test_the_marker_records_the_owner_token(self):
+        token = default_layout.claim("alpha")
+        self.addCleanup(default_layout.release, "alpha")
+        self.assertRegex(token, r"^[0-9a-f]{32}$")
+        self.assertEqual(default_layout.claim_path("alpha").read_text(), token)
+
+    def test_a_fresh_marker_without_a_token_blocks_the_claim(self):
         self.state_dir.mkdir()
         (self.state_dir / "building-alpha").touch()
-        self.assertFalse(default_layout.claim("alpha"))
+        self.assertIsNone(default_layout.claim("alpha"))
 
     def test_an_aged_marker_is_taken_over(self):
         self.aged_marker("alpha")
-        self.assertTrue(default_layout.claim("alpha"))
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
+
+    def test_a_claim_lasts_past_the_ttl_while_its_run_lives(self):
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
+        marker = default_layout.claim_path("alpha")
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(marker, (old, old))
+        self.assertIsNone(default_layout.claim("alpha"), "a live run keeps its claim")
+
+    def test_a_marker_from_a_dead_run_is_taken_over_at_once(self):
+        # The owner died, so the kernel dropped its lock and the age does not matter.
+        default_layout.claim_path("alpha").write_text("0" * 32)
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
+
+    def test_a_release_removes_this_run_marker(self):
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        default_layout.release("alpha")
+        self.assertFalse(default_layout.claim_path("alpha").exists())
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
+
+    def test_a_release_leaves_a_marker_that_another_run_owns(self):
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        marker = default_layout.claim_path("alpha")
+        marker.write_text("f" * 32)  # Another run has taken the claim over.
+        default_layout.release("alpha")
+        self.assertTrue(marker.exists(), "a release must leave another run's marker alone")
+
+    def test_a_release_leaves_a_marker_that_replaced_its_own(self):
+        self.assertIsNotNone(default_layout.claim("alpha"))
+        marker = default_layout.claim_path("alpha")
+        # A sweep, or an older plugin, unlinks the marker. A later run makes a new
+        # file at the same path, and this run's open file no longer names it.
+        marker.unlink()
+        marker.write_text("f" * 32)
+        default_layout.release("alpha")
+        self.assertTrue(marker.exists(), "a release must unlink only the file it opened")
+        self.assertEqual(marker.read_text(), "f" * 32)
+
+    def test_one_project_never_has_two_builders(self):
+        # The card's proof: a run that passes the TTL keeps the project.
+        first = default_layout.claim("alpha")
+        self.assertIsNotNone(first)
+        self.addCleanup(default_layout.release, "alpha")
+        marker = default_layout.claim_path("alpha")
+        old = time.time() - default_layout.CLAIM_TTL_SECONDS - 10
+        os.utime(marker, (old, old))
+        self.assertIsNone(default_layout.claim("alpha"), "a second run must not take the claim")
+        default_layout.release("alpha")
+        self.assertFalse(marker.exists(), "the owner frees the claim when its run ends")
 
     def test_a_marker_that_vanishes_mid_check_is_a_won_claim(self):
         marker = self.aged_marker("alpha")
         real_stat = Path.stat
+        raced = []
 
         def stat_after_release(path, *args, **kwargs):
             # The run holding the aged claim finishes and releases it now.
-            if Path(path) == marker:
+            if Path(path) == marker and not raced:
+                raced.append(path)
                 marker.unlink()
+                raise FileNotFoundError(2, "No such file or directory", str(path))
             return real_stat(path, *args, **kwargs)
 
         with patch.object(Path, "stat", stat_after_release):
-            self.assertTrue(default_layout.claim("alpha"))
+            self.assertIsNotNone(default_layout.claim("alpha"))
+        self.addCleanup(default_layout.release, "alpha")
         self.assertTrue(marker.exists(), "a won claim must leave a marker")
 
     def test_a_claim_that_never_gets_its_marker_is_lost(self):
         marker = self.aged_marker("alpha")
         real_stat = Path.stat
         real_open = os.open
+        raced = []
 
         def stat_after_release(path, *args, **kwargs):
-            if Path(path) == marker:
+            if Path(path) == marker and not raced:
+                raced.append(path)
                 marker.unlink(missing_ok=True)
             return real_stat(path, *args, **kwargs)
 
@@ -1293,7 +1397,7 @@ class ClaimTests(DefaultLayoutTestCase):
             return real_open(path, *args, **kwargs)
 
         with patch.object(Path, "stat", stat_after_release), patch.object(os, "open", open_always_taken):
-            self.assertFalse(default_layout.claim("alpha"))
+            self.assertIsNone(default_layout.claim("alpha"))
 
 
 class RehydrateTests(DefaultLayoutTestCase):

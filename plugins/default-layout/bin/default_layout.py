@@ -13,6 +13,7 @@ default_layout.py apply leaves the focused tab alone when a program or an agent
 runs in it. --force replaces the tab anyway, which kills that work.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ from pathlib import Path
 PLUGIN_ID = "nulluminati.default-layout"
 AGENT_NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 CLAIM_KEY = re.compile(r"[A-Za-z0-9._-]+")
+CLAIM_TOKEN = re.compile(r"[0-9a-f]{32}")
 SPLITS = ("down", "right")
 MAX_PANES = 4
 
@@ -40,7 +42,8 @@ SNAPSHOT_WAIT_SECONDS = 5.0
 # How many seconds one Herdr request may take, for the CLI and the socket alike.
 REQUEST_TIMEOUT_SECONDS = 30.0
 
-# How long one run's claim on building a project stays valid.
+# How long a marker that holds no owner token, such as one an older run left
+# behind, keeps a claim.
 CLAIM_TTL_SECONDS = 60.0
 
 
@@ -605,43 +608,140 @@ def claim_path(key: str) -> Path:
     return state_dir / f"building-{key}"
 
 
-def claim(key: str) -> bool:
-    """Take a short-lived claim, so two runs cannot build the same project.
+# The claims this run holds: the marker path and the open file that locks it.
+HELD_CLAIMS: dict[Path, tuple[int, str]] = {}
 
-    A claim ages out after CLAIM_TTL_SECONDS, so a run that died holding one
-    does not block later runs. A marker that vanishes during the check belonged
-    to a run that has released it, so the claim is free: create the marker
-    again. A guard that cannot write or read its marker never blocks the work.
+
+def new_token() -> str:
+    """A value that names one claim, so a release leaves another run's marker alone."""
+    return os.urandom(16).hex()
+
+
+def marker_owner(fd: int) -> str | None:
+    """The owner token in an open marker, or None when it holds none."""
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        found = os.read(fd, 64).decode("ascii", "replace").strip()
+    except OSError:
+        return None
+    return found if CLAIM_TOKEN.fullmatch(found) else None
+
+
+def write_owner(fd: int, token: str) -> None:
+    """Write this run's token into its open marker."""
+    try:
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, token.encode("ascii"))
+    except OSError:
+        pass  # The lock decides the claim; the token is only there for the release.
+
+
+def lock_marker(fd: int) -> bool | None:
+    """Lock the marker for this run: True for the lock, False when another run holds it.
+
+    None means the file system cannot lock, so the age of the marker decides.
+    """
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    except OSError:
+        return None
+    return True
+
+
+def marker_is_fresh(fd: int) -> bool:
+    """True when the marker is young enough to hold a claim for a run that does not lock it."""
+    try:
+        return time.time() - os.fstat(fd).st_mtime < CLAIM_TTL_SECONDS
+    except OSError:
+        return False
+
+
+def same_marker(fd: int, marker: Path) -> bool:
+    """True when the open file is still the file at the marker path.
+
+    A run releases its claim by unlinking the marker. A run that opened the file
+    just before that unlink would hold a lock on a file with no name, and the
+    next run would take a fresh marker beside it, so both would build.
+    """
+    try:
+        open_file = os.fstat(fd)
+        found = marker.stat()
+    except OSError:
+        return False
+    return (open_file.st_dev, open_file.st_ino) == (found.st_dev, found.st_ino)
+
+
+def claim(key: str) -> str | None:
+    """Take a claim for this run and return its token, or None when another run holds it.
+
+    The marker stays open under an exclusive lock for as long as the run builds.
+    The kernel drops the lock when the run ends, so a marker that a dead run left
+    behind does not block later runs, and no run can take a claim from a run that
+    still lives, even past CLAIM_TTL_SECONDS. A marker that holds no token comes
+    from a run that does not lock it, so its age decides. A guard that cannot
+    write or lock its marker never blocks the work.
     """
     try:
         marker = claim_path(key)
     except OSError:
-        return True  # No usable state directory; do not let the guard block the work.
+        return new_token()  # No usable state directory; do not let the guard block the work.
+    token = new_token()
     for _ in range(2):
         try:
-            os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            return True
+            fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_CLOEXEC, 0o600)
         except FileExistsError:
-            pass
+            fd = None
         except OSError:
-            return True  # The marker cannot be written; do not let the guard block the work.
-        try:
-            if time.time() - marker.stat().st_mtime < CLAIM_TTL_SECONDS:
-                return False  # Another run holds a claim that has not aged out.
-            marker.touch()
-            return True
-        except FileNotFoundError:
-            continue  # The owner released it; take the claim with a fresh marker.
-        except OSError:
-            return True  # The marker cannot be read or touched; do not block the work.
-    return False  # Two runs released the claim under us; leave the build to the next pass.
+            return token  # The marker cannot be written; do not let the guard block the work.
+        else:
+            write_owner(fd, token)  # A fresh marker never appears empty to another run.
+        created = fd is not None
+        if fd is None:
+            try:
+                fd = os.open(marker, os.O_RDWR | os.O_CLOEXEC)
+            except OSError:
+                continue  # The owner released the marker; take it with a fresh one.
+        locked = lock_marker(fd)
+        if locked is False or not same_marker(fd, marker):
+            os.close(fd)
+            if locked is False:
+                return None  # Another live run holds the claim.
+            continue  # The owner released it under this run; take the new marker.
+        # A marker that this run did not create, and that holds no token, or one on
+        # a file system that cannot lock, holds a claim only while it is young.
+        if not created and (locked is None or marker_owner(fd) is None) and marker_is_fresh(fd):
+            os.close(fd)
+            return None  # Another run holds a claim that has not aged out.
+        write_owner(fd, token)
+        HELD_CLAIMS[marker] = (fd, token)
+        return token
+    return None  # Two runs released the claim under this one; leave the build to the next pass.
 
 
 def release(key: str) -> None:
+    """Drop this run's claim, and leave every other run's marker alone."""
     try:
-        claim_path(key).unlink()
+        marker = claim_path(key)
     except OSError:
-        pass
+        return
+    found = HELD_CLAIMS.pop(marker, None)
+    if found is None:
+        return
+    fd, token = found
+    try:
+        # Unlink only the file this run opened, and only while it still holds this
+        # run's token. A marker that another run made at the same path stays.
+        if marker_owner(fd) == token and same_marker(fd, marker):
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+    finally:
+        # Close last: the lock stays until the marker that held it is gone.
+        os.close(fd)
 
 
 # Building tabs
@@ -803,19 +903,19 @@ def each_project(spec: dict, work) -> None:
             continue
         key = claim_key(number, project)
         # The claim itself can fail, and a lost claim must not end the pass.
-        held = False
+        token = None
         try:
-            if not claim(key):
+            token = claim(key)
+            if token is None:
                 print(f"default-layout: {label} is already being built")
                 continue
-            held = True
             work(project)
         # A startup hook has no one to show an error to, so report it and go on.
         except Exception as error:
             print(f"default-layout: {label} failed: {error}")
         finally:
             # Release only what this run took, never another run's marker.
-            if held:
+            if token is not None:
                 release(key)
 
 
