@@ -135,6 +135,20 @@ A restored session opens no workspace. A project that you closed stays closed un
 
 It replaces the focused tab with the first tab in the file, and appends the other tabs after it. When no project matches the workspace, it does nothing and exits with status 1.
 
+`apply` leaves the focused tab alone when a program or an agent runs in it, and exits with status 1. It prints one line, such as:
+
+```
+default-layout: herdr-extensions/agents left alone: something is running in w1:p2
+```
+
+The tab keeps its work, because `layout.apply` closes the tab that it rebuilds, and Herdr cannot keep a live process in a rebuilt tab. The `apply` action passes no arguments, so it never overrides this check. Add `--force` to replace the tab whatever runs in it:
+
+```bash
+python3 bin/default_layout.py apply --force
+```
+
+Run that from the plugin root in a Herdr pane in the workspace, so the pane gives the plugin the workspace id.
+
 Bind it in `~/.config/herdr/config.toml`:
 
 ```toml

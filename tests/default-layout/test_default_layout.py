@@ -1001,6 +1001,43 @@ class RehydrateTests(DefaultLayoutTestCase):
 
 
 class ApplyTests(DefaultLayoutTestCase):
+    def focused_tab(self):
+        """A workspace for project alpha with a user tab in focus, as apply sees it."""
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace("alpha", {"first": [{"cwd": "/x"}], "my-work": [{"cwd": "/x"}]})
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[1]
+        pane = next(p for p in self.herdr.panes if p["tab_id"] == os.environ["HERDR_TAB_ID"])
+        return workspace_id, pane
+
+    def test_apply_leaves_a_tab_that_runs_a_program_alone(self):
+        workspace_id, pane = self.focused_tab()
+        self.herdr.busy.add(pane["pane_id"])
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "my-work"])
+        self.assertIn(
+            f"default-layout: alpha/my-work left alone: something is running in {pane['pane_id']}",
+            self.stdout.getvalue(),
+        )
+        self.assertIn("--force", self.stdout.getvalue())
+
+    def test_apply_leaves_a_tab_that_holds_an_agent_alone(self):
+        workspace_id, pane = self.focused_tab()
+        pane["agent_session"] = {"agent": "pi", "value": "x"}
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "my-work"])
+        self.assertIn(f"default-layout: alpha/my-work left alone: agent in {pane['pane_id']}", self.stdout.getvalue())
+
+    def test_apply_with_force_replaces_a_tab_that_runs_a_program(self):
+        workspace_id, pane = self.focused_tab()
+        self.herdr.busy.add(pane["pane_id"])
+        self.assertEqual(self.run_main("default_layout.py", "apply", "--force"), 0)
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["agents", "editor", "shell"])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "agents", "editor", "shell"])
+        self.assertIn("default-layout: applied alpha (3 tabs)", self.stdout.getvalue())
+
     def test_apply_replaces_the_focused_tab_and_appends_the_rest(self):
         self.two_projects()
         workspace_id = self.herdr.add_workspace("alpha", {"first": [{"cwd": "/x"}], "focused": [{"cwd": "/x"}]})
@@ -1040,6 +1077,19 @@ class ApplyTests(DefaultLayoutTestCase):
         self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
         self.assertIn("default-layout: no project for this workspace", self.stdout.getvalue())
         self.assertEqual(self.applies(), [])
+
+    def test_an_unknown_option_is_refused_before_any_work(self):
+        self.two_projects()
+        self.assertEqual(self.run_main("default_layout.py", "apply", "--froce"), 2)
+        self.assertIn("default-layout: unknown option --froce for apply", self.stderr.getvalue())
+        self.assertEqual(self.herdr.commands, [])
+        self.assertEqual(self.herdr.requests, [])
+
+    def test_startup_takes_no_force_option(self):
+        self.two_projects()
+        self.assertEqual(self.run_main("default_layout.py", "startup", "--force"), 2)
+        self.assertIn("default-layout: unknown option --force for startup", self.stderr.getvalue())
+        self.assertEqual(self.herdr.commands, [])
 
 
 if __name__ == "__main__":

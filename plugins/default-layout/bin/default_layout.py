@@ -6,7 +6,11 @@
 
 default_layout.py startup   build missing projects in a fresh session, or
                             relaunch programs in a restored one
-default_layout.py apply     rebuild the focused workspace from its project
+default_layout.py apply [--force]
+                            rebuild the focused workspace from its project
+
+default_layout.py apply leaves the focused tab alone when a program or an agent
+runs in it. --force replaces the tab anyway, which kills that work.
 """
 
 import json
@@ -687,7 +691,7 @@ def context() -> dict:
     return found if isinstance(found, dict) else {}
 
 
-def cmd_apply(spec: dict) -> int:
+def cmd_apply(spec: dict, force: bool = False) -> int:
     workspace_id = os.environ.get("HERDR_WORKSPACE_ID") or context().get("workspace_id")
     snap = snapshot()
     workspace = next((w for w in workspaces() if w["workspace_id"] == workspace_id), None)
@@ -698,7 +702,8 @@ def cmd_apply(spec: dict) -> int:
     if not project_dir(project).is_dir():
         print(f"default-layout: skip {project['label']}: no such directory {project_dir(project)}")
         return 1
-    tab_ids = [tab["tab_id"] for tab in workspace_tabs(snap, workspace_id)]
+    open_tabs = workspace_tabs(snap, workspace_id)
+    tab_ids = [tab["tab_id"] for tab in open_tabs]
     focused = next(
         (
             tab_id
@@ -707,14 +712,32 @@ def cmd_apply(spec: dict) -> int:
         ),
         tab_ids[0],
     )
+    # `layout.apply` closes the tab it rebuilds and cannot keep a live PTY, so a
+    # tab with work in it must stay. Only --force replaces it.
+    focused_tab = next(tab for tab in open_tabs if tab["tab_id"] == focused)
+    reason = in_use_reason(tab_panes(snap, focused))
+    if reason and not force:
+        where = f"{project['label']}/{focused_tab.get('label') or focused}"
+        print(f"default-layout: {where} left alone: {reason}")
+        print("default-layout: run apply with --force to replace it and lose that work")
+        return 1
     build_into(project, focused, tab_ids.index(focused), workspace_id)
     print(f"default-layout: applied {project['label']} ({len(project['tabs'])} tabs)")
     return 0
 
 
+ACTION_FLAGS = {"startup": (), "apply": ("--force",)}
+
+
 def main(argv: list[str]) -> int:
     action = argv[1] if len(argv) > 1 else ""
-    if action not in ("startup", "apply"):
+    if action not in ACTION_FLAGS:
+        print(__doc__, file=sys.stderr)
+        return 2
+    flags = argv[2:]
+    unknown = [flag for flag in flags if flag not in ACTION_FLAGS[action]]
+    if unknown:
+        print(f"default-layout: unknown option {unknown[0]} for {action}", file=sys.stderr)
         print(__doc__, file=sys.stderr)
         return 2
     try:
@@ -728,7 +751,9 @@ def main(argv: list[str]) -> int:
         print(f"default-layout: no layout file at {layout_path()}")
         return 0
     try:
-        return cmd_startup(spec) if action == "startup" else cmd_apply(spec)
+        if action == "startup":
+            return cmd_startup(spec)
+        return cmd_apply(spec, force="--force" in flags)
     except (HerdrError, OSError, ValueError) as error:
         print(f"default-layout: {error}", file=sys.stderr)
         return 1
