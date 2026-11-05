@@ -353,7 +353,8 @@ def _check(store, item: Automation, *, check_preset: bool = True) -> Automation:
         if any(value is not None for value in (item.agent, item.model, item.thinking)):
             raise AutomationError(
                 "A factory preset sets the agent, model and thinking. "
-                "Clear overrides with --agent '' --model '' --thinking ''.",
+                "Leave out --agent, --model and --thinking, "
+                "or clear saved overrides with --agent '' --model '' --thinking ''.",
                 "usage",
             )
         if check_preset and item.factory_preset not in config.factory_presets:

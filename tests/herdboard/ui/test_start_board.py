@@ -189,6 +189,25 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Rounds", str(app.screen.query_one("#factory-error", Static).render()))
             self.callback.assert_not_called()
 
+    async def test_factory_custom_long_save_error_stays_visible(self):
+        from textual.widgets import Static
+
+        message = "/a/very/long/configuration/path/" * 4 + "config.toml: cannot save settings: permission denied"
+        app = self.app()
+        async with app.run_test(size=(86, 24)) as pilot:
+            await pilot.press("F", "c", "shift+tab")
+            await pilot.pause()
+            app.focused.value = "cheap"
+            with patch("herdboard.board.save_factory_preset", side_effect=HerdboardError(message)):
+                await pilot.press("ctrl+s")
+                await pilot.pause()
+            form = app.screen
+            error = form.query_one("#factory-error", Static)
+            self.assertIn(message, str(error.render()))
+            self.assertGreaterEqual(error.region.height, 2)
+            self.assertTrue(form.query_one(".dialog").content_region.contains_region(error.region))
+            self.callback.assert_not_called()
+
     async def test_factory_custom_narrow_columns_and_spacing(self):
         from textual.widgets import Label
 
@@ -204,7 +223,7 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(header.styles.content_align_horizontal, "center")
             label = form.query_one("#factory-thinking-builder #label")
             self.assertGreaterEqual(label.content_size.width, len("default"))
-            self.assertIn("enter: start", str(form.query_one("#factory-custom-hint", Label).render()))
+            self.assertIn("enter in text fields: start", str(form.query_one("#factory-custom-hint", Label).render()))
 
     async def test_factory_custom_layout_and_error_stay_visible_in_small_pane(self):
         from textual.widgets import Checkbox, Label, Select, Static

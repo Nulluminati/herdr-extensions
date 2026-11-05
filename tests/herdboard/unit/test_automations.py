@@ -387,6 +387,7 @@ class FactoryAutomationTests(AutomationTestCase):
             self.add(factory_preset="cheap")
         with self.assertRaises(automations.AutomationError) as caught:
             self.add(factory=True, factory_preset="cheap", agent="pi")
+        self.assertIn("Leave out --agent, --model and --thinking", str(caught.exception))
         self.assertIn("--agent '' --model '' --thinking ''", str(caught.exception))
 
     def test_removed_preset_does_not_block_pause_or_unrelated_edits(self):

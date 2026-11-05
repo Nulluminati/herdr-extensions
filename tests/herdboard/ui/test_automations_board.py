@@ -552,6 +552,28 @@ class FormTests(AutomationsBoardTestCase):
             self.assertTrue(form.query_one(".dialog").content_region.contains_region(checkbox.region))
             self.assertIn("no extra permissions", str(form.query_one("#automation-merge-help").render()))
 
+    async def test_missing_factory_preset_has_warning_and_no_round_estimate(self):
+        item = automations.Automation(
+            "a123", "Missing preset", "every day", board="repo", factory=True, factory_preset="cheap"
+        )
+        app = self.app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            form = AutomationFormScreen(
+                "Edit an automation", ["inbox", "repo"], self.store.config.types, Mock(), self.store.config, item
+            )
+            app.push_screen(form)
+            await pilot.pause()
+            preset = form.query_one("#automation-factory-preset", Select)
+            labels = {value: str(label) for label, value in preset._options}
+            self.assertEqual(labels["cheap"], "cheap (missing)")
+            help_text = str(form.query_one("#automation-factory-help").render())
+            self.assertIn("missing from the config file", help_text)
+            self.assertNotIn("rounds", help_text)
+            self.assertEqual(form.values()["factory_preset"], "cheap")
+            preset.value = "default"
+            await pilot.pause()
+            self.assertIn("3 rounds", str(form.query_one("#automation-factory-help").render()))
+
     async def test_factory_preset_select_follows_factory_checkbox(self):
         from dataclasses import replace
 

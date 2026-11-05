@@ -110,7 +110,8 @@ herdboard --json pin ENG-123 --remove         # remove the pin
 herdboard --json start tep3 --base feature-x  # start from, and later merge into, a local branch
 herdboard --json start tep3 --factory --rounds 2   # lens reviewers check each move to Review, then an approver
 # Board F: Default, named presets, or Custom…; c edits the highlighted run.
-# Custom ctrl+s starts; an optional save name writes a preset after overwrite confirmation.
+# Custom: ctrl+s, or Enter in Rounds or save-name, starts the run.
+# An optional save name writes a preset after overwrite confirmation.
 # [factory.presets.NAME] needs builder, approver, all four lenses and rounds (1–10).
 # Each role needs agent; model and thinking are optional. lenses_on overrides the plan when present.
 # Names use a-z, 0-9 and -; default and custom are reserved.

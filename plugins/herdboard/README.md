@@ -507,7 +507,7 @@ Default runs take their lens agents from `[factory.lenses]` in the config, see [
 
 Use `herdboard start <id> --factory --preset cheap` to select a named preset. Do not combine `--preset` with `--agent`, `--model`, `--thinking` or `--rounds`. Each preset defines the builder, all four lens reviewers, the approver and the round limit. Optional `lenses_on` replaces the plan's lens selection. Without it, the plan decides.
 
-The `F` popup shows a summary of the highlighted run. Enter starts it. Default uses `start_agent` and its configured model and thinking level. To choose a different builder, open the Custom form. Press `c` to edit a copy in the Custom form. Set each role's agent, model and thinking level. Select the lenses, or let the plan choose them. Press `ctrl+s` to start. Leave the save name empty for a one-off run. A name saves a preset first; replacing a preset needs confirmation. Escape returns to the popup.
+The `F` popup shows a summary of the highlighted run. Enter starts it. Default uses `start_agent` and its configured model and thinking level. To choose a different builder, open the Custom form. Press `c` to edit a copy in the Custom form. Set each role's agent, model and thinking level. Select the lenses, or let the plan choose them. Press `ctrl+s`, or Enter in the Rounds or save-name field, to start. Leave the save name empty for a one-off run. A name saves a preset first; replacing a preset needs confirmation. Escape returns to the popup.
 
 Preset names use `a-z`, `0-9` and `-`. The names `default` and `custom` are reserved. Each preset needs all six role agents and a round limit from 1 to 10. Model and thinking are optional on each role. Unknown keys are errors. Edit or delete presets in the config file.
 

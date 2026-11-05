@@ -1800,7 +1800,9 @@ class FactoryCustomScreen(ModalBase):
                 yield from self.compose_fields()
             yield Static("", id="factory-error", classes="error", markup=False)
             yield Label(
-                "ctrl+s or enter: start · tab: next field · escape: back", id="factory-custom-hint", classes="dim"
+                "ctrl+s or enter in text fields: start · tab: next · escape: back",
+                id="factory-custom-hint",
+                classes="dim",
             )
 
     def compose_fields(self) -> ComposeResult:
@@ -4653,7 +4655,10 @@ class AutomationFormScreen(ModalBase):
             )
             yield titled(
                 Select(
-                    [("Default", "default"), *((name, name) for name in self.presets)],
+                    [
+                        ("Default", "default"),
+                        *((name if name in self.preset_runs else f"{name} (missing)", name) for name in self.presets),
+                    ],
                     value=item.factory_preset if item and item.factory_preset else "default",
                     allow_blank=False,
                     disabled=not bool(item and item.factory),
@@ -4712,11 +4717,15 @@ class AutomationFormScreen(ModalBase):
                 select.value = "default"
             select.disabled = preset is not None
         run = self.preset_runs.get(preset)
-        rounds = run.rounds if run is not None else self.max_rounds
-        self.query_one("#automation-factory-help", Label).update(
-            "Needs a repository board. Each run costs up to 4 reviewers per round, "
-            f"for up to {rounds} rounds, and an approver"
-        )
+        if preset is not None and run is None:
+            help_text = f"Preset {preset!r} is missing from the config file. Choose another preset or Default."
+        else:
+            rounds = run.rounds if run is not None else self.max_rounds
+            help_text = (
+                "Needs a repository board. Each run costs up to 4 reviewers per round, "
+                f"for up to {rounds} rounds, and an approver"
+            )
+        self.query_one("#automation-factory-help", Label).update(help_text)
 
     def error_text(self) -> str:
         return self.query_one("#automation-error", Static).plain
