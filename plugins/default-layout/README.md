@@ -47,12 +47,14 @@ Each `[[projects.tabs]]` table is one tab, in file order. The first tab is the a
 
 | Key | Meaning |
 |---|---|
-| `name` | The tab label. Required. |
+| `name` | The tab label. Required. Two tabs in one project may share a name. |
 | `command` | A program for a one-pane tab, such as `"nvim"`. |
 | `agent` | An agent for a one-pane tab, such as `"claude"` or `"pi"`. |
 | `working_dir` | The pane directory. A relative path starts at the project `path`. |
 
 A tab with none of these keys is one shell in the project directory.
+
+Two tabs with one name are a natural way to write a second shell or a second agent in another directory. The plugin matches tabs by name in file order, so each open tab answers for one entry and a restored tab gets the program of its own entry. Do not name a tab with a bare number, such as `"1"`. Herdr labels an unnamed tab after its position, so the plugin cannot tell that name from one of its own.
 
 For more than one pane, give the tab up to four `[[projects.tabs.panes]]` tables instead of `command` or `agent`:
 
@@ -95,7 +97,7 @@ working_dir = "plugins"
 
 This gives one workspace, `herdr-extensions`, with three tabs. The `agents` tab has pi on the left (60% of the width) and a shell on the right.
 
-The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions. A repeated `label` is a problem too, because two workspaces with one label cannot be told apart, and so is a `label` with a space at either end.
+The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions. A repeated `label` is a problem too, because two workspaces with one label cannot be told apart, and so is a `label` with a space at either end. A repeated tab `name` is not a problem.
 
 ## When it runs
 
@@ -114,7 +116,7 @@ The plugin treats a session as fresh when the server has no workspace, or when t
 - A workspace at the project directory wins over one that holds a pane lower down.
 - A project that is not open gets a new workspace with its label and its tabs.
 - When the fresh workspace is in a project's directory, the plugin builds that project into it.
-- An open project gets only the tabs whose names it does not have. The plugin removes no tab.
+- An open project gets a file tab when the workspace holds fewer tabs of that name than the file asks for. One open tab answers for one file tab, so a file with two `shell` tabs adds the second one. The plugin removes no tab.
 
 ### A restored session
 
@@ -125,7 +127,7 @@ Herdr restores workspaces, tabs, splits and directories, but each pane comes bac
 
 A pane is an idle shell when Herdr reports its shell as the only foreground process. Any shell counts, whatever its name. A shell that is busy inside its own process, in a builtin loop or when it waits in `read`, still shows one foreground process. The plugin cannot tell that shell from an idle one. A pane whose shell pid Herdr does not report never counts as idle, so its tab stays as restored.
 
-The plugin leaves a tab alone when it holds an agent, including an agent that Herdr will resume, or a running program. A tab of shells needs nothing, so the plugin skips it. The rebuilt tab keeps its place in the tab row.
+The plugin leaves a tab alone when it holds an agent, including an agent that Herdr will resume, or a running program. A tab of shells needs nothing, so the plugin skips it. Either way the tab answers for its file entry, so a later tab of the same name takes the next entry. The rebuilt tab keeps its place in the tab row.
 
 A restored session opens no workspace. A project that you closed stays closed until you start a fresh session or run `apply` in a workspace for it.
 
@@ -175,6 +177,7 @@ description = "default layout: apply to this workspace"
 - The plugin does not hook `workspace.created`.
 - The plugin does not change focus.
 - The plugin removes and reorders only a tab that it rebuilds: a tab that a restore rehydrates, or the tab that `apply` replaces. It never renames a tab.
+- A tab whose label is its own position, such as `"1"` in the first place, counts as unnamed, because Herdr names an unnamed tab that way. The plugin then adds the file's tab of that name, and the tab row can show two tabs with one label.
 - A project whose directory does not exist is skipped, with one line in the plugin log.
 - A request to Herdr gives up after 30 seconds, from the connect to the reply. A server that stalls fails that project with one line, and the run moves to the next project.
 - `herdr plugin log list --plugin nulluminati.default-layout` shows what each run did.

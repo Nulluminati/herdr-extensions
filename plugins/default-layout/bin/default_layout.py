@@ -696,6 +696,44 @@ def create_project(project: dict) -> None:
     print(f"default-layout: built {project['label']} ({len(project['tabs'])} tabs)")
 
 
+def unnamed_tab(tab: dict, position: int) -> bool:
+    """True when Herdr named the tab after its place in the tab row.
+
+    Herdr labels a tab that has no name with its 1-based position, so the first
+    tab of a workspace is "1". That name says nothing about whether the file's
+    tab of that name is open, so it must not count as one.
+    """
+    return tab.get("label") == str(tab.get("number") or position)
+
+
+def named_tab_counts(open_tabs: list[dict]) -> dict[str, int]:
+    """How many tabs that carry a name of their own hold each label."""
+    counts: dict[str, int] = {}
+    for position, tab in enumerate(open_tabs, 1):
+        if unnamed_tab(tab, position):
+            continue
+        label = tab.get("label")
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def missing_tabs(project: dict, open_tabs: list[dict]) -> list[dict]:
+    """The file's tabs that the workspace does not hold yet.
+
+    Each open tab of a label answers for one file tab of that label, so a file
+    may name two tabs alike: the open tab keeps its work and the file's tab
+    beyond it is added.
+    """
+    counts = named_tab_counts(open_tabs)
+    missing = []
+    for tab in project["tabs"]:
+        if counts.get(tab["name"], 0):
+            counts[tab["name"]] -= 1
+        else:
+            missing.append(tab)
+    return missing
+
+
 def ensure_project(project: dict, open_workspaces: list[dict], snap: dict) -> None:
     """Create the project, fill its empty workspace, or add the tabs it lacks."""
     workspace = match_project(project, open_workspaces, snap)
@@ -707,8 +745,7 @@ def ensure_project(project: dict, open_workspaces: list[dict], snap: dict) -> No
         build_into(project, workspace_tabs(snap, workspace_id)[0]["tab_id"], 0, workspace_id)
         print(f"default-layout: built {project['label']} ({len(project['tabs'])} tabs)")
         return
-    present = {tab.get("label") for tab in workspace_tabs(snap, workspace_id)}
-    missing = [tab for tab in project["tabs"] if tab["name"] not in present]
+    missing = missing_tabs(project, workspace_tabs(snap, workspace_id))
     if not missing:
         print(f"default-layout: {project['label']} already open")
         return
@@ -717,13 +754,22 @@ def ensure_project(project: dict, open_workspaces: list[dict], snap: dict) -> No
 
 
 def rehydrate(project: dict, workspace_id: str, snap: dict) -> int:
-    """Relaunch the programs in tabs that a restore brought back as bare shells."""
-    by_name = {tab["name"]: tab for tab in project["tabs"]}
+    """Relaunch the programs in tabs that a restore brought back as bare shells.
+
+    Each open tab takes the first file tab of its name that no earlier open tab
+    took. Two file tabs may share a name, and each rebuilt tab then gets the
+    program of its own entry.
+    """
+    unused = list(project["tabs"])
     rebuilt = 0
     for index, open_tab in enumerate(workspace_tabs(snap, workspace_id)):
-        tab = by_name.get(open_tab.get("label"))
+        tab = next((entry for entry in unused if entry["name"] == open_tab.get("label")), None)
+        if tab is None:
+            continue
         # A tab of shells looks the same after a restore, so it has nothing to relaunch.
-        if tab is None or not starts_program(tab):
+        # It still answers for its file entry, so a later tab gets the next entry.
+        unused.remove(tab)
+        if not starts_program(tab):
             continue
         where = f"{project['label']}/{tab['name']}"
         reason = in_use_reason(tab_panes(snap, open_tab["tab_id"]))
