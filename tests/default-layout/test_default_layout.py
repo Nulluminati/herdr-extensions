@@ -29,6 +29,8 @@ class FakeHerdr:
         self.tabs = []
         self.panes = []
         self.busy = set()
+        self.no_job_control = set()
+        self.no_shell_pid = set()
         self.shell_name = "fish"
         self.commands = []
         self.requests = []
@@ -124,14 +126,24 @@ class FakeHerdr:
             if self.failing_process_info:
                 error = {"error": {"code": "pane_not_found", "message": f"no pane {pane_id}"}}
                 return subprocess.CompletedProcess(argv, 1, json.dumps(error), "")
-            name = "nvim" if pane_id in self.busy else self.shell_name
+            if pane_id in self.busy:
+                # A program in the foreground keeps the shell's process group
+                # when the shell has no job control, as `sh -c` has none.
+                pgid = 10 if pane_id in self.no_job_control else 11
+                foreground = [{"name": "nvim", "pid": 11}]
+            else:
+                pgid = 10
+                foreground = [{"name": self.shell_name, "pid": 10}]
+            shell_pid = None if pane_id in self.no_shell_pid else 10
+            if shell_pid is None:
+                pgid = None
             return self.ok(
                 {
                     "type": "pane_process_info",
                     "process_info": {
-                        "shell_pid": 10,
-                        "foreground_process_group_id": 11 if pane_id in self.busy else 10,
-                        "foreground_processes": [{"name": name, "pid": 10}],
+                        "shell_pid": shell_pid,
+                        "foreground_process_group_id": pgid,
+                        "foreground_processes": foreground,
                     },
                 }
             )
@@ -608,9 +620,24 @@ class IdleShellTests(DefaultLayoutTestCase):
         self.herdr.busy.add(pane_id)
         self.assertFalse(default_layout.is_idle_shell(pane_id))
 
+    def test_a_program_in_the_shell_process_group_is_not_idle(self):
+        # `sh -c '<program>; exec $SHELL'` has no job control, so the program
+        # keeps the shell's process group. Only the pid tells them apart.
+        pane_id = self.pane_id()
+        self.herdr.busy.add(pane_id)
+        self.herdr.no_job_control.add(pane_id)
+        self.assertFalse(default_layout.is_idle_shell(pane_id))
+
     def test_a_pane_with_an_unreadable_process_info_is_not_idle(self):
         pane_id = self.pane_id()
         self.herdr.failing_process_info = True
+        self.assertFalse(default_layout.is_idle_shell(pane_id))
+
+    def test_a_pane_without_a_shell_pid_is_not_idle(self):
+        # Herdr allows a null shell pid. Without it there is no evidence that
+        # the pane is at a prompt, so the plugin leaves the tab alone.
+        pane_id = self.pane_id()
+        self.herdr.no_shell_pid.add(pane_id)
         self.assertFalse(default_layout.is_idle_shell(pane_id))
 
 

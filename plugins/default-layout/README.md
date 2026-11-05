@@ -123,7 +123,7 @@ Herdr restores workspaces, tabs, splits and directories, but each pane comes bac
 - the file gives the tab a program or an agent, and
 - every pane of the tab is an idle shell.
 
-A pane is an idle shell when Herdr reports its shell as the only foreground process. Any shell counts, whatever its name.
+A pane is an idle shell when Herdr reports its shell as the only foreground process. Any shell counts, whatever its name. A shell that is busy inside its own process, in a builtin loop or when it waits in `read`, still shows one foreground process. The plugin cannot tell that shell from an idle one. A pane whose shell pid Herdr does not report never counts as idle, so its tab stays as restored.
 
 The plugin leaves a tab alone when it holds an agent, including an agent that Herdr will resume, or a running program. A tab of shells needs nothing, so the plugin skips it. The rebuilt tab keeps its place in the tab row.
 

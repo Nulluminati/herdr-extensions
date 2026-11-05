@@ -414,9 +414,11 @@ def is_idle_shell(pane_id: str) -> bool:
     """True when a pane sits at a shell prompt with nothing running.
 
     Herdr reports the pane's shell pid. At a prompt the shell is the only
-    foreground process, and it leads the foreground process group. A running
-    program leaves both behind. The check reads that state, not a list of
-    shell names, so it holds for any shell the user starts.
+    foreground process, and it leads the foreground process group. A program
+    in the foreground leaves both behind. A shell that is busy inside its own
+    process still shows itself, so this check cannot tell it from a prompt.
+    The check reads that state, not a list of shell names, so it holds for any
+    shell the user starts.
     """
     try:
         info = herdr("pane", "process-info", "--pane", pane_id)["process_info"]
