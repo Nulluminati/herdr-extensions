@@ -135,19 +135,28 @@ A restored session opens no workspace. A project that you closed stays closed un
 
 It replaces the focused tab with the first tab in the file, and appends the other tabs after it. When no project matches the workspace, it does nothing and exits with status 1.
 
-`apply` leaves the focused tab alone when a program or an agent runs in it, and exits with status 1. It prints one line, such as:
+`apply` leaves the focused tab alone when a program or an agent runs in it, and exits with status 1. It prints two lines, such as:
 
 ```
 default-layout: herdr-extensions/agents left alone: something is running in w1:p2
+default-layout: run apply with --force to replace it and lose that work
 ```
 
-The tab keeps its work, because `layout.apply` closes the tab that it rebuilds, and Herdr cannot keep a live process in a rebuilt tab. The `apply` action passes no arguments, so it never overrides this check. Add `--force` to replace the tab whatever runs in it:
+The tab keeps its work, because `layout.apply` closes the tab that it rebuilds, and Herdr cannot keep a live process in a rebuilt tab.
+
+A manual run must not rebuild the tab that holds the pane it starts from, because the close would stop the run itself. When the run lives in the focused tab, `apply` rebuilds another tab of the workspace instead. When that is the only tab, it does nothing and exits with status 1:
+
+```
+default-layout: herdr-extensions/agents runs this command; run apply from a pane in another tab
+```
+
+The `apply` action passes no arguments, so it never overrides the busy check. Add `--force` to replace the tab whatever runs in it:
 
 ```bash
 python3 bin/default_layout.py apply --force
 ```
 
-Run that from the plugin root in a Herdr pane in the workspace, so the pane gives the plugin the workspace id.
+Run that from the plugin root in a pane in another tab of the workspace. The pane gives the plugin the workspace id. `--force` never rebuilds the tab that runs it, for the same reason the action does not.
 
 Bind it in `~/.config/herdr/config.toml`:
 
@@ -165,7 +174,7 @@ description = "default layout: apply to this workspace"
 - The plugin tells a fresh session from a restored one by `session.json` in the session directory, because Herdr gives a startup hook no restore flag. Herdr restores from the same file, so keep the two in step.
 - The plugin does not hook `workspace.created`.
 - The plugin does not change focus.
-- The plugin never removes, renames or reorders a tab that it did not build.
+- The plugin removes and reorders only a tab that it rebuilds: a tab that a restore rehydrates, or the tab that `apply` replaces. It never renames a tab.
 - A project whose directory does not exist is skipped, with one line in the plugin log.
 - `herdr plugin log list --plugin nulluminati.default-layout` shows what each run did.
 

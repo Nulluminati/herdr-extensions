@@ -34,6 +34,7 @@ class FakeHerdr:
         self.shell_name = "fish"
         self.commands = []
         self.requests = []
+        self.own_panes = set()
         self.failing_workspace_labels = set()
         self.failing_process_info = False
         self.failing_session_list = False
@@ -123,6 +124,18 @@ class FakeHerdr:
             )
         if args[:3] == ["pane", "process-info", "--pane"]:
             pane_id = args[3]
+            if pane_id in self.own_panes:
+                # This pane runs the plugin process itself.
+                return self.ok(
+                    {
+                        "type": "pane_process_info",
+                        "process_info": {
+                            "shell_pid": 10,
+                            "foreground_process_group_id": 11,
+                            "foreground_processes": [{"name": "python3", "pid": os.getpid()}],
+                        },
+                    }
+                )
             if self.failing_process_info:
                 error = {"error": {"code": "pane_not_found", "message": f"no pane {pane_id}"}}
                 return subprocess.CompletedProcess(argv, 1, json.dumps(error), "")
@@ -208,6 +221,7 @@ class DefaultLayoutTestCase(unittest.TestCase):
         for name in (
             "HERDR_WORKSPACE_ID",
             "HERDR_TAB_ID",
+            "HERDR_PANE_ID",
             "HERDR_PLUGIN_CONTEXT_JSON",
             "HERDR_SESSION",
             "XDG_CONFIG_HOME",
@@ -1010,6 +1024,17 @@ class ApplyTests(DefaultLayoutTestCase):
         pane = next(p for p in self.herdr.panes if p["tab_id"] == os.environ["HERDR_TAB_ID"])
         return workspace_id, pane
 
+    def only_tab(self):
+        """A workspace for project alpha whose one tab runs this command."""
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace("alpha", {"my-work": [{"cwd": "/x"}]})
+        pane = next(p for p in self.herdr.panes if p["workspace_id"] == workspace_id)
+        self.herdr.own_panes.add(pane["pane_id"])
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = pane["tab_id"]
+        os.environ["HERDR_PANE_ID"] = pane["pane_id"]
+        return workspace_id, pane
+
     def test_apply_leaves_a_tab_that_runs_a_program_alone(self):
         workspace_id, pane = self.focused_tab()
         self.herdr.busy.add(pane["pane_id"])
@@ -1029,6 +1054,53 @@ class ApplyTests(DefaultLayoutTestCase):
         self.assertEqual(self.applies(), [])
         self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "my-work"])
         self.assertIn(f"default-layout: alpha/my-work left alone: agent in {pane['pane_id']}", self.stdout.getvalue())
+
+    def test_a_run_outside_the_pane_still_refuses_a_busy_focused_tab(self):
+        workspace_id, pane = self.focused_tab()
+        self.herdr.busy.add(pane["pane_id"])
+        # Herdr reports the focused pane on a keybinding press, but no pane runs it.
+        os.environ["HERDR_PANE_ID"] = pane["pane_id"]
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertIn("left alone: something is running in", self.stdout.getvalue())
+
+    def test_apply_from_a_pane_rebuilds_a_tab_that_does_not_hold_it(self):
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace("alpha", {"mine": [{"cwd": "/x"}], "other": [{"cwd": "/x"}]})
+        own_tab, other_tab = self.herdr.tab_ids(workspace_id)
+        own_pane = next(p for p in self.herdr.panes if p["tab_id"] == own_tab)["pane_id"]
+        self.herdr.own_panes.add(own_pane)
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = own_tab
+        os.environ["HERDR_PANE_ID"] = own_pane
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual(self.applies()[0]["tab_id"], other_tab)
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["mine", "agents", "editor", "shell"])
+        self.assertIn("default-layout: applied alpha (3 tabs)", self.stdout.getvalue())
+
+    def test_apply_from_the_only_tab_refuses(self):
+        workspace_id, _ = self.only_tab()
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["my-work"])
+        self.assertIn(
+            "default-layout: alpha/my-work runs this command; run apply from a pane in another tab",
+            self.stdout.getvalue(),
+        )
+
+    def test_apply_with_force_from_the_only_tab_refuses(self):
+        workspace_id, _ = self.only_tab()
+        self.assertEqual(self.run_main("default_layout.py", "apply", "--force"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["my-work"])
+        self.assertIn("run apply from a pane in another tab", self.stdout.getvalue())
+
+    def test_apply_with_no_tab_in_the_workspace_says_so(self):
+        self.two_projects()
+        os.environ["HERDR_WORKSPACE_ID"] = self.herdr.add_workspace("alpha", {})
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertIn("default-layout: no tab in this workspace", self.stdout.getvalue())
+        self.assertEqual(self.herdr.requests, [])
 
     def test_apply_with_force_replaces_a_tab_that_runs_a_program(self):
         workspace_id, pane = self.focused_tab()

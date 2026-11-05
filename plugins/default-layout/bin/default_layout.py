@@ -462,6 +462,33 @@ def in_use_reason(panes: list[dict]) -> str | None:
     return None
 
 
+def caller_pane() -> str | None:
+    """The pane that runs this process, or None when it runs outside every pane.
+
+    Herdr gives a managed pane and a plugin action the same `HERDR_PANE_ID`, so
+    the environment alone cannot tell a manual run inside its own pane from a
+    keybinding press while that pane is focused. The process ids can: a manual
+    `apply` is the foreground process of its own pane, and no pane runs a plugin
+    action.
+    """
+    pane_id = os.environ.get("HERDR_PANE_ID")
+    if not pane_id:
+        return None
+    try:
+        info = herdr("pane", "process-info", "--pane", pane_id)["process_info"]
+    except (HerdrError, KeyError):
+        return None
+    running = {os.getpid(), os.getppid()}
+    if any(process.get("pid") in running for process in info.get("foreground_processes") or []):
+        return pane_id
+    return None
+
+
+def tab_of_pane(snap: dict, pane_id: str | None) -> str | None:
+    """The tab that holds one pane, or None when the pane is not in the snapshot."""
+    return next((pane["tab_id"] for pane in snap["panes"] if pane["pane_id"] == pane_id), None)
+
+
 def is_empty(snap: dict, workspace_id: str) -> bool:
     """One tab that holds one idle shell."""
     panes = workspace_panes(snap, workspace_id)
@@ -573,6 +600,23 @@ def build_into(project: dict, tab_id: str, index: int, workspace_id: str) -> Non
     first, *rest = project["tabs"]
     replace_tab(first, project, tab_id, index)
     append_tabs(rest, project, workspace_id)
+
+
+def target_tab(open_tabs: list[dict], preferred: list[str | None], own_tab: str | None) -> str | None:
+    """The tab to rebuild: the focused one unless this run lives in it.
+
+    `layout.apply` closes the tab that it rebuilds, so a run that starts from a
+    pane must not rebuild the tab that holds that pane: the close would stop the
+    run. A keybinding press reports the focused pane too, but no pane runs it,
+    so `own_tab` stays None there. None means the workspace has no tab to rebuild.
+    """
+    tab_ids = [tab["tab_id"] for tab in open_tabs if tab["tab_id"] != own_tab]
+    if not tab_ids:
+        return None
+    for tab_id in preferred:
+        if tab_id in tab_ids:
+            return tab_id
+    return tab_ids[0]
 
 
 def create_project(project: dict) -> None:
@@ -703,25 +747,32 @@ def cmd_apply(spec: dict, force: bool = False) -> int:
         print(f"default-layout: skip {project['label']}: no such directory {project_dir(project)}")
         return 1
     open_tabs = workspace_tabs(snap, workspace_id)
-    tab_ids = [tab["tab_id"] for tab in open_tabs]
-    focused = next(
-        (
-            tab_id
-            for tab_id in (os.environ.get("HERDR_TAB_ID"), context().get("tab_id"), workspace.get("active_tab_id"))
-            if tab_id in tab_ids
-        ),
-        tab_ids[0],
+    if not open_tabs:
+        print("default-layout: no tab in this workspace")
+        return 1
+    own_pane = caller_pane()
+    own_tab = tab_of_pane(snap, own_pane)
+    focused = target_tab(
+        open_tabs,
+        [os.environ.get("HERDR_TAB_ID"), context().get("tab_id"), workspace.get("active_tab_id")],
+        own_tab,
     )
+    if focused is None:
+        own = next(tab for tab in open_tabs if tab["tab_id"] == own_tab)
+        where = f"{project['label']}/{own.get('label') or own_tab}"
+        print(f"default-layout: {where} runs this command; run apply from a pane in another tab")
+        return 1
     # `layout.apply` closes the tab it rebuilds and cannot keep a live PTY, so a
     # tab with work in it must stay. Only --force replaces it.
     focused_tab = next(tab for tab in open_tabs if tab["tab_id"] == focused)
-    reason = in_use_reason(tab_panes(snap, focused))
+    panes = [pane for pane in tab_panes(snap, focused) if pane["pane_id"] != own_pane]
+    reason = in_use_reason(panes)
     if reason and not force:
         where = f"{project['label']}/{focused_tab.get('label') or focused}"
         print(f"default-layout: {where} left alone: {reason}")
         print("default-layout: run apply with --force to replace it and lose that work")
         return 1
-    build_into(project, focused, tab_ids.index(focused), workspace_id)
+    build_into(project, focused, open_tabs.index(focused_tab), workspace_id)
     print(f"default-layout: applied {project['label']} ({len(project['tabs'])} tabs)")
     return 0
 
