@@ -50,20 +50,25 @@ Each `[[projects.tabs]]` table is one tab, in file order. The first tab is the a
 | `name` | The tab label. Required. Two tabs in one project may share a name. |
 | `command` | A program for a one-pane tab, such as `"nvim"`. |
 | `agent` | An agent for a one-pane tab, such as `"claude"` or `"pi"`. |
-| `working_dir` | The pane directory. A relative path starts at the project `path`. A relative path that climbs out of the project falls back to it. |
+| `working_dir` | The pane directory. For a tab with panes, the default directory of every pane that sets none. A relative path starts at the project `path`. A relative path that climbs out of the project falls back to it. |
 
 A tab with none of these keys is one shell in the project directory.
 
+A tab with `panes` may not also set `command`, `agent` or `label`. The plugin reports that as a problem, because it would ignore the key. `label` names a pane, so name the tab with `name`.
+
 Two tabs with one name are a natural way to write a second shell or a second agent in another directory. The plugin matches tabs by name in file order, so each open tab answers for one entry and a restored tab gets the program of its own entry. A name of only digits, such as `"1"`, is a problem: Herdr gives that label to a tab without a name, so the plugin cannot tell the two apart.
 
-For more than one pane, give the tab up to four `[[projects.tabs.panes]]` tables instead of `command` or `agent`:
+For more than one pane, give the tab up to four `[[projects.tabs.panes]]` tables instead of `command`, `agent` or `label`:
 
 | Key | Meaning |
 |---|---|
 | `label` | The pane name. |
-| `command`, `agent`, `working_dir` | As above. Set `command` or `agent`, not both. No program gives a shell. |
+| `command`, `agent` | As above. Set `command` or `agent`, not both. No program gives a shell. |
+| `working_dir` | The pane directory, as above. A pane that sets none uses the tab's `working_dir`. |
 | `split` | `"down"` (the default) or `"right"`. Each pane after the first splits all the panes above it. |
 | `ratio` | The share of the space that the panes above keep, between 0 and 1. The default is 0.5. |
+
+The first pane holds no split of its own, so it may not set `split` or `ratio`. The plugin reports both as a problem. A tab without `panes` is one pane, so it may not set them either. A pane with no `working_dir` starts in the tab's `working_dir`, or in the project directory when the tab sets none.
 
 An agent is a plain name. The plugin runs it as the pane's command, and Herdr detects it as an agent. The plugin adds no model, thinking or prompt flags.
 
@@ -97,7 +102,7 @@ working_dir = "plugins"
 
 This gives one workspace, `herdr-extensions`, with three tabs. The `agents` tab has pi on the left (60% of the width) and a shell on the right.
 
-The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions. A repeated `label` is a problem too, because two workspaces with one label cannot be told apart, and so is a `label` with a space at either end. A repeated tab `name` is not a problem. A `name` of only digits is a problem, because Herdr gives that label to an unnamed tab. An absolute `working_dir` may point anywhere, inside the project or not.
+The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions. A repeated `label` is a problem too, because two workspaces with one label cannot be told apart, and so is a `label` with a space at either end. A key that the plugin would ignore is a problem as well, such as `label` on a tab with panes, or `split` or `ratio` on the first pane. A repeated tab `name` is not a problem. A `name` of only digits is a problem, because Herdr gives that label to an unnamed tab. An absolute `working_dir` may point anywhere, inside the project or not.
 
 ## When it runs
 
@@ -178,7 +183,7 @@ description = "default layout: apply to this workspace"
 - The plugin does not change focus.
 - The plugin removes and reorders only a tab that it rebuilds: a tab that a restore rehydrates, or the tab that `apply` replaces. It never renames a tab.
 - The file may not name a tab with only digits. Herdr labels a tab without a name with its position, so the plugin reports such a name as a problem and builds nothing.
-- A pane whose `working_dir` is not a directory opens in the project directory, with one line in the plugin log. A relative `working_dir` that climbs out of the project, even through a symbolic link, does the same, such as `"../etc"`. Herdr does not refuse a missing directory: it opens the pane in your home directory instead, so the plugin never sends one.
+- A pane whose `working_dir` is not a directory opens in the project directory, with one line in the plugin log. A tab-level `working_dir` does the same for all of its panes, and reports one line for the tab. A relative `working_dir` that climbs out of the project, even through a symbolic link, does the same, such as `"../etc"`. Herdr does not refuse a missing directory: it opens the pane in your home directory instead, so the plugin never sends one.
 - A project whose directory does not exist is skipped, with one line in the plugin log.
 - A request to Herdr gives up after 30 seconds, from the connect to the reply. A server that stalls fails that project with one line, and the run moves to the next project.
 - Two runs do not build one project at once: a run holds a lock on the claim marker until it ends. A file system that cannot lock falls back to the marker's age, so on such a file system a run past 60 seconds can still lose its claim. `flock` on some CIFS and FUSE mounts reports success without excluding anyone, and this plugin cannot tell.

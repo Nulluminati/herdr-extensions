@@ -468,6 +468,63 @@ class SpecTests(DefaultLayoutTestCase):
             """)
         self.assertEqual(problems, ["a/t: set either command or panes, not both"])
 
+    def test_a_label_on_a_tab_with_panes_is_an_error(self):
+        # `label` names a pane, and a tab with panes is named by `name`.
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp"
+            [[projects.tabs]]
+            name = "t"
+            label = "shared label"
+            [[projects.tabs.panes]]
+            command = "ls"
+            """)
+        self.assertEqual(problems, ["a/t: label is a pane key; name the tab with name"])
+
+    def test_a_tab_working_dir_is_the_default_for_its_panes(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp/proj"
+            [[projects.tabs]]
+            name = "dev"
+            working_dir = "backend"
+            [[projects.tabs.panes]]
+            agent = "pi"
+            [[projects.tabs.panes]]
+            split = "right"
+            """)
+        self.assertEqual(problems, [])
+
+    def test_a_tab_working_dir_must_be_a_string(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp/proj"
+            [[projects.tabs]]
+            name = "dev"
+            working_dir = " "
+            [[projects.tabs.panes]]
+            agent = "pi"
+            """)
+        self.assertEqual(problems, ["a/dev: working_dir must be a non-empty string"])
+
+    def test_an_empty_pane_list_is_a_one_pane_tab(self):
+        # `tab_tree` builds one pane from the tab's own keys, so validate must
+        # read the tab the same way.
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp/proj"
+            [[projects.tabs]]
+            name = "t"
+            command = "nvim"
+            working_dir = "docs"
+            panes = []
+            """)
+        self.assertEqual(problems, [])
+
     def test_five_panes_is_an_error(self):
         panes = "[[projects.tabs.panes]]\n" * 5
         problems = self.problems('[[projects]]\nlabel = "a"\npath = "/tmp"\n[[projects.tabs]]\nname = "t"\n' + panes)
@@ -491,6 +548,46 @@ class SpecTests(DefaultLayoutTestCase):
             [
                 'a/t: pane 2: split must be "down" or "right"',
                 "a/t: pane 3: ratio must be between 0 and 1",
+            ],
+        )
+
+    def test_a_split_or_ratio_on_the_first_pane_is_an_error(self):
+        # Only the panes that split after the first one use these two keys.
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp"
+            [[projects.tabs]]
+            name = "t"
+            [[projects.tabs.panes]]
+            split = "right"
+            ratio = 0.3
+            [[projects.tabs.panes]]
+            command = "ls"
+            """)
+        self.assertEqual(
+            problems,
+            [
+                "a/t: pane 1: split has no effect on the first pane",
+                "a/t: pane 1: ratio has no effect on the first pane",
+            ],
+        )
+
+    def test_a_split_or_ratio_on_a_one_pane_tab_is_an_error(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "a"
+            path = "/tmp"
+            [[projects.tabs]]
+            name = "t"
+            split = "right"
+            ratio = 0.3
+            """)
+        self.assertEqual(
+            problems,
+            [
+                "a/t: split has no effect on the first pane",
+                "a/t: ratio has no effect on the first pane",
             ],
         )
 
@@ -718,6 +815,64 @@ class TreeTests(unittest.TestCase):
                 )
             self.assertEqual(tree["first"]["cwd"], str(Path(root) / "plugins"))
             self.assertEqual(tree["second"]["cwd"], root)
+
+    def test_a_tab_working_dir_is_the_default_for_its_panes(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "backend").mkdir()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                tree = default_layout.tab_tree(
+                    {"name": "dev", "working_dir": "backend", "panes": [{}, {"split": "right"}]}, root
+                )
+            self.assertEqual(tree["first"]["cwd"], str(Path(root) / "backend"))
+            self.assertEqual(tree["second"]["cwd"], str(Path(root) / "backend"))
+            self.assertEqual(output.getvalue(), "")
+
+    def test_a_pane_working_dir_wins_over_the_tab_one(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "backend").mkdir()
+            (Path(root) / "plugins").mkdir()
+            tree = default_layout.tab_tree(
+                {"name": "dev", "working_dir": "backend", "panes": [{"working_dir": "plugins"}, {}]}, root
+            )
+            self.assertEqual(tree["first"]["cwd"], str(Path(root) / "plugins"))
+            self.assertEqual(tree["second"]["cwd"], str(Path(root) / "backend"))
+
+    def test_a_pane_working_dir_starts_at_the_project_not_the_tab(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "backend" / "api").mkdir(parents=True)
+            tree = default_layout.tab_tree(
+                {"name": "dev", "working_dir": "backend", "panes": [{"working_dir": "backend/api"}, {}]}, root
+            )
+            self.assertEqual(tree["first"]["cwd"], str(Path(root) / "backend" / "api"))
+
+    def test_a_missing_tab_working_dir_falls_back_once_for_its_panes(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                tree = default_layout.tab_tree(
+                    {"name": "dev", "working_dir": "docs", "panes": [{}, {"split": "right"}]}, root, "alpha/dev"
+                )
+            self.assertEqual(tree["first"]["cwd"], root)
+            self.assertEqual(tree["second"]["cwd"], root)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [f"default-layout: alpha/dev: no such directory {Path(root) / 'docs'}; using {root}"],
+            )
+
+    def test_a_tab_working_dir_that_leaves_the_project_falls_back(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                tree = default_layout.tab_tree(
+                    {"name": "dev", "working_dir": "../etc", "panes": [{}, {"split": "right"}]}, root, "alpha/dev"
+                )
+            self.assertEqual(tree["first"]["cwd"], root)
+            self.assertEqual(tree["second"]["cwd"], root)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [f"default-layout: alpha/dev: working_dir ../etc is outside the project; using {root}"],
+            )
 
     def test_a_relative_working_dir_that_leaves_the_project_falls_back(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1297,6 +1452,29 @@ class StartupTests(DefaultLayoutTestCase):
             self.stdout.getvalue(),
         )
         self.assertIn("default-layout: built alpha (2 tabs)", self.stdout.getvalue())
+
+    def test_a_tab_working_dir_is_used_for_the_panes_it_builds(self):
+        (self.project_a / "backend").mkdir()
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "dev"
+            working_dir = "backend"
+
+            [[projects.tabs.panes]]
+            agent = "pi"
+
+            [[projects.tabs.panes]]
+            split = "right"
+            """)
+        self.fresh_home()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        root = self.applies()[0]["root"]
+        self.assertEqual(root["first"]["cwd"], str(self.project_a / "backend"))
+        self.assertEqual(root["second"]["cwd"], str(self.project_a / "backend"))
 
     def test_a_home_directory_that_does_not_resolve_is_a_message(self):
         # Path.expanduser raises RuntimeError for an unknown ~user, and the

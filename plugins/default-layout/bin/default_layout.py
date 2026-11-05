@@ -293,12 +293,19 @@ def pane_problems(pane: dict, where: str, first: bool) -> list[str]:
             problems.append(f"{where}: agent must be a plain name such as claude or pi")
         if "command" in pane:
             problems.append(f"{where}: set either agent or command, not both")
-    if not first and "split" in pane and pane["split"] not in SPLITS:
-        problems.append(f'{where}: split must be "down" or "right"')
-    if "ratio" in pane:
-        ratio = pane["ratio"]
-        if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio < 1:
-            problems.append(f"{where}: ratio must be between 0 and 1")
+    # The first pane holds no split of its own: `tab_tree` reads both keys from
+    # the panes that split after it, so they do nothing here.
+    if first:
+        for key in ("split", "ratio"):
+            if key in pane:
+                problems.append(f"{where}: {key} has no effect on the first pane")
+    else:
+        if "split" in pane and pane["split"] not in SPLITS:
+            problems.append(f'{where}: split must be "down" or "right"')
+        if "ratio" in pane:
+            ratio = pane["ratio"]
+            if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio < 1:
+                problems.append(f"{where}: ratio must be between 0 and 1")
     return problems
 
 
@@ -315,10 +322,17 @@ def tab_problems(tab, where: str) -> list[str]:
     else:
         problems.append(f"{where}: name is required")
     panes = tab.get("panes")
-    if panes is None:
+    # An empty pane list is a plain tab: `tab_tree` builds one pane from the tab.
+    if panes is None or panes == []:
         return problems + pane_problems(tab, where, first=True)
     if "command" in tab or "agent" in tab:
         problems.append(f"{where}: set either command or panes, not both")
+    # `label` names a pane, and a tab with panes is named by `name`.
+    if "label" in tab:
+        problems.append(f"{where}: label is a pane key; name the tab with name")
+    # `working_dir` sets the directory that the panes below start in.
+    if "working_dir" in tab and not is_text(tab["working_dir"]):
+        problems.append(f"{where}: working_dir must be a non-empty string")
     if not isinstance(panes, list) or not all(isinstance(pane, dict) for pane in panes):
         return problems + [f"{where}: panes must be [[tabs.panes]] tables"]
     if len(panes) > MAX_PANES:
@@ -394,7 +408,7 @@ def pane_command(pane: dict) -> list[str] | None:
     return ["sh", "-c", program + "; exec ${SHELL:-/bin/sh}"]
 
 
-def pane_cwd(pane: dict, project_path, where: str) -> Path:
+def pane_cwd(pane: dict, project_path, where: str, default_cwd: Path | None = None) -> Path:
     """The directory a pane starts in.
 
     Herdr does not refuse a cwd that does not exist. It opens the pane in the
@@ -402,15 +416,19 @@ def pane_cwd(pane: dict, project_path, where: str) -> Path:
     working_dir. A directory that is not there, and a relative one that climbs
     out of the project, therefore fall back to the project path, with one line
     in the plugin log. The plugin never sends Herdr a cwd it cannot use.
+
+    A pane without a working_dir of its own starts in `default_cwd`, which is
+    the directory that its tab sets.
     """
     root = Path(project_path)
     if not pane.get("working_dir"):
-        return root
+        return root if default_cwd is None else default_cwd
+    working_dir = pane["working_dir"]
     # An absolute working_dir replaces the project path in the join.
-    cwd = root / Path(pane["working_dir"]).expanduser()
+    cwd = root / Path(working_dir).expanduser()
     prefix = f"{where}: " if where else ""
-    if outside_project(pane["working_dir"], root):
-        print(f"default-layout: {prefix}working_dir {pane['working_dir']} is outside the project; using {root}")
+    if outside_project(working_dir, root):
+        print(f"default-layout: {prefix}working_dir {working_dir} is outside the project; using {root}")
         return root
     if cwd.is_dir():
         return cwd
@@ -418,11 +436,11 @@ def pane_cwd(pane: dict, project_path, where: str) -> Path:
     return root
 
 
-def pane_node(pane: dict, project_path, where: str = "") -> dict:
+def pane_node(pane: dict, project_path, where: str = "", default_cwd: Path | None = None) -> dict:
     node = {"type": "pane"}
     if pane.get("label"):
         node["label"] = pane["label"]
-    node["cwd"] = str(pane_cwd(pane, project_path, where))
+    node["cwd"] = str(pane_cwd(pane, project_path, where, default_cwd))
     program = pane_command(pane)
     if program:
         node["command"] = program
@@ -435,15 +453,20 @@ def tab_tree(tab: dict, project_path, where: str = "") -> dict:
     Each pane splits the whole layout built so far, so the first pane ends up
     innermost. A tab without panes is one pane built from the tab's own keys.
     """
-    panes = tab.get("panes") or [tab]
-    node = pane_node(panes[0], project_path, where)
+    panes = tab.get("panes")
+    if not panes:
+        return pane_node(tab, project_path, where)
+    # A tab-level working_dir is the default directory of its panes. It is
+    # resolved once, so a directory that is not there is reported once.
+    default_cwd = pane_cwd(tab, project_path, where) if tab.get("working_dir") else None
+    node = pane_node(panes[0], project_path, where, default_cwd)
     for pane in panes[1:]:
         node = {
             "type": "split",
             "direction": pane.get("split", "down"),
             "ratio": pane.get("ratio", 0.5),
             "first": node,
-            "second": pane_node(pane, project_path, where),
+            "second": pane_node(pane, project_path, where, default_cwd),
         }
     return node
 

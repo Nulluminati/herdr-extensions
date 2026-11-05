@@ -17,22 +17,27 @@
 #                       label to a tab without a name.
 #   command             A program for a one-pane tab, such as "nvim".
 #   agent               An agent for a one-pane tab, such as "claude" or "pi".
-#   working_dir         A directory for a one-pane tab. A relative path is
-#                       relative to the project `path`. An absolute path may
+#   working_dir         The pane directory. For a tab with panes, the default
+#                       directory of every pane that sets none. A relative path
+#                       is relative to the project `path`. An absolute path may
 #                       point anywhere. A path that is not a directory, or a
 #                       relative path that climbs out of the project, falls back
 #                       to the project path.
 #   A tab with none of these is one shell in the project directory.
 #
+#   A tab with panes may not also set `command`, `agent` or `label`.
+#
 # [[projects.tabs.panes]]  Up to 4 panes, instead of the keys above.
 #   label               The pane name.
-#   command, agent, working_dir
-#                       The same as for a one-pane tab. Set `command` or
+#   command, agent      The same as for a one-pane tab. Set `command` or
 #                       `agent`, not both. No program gives a shell.
+#   working_dir         The pane directory, as above. A pane that sets none
+#                       uses the tab's `working_dir`.
 #   split               "down" (the default) or "right". Each pane after the
 #                       first splits everything above it in this direction.
 #   ratio               The share of the space the earlier panes keep, between
-#                       0 and 1. The default is 0.5.
+#                       0 and 1. The default is 0.5. The first pane may not set
+#                       `split` or `ratio`, because it holds no split.
 #
 # A program runs as `sh -c '<program>; exec $SHELL'`, so quitting it leaves
 # your shell in the pane.
