@@ -423,6 +423,32 @@ class SpecTests(DefaultLayoutTestCase):
         self.assertEqual(self.herdr.commands, [])
         self.assertEqual(self.herdr.requests, [])
 
+    def test_a_layout_path_that_is_a_directory_is_reported(self):
+        (self.config_dir / "layout.toml").mkdir()
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
+        lines = self.stderr.getvalue().splitlines()
+        self.assertIn("invalid layout file", lines[0])
+        self.assertIn("Is a directory", lines[1])
+        self.assertEqual(self.herdr.commands, [])
+
+    def test_an_unreadable_layout_file_is_reported(self):
+        self.two_projects()
+        denied = PermissionError(13, "Permission denied", str(self.config_dir / "layout.toml"))
+        with self.race_once("read_text", self.config_dir / "layout.toml", denied):
+            self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
+        lines = self.stderr.getvalue().splitlines()
+        self.assertIn("invalid layout file", lines[0])
+        self.assertIn("Permission denied", lines[1])
+        self.assertEqual(self.herdr.commands, [])
+
+    def test_a_layout_file_that_is_not_utf8_is_reported(self):
+        (self.config_dir / "layout.toml").write_bytes(b"\xff\xfe[[projects]]\n")
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
+        lines = self.stderr.getvalue().splitlines()
+        self.assertIn("invalid layout file", lines[0])
+        self.assertIn("utf-8", lines[1])
+        self.assertEqual(self.herdr.commands, [])
+
     def test_layout_path_falls_back_to_the_home_config_dir(self):
         os.environ.pop("HERDR_PLUGIN_CONFIG_DIR")
         self.assertEqual(

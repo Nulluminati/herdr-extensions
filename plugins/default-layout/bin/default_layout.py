@@ -210,6 +210,8 @@ def load_layout() -> dict | None:
         text = path.read_text()
     except FileNotFoundError:
         return None
+    except (OSError, UnicodeDecodeError) as error:
+        raise LayoutError(path, [str(error)]) from error
     try:
         spec = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:

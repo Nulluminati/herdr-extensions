@@ -95,7 +95,7 @@ working_dir = "plugins"
 
 This gives one workspace, `herdr-extensions`, with three tabs. The `agents` tab has pi on the left (60% of the width) and a shell on the right.
 
-The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing.
+The plugin checks the whole file before it builds anything. It reports every problem at once in the plugin log, and builds nothing. That includes a file the plugin cannot read, such as one with the wrong permissions.
 
 ## When it runs
 
