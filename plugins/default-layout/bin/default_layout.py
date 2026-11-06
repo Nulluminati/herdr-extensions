@@ -1038,16 +1038,20 @@ def ensure_project(project: dict, open_workspaces: list[dict], snap: dict) -> No
     print(f"default-layout: added {len(missing)} tab(s) to {project['label']}")
 
 
-def rehydrate(project: dict, workspace_id: str, snap: dict) -> int:
+def rehydrate(project: dict, workspace_id: str, snap: dict, built: set[str]) -> int:
     """Relaunch the programs in tabs that a restore brought back as bare shells.
 
     Each open tab takes the first file tab of its name that no earlier open tab
     took. Two file tabs may share a name, and each rebuilt tab then gets the
-    program of its own entry.
+    program of its own entry. `built` holds the ids of the tabs that this pass
+    built already. Such a tab is no restored shell, so it is skipped, and the id
+    of each tab rebuilt here goes into it.
     """
     unused = list(project["tabs"])
     rebuilt = 0
     for index, open_tab in enumerate(workspace_tabs(snap, workspace_id)):
+        if open_tab["tab_id"] in built:
+            continue
         found = next(
             ((place, entry) for place, entry in enumerate(unused) if entry["name"] == open_tab.get("label")),
             None,
@@ -1065,7 +1069,7 @@ def rehydrate(project: dict, workspace_id: str, snap: dict) -> int:
         if reason:
             print(f"default-layout: {where} left alone: {reason}")
             continue
-        replace_tab(tab, project, open_tab["tab_id"], index)
+        built.add(replace_tab(tab, project, open_tab["tab_id"], index))
         print(f"default-layout: rehydrated {where}")
         rebuilt += 1
     return rebuilt
@@ -1100,16 +1104,33 @@ def each_project(spec: dict, work) -> None:
                 release(key)
 
 
+def session_views(open_workspaces: list[dict], snap: dict):
+    """The workspaces and snapshot for each project of a pass, in turn.
+
+    The first project gets the ones given. A project can close a tab, and Herdr
+    gives the rebuilt tab a new id, so each later project reads them again. Two
+    projects can share a workspace, such as a repository and a package nested in it.
+    """
+    yield open_workspaces, snap
+    while True:
+        yield workspaces(), snapshot()
+
+
 def build_missing(spec: dict, open_workspaces: list[dict], snap: dict) -> None:
-    each_project(spec, lambda project: ensure_project(project, open_workspaces, snap))
+    views = session_views(open_workspaces, snap)
+    each_project(spec, lambda project: ensure_project(project, *next(views)))
 
 
 def rehydrate_open(spec: dict, open_workspaces: list[dict], snap: dict) -> None:
+    views = session_views(open_workspaces, snap)
+    built: set[str] = set()
+
     def work(project):
+        current_workspaces, current = next(views)
         # A project with no open workspace was closed on purpose; leave it closed.
-        workspace = match_project(project, open_workspaces, snap)
+        workspace = match_project(project, current_workspaces, current)
         if workspace is not None:
-            count = rehydrate(project, workspace["workspace_id"], snap)
+            count = rehydrate(project, workspace["workspace_id"], current, built)
             print(f"default-layout: rehydrated {count} tab(s) in {project['label']}")
 
     each_project(spec, work)

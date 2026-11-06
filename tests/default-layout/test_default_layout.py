@@ -27,6 +27,13 @@ def wrapped(program):
     return ["sh", "-c", program + "; exec ${SHELL:-/bin/sh}"]
 
 
+def leaves(node):
+    """The pane nodes of a `layout.apply` tree, in order."""
+    if node["type"] == "pane":
+        return [node]
+    return leaves(node["first"]) + leaves(node["second"])
+
+
 class FakeHerdr:
     """A Herdr server in memory: CLI commands and socket requests both land here."""
 
@@ -177,7 +184,10 @@ class FakeHerdr:
         self.requests.append((method, params))
         if method == "layout.apply":
             if params.get("tab_id"):
-                old = next(t for t in self.tabs if t["tab_id"] == params["tab_id"])
+                old = next((t for t in self.tabs if t["tab_id"] == params["tab_id"]), None)
+                if old is None:
+                    # Herdr answers a tab that is gone, such as one an earlier apply closed.
+                    raise default_layout.HerdrError(f"layout.apply: tab {params['tab_id']} not found")
                 self.tabs.remove(old)
                 self.panes = [p for p in self.panes if p["tab_id"] != old["tab_id"]]
                 workspace_id = old["workspace_id"]
@@ -185,6 +195,17 @@ class FakeHerdr:
                 workspace_id = params["workspace_id"]
             # Herdr appends the built tab to the end of the tab row.
             tab_id = self.add_tab(workspace_id, params.get("tab_label"))
+            # Each pane of the tree starts in its own directory. The pane ids
+            # leave the shared counter alone, so tab ids stay as tests expect.
+            for number, node in enumerate(leaves(params["root"]), 1):
+                self.panes.append(
+                    {
+                        "pane_id": f"{tab_id}:p{number}",
+                        "tab_id": tab_id,
+                        "workspace_id": workspace_id,
+                        "cwd": node["cwd"],
+                    }
+                )
             return {"type": "layout_applied", "layout": {"tab_id": tab_id}}
         if method == "tab.move":
             tab = next(t for t in self.tabs if t["tab_id"] == params["tab_id"])
@@ -1454,6 +1475,34 @@ class StartupTests(DefaultLayoutTestCase):
         self.assertEqual([p["tab_label"] for p in self.applies()], ["editor"])
         self.assertIn("default-layout: alpha already open", self.stdout.getvalue())
 
+    def test_a_parent_project_fills_in_after_a_nested_project_built_the_workspace(self):
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "agents"
+            command = "pi"
+
+            [[projects.tabs]]
+            name = "editor"
+            command = "nvim"
+
+            [[projects]]
+            label = "outer"
+            path = "{self.dir}"
+
+            [[projects.tabs]]
+            name = "outer-shell"
+            """)
+        # A fresh server starts its one workspace in the nested project, so both projects match it.
+        workspace_id = self.herdr.add_workspace("1", {"1": [{"cwd": str(self.project_a)}]})
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertNotIn("failed", self.stdout.getvalue())
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["agents", "editor", "outer-shell"])
+        self.assertIn("default-layout: added 1 tab(s) to outer", self.stdout.getvalue())
+
     def test_open_project_with_some_tabs_gets_only_the_missing_tabs(self):
         self.two_projects()
         workspace_id = self.herdr.add_workspace("alpha", {"mine": [{"cwd": "/x"}], "editor": [{"cwd": "/x"}]})
@@ -2073,6 +2122,38 @@ class RehydrateTests(DefaultLayoutTestCase):
             f"default-layout: alpha/shell left alone: agent in {first_pane['pane_id']}",
             self.stdout.getvalue(),
         )
+
+    def test_a_tab_that_one_project_rehydrated_is_not_rebuilt_by_another(self):
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "editor"
+            command = "nvim"
+
+            [[projects]]
+            label = "outer"
+            path = "{self.dir}"
+
+            [[projects.tabs]]
+            name = "editor"
+            command = "htop"
+
+            [[projects.tabs]]
+            name = "logs"
+            command = "tail"
+            """)
+        self.saved_session()
+        cwd = str(self.project_a)
+        workspace_id = self.herdr.add_workspace("1", {"editor": [{"cwd": cwd}], "logs": [{"cwd": cwd}]})
+        self.run_main("default_layout.py", "startup")
+        self.assertNotIn("failed", self.stdout.getvalue())
+        applies = self.applies()
+        self.assertEqual([p["root"]["command"] for p in applies], [wrapped("nvim"), wrapped("tail")])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["editor", "logs"])
+        self.assertIn("default-layout: rehydrated outer/logs", self.stdout.getvalue())
 
     def test_one_workspace_restore_rehydrates_and_builds_no_workspace(self):
         self.two_projects()
