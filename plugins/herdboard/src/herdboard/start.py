@@ -19,7 +19,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import attachments
+from . import attachments, verification
 from .activity import LOG_REF, record_pane_agent
 from .activity import append as activity_append
 from .brief import agent_message, brief_text, card_token
@@ -1621,6 +1621,8 @@ class Starter:
             card = self.store.show(ref)
             key = card.ref
         lock_key = safe_key(key)
+        # Before anything starts: a factory run needs the plan's verification contract.
+        verified = verification.check_plan(self.config, card.ref) if factory else None
         with _lock(".start-" + lock_key + ".lock"):
             mode, target = self._target(card, repo, no_repo, new_repo, issue, checkout, base)
             if factory:
@@ -1653,7 +1655,7 @@ class Starter:
                     factory_run = replace(
                         factory_module.default_run(self.config, agent, model, thinking), rounds=rounds
                     )
-                record["factory"] = factory_module.new_state(key, factory_run)
+                record["factory"] = factory_module.new_state(key, factory_run, *verified)
             try:
 
                 def persist():

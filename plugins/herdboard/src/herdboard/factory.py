@@ -22,7 +22,7 @@ import traceback
 from dataclasses import replace
 from pathlib import Path
 
-from . import activity, attachments
+from . import activity, attachments, verification
 from . import start as start_module
 from .agent_review import (
     REVIEW_COMMAND_RULES,
@@ -236,14 +236,19 @@ def update(ref, folder: Path, **changes) -> dict | None:
         return dict(state)
 
 
-def new_state(key: str, run: FactoryRun) -> dict:
-    """The state of a new factory run, with its folder created."""
+def new_state(key: str, run: FactoryRun, contract: verification.Contract, plan_text: str) -> dict:
+    """The state of a new factory run, with its folder created.
+
+    Every new run follows the evidence policy: it keeps the plan's contract, the plan's digest and a copy of
+    the plan beside the run settings. A record without `verification` comes from before the policy."""
     folder = state_dir() / "factory" / f"{safe_key(key)}-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
         folder.mkdir(parents=True, exist_ok=True)
+        (folder / verification.EVIDENCE_DIR).mkdir(exist_ok=True)
     except OSError as error:
         raise FactoryError(f"{folder}: cannot create the factory folder: {error}", "io") from error
     return {
+        **verification.freeze(folder, contract, plan_text),
         "run": run.to_dict(),
         "rounds": run.rounds,
         "round": 0,

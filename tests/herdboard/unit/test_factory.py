@@ -9,12 +9,14 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from herdboard import activity, agent_review, attachments, factory, start
+from herdboard import activity, agent_review, attachments, factory, start, verification
 from herdboard.config import Config
 from herdboard.linear_states import refuse
 from herdboard.model import HerdboardError
 from support.herdboard_cli import CliTestCase
 from support.herdboard_merge import GitHerdr, MergeTestCase
+from support.herdboard_verification import CONTRACT, contract
+from support.herdboard_verification import plan as verified_plan
 
 REQUEST = re.compile(r"Read (\S+)/request\.md")
 
@@ -124,6 +126,9 @@ class FactoryTestCase(MergeTestCase):
         self.enterContext(patch.object(agent_review, "POLL_SECONDS", 0))
 
     def start_factory(self, **options):
+        """Start a factory run. A card without a plan gets one with a valid verification contract."""
+        if not attachments.plan_path(self.config, self.card.ref).exists():
+            self.write_plan(verified_plan())
         result = self.starter.start(self.card.ref, agent=options.pop("agent", "claude"), factory=True, **options)
         self.worktree = Path(result["worktree_path"])
         self.folder = Path(self.record()["factory"]["folder"])
@@ -260,7 +265,7 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(self.state()["run"], run.to_dict())
         self.assertEqual(factory.summary(self.state())["preset"], "cheap")
         self.commit(self.worktree, "change.txt", "change\n", "feat: change")
-        self.write_plan("Review lenses: code, ux")
+        self.write_plan(verified_plan(lenses="code, ux"))
         review = factory.run_round(self.store, self.card.ref, self.record(), self.card, 1)
         self.assertEqual([entry["lens"] for entry in review["reviewers"]], ["security"])
 
@@ -355,6 +360,7 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(self.workers, [])
 
     def test_a_failed_start_leaves_no_running_factory(self):
+        self.write_plan(verified_plan())
         self.fake.fail = "agent start"
         with self.assertRaises(start.StartError):
             self.starter.start(self.card.ref, agent="claude", factory=True)
@@ -370,15 +376,68 @@ class StartFactoryTests(FactoryTestCase):
         self.assertEqual(raised.exception.code, "factory_running")
 
     def test_a_factory_does_not_start_over_a_running_agent(self):
+        self.write_plan(verified_plan())
         self.starter.start(self.card.ref, agent="claude")
         with self.assertRaises(start.StartError) as raised:
             self.starter.start(self.card.ref, agent="claude", factory=True)
         self.assertEqual(raised.exception.code, "agent_running")
 
+    def test_every_kind_of_run_refuses_a_plan_without_a_valid_contract(self):
+        from herdboard.config import Role
+
+        preset = dataclasses.replace(factory.default_run(self.config), name="cheap", rounds=1)
+        custom = dataclasses.replace(
+            factory.default_run(self.config), name="custom", builder=Role("pi", "test/model", "high")
+        )
+        runs = {"default": None, "preset": preset, "custom": custom}
+        for plan_text, code in (
+            (None, "verification_plan_required"),
+            ("# Plan\n\n## Testing\nRun the tests.\n", "verification_plan_required"),
+            (verified_plan(contract(workflow="research")), "verification_plan_invalid"),
+        ):
+            for name, run in runs.items():
+                with self.subTest(plan=plan_text, run=name):
+                    if plan_text is None:
+                        attachments.plan_path(self.config, self.card.ref).unlink(missing_ok=True)
+                    else:
+                        self.write_plan(plan_text)
+                    before = len(self.fake.calls)
+                    with self.assertRaises(verification.VerificationError) as raised:
+                        self.starter.start(self.card.ref, agent="claude", factory=True, factory_run=run)
+                    self.assertEqual(raised.exception.code, code)
+                    self.assertIn("Update the plan", str(raised.exception))
+                    # Nothing started: no worktree, no agent, no worker and no factory state.
+                    self.assertEqual(self.fake.calls[before:], [])
+                    self.assertEqual(self.workers, [])
+                    self.assertIsNone(factory.factory_state(self.card.ref))
+                    self.assertEqual(self.store.show(self.card.ref).column, self.card.column)
+
+    def test_an_ordinary_start_needs_no_contract(self):
+        result = self.starter.start(self.card.ref, agent="claude")
+        self.assertIsNone(self.record().get("factory"))
+        self.assertTrue(result["worktree_path"])
+
+    def test_a_new_run_freezes_the_contract_beside_its_settings(self):
+        run = dataclasses.replace(factory.default_run(self.config), name="cheap", lenses_on=("security",))
+        before = run.to_dict()
+        self.write_plan(verified_plan(lenses="code"))
+        self.start_factory(factory_run=run)
+        state = self.state()
+        self.assertEqual(state["verification"], 1)
+        self.assertEqual(state["contract"], CONTRACT)
+        self.assertEqual(state["plan_digest"], verification.digest(verified_plan(lenses="code")))
+        self.assertEqual((self.folder / "plan.md").read_text(), verified_plan(lenses="code"))
+        self.assertTrue((self.folder / "evidence").is_dir())
+        # The run settings keep their own format: the contract is not part of them.
+        self.assertEqual(state["run"], before)
+        self.assertNotIn("verification", state["run"])
+        # A run without the code lens still starts.
+        self.assertEqual(state["run"]["lenses_on"], ["security"])
+
 
 class RoundTests(FactoryTestCase):
     def test_one_reviewer_per_plan_lens_with_its_kind_name_and_split(self):
-        self.write_plan("## Decisions\n- Review lenses: security, code\n")
+        self.write_plan(verified_plan(lenses="security, code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         record = self.record()
@@ -402,7 +461,7 @@ class RoundTests(FactoryTestCase):
         self.assertEqual((state["round"], state["lenses"], state["status"]), (1, ["security", "code"], "reviewing"))
 
     def test_the_next_round_gets_the_earlier_answers(self):
-        self.write_plan("Review lenses: code\n")
+        self.write_plan(verified_plan(lenses="code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         factory.run_round(self.store, self.card.ref, self.record(), self.card, 2)
@@ -412,7 +471,7 @@ class RoundTests(FactoryTestCase):
         self.assertIn("unless you have new evidence", request)
 
     def test_wait_round_merges_findings_and_a_failed_lens_does_not_stop_it(self):
-        self.write_plan("Review lenses: security, code\n")
+        self.write_plan(verified_plan(lenses="security, code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n\n## Risks and questions\n- q\n"
@@ -451,7 +510,7 @@ class RoundTests(FactoryTestCase):
         self.assertIn("This lens failed: The codex reviewer", merged)
 
     def test_a_lens_that_does_not_launch_fails_alone(self):
-        self.write_plan("Review lenses: security, code\n")
+        self.write_plan(verified_plan(lenses="security, code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.fake.failed_starts = {"security"}
@@ -476,7 +535,7 @@ class RoundTests(FactoryTestCase):
         self.assertIn("This lens failed", merged)
 
     def test_a_round_where_no_lens_launches_fails(self):
-        self.write_plan("Review lenses: security, code\n")
+        self.write_plan(verified_plan(lenses="security, code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.fake.failed_starts = {"security", "code"}
@@ -488,7 +547,7 @@ class RoundTests(FactoryTestCase):
 class WorkerTests(FactoryTestCase):
     def setUp(self):
         super().setUp()
-        self.write_plan("Review lenses: code\n")
+        self.write_plan(verified_plan(lenses="code"))
         self.start_factory(rounds=3)
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         self.ready()
@@ -604,7 +663,7 @@ class WorkerTests(FactoryTestCase):
         self.assertIn("Factory stopped: the card's agent is gone.", self.log())
 
     def test_stop_during_a_reviewer_launch_holds(self):
-        self.write_plan("Review lenses: security, code\n")
+        self.write_plan(verified_plan(lenses="security, code"))
 
         def stop_at_launch(argv, timeout=120):
             if argv[1:3] == ["agent", "start"] and argv[3].endswith("-security"):
@@ -876,7 +935,7 @@ class LinearFactoryTests(FactoryTestCase):
 
     def setUp(self):
         super().setUp()
-        self.write_plan("Review lenses: code\n")
+        self.write_plan(verified_plan(lenses="code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         records = json.loads((start.state_dir() / "starts.json").read_text())

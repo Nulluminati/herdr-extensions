@@ -22,6 +22,7 @@ from herdboard.store import Store
 from support.herdboard_brief import todo
 from support.herdboard_cli import CliTestCase
 from support.herdboard_start import FakeHerdr
+from support.herdboard_verification import plan as verified_plan
 
 
 class LocalTime(unittest.TestCase):
@@ -390,6 +391,12 @@ class FactoryAutomationTests(AutomationTestCase):
         start.register_checkout(repo)
         return self.store.init_board(repo_identity(repo)).stem
 
+    def give_plan(self, automation, text=None):
+        """Attach a plan to the automation; each spawned card gets a copy."""
+        path = attachments.plan_path(self.config, automation.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(verified_plan() if text is None else text)
+
     def test_factory_preset_round_trip_and_rules(self):
         from dataclasses import replace
 
@@ -441,6 +448,7 @@ class FactoryAutomationTests(AutomationTestCase):
         run = replace(factory.default_run(self.config), name="cheap", rounds=2)
         self.config.factory_presets["cheap"] = run
         added = self.add(board=self.repo_board(), factory=True, factory_preset="cheap")
+        self.give_plan(added)
         with patch.object(start.Starter, "start", return_value={"ref": "x"}) as started:
             result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
         self.assertEqual(result["result"], "started")
@@ -451,6 +459,25 @@ class FactoryAutomationTests(AutomationTestCase):
         started.assert_not_called()
         self.assertIn("start_failed:", result["result"])
         self.assertIn("cheap", result["result"])
+
+    def test_a_factory_automation_without_a_contract_fails_its_start(self):
+        added = self.add(board=self.repo_board(), factory=True)
+        for text in (None, "# Plan\n"):
+            with self.subTest(text=text):
+                if text is None:
+                    attachments.plan_path(self.config, added.id).unlink(missing_ok=True)
+                else:
+                    self.give_plan(added, text)
+                with patch.object(start.Starter, "start") as started:
+                    result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+                started.assert_not_called()
+                self.assertTrue(result["result"].startswith("start_failed: "))
+                self.assertIn("herdboard-verification", result["result"])
+                self.assertIn("Update the plan", result["result"])
+                log = [entry["message"] for entry in activity.read(self.config, result["card"])]
+                self.assertTrue(any(line.startswith("Auto start failed: ") for line in log))
+                # The card stays in the first column, where it was spawned.
+                self.assertEqual(self.store.show(result["card"]).column, self.config.columns[0])
 
     def test_factory_round_trips_with_may_merge_prs(self):
         added = self.add(board=self.repo_board(), factory=True, may_merge_prs=True)
@@ -475,6 +502,7 @@ class FactoryAutomationTests(AutomationTestCase):
 
     def test_spawn_starts_the_card_as_a_factory(self):
         added = self.add(board=self.repo_board(), factory=True)
+        self.give_plan(added)
         with patch.object(start.Starter, "start", return_value={"ref": "x"}) as started:
             automations.run(self.store, added, local(2026, 10, 23, 9, 0))
         self.assertIs(started.call_args.kwargs["factory"], True)

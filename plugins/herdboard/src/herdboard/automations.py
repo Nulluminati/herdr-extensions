@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as clock
 from pathlib import Path
 
-from . import activity, attachments
+from . import activity, attachments, verification
 from . import start as start_module
 from .config import AGENTS, Config, thinking_levels
 from .model import ConflictError, HerdboardError, IoError, NotFoundError, automation_title
@@ -567,6 +567,9 @@ def run(store, automation: Automation, due: datetime, *, skipped: int = 0, confi
             if automation.factory
             else None
         )
+        if automation.factory:
+            # The spawned card has a copy of the automation's plan. `start` checks it too.
+            verification.check_plan(store.config, card.ref)
         starter.start(
             card.ref,
             agent=automation.agent,
