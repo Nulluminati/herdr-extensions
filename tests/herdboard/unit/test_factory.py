@@ -928,6 +928,12 @@ class GateTests(FactoryTestCase):
         self.fake.on_approve = lambda: (self.folder / "evidence" / "unit.txt").write_text("edited\n")
         self.assert_changes_needed("The evidence changed after herdboard captured it: unit.txt.")
 
+    def test_the_approvers_copy_changed_during_the_approval(self):
+        self.write_evidence()
+        copy = self.folder / "approver" / "evidence"
+        self.fake.on_approve = lambda: (copy / "unit.txt").write_text("edited\n")
+        self.assert_changes_needed("The approver's copy of the evidence changed after herdboard captured it: unit.txt.")
+
     def test_a_commit_during_the_approval(self):
         self.write_evidence()
         self.fake.on_approve = lambda: self.commit(self.worktree, "late.txt", "late\n", "feat: late")

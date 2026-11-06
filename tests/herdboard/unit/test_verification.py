@@ -241,6 +241,19 @@ class ReportTests(EvidenceTestCase):
                 self.report(results=[result("unit", evidence=[name]), result("live", evidence=["live.txt"])])
                 self.assertIn(words, self.problems())
 
+    def test_a_report_outside_the_evidence_folder(self):
+        self.report()
+        outside = self.root / "elsewhere.json"
+        (self.evidence / "verification.json").rename(outside)
+        os.symlink(outside, self.evidence / "verification.json")
+        report = self.validate()
+        self.assertIn("verification.json is outside the evidence folder.", report.problems)
+        self.assertNotIn("verification.json", report.files)
+
+    def test_an_evidence_path_with_a_null_character(self):
+        self.report(results=[result("unit", evidence=["unit\x00.txt"]), result("live", evidence=["live.txt"])])
+        self.assertIn("Evidence path 'unit\\x00.txt' is not a valid file name.", self.problems())
+
     def test_a_link_inside_the_evidence_folder_is_allowed(self):
         self.evidence.mkdir(parents=True)
         (self.evidence / "real.txt").write_text("real\n")

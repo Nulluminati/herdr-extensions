@@ -156,7 +156,7 @@ The builder's brief has a Verification evidence section with the run's evidence 
 | `exit_code` | Required for a `command_output` check that passed or failed. A pass needs `0`. |
 | `evidence` | Files in the evidence folder. A pass needs at least one non-empty file. |
 
-herdboard reads only bounded files inside the evidence folder. It refuses absolute paths, `..`, links that leave the folder, missing or empty files, and the report itself as evidence. It reads at most 256 KB of report, 4 MB per evidence file and 32 MB in all.
+herdboard reads only bounded files inside the evidence folder. It refuses a report that links outside the folder. As evidence, it refuses absolute paths, `..`, links that leave the folder, names that are not valid file names, missing or empty files, and the report itself. It reads at most 256 KB of report, 4 MB per evidence file and 32 MB in all.
 
 Each round's prompt asks the builder to run the checks again after its fixes. Earlier output, such as a failing test before the fix, can stay as an extra file. It does not replace the final result.
 
@@ -182,7 +182,7 @@ The lens reviewers check the code. The approver checks the requirements and the 
 }
 ```
 
-After the approver ends, herdboard checks again: the same HEAD, a clean tree, unchanged evidence files (by digest) and an unchanged plan. Then it decides the effective verdict. Any of these makes it `changes needed`:
+After the approver ends, herdboard checks again: the same HEAD, a clean tree, unchanged evidence files (by digest) in both the evidence folder and the approver's copy, and an unchanged plan. Then it decides the effective verdict. Any of these makes it `changes needed`:
 
 - No report, a malformed report, or a report for another run, contract or commit.
 - Uncommitted or untracked changes.

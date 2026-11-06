@@ -749,6 +749,8 @@ def _late_problems(store, ref, state: dict, worktree: Path, report: verification
     if dirty and not any(problem.startswith("The worktree has uncommitted") for problem in report.problems):
         problems.append("The worktree changed during the approval: " + ", ".join(line[3:] for line in dirty) + ".")
     problems += verification.changed_since(report, evidence_dir(state))
+    copy = Path(state["folder"]) / "approver" / "evidence"
+    problems += verification.changed_since(report, copy, "The approver's copy of the evidence")
     return [problem for problem in problems + _plan_changed(store.config, ref, state) if problem not in report.problems]
 
 

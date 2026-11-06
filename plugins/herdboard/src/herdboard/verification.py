@@ -349,7 +349,11 @@ def _evidence_file(evidence_dir: Path, name, problems: list[str]) -> Path | None
         problems.append(f"Evidence path {name} is absolute; name a file in the evidence folder.")
         return None
     root = evidence_dir.resolve()
-    path = (evidence_dir / name).resolve()
+    try:
+        path = (evidence_dir / name).resolve()
+    except ValueError:
+        problems.append(f"Evidence path {name!r} is not a valid file name.")
+        return None
     if not path.is_relative_to(root):
         problems.append(f"Evidence path {name} is outside the evidence folder.")
         return None
@@ -375,6 +379,9 @@ def validate_report(evidence_dir: Path, *, run_id: str, contract: Contract, head
         names = ", ".join(line[3:] for line in dirty)
         problems.append(f"The worktree has uncommitted or untracked changes: {names}. Commit them, then check again.")
     path = evidence_dir / REPORT_NAME
+    if not path.resolve().is_relative_to(evidence_dir.resolve()):
+        problems.append(f"{REPORT_NAME} is outside the evidence folder.")
+        return Report(problems, statuses, files)
     report = _read_json(path, MAX_REPORT_BYTES, problems, files)
     if report is None:
         if not problems or not any(REPORT_NAME in problem for problem in problems):
@@ -470,8 +477,9 @@ def snapshot(report: Report, evidence_dir: Path, target: Path) -> None:
         shutil.copyfile((evidence_dir / name).resolve(), destination)
 
 
-def changed_since(report: Report, evidence_dir: Path) -> list[str]:
-    """A problem when any captured file differs now, so evidence changed during the approval does not count."""
+def changed_since(report: Report, evidence_dir: Path, subject: str = "The evidence") -> list[str]:
+    """A problem when any captured file differs now, so evidence changed during the approval does not count.
+    `subject` names the folder in the problem, such as the approver's copy."""
     changed = []
     for name, expected in report.files.items():
         try:
@@ -482,7 +490,7 @@ def changed_since(report: Report, evidence_dir: Path) -> list[str]:
             changed.append(name)
     if not changed:
         return []
-    return [f"The evidence changed after herdboard captured it: {', '.join(changed)}."]
+    return [f"{subject} changed after herdboard captured it: {', '.join(changed)}."]
 
 
 # The approver's structured approval.
