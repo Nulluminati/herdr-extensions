@@ -2184,6 +2184,69 @@ class ApplyTests(DefaultLayoutTestCase):
         self.assertEqual(self.herdr.requests[1][1]["insert_index"], 1)
         self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "agents", "editor", "shell"])
 
+    def test_a_second_apply_keeps_one_tab_of_each_name(self):
+        workspace_id, _ = self.focused_tab()
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "agents", "editor", "shell"])
+        # Herdr focuses the rebuilt tab, so the second press lands on it.
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[1]
+        self.herdr.requests.clear()
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["agents"])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "agents", "editor", "shell"])
+
+    def test_apply_replaces_the_tab_named_like_the_first_tab_and_adds_only_missing_tabs(self):
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace(
+            "alpha", {"my-work": [{"cwd": "/x"}], "agents": [{"cwd": "/x"}], "editor": [{"cwd": "/x"}]}
+        )
+        user_tab, agents_tab, _ = self.herdr.tab_ids(workspace_id)
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = user_tab
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        applies = self.applies()
+        self.assertEqual(applies[0]["tab_id"], agents_tab)
+        self.assertEqual([p["tab_label"] for p in applies], ["agents", "shell"])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["my-work", "agents", "editor", "shell"])
+
+    def test_apply_leaves_a_busy_tab_named_like_the_first_tab_alone(self):
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace("alpha", {"my-work": [{"cwd": "/x"}], "agents": [{"cwd": "/x"}]})
+        user_tab, agents_tab = self.herdr.tab_ids(workspace_id)
+        pane = next(p for p in self.herdr.panes if p["tab_id"] == agents_tab)
+        pane["agent_session"] = {"agent": "pi", "value": "x"}
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = user_tab
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["my-work", "agents"])
+        self.assertIn(f"default-layout: alpha/agents left alone: agent in {pane['pane_id']}", self.stdout.getvalue())
+
+    def test_apply_from_a_pane_in_the_tab_named_like_the_first_tab_refuses(self):
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace("alpha", {"agents": [{"cwd": "/x"}], "my-work": [{"cwd": "/x"}]})
+        agents_tab, _ = self.herdr.tab_ids(workspace_id)
+        own_pane = next(p for p in self.herdr.panes if p["tab_id"] == agents_tab)["pane_id"]
+        self.herdr.own_panes.add(own_pane)
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = agents_tab
+        os.environ["HERDR_PANE_ID"] = own_pane
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 1)
+        self.assertEqual(self.applies(), [])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["agents", "my-work"])
+        self.assertIn(
+            "default-layout: alpha/agents runs this command; run apply from a pane in another tab",
+            self.stdout.getvalue(),
+        )
+
+    def test_apply_into_a_focused_layout_tab_adds_that_tab_back(self):
+        self.two_projects()
+        workspace_id = self.herdr.add_workspace("alpha", {"editor": [{"cwd": "/x"}]})
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[0]
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["agents", "editor", "shell"])
+
     def test_apply_reads_the_workspace_from_the_context(self):
         self.two_projects()
         workspace_id = self.herdr.add_workspace("x", {"t": [{"cwd": str(self.project_b)}]})

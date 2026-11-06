@@ -9,8 +9,8 @@ default_layout.py startup   build missing projects in a fresh session, or
 default_layout.py apply [--force]
                             rebuild the focused workspace from its project
 
-default_layout.py apply leaves the focused tab alone when a program or an agent
-runs in it. --force replaces the tab anyway, which kills that work.
+default_layout.py apply leaves the tab that it rebuilds alone when a program or
+an agent runs in it. --force replaces the tab anyway, which kills that work.
 """
 
 import fcntl
@@ -937,6 +937,35 @@ def target_tab(open_tabs: list[dict], preferred: list[str | None], own_tab: str 
     return tab_ids[0]
 
 
+def apply_target(project: dict, open_tabs: list[dict], preferred: list[str | None], own_tab: str | None) -> str | None:
+    """The tab that `apply` rebuilds into the project's first tab.
+
+    An open tab named like the first tab is that tab already, so `apply` rebuilds
+    it in place, and a second run does not add a copy. When the only such tab
+    holds this run, None says that `apply` cannot rebuild it. Without such a
+    tab, `apply` falls back to the focused tab.
+    """
+    first = project["tabs"][0]["name"]
+    named = [
+        tab["tab_id"]
+        for position, tab in enumerate(open_tabs, 1)
+        if tab.get("label") == first and not unnamed_tab(tab, position)
+    ]
+    if named:
+        return next((tab_id for tab_id in named if tab_id != own_tab), None)
+    return target_tab(open_tabs, preferred, own_tab)
+
+
+def apply_into(project: dict, open_tabs: list[dict], target: dict, workspace_id: str) -> None:
+    """Rebuild `target` as the project's first tab and add the tabs the workspace lacks."""
+    first = project["tabs"][0]
+    # The target holds the first tab after the rebuild, whatever it holds now.
+    others = [tab for tab in open_tabs if tab is not target]
+    missing = [tab for tab in missing_tabs(project, others) if tab is not first]
+    replace_tab(first, project, target["tab_id"], open_tabs.index(target))
+    append_tabs(missing, project, workspace_id)
+
+
 def create_project(project: dict) -> None:
     created = herdr(
         "workspace", "create", "--cwd", str(project_dir(project)), "--label", project["label"], "--no-focus"
@@ -1121,7 +1150,8 @@ def cmd_apply(spec: dict, force: bool = False) -> int:
         return 1
     own_pane = caller_pane()
     own_tab = tab_of_pane(snap, own_pane)
-    focused = target_tab(
+    focused = apply_target(
+        project,
         open_tabs,
         [os.environ.get("HERDR_TAB_ID"), context().get("tab_id"), workspace.get("active_tab_id")],
         own_tab,
@@ -1141,7 +1171,7 @@ def cmd_apply(spec: dict, force: bool = False) -> int:
         print(f"default-layout: {where} left alone: {reason}")
         print("default-layout: run apply with --force to replace it and lose that work")
         return 1
-    build_into(project, focused, open_tabs.index(focused_tab), workspace_id)
+    apply_into(project, open_tabs, focused_tab, workspace_id)
     print(f"default-layout: applied {project['label']} ({len(project['tabs'])} tabs)")
     return 0
 

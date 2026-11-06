@@ -140,9 +140,9 @@ A restored session opens no workspace. A project that you closed stays closed un
 
 `apply` rebuilds the focused workspace from the project that matches it. A project matches a workspace by its label first. Without a label match, the project that holds the workspace's own directory, or a pane directory inside it, matches. When two projects both hold it, the project with the longer path wins.
 
-It replaces the focused tab with the first tab in the file, and appends the other tabs after it. When no project matches the workspace, it does nothing and exits with status 1.
+It rebuilds the tab named like the first tab in the file. Without such a tab, it replaces the focused tab with the first tab. Then it appends only the tabs of the file that the workspace does not hold yet. A second `apply` on an unchanged workspace thus keeps one tab of each name. When no project matches the workspace, it does nothing and exits with status 1.
 
-`apply` leaves the focused tab alone when a program or an agent runs in it, and exits with status 1. It prints two lines, such as:
+`apply` leaves the tab that it would rebuild alone when a program or an agent runs in it, and exits with status 1. It prints two lines, such as:
 
 ```
 default-layout: herdr-extensions/agents left alone: something is running in w1:p2
@@ -151,7 +151,7 @@ default-layout: run apply with --force to replace it and lose that work
 
 The tab keeps its work, because `layout.apply` closes the tab that it rebuilds, and Herdr cannot keep a live process in a rebuilt tab.
 
-A manual run must not rebuild the tab that holds the pane it starts from, because the close would stop the run itself. When the run lives in the focused tab, `apply` rebuilds another tab of the workspace instead. When that is the only tab, it does nothing and exits with status 1:
+A manual run must not rebuild the tab that holds the pane it starts from, because the close would stop the run itself. When the run lives in the focused tab, `apply` rebuilds another tab of the workspace instead. When that is the only tab, or the run lives in the tab named like the first tab, it does nothing and exits with status 1:
 
 ```
 default-layout: herdr-extensions/agents runs this command; run apply from a pane in another tab
