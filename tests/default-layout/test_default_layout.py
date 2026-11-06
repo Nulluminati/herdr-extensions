@@ -2404,6 +2404,29 @@ class ApplyTests(DefaultLayoutTestCase):
         self.assertEqual([p["tab_label"] for p in self.applies()], ["agents"])
         self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "agents", "editor", "shell"])
 
+    def test_a_second_apply_keeps_two_tabs_when_the_file_names_the_first_tab_twice(self):
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "shell"
+
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        workspace_id = self.herdr.add_workspace("alpha", {"first": [{"cwd": "/x"}], "shell": [{"cwd": "/x"}]})
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[1]
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "shell", "shell"])
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[1]
+        self.herdr.requests.clear()
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["shell"])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["first", "shell", "shell"])
+
     def test_apply_replaces_the_tab_named_like_the_first_tab_and_adds_only_missing_tabs(self):
         self.two_projects()
         workspace_id = self.herdr.add_workspace(

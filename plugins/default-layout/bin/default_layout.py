@@ -1019,10 +1019,12 @@ def apply_target(project: dict, open_tabs: list[dict], preferred: list[str | Non
 
 def apply_into(project: dict, open_tabs: list[dict], target: dict, workspace_id: str) -> None:
     """Rebuild `target` as the project's first tab and add the tabs the workspace lacks."""
-    first = project["tabs"][0]
+    first, *rest = project["tabs"]
     # The target holds the first tab after the rebuild, whatever it holds now.
+    # The other open tabs answer only for the file's other tabs, so a file that
+    # names the first tab twice does not count one open tab for both entries.
     others = [tab for tab in open_tabs if tab is not target]
-    missing = [tab for tab in missing_tabs(project, others) if tab is not first]
+    missing = missing_tabs({"tabs": rest}, others)
     replace_tab(first, project, target["tab_id"], open_tabs.index(target))
     append_tabs(missing, project, workspace_id)
 
