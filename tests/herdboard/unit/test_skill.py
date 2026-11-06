@@ -113,6 +113,13 @@ class SkillTests(unittest.TestCase):
         self.assertIn(["--json", "attach", "tep3", "docs/spec.md"], commands)
         self.assertIn("## When you plan a card", SKILL.read_text(encoding="utf-8"))
 
+    def test_the_factory_evidence_workflow_is_documented(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for part in ("Verification evidence", "verification.json", "blocked", "herdboard-verification"):
+            self.assertIn(part, text)
+        self.assertIn("| `verification_plan_required` |", text)
+        self.assertIn("| `verification_plan_invalid` |", text)
+
     def test_every_error_code_in_the_skill_exists(self):
         text = SKILL.read_text(encoding="utf-8")
         table = text[text.index("| Code |") :]
@@ -162,6 +169,7 @@ class SkillTests(unittest.TestCase):
         known |= {"review_running", "nothing_to_review", "worker_failed", "pr_writing", "plan_running"}
         known |= {"no_pr", "no_description"}
         known |= {"no_repository", "new_repo_family", "path_exists", "new_repo_failed"}
+        known |= {"verification_plan_required", "verification_plan_invalid"}
         known |= {ArchivedError.code, CardActiveError.code, cli.LinearArchiveError.code, "has_sub_cards"}
         known.add(UnknownTypeError.code)
         known |= {

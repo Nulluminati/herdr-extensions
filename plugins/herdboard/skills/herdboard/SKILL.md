@@ -173,6 +173,8 @@ Reviewers (`review --agent`, the `merge --pr` writer, `pr-review`) run in a sand
 8. Do not push, merge, rebase onto another branch, or remove the worktree. herdboard does that.
 9. Do not run `done`. The user moves the card to Done.
 
+When your brief has a "Verification evidence" section, the card runs as a factory under the plan's `herdboard-verification` contract. Before each move to Review: commit everything, run every check of the contract on the final commit, save each check's real output in the evidence folder that the brief names (without secrets), and write `verification.json` there in the brief's format. For a check that cannot run here, write status `blocked` and say why. Do not change the contract or the plan, and do not exempt a check: the approver decides. Without current evidence for each check, the factory verdict is `changes needed`.
+
 A repoless card has no repository and no branch. Work in its card folder, write the result to the card's attachments, and do not commit. herdboard deletes the folder at `finish`, so everything worth keeping goes in the attachments.
 
 You may run `pr-sync <id>` for your own card. It pushes your branch and sends `pr.md` to the open pull request. When the user asks to change the PR title or description, edit the `pr.md` you wrote when you know its path. Otherwise, run `pr-sync <id> --fetch`, which names a new `pr.md`. Edit that file, then run `pr-sync <id>`.
@@ -198,7 +200,7 @@ When your brief has a "GitHub pull requests" section, the automation lets you ru
 
 ## When you plan a card
 
-`herdboard plan` opens you in a tab in the card's worktree; herdboard creates the worktree when the card has none. Your first message names the card and a brief file. Read the brief, then plan the work with the user: read the code, ask about the unknowns, and write the plan to the `plan.md` path that the brief gives. You may change code and run commands in the worktree to test ideas. Revert every change you made before you end, and do not commit. Do not change the card text. herdboard logs each save of the plan.
+`herdboard plan` opens you in a tab in the card's worktree; herdboard creates the worktree when the card has none. Your first message names the card and a brief file. Read the brief, then plan the work with the user: find the facts in the code yourself, ask the user about the open decisions in small numbered rounds with a recommendation, and write the plan to the `plan.md` path that the brief gives. For a card with a repository, add acceptance criteria and the `herdboard-verification` contract under Testing, as the brief shows: a factory run does not start without it. You may change code and run commands in the worktree to test ideas. Revert every change you made before you end, and do not commit. Do not change the card text. herdboard logs each save of the plan.
 
 ## Errors
 
@@ -207,6 +209,8 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | Code | Do this |
 |---|---|
 | `no_state` | No workflow state of the issue's team maps to that column. Ask the user for another column. |
+| `verification_plan_required` | A factory start needs a plan with a `herdboard-verification` block. Nothing started. Tell the user to plan the card (`P` on the board, or `plan <id>`). |
+| `verification_plan_invalid` | The plan's `herdboard-verification` block is malformed; the message names the field. Nothing started. Tell the user the message. |
 | `agent_edit_denied` | You are the card's agent, and the card text is the user's. Record the change with `log` instead. |
 | `linear_edit` | herdboard does not edit Linear issues. Tell the user to edit it in Linear. |
 | `confirmation_required` | `delete` needs `--yes`. `unarchive` needs it when the card's parent is archived too, because the parent comes back with it. Ask the user first, then run it with `--yes`. |
