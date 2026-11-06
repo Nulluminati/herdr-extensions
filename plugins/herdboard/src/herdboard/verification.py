@@ -34,7 +34,8 @@ MAX_PLAN_BYTES = 1024 * 1024
 MAX_CONTRACT_BYTES = 64 * 1024
 # A plain identifier, such as AC1 or unit-tests.
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
-FENCE = re.compile(r"^(?P<fence>`{3,}|~{3,})[ \t]*(?P<label>[^`\s]*)[ \t]*$")
+# A fence may be indented, such as in a list item or in the plan format's example.
+FENCE = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})[ \t]*(?P<label>[^`\s]*)[ \t]*$")
 FIX = "Update the plan (press P on the board, or run `herdboard plan <ref>`), then start the factory again."
 
 

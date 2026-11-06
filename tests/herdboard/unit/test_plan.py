@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from herdboard import activity, agent_review, attachments, merge, plan, review, start
+from herdboard import activity, agent_review, attachments, merge, plan, review, start, verification
 from herdboard.config import Config
 from herdboard.identity import repo_identity
 from herdboard.store import Store
@@ -211,7 +211,7 @@ class RequestTests(PlanTestCase):
             "## Steps",
             "## Testing",
             "## Open questions",
-            "6. Revert your code changes",
+            "7. Revert your code changes",
             "git status",
         ):
             self.assertIn(part, text)
@@ -227,6 +227,35 @@ class RequestTests(PlanTestCase):
             text,
         )
         self.assertLess(text.index("## Open questions"), text.index("Review lenses:"))
+
+    def test_the_brief_plans_facts_first_in_rounds_of_questions(self):
+        self.planner.plan(self.card.ref)
+        text = self.brief()
+        for part in (
+            "Do not ask the user for a fact that you can look up",
+            "whose prerequisites have answers",
+            "recommend one",
+            "Ask a dependent question in a later round",
+            "test boundaries",
+            "one small change with its own observable check",
+            "each check that you leave out and why, when the work must stop",
+        ):
+            self.assertIn(part, text)
+
+    def test_the_brief_asks_for_acceptance_criteria_and_a_contract(self):
+        self.planner.plan(self.card.ref)
+        text = self.brief()
+        self.assertIn("## Acceptance criteria and verification", text)
+        self.assertIn("```herdboard-verification", text)
+        self.assertLess(text.index("## Open questions"), text.index("## Acceptance criteria and verification"))
+        for workflow in ("- feature:", "- defect:", "- refactor:", "- performance:"):
+            self.assertIn(workflow, text)
+        for part in ("reproduction", "root cause", "same surface", "behavior to keep", "baseline", "target"):
+            self.assertIn(part, text)
+
+    def test_the_contract_example_in_the_brief_is_valid(self):
+        contract = verification.parse_contract(plan.VERIFICATION_RULE)
+        self.assertEqual(contract.workflow, "feature")
 
     def test_the_brief_offers_mockups_before_how_to_plan(self):
         self.planner.plan(self.card.ref)
@@ -591,7 +620,17 @@ class NoRepositoryPlanTests(PlanTestCase):
 
     def test_the_new_repository_plan_brief_has_no_review_lenses(self):
         self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")
-        self.assertNotIn("Review lenses:", self.brief_for(self.inbox_card.ref))
+        text = self.brief_for(self.inbox_card.ref)
+        self.assertNotIn("Review lenses:", text)
+        self.assertNotIn("herdboard-verification", text)
+
+    def test_a_plan_without_a_repository_keeps_its_brief(self):
+        self.planner.plan(self.inbox_card.ref, no_repo=True)
+        text = self.brief_for(self.inbox_card.ref)
+        self.assertNotIn("herdboard-verification", text)
+        self.assertIn(
+            "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one.", text
+        )
 
     def test_the_new_repository_plan_brief_does_not_promise_a_finished_folder(self):
         self.planner.plan(self.inbox_card.ref, new_repo=self.root / "Projects" / "corvid")

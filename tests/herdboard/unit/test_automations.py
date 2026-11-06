@@ -1135,10 +1135,20 @@ class PlanAutomationTests(LocalTime):
         brief = self.brief()
         self.assertIn("Each run of this automation is a factory run", brief)
         self.assertIn("Review lenses: security, ux, ui, code", brief)
+        self.assertIn("```herdboard-verification", brief)
+        self.assertIn("does not start without", brief)
         self.fake.calls.clear()
         plain = self.add(self.board.stem)
         self.planner.plan(plain.id)
         self.assertNotIn("factory run", self.brief())
+        self.assertNotIn("herdboard-verification", self.brief())
+
+    def test_an_unattended_agent_stops_at_an_open_decision(self):
+        added = self.add(self.board.stem)
+        self.planner.plan(added.id)
+        brief = self.brief()
+        self.assertIn("Do not invent an answer", brief)
+        self.assertIn("Find the facts in the repository yourself", brief)
 
     def test_an_inbox_automation_plans_in_its_folder(self):
         added = self.add("inbox")

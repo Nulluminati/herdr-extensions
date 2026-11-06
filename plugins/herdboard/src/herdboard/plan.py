@@ -73,6 +73,77 @@ FACTORY_LENSES_RULE = (
     "with no user interface."
 )
 
+# A factory run needs this contract (see `verification`): it does not start without it, and its approver cannot
+# approve without current evidence for each check.
+VERIFICATION_RULE = """## Acceptance criteria and verification
+
+A factory run does not start without this section, and its approver cannot approve without evidence for it.
+
+- Under Testing, list the acceptance criteria, one per line: `AC1: <observable outcome>`. An outcome is a
+  result that a person or a test can see, not a task.
+- Below them, add one fenced block labeled `herdboard-verification` with the contract as JSON:
+
+    ```herdboard-verification
+    {
+      "version": 1,
+      "workflow": "feature",
+      "criteria": [{"id": "AC1", "outcome": "A saved draft opens again after a restart."}],
+      "checks": [
+        {
+          "id": "unit",
+          "criteria": ["AC1"],
+          "action": "uv run pytest tests/test_drafts.py",
+          "expected": "Exit 0, and test_draft_survives_restart passes.",
+          "surface": "unit tests",
+          "evidence_kind": "command_output",
+          "isolation": "Test temporary directories.",
+          "cleanup": "Fixture teardown."
+        }
+      ]
+    }
+    ```
+
+- `workflow` is feature, defect, refactor or performance. Every criterion needs at least one check.
+- `evidence_kind` is command_output, transcript, screenshot, file or measurement.
+- Take each command from this repository as it runs today. herdboard never runs it: the agent that does the
+  work runs it and records what it saw. An exit code of 0 alone does not prove behavior: say what `expected`
+  must show.
+- Keep a check that cannot run on this machine, and say why. Only the approver can exempt a blocked check.
+
+Write the plan for the workflow:
+
+- feature: the observable behavior, acceptance examples, and the real user path to verify.
+- defect: the reproduction, the failure it shows now, how to find the root cause, the regression test, and a
+  check of the fix on the same surface as the reproduction.
+- refactor: the behavior to keep, the boundaries that the change touches, and the checks that show the same
+  behavior before and after.
+- performance: the metric, a repeatable measurement recipe, the baseline, the target, repeated measurements,
+  and the correctness checks.
+"""
+
+HOW_TO_PLAN_WITHOUT_REPOSITORY = [
+    "1. Read the card, its attachments and the code that the work touches.",
+    "2. Make a list of the unknowns: unclear behavior, choices between approaches, edge cases, limits.",
+    "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one.",
+    "4. Write the plan when the main questions have answers. Write it again each time a decision changes.",
+    "5. Tell the user when the plan is saved. herdboard records each save in the card's log.",
+]
+HOW_TO_PLAN = [
+    "1. Read the card, its attachments and the code that the work touches. Find the facts yourself: commands, "
+    "test layout, public interfaces. Do not ask the user for a fact that you can look up.",
+    "2. Make a list of the decisions that are still open: unclear behavior, choices between approaches, edge "
+    "cases, limits. Note which decisions depend on others.",
+    "3. Ask the user about the decisions whose prerequisites have answers. Ask a few numbered questions at a "
+    "time. Give the options and recommend one. Ask a dependent question in a later round, after its "
+    "prerequisite has an answer.",
+    "4. Agree with the user on the test boundaries: the public interfaces where the tests observe behavior. "
+    "Make each step one small change with its own observable check.",
+    "5. Write the plan when the main questions have answers. Record each decision, each check that you leave "
+    "out and why, when the work must stop, and what is still unknown. Write it again each time a decision "
+    "changes.",
+    "6. Tell the user when the plan is saved. herdboard records each save in the card's log.",
+]
+
 
 class PlanError(HerdboardError):
     def __init__(self, message, code):
@@ -206,15 +277,13 @@ def brief_text(
         "",
         "## How to plan",
         "",
-        "1. Read the card, its attachments and the code that the work touches.",
-        "2. Make a list of the unknowns: unclear behavior, choices between approaches, edge cases, limits.",
-        "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one.",
-        "4. Write the plan when the main questions have answers. Write it again each time a decision changes.",
-        "5. Tell the user when the plan is saved. herdboard records each save in the card's log.",
         *(
-            []
+            HOW_TO_PLAN_WITHOUT_REPOSITORY
             if repoless or new_repo_path is not None
-            else ["6. Revert your code changes. Check with `git status` that the worktree is as it was."]
+            else [
+                *HOW_TO_PLAN,
+                "7. Revert your code changes. Check with `git status` that the worktree is as it was.",
+            ]
         ),
         "",
         f"Write the plan to `{plan_file}` and to no other file. Do not change the card title or details: "
@@ -228,7 +297,7 @@ def brief_text(
         PLAN_FORMAT,
     ]
     if not (repoless or new_repo_path is not None):
-        lines += [FACTORY_LENSES_RULE, ""]
+        lines += [FACTORY_LENSES_RULE, "", VERIFICATION_RULE]
     return "\n".join(lines)
 
 

@@ -19,7 +19,16 @@ from .agent_review import start_worker
 from .brief import _one_line
 from .config import AGENTS, thinking_levels
 from .model import HerdboardError
-from .plan import FACTORY_LENSES_RULE, PLAN_FORMAT, PlanError, _mtime, _planner_pane, _plans_path, planner_arguments
+from .plan import (
+    FACTORY_LENSES_RULE,
+    PLAN_FORMAT,
+    VERIFICATION_RULE,
+    PlanError,
+    _mtime,
+    _planner_pane,
+    _plans_path,
+    planner_arguments,
+)
 from .start import (
     Starter,
     StartError,
@@ -111,12 +120,15 @@ def brief_text(
     lines += [
         "## How to plan",
         "",
-        "1. Read the automation, its attachments and the code that the work touches.",
+        "1. Read the automation, its attachments and the code that the work touches. Find the facts in the "
+        "repository yourself; ask the user only for decisions.",
         "2. Make a list of the unknowns: unclear behavior, choices between approaches, edge cases, limits.",
-        "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one.",
+        "3. Ask the user about them. Ask a few questions at a time. Give the options and recommend one. Ask a "
+        "question that depends on another answer in a later round.",
         "4. Write the plan for an agent that works alone. Name each check, each command and when to stop. Say "
         "what the agent does when something is unclear: it logs the question on its card and moves the card "
-        "to Review.",
+        "to Review. Do not invent an answer to a required decision: write it in the plan, or tell the agent "
+        "to stop at it.",
         "5. Tell the user when the plan is saved. herdboard records each save in the automation's log.",
         *([] if repoless else ["6. Revert your code changes. Check with `git status` that the worktree is clean."]),
         "",
@@ -131,7 +143,7 @@ def brief_text(
         PLAN_FORMAT,
     ]
     if item.factory:
-        lines += [FACTORY_LENSES_RULE, ""]
+        lines += [FACTORY_LENSES_RULE, "", VERIFICATION_RULE]
     return "\n".join(lines)
 
 

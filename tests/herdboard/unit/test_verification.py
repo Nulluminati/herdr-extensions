@@ -52,6 +52,10 @@ class ContractTests(unittest.TestCase):
         # A block with another label, such as plain JSON, is not the contract.
         self.refused(block(CONTRACT, label="json"), "verification_plan_required")
 
+    def test_an_indented_block(self):
+        indented = "".join(f"    {line}\n" for line in block(CONTRACT).splitlines())
+        self.assertEqual(self.parse("- Testing:\n" + indented).to_dict(), CONTRACT)
+
     def test_two_blocks(self):
         self.assertIn("2 herdboard-verification blocks", self.refused(plan() + block(CONTRACT)))
 
