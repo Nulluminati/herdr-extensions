@@ -53,8 +53,9 @@ class Section:
 @dataclass
 class NonListLine:
     """A line that needs a look. `action` is `attached` or `card` (a text line that is not a list
-    item), or `ambiguous` (a list item whose indent is not a clean level; `parent` is the item
-    it was put under, None for a card)."""
+    item), `skipped` (a line of a code fence before the first card of its section, kept out of
+    the cards), or `ambiguous` (a list item whose indent is not a clean level; `parent` is the
+    item it was put under, None for a card)."""
 
     number: int
     text: str
@@ -121,7 +122,8 @@ class _Converter:
         self.titles: list[str] = []
         self.card: Item | None = None
         # The open code fence: its character, its length, its indent and the card depth.
-        self.fence: tuple[str, int, str, int] | None = None
+        # The depth is None for a fence with no card to hold it: its lines are skipped.
+        self.fence: tuple[str, int, str, int | None] | None = None
 
     def level(self, indent: str) -> tuple[int, bool]:
         """The indent level of a prefix and whether that level is ambiguous.
@@ -200,7 +202,11 @@ class _Converter:
 
     def open_fence(self, number: int, line: str, match: re.Match) -> None:
         fence = match.group("fence")
-        tabs = self.add_text(number, line)
+        if self.card is None:
+            self.non_list.append(NonListLine(number, line.strip(), "skipped", self.section.name))
+            tabs = None
+        else:
+            tabs = self.add_text(number, line)
         self.fence = (fence[0], len(fence), match.group("indent"), tabs)
 
     def fence_line(self, number: int, line: str) -> None:
@@ -209,9 +215,11 @@ class _Converter:
         if re.match(rf"^[ \t]*{re.escape(char)}{{{length},}}[ \t]*$", line):
             self.fence = None
         text = (line[len(indent) :] if line.startswith(indent) else line.lstrip()).rstrip()
-        self.card.body.append("\t" * tabs + text)
+        if tabs is not None:
+            self.card.body.append("\t" * tabs + text)
         if text:
-            self.non_list.append(NonListLine(number, text, "attached", self.section.name))
+            action = "attached" if tabs is not None else "skipped"
+            self.non_list.append(NonListLine(number, text, action, self.section.name))
 
     def run(self) -> Conversion:
         skip = False
@@ -250,7 +258,7 @@ class _Converter:
                 continue
             else:
                 self.add_text(number, line)
-        while self.fence and not self.card.body[-1].strip():
+        while self.fence and self.card and self.card.body and not self.card.body[-1].strip():
             self.card.body.pop()
         self.finish_section()
         return Conversion(self.sections, self.non_list, self.unit)

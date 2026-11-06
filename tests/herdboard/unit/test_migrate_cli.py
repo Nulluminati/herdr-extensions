@@ -216,6 +216,12 @@ class ErrorTests(MigrateCliTestCase):
         self.assertIn("nothing to migrate", data["error"]["message"].lower())
         self.assertFalse(self.board.exists())
 
+    def test_file_with_only_an_unclosed_fence(self):
+        self.todo.write_text("```python\n")
+        data = self.migrate_json("migrate", str(self.todo), "--yes", expect=1)
+        self.assertIn("nothing to migrate", data["error"]["message"].lower())
+        self.assertFalse(self.board.exists())
+
     def test_not_utf8(self):
         self.todo.write_bytes(b"- \xff\xfe\n")
         data = self.migrate_json("migrate", str(self.todo), "--yes", expect=1)

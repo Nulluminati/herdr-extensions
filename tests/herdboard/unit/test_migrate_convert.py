@@ -291,10 +291,36 @@ class FenceTests(unittest.TestCase):
         self.assertEqual([(i.title, i.tag) for i in result.items], [("a", "s"), ("b", "s")])
         self.assertEqual(result.items[0].body, ["\t~~~", "\t## not a heading", "\t~~~"])
 
-    def test_fence_without_a_card_becomes_one_card(self):
+    def test_fence_without_a_card_is_skipped(self):
         result = convert("```\n- item\n\n# h\n```\n- after\n")
-        self.assertEqual([i.title for i in result.items], ["```", "after"])
-        self.assertEqual(result.items[0].body, ["\t- item", "\t", "\t# h", "\t```"])
+        self.assertEqual([i.title for i in result.items], ["after"])
+        self.assertEqual(result.items[0].body, [])
+        self.assertEqual(
+            [(n.number, n.text, n.action) for n in result.non_list],
+            [(1, "```", "skipped"), (2, "- item", "skipped"), (4, "# h", "skipped"), (5, "```", "skipped")],
+        )
+
+    def test_install_snippet_before_the_first_card_is_skipped(self):
+        result = convert("```bash\nuv pip install x\n```\n\n- [ ] real task\n")
+        self.assertEqual([i.title for i in result.items], ["real task"])
+        self.assertEqual([n.action for n in result.non_list], ["skipped"] * 3)
+
+    def test_skipped_fence_in_a_section_does_not_end_the_section(self):
+        result = convert("# S\n~~~\n# not a heading\n~~~\n- a\n")
+        self.assertEqual([(i.title, i.tag) for i in result.items], [("a", "s")])
+
+    def test_unclosed_fence_alone_gives_no_cards(self):
+        result = convert("```python\n")
+        self.assertEqual(result.items, [])
+        self.assertEqual([(n.number, n.action) for n in result.non_list], [(1, "skipped")])
+
+    def test_unclosed_fence_at_end_of_file_without_a_card(self):
+        result = convert("```python\nprint(1)")
+        self.assertEqual(result.items, [])
+
+    def test_unclosed_fence_after_a_card_drops_trailing_blank_lines(self):
+        result = convert("- a\n```\ncode\n\n")
+        self.assertEqual(result.items[0].body, ["\t```", "\tcode"])
 
     def test_closing_fence_needs_same_character_and_length(self):
         result = convert("- a\n~~~~\n~~~\n```\n- x\n~~~~~\n- b\n")
