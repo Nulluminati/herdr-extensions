@@ -38,6 +38,18 @@ class UsageError(HerdboardError):
     code = "usage"
 
 
+def _option_tags(values: list[str]) -> list[str]:
+    """Tags from `--tag`: each one word, with or without a leading `#`. Empty values drop."""
+    tags = []
+    for value in values:
+        tag = value.strip().lstrip("#")
+        if any(ch.isspace() or ch == "#" for ch in tag):
+            raise UsageError(f"Tag {tag!r} must be one word without #")
+        if tag:
+            tags.append(tag)
+    return tags
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str):
         raise UsageError(message)
@@ -745,7 +757,7 @@ def _cmd_add(ctx: _Context) -> dict:
         return _cmd_add_linear(ctx, body)
     lines = body.splitlines() if body is not None else None
     fields = {
-        "tags": [tag.strip().lstrip("#") for tag in args.tag if tag.strip().lstrip("#")],
+        "tags": _option_tags(args.tag),
         "type": ctx.config.type_named(args.type) if args.type is not None else None,
         "due": args.due,
     }
@@ -1014,7 +1026,7 @@ def _cmd_edit(ctx: _Context) -> dict:
     lines = body.splitlines() if body is not None else None
     fields: dict = {}
     if args.tag is not None or args.no_tags:
-        fields["tags"] = [tag.strip().lstrip("#") for tag in args.tag or [] if tag.strip().lstrip("#")]
+        fields["tags"] = _option_tags(args.tag or [])
     if args.type is not None or args.no_type:
         fields["type"] = kind
     if args.due is not None or args.no_due:

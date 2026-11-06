@@ -34,6 +34,14 @@ class CommandTests(CliTestCase):
         card = data["card"]
         self.assertEqual((card["title"], card["tags"], card["due"]), ("buy milk", ["errand", "home"], "2026-01-02"))
 
+    def test_add_refuses_a_tag_that_is_not_one_word(self):
+        for tag in ("with space", "two\nlines", "a\tb", "a#b"):
+            with self.subTest(tag=tag):
+                data = self.run_json("add", "buy milk", "--tag", tag, expect=1)
+                self.assertEqual(data["error"]["code"], "usage")
+                self.assertIn(f"Tag {tag!r} must be one word without #", data["error"]["message"])
+        self.assertEqual(self.run_json("list")["cards"], [])
+
     def test_add_refuses_a_bad_due_date(self):
         data = self.run_json("add", "buy milk", "--due", "2026-02-30", expect=1)
         self.assertIn("2026-02-30", data["error"]["message"])
@@ -225,6 +233,15 @@ class CommandTests(CliTestCase):
         self.assertEqual((data["card"]["tags"], data["card"]["due"]), (["b"], "2026-03-04"))
         data = self.run_json("edit", card["ref"], "--no-tags", "--no-due", directory=self.plain)
         self.assertEqual((data["card"]["tags"], data["card"]["due"], data["card"]["title"]), ([], None, "notes"))
+
+    def test_edit_refuses_a_tag_that_is_not_one_word(self):
+        card = self.run_json("add", "notes", "--tag", "a", directory=self.plain)["card"]
+        for tag in ("with space", "two\nlines"):
+            with self.subTest(tag=tag):
+                data = self.run_json("edit", card["ref"], "--tag", tag, directory=self.plain, expect=1)
+                self.assertEqual(data["error"]["code"], "usage")
+                self.assertIn(f"Tag {tag!r} must be one word without #", data["error"]["message"])
+        self.assertEqual(self.run_json("show", card["ref"], directory=self.plain)["card"]["tags"], ["a"])
 
     def test_edit_needs_a_change(self):
         card = self.run_json("add", "notes", directory=self.plain)["card"]
