@@ -13,12 +13,14 @@ from unittest.mock import Mock, patch
 
 from textual.widgets import Input
 
+from herdboard import attachments
 from herdboard.board import AgentScreen, ClaudeModelScreen, HerdboardApp, ModelScreen, ReviewKindScreen, TargetScreen
 from herdboard.config import Config, load_config
 from herdboard.identity import RepoIdentity
 from herdboard.model import HerdboardError
 from herdboard.start import StartError
 from herdboard.store import Store
+from support.herdboard_verification import plan as verified_plan
 
 
 class StartBoardTests(unittest.IsolatedAsyncioTestCase):
@@ -35,6 +37,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
         self.config_file = root / "config.toml"
         self.path = self.store.ensure_inbox()
         self.card = self.store.add(self.path, "Start test")
+        # A factory start needs the plan's verification contract.
+        self.write_plan(verified_plan())
         self.merge = Mock(
             return_value={
                 "ref": self.card.ref,
@@ -88,6 +92,11 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
+    def write_plan(self, text):
+        path = attachments.plan_path(self.store.config, self.card.ref)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
     def app(self):
         app = HerdboardApp(
             self.store,
@@ -139,6 +148,65 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.callback.assert_called_with(
                 self.card.ref, "claude", factory_run=factory.default_run(self.store.config)
             )
+
+    async def test_factory_dialogs_refuse_a_plan_without_a_contract(self):
+        from dataclasses import replace
+
+        from textual.widgets import Input, Static
+
+        from herdboard import factory
+        from herdboard.board import FactoryCustomScreen, FactoryPresetScreen
+
+        self.store.config.factory_presets["cheap"] = replace(factory.default_run(self.store.config), name="cheap")
+        self.write_plan("# Plan\n\n## Testing\nRun the tests.\n")
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            for keys in (("enter",), ("down", "enter")):
+                with self.subTest(keys=keys):
+                    await pilot.press("F")
+                    await pilot.pause()
+                    # The popup opens without a check: the error shows only when the user starts.
+                    error = app.screen.query_one("#factory-preset-error", Static)
+                    self.assertEqual(str(error.render()), "")
+                    await pilot.press(*keys)
+                    await pilot.pause()
+                    self.assertIsInstance(app.screen, FactoryPresetScreen)
+                    text = str(error.render())
+                    self.assertIn("no herdboard-verification block", text)
+                    self.assertIn("press P", text)
+                    self.assertIn("error", error.classes)
+                    await pilot.press("escape")
+                    await pilot.pause()
+            await pilot.press("F", "c")
+            await pilot.pause()
+            form = app.screen
+            self.assertIsInstance(form, FactoryCustomScreen)
+            form.query_one("#factory-save-name", Input).value = "keep"
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            self.assertIs(app.screen, form)
+            self.assertIn("no herdboard-verification block", str(form.query_one("#factory-error", Static).render()))
+            # The form does not save a preset for a run that cannot start.
+            self.assertNotIn("keep", self.store.config.factory_presets)
+            self.assertFalse(self.config_file.exists() and "keep" in self.config_file.read_text())
+        self.callback.assert_not_called()
+
+    async def test_factory_dialogs_start_once_the_plan_has_a_contract(self):
+        from textual.widgets import Static
+
+        from herdboard import factory
+
+        self.write_plan("# Plan\n")
+        app = self.app()
+        async with app.run_test(size=(110, 50)) as pilot:
+            await pilot.press("F", "enter")
+            await pilot.pause()
+            self.assertIn("herdboard-verification", str(app.screen.query_one("#factory-preset-error", Static).render()))
+            self.write_plan(verified_plan())
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        self.callback.assert_called_with(self.card.ref, "claude", factory_run=factory.default_run(self.store.config))
 
     async def test_factory_custom_lenses_validation_and_back(self):
         from textual.widgets import Checkbox, Static

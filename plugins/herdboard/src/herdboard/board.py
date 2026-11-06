@@ -47,7 +47,7 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from . import activity, agent_states, attachments, automations, factory, notes, pr_reviews
+from . import activity, agent_states, attachments, automations, factory, notes, pr_reviews, verification
 from . import merge as merge_module
 from . import start as start_module
 from .agent_review import AgentReviewer
@@ -1706,6 +1706,15 @@ class AgentScreen(ModalBase):
         self.dismiss(AGENTS[event.option_index])
 
 
+def factory_plan_error(config, ref: str) -> str | None:
+    """Why the card's plan cannot start a factory run, or None. `start` checks again; this shows it early."""
+    try:
+        verification.check_plan(config, ref)
+    except HerdboardError as error:
+        return str(error)
+    return None
+
+
 class FactoryPresetScreen(ModalBase):
     """Choose a complete run, or edit a one-off copy of the highlighted run."""
 
@@ -1724,6 +1733,7 @@ class FactoryPresetScreen(ModalBase):
             yield Label(f"Start {self.ref} as a factory")
             yield OptionList("Default", *(run.name for run in self.runs[1:]), "Custom…", id="factory-presets")
             yield Static(self.run_summary(self.runs[0]), id="factory-summary", markup=False)
+            yield Static("", id="factory-preset-error", classes="error", markup=False)
 
     @staticmethod
     def run_summary(run: FactoryRun) -> str:
@@ -1754,8 +1764,12 @@ class FactoryPresetScreen(ModalBase):
         event.stop()
         if event.option_index == len(self.runs):
             self.action_custom()
-        else:
-            self.dismiss(self.runs[event.option_index])
+            return
+        problem = factory_plan_error(self.config, self.ref)
+        if problem:
+            self.query_one("#factory-preset-error", Static).update(problem)
+            return
+        self.dismiss(self.runs[event.option_index])
 
     def action_custom(self) -> None:
         def chosen(run):
@@ -1923,6 +1937,10 @@ class FactoryCustomScreen(ModalBase):
             rounds,
             selected,
         )
+        problem = factory_plan_error(self.config, self.ref)
+        if problem:
+            error.update(problem)
+            return
         if not name:
             self.dismiss(run)
             return
