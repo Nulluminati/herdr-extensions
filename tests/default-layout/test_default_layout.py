@@ -1109,6 +1109,60 @@ class MatchTests(DefaultLayoutTestCase):
         found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
         self.assertEqual(found["label"], "pkg")
 
+    def test_project_for_workspace_picks_the_nested_project_when_a_pane_sits_at_each_root(self):
+        nested = self.project_a / "pkg"
+        nested.mkdir()
+        projects = [self.project("alpha", self.project_a), self.project("pkg", nested)]
+        workspace_id = self.herdr.add_workspace(
+            "scratch", {"t": [{"cwd": str(self.project_a)}], "u": [{"cwd": str(nested)}]}
+        )
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "pkg")
+
+    def test_project_for_workspace_picks_the_nested_project_whatever_the_file_order(self):
+        nested = self.project_a / "pkg"
+        nested.mkdir()
+        projects = [self.project("pkg", nested), self.project("alpha", self.project_a)]
+        workspace_id = self.herdr.add_workspace(
+            "scratch", {"t": [{"cwd": str(nested)}], "u": [{"cwd": str(self.project_a)}]}
+        )
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "pkg")
+
+    def test_project_for_workspace_picks_the_nested_project_when_it_holds_only_a_deep_pane(self):
+        nested = self.project_a / "pkg"
+        sub = nested / "src"
+        sub.mkdir(parents=True)
+        projects = [self.project("alpha", self.project_a), self.project("pkg", nested)]
+        workspace_id = self.herdr.add_workspace(
+            "scratch", {"t": [{"cwd": str(self.project_a)}], "u": [{"cwd": str(sub)}]}
+        )
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "pkg")
+
+    def test_project_for_workspace_ignores_a_nested_project_the_workspace_does_not_hold(self):
+        nested = self.project_a / "pkg"
+        nested.mkdir()
+        projects = [self.project("alpha", self.project_a), self.project("pkg", nested)]
+        workspace_id = self.herdr.add_workspace("scratch", {"t": [{"cwd": str(self.project_a)}]})
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "alpha")
+
+    def test_project_for_workspace_keeps_the_first_of_two_projects_at_one_path_length(self):
+        deep = self.project_a / "pkg1"
+        other = self.project_a / "pkg2"
+        deep.mkdir()
+        other.mkdir()
+        projects = [self.project("pkg1", deep), self.project("pkg2", other)]
+        workspace_id = self.herdr.add_workspace("scratch", {"t": [{"cwd": str(other)}], "u": [{"cwd": str(deep)}]})
+        workspace = next(w for w in self.herdr.workspaces if w["workspace_id"] == workspace_id)
+        found = default_layout.project_for_workspace(projects, workspace, self.herdr.snapshot())
+        self.assertEqual(found["label"], "pkg1")
+
     def test_project_for_workspace_still_prefers_the_label(self):
         projects = [self.project("alpha", self.project_a)]
         workspace_id = self.herdr.add_workspace("alpha", {"t": [{"cwd": "/nowhere"}]})
@@ -2366,6 +2420,48 @@ class ApplyTests(DefaultLayoutTestCase):
         self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
         self.assertEqual(self.herdr.tab_labels(workspace_id), ["agents", "editor", "shell"])
         self.assertIn("default-layout: applied alpha (3 tabs)", self.stdout.getvalue())
+
+    def nested_projects(self):
+        """A project and a package nested in it, each with a tab of its own."""
+        nested = self.project_a / "pkg"
+        nested.mkdir()
+        self.write_layout(f"""
+            [[projects]]
+            label = "alpha"
+            path = "{self.project_a}"
+
+            [[projects.tabs]]
+            name = "root-tab"
+
+            [[projects]]
+            label = "pkg"
+            path = "{nested}"
+
+            [[projects.tabs]]
+            name = "pkg-tab"
+            """)
+        return nested
+
+    def test_apply_rebuilds_the_nested_project_when_a_pane_sits_at_each_root(self):
+        nested = self.nested_projects()
+        workspace_id = self.herdr.add_workspace(
+            "scratch", {"one": [{"cwd": str(self.project_a)}], "two": [{"cwd": str(nested)}]}
+        )
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[1]
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["pkg-tab"])
+        self.assertEqual(self.herdr.tab_labels(workspace_id), ["one", "pkg-tab"])
+        self.assertIn("default-layout: applied pkg (1 tabs)", self.stdout.getvalue())
+
+    def test_apply_rebuilds_the_parent_when_the_workspace_only_holds_it(self):
+        self.nested_projects()
+        workspace_id = self.herdr.add_workspace("scratch", {"one": [{"cwd": str(self.project_a)}]})
+        os.environ["HERDR_WORKSPACE_ID"] = workspace_id
+        os.environ["HERDR_TAB_ID"] = self.herdr.tab_ids(workspace_id)[0]
+        self.assertEqual(self.run_main("default_layout.py", "apply"), 0)
+        self.assertEqual([p["tab_label"] for p in self.applies()], ["root-tab"])
+        self.assertIn("default-layout: applied alpha (1 tabs)", self.stdout.getvalue())
 
     def test_apply_without_a_matching_project_exits_1(self):
         self.two_projects()

@@ -138,7 +138,7 @@ A restored session opens no workspace. A project that you closed stays closed un
 
 ### The apply action
 
-`apply` rebuilds the focused workspace from the project that matches it. A project matches a workspace by its label first. Without a label match, the project that holds the workspace's own directory, or a pane directory inside it, matches. When two projects both hold it, the project with the longer path wins.
+`apply` rebuilds the focused workspace from the project that matches it. A project matches a workspace by its label first. Without a label match, the project that holds the workspace's own directory, or a pane directory inside it, matches. Every project that holds the workspace counts, whatever the depth of the directory it holds. When two projects both hold it, the project with the longer path wins, so a package workspace rebuilds from the package and not from the repository that holds it. Two projects of one path length keep the first in the file.
 
 It rebuilds the tab named like the first tab in the file. Without such a tab, it replaces the focused tab with the first tab. Then it appends only the tabs of the file that the workspace does not hold yet. A second `apply` on an unchanged workspace thus keeps one tab of each name. When no project matches the workspace, it does nothing and exits with status 1.
 

@@ -545,11 +545,19 @@ def match_project(project: dict, open_workspaces: list[dict], snap: dict) -> dic
 
 
 def project_for_workspace(projects: list[dict], workspace: dict, snap: dict) -> dict | None:
-    """The project that the workspace sits in: by label first, then by the nearest directory."""
+    """The project that the workspace sits in: by label first, then the longer path.
+
+    A project nested in another holds the workspace as its parent does when the
+    workspace has a pane in each root, so the deeper root must win. Two projects
+    of one path length keep the first in file order.
+    """
     for project in projects:
         if workspace.get("label") == project["label"]:
             return project
-    return nearest([(workspace_depth(project, workspace, snap), project) for project in projects])
+    holding = [project for project in projects if workspace_depth(project, workspace, snap) is not None]
+    if not holding:
+        return None
+    return max(holding, key=lambda project: len(resolve_dir(project["path"]).parts))
 
 
 # Pane state
