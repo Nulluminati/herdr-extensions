@@ -879,7 +879,7 @@ When the column matches more than one workflow state, the state dialog asks, as 
 | Command | Action |
 |---|---|
 | `herdboard board [--view NAME] [--project NAME]` | Open the board |
-| `herdboard list [--view] [--board] [--column] [--source todo\|linear] [--archived]` | List cards. `--archived` lists the archived todos |
+| `herdboard list [--view] [--project NAME] [--board] [--column] [--source todo\|linear] [--archived]` | List cards. `--archived` lists the archived todos |
 | `herdboard add "title" [--body TEXT \| --body-file PATH] [--type NAME] [--tag NAME]... [--due YYYY-MM-DD] [--board] [--column] [--position top\|bottom] [--parent ID]` | Add a todo. Default board: the parent's board, else the repository board, else the inbox |
 | `herdboard add --linear "title" [--body TEXT \| --body-file PATH] [--type NAME] [--team] [--project] [--label] [--column] [--state]` | Create a Linear issue assigned to you. In a repository with one linked project, that project and its labels are the default |
 | `herdboard show <id> [--log]` | Show a card, its attachments and its last 10 log entries. `--log` shows them all |
