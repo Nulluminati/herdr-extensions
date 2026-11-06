@@ -292,7 +292,9 @@ def _read_bounded(path: Path, limit: int) -> bytes:
     return data
 
 
-def _read_json(path: Path, limit: int, problems: list[str]):
+def _read_json(path: Path, limit: int, problems: list[str], digests: dict | None = None):
+    """The JSON object in `path`, or None with the problem added. With `digests`, records the digest of the
+    bytes that it parsed, so a later change to the file cannot slip between the check and the digest."""
     try:
         data = _read_bounded(path, limit)
     except FileNotFoundError:
@@ -308,6 +310,8 @@ def _read_json(path: Path, limit: int, problems: list[str]):
     if not isinstance(value, dict):
         problems.append(f"{path.name} must be one JSON object")
         return None
+    if digests is not None:
+        digests[path.name] = digest(data)
     return value
 
 
@@ -371,12 +375,11 @@ def validate_report(evidence_dir: Path, *, run_id: str, contract: Contract, head
         names = ", ".join(line[3:] for line in dirty)
         problems.append(f"The worktree has uncommitted or untracked changes: {names}. Commit them, then check again.")
     path = evidence_dir / REPORT_NAME
-    report = _read_json(path, MAX_REPORT_BYTES, problems)
+    report = _read_json(path, MAX_REPORT_BYTES, problems, files)
     if report is None:
         if not problems or not any(REPORT_NAME in problem for problem in problems):
             problems.append(f"The builder wrote no {REPORT_NAME} in {evidence_dir}.")
         return Report(problems, statuses, files)
-    files[REPORT_NAME] = digest(path.read_bytes())
     if isinstance(report.get("version"), bool) or report.get("version") != VERSION:
         problems.append(f"{REPORT_NAME} version must be {VERSION}.")
     if report.get("run") != run_id:
