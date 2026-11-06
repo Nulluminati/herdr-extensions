@@ -253,6 +253,20 @@ class TokenTests(unittest.TestCase):
         self.assertLessEqual(len(token), 60)
         self.assertTrue(token.endswith("… · In progress"))
 
+    def test_a_long_column_name_is_cut_and_the_title_keeps_room(self):
+        title = "Fix the login timeout on the auth service"
+        for width in (54, 55, 56, 60, 120):
+            with self.subTest(width=width):
+                token = card_token(todo(title=title, column="C" * width))
+                self.assertLessEqual(len(token), 60)
+                self.assertTrue(token.startswith("▶ Fix the login"))
+                self.assertTrue(token.endswith("C…"))
+
+    def test_a_long_column_name_with_a_short_title_keeps_the_title(self):
+        token = card_token(todo(title="Fix it", column="C" * 80))
+        self.assertLessEqual(len(token), 60)
+        self.assertTrue(token.startswith("▶ Fix it · C"))
+
     def test_a_done_card(self):
         self.assertEqual(card_token(todo(column="Done", checked=True)), "✓ Move to shared [[Stow notes]] · Done")
 

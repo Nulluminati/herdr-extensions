@@ -217,9 +217,17 @@ def agent_message(card: CardView, brief: Path) -> str:
 def card_token(card: CardView) -> str:
     """The sidebar text for the card an agent works on: `▶ title · column`."""
     mark = "✓ " if card.checked else "▶ "
-    ending = f" · {card.column}"
+    separator = " · "
     title = " ".join(_one_line(card.title).split())
-    room = TOKEN_WIDTH - len(mark) - len(ending)
-    if len(title) > room:
-        title = title[: room - 1].rstrip() + "…"
+    # The title keeps up to half the token, so a long column name cannot push it out.
+    column_room = TOKEN_WIDTH - len(mark) - len(separator) - min(len(title), TOKEN_WIDTH // 2)
+    ending = separator + _cut(card.column, column_room)
+    title = _cut(title, TOKEN_WIDTH - len(mark) - len(ending))
     return f"{mark}{title}{ending}"
+
+
+def _cut(text: str, room: int) -> str:
+    """`text`, cut to `room` cells with an `…` when it is longer."""
+    if len(text) <= room:
+        return text
+    return text[: room - 1].rstrip() + "…"
