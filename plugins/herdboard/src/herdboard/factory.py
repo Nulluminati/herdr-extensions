@@ -12,6 +12,7 @@ work against the plan and writes a verdict. Only then does the card move to Revi
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -32,6 +33,7 @@ from .agent_review import (
     launch_reviewer,
     read_change,
     request_text,
+    write_change,
 )
 from .config import LENSES, FactoryRun, Role
 from .linear_cards import LINEAR_REF
@@ -354,7 +356,7 @@ def history_text(folder: Path, done: int) -> str:
         "",
         "Read them first. Do not raise a finding again that the agent fixed, unless the fix is wrong. "
         "Do not raise a finding again that the agent disagreed with, unless you have new evidence: "
-        "then give the evidence.",
+        "then give the evidence. Check the evidence that an answer cites before you accept it.",
     ]
     return "\n".join(lines)
 
@@ -483,17 +485,36 @@ def round_summary(number: int, rounds: int, result: dict) -> str:
     return text
 
 
-def builder_message(ref, round_folder: Path, command: str) -> str:
-    """The builder's prompt for one round. One line: Herdr rejects line breaks in agent arguments."""
+def builder_message(ref, round_folder: Path, command: str, evidence_dir: Path | None = None) -> str:
+    """The builder's prompt for one round. One line: Herdr rejects line breaks in agent arguments.
+
+    With `evidence_dir` (a run under the evidence policy), the builder checks the final commit again."""
+    evidence = (
+        "Then run every check of the plan's verification contract again on your final commit, and write "
+        f"fresh evidence and {evidence_dir / verification.REPORT_NAME} as your brief says. "
+        if evidence_dir is not None
+        else ""
+    )
     return (
         f"Factory review round findings for {ref} are ready: {round_folder / 'findings.md'}. Read them. "
         "For each finding, fix it, or record why you disagree with "
         f'{command} log {ref} "..." and do not change the code for it. '
+        "A disagreement needs a reason that you can support: cite the code path, test or evidence file. "
         "Answer the risks and questions too. "
         f"Then write {round_folder / 'responses.md'} as one Markdown table: "
         "| Lens | # | Finding | Agree/Disagree | What you did |, one row for each finding. "
-        f"Commit your fixes. Then run {command} --json move {ref} Review."
+        "Name the evidence for each answer in What you did. "
+        f"Commit your fixes. {evidence}Then run {command} --json move {ref} Review."
     )
+
+
+def under_policy(state: dict) -> bool:
+    """True for a run under the evidence policy. A run started before the policy keeps the old approval."""
+    return state.get("verification") == verification.VERSION
+
+
+def evidence_dir(state: dict) -> Path:
+    return Path(state["folder"]) / verification.EVIDENCE_DIR
 
 
 def send_to_builder(store, ref, record, round_folder: Path, config_file: Path | None) -> None:
@@ -522,11 +543,99 @@ def send_to_builder(store, ref, record, round_folder: Path, config_file: Path | 
         "agent",
         "prompt",
         record["pane_id"],
-        builder_message(ref, round_folder, start_module.herdboard_command(config_file)),
+        builder_message(
+            ref,
+            round_folder,
+            start_module.herdboard_command(config_file),
+            evidence_dir(record["factory"]) if under_policy(record["factory"]) else None,
+        ),
     )
 
 
 # The approver.
+
+
+APPROVAL_EXAMPLE = """    {
+      "version": 1,
+      "verdict": "approve",
+      "criteria": [
+        {"id": "AC1", "outcome": "satisfied", "checks": ["unit"], "evidence": "unit.txt shows test_x passing"}
+      ],
+      "exceptions": [
+        {"check": "live", "reason": "No display in the sandbox.", "risk": "The screen is not checked live."}
+      ]
+    }"""
+
+
+def policy_request(card, record, folder: Path, approver_folder: Path, rounds: int) -> str:
+    """The approver's request for a run under the evidence policy: requirements and evidence, not code style."""
+    round_lines = (
+        "".join(
+            f"- Round {number}: findings `{folder / f'round-{number}' / 'findings.md'}`, "
+            f"answers `{folder / f'round-{number}' / 'responses.md'}`\n"
+            for number in range(1, rounds + 1)
+        )
+        or "- (none: the run had no review round)\n"
+    )
+    body = "\n".join(card.body).strip() if card is not None else ""
+    return f"""# Factory approval
+
+Card {record["ref"]}: {card.title if card is not None else record["ref"]}
+
+{body or "(no description)"}
+
+- Repository: `{record["worktree_path"]}`
+- Branch `{record["branch"]}`, based on `{record.get("base") or "@{upstream}"}`
+- The full branch diff: `{approver_folder / "branch.patch"}`
+- Uncommitted changes: `{approver_folder / "uncommitted.patch"}`
+- The plan that the user agreed on, as it was when the run started: `{folder / "plan.md"}`
+- Its verification contract: `{approver_folder / "contract.json"}`
+- The builder's evidence, as herdboard captured it: `{approver_folder / "evidence"}` (the report is
+  `{verification.REPORT_NAME}`)
+- herdboard's checks of that evidence: `{approver_folder / "validation.md"}`
+- The card's activity log: `{approver_folder / "log.md"}`
+- The review rounds:
+{round_lines}
+You are the approver. The lens reviewers checked the code. You check the requirements and the evidence:
+does the change meet each acceptance criterion of the contract, and does current evidence show it?
+You do not replace a code review: when no code lens ran, say so under Testing.
+Read the evidence files. Do not trust a summary that the files do not support.
+A problem in `validation.md` makes the verdict changes needed. You cannot overrule it.
+Check that the card's agent dealt with each finding of the review rounds.
+Do not change any file in the repository.
+{REVIEW_COMMAND_RULES}
+Write your verdict to `{approver_folder / "verdict.md"}` in this format:
+
+    Verdict: approve
+
+    ## Acceptance
+    | Criterion | Check | Evidence | Outcome |
+    | AC1 | unit | unit.txt | satisfied |
+
+    ## Requirements not met
+    - Criterion or plan step: what is missing.
+
+    ## Code findings left
+    - Lens, finding: left at the round limit, or the reviewer's point and the agent's reason for a disagreement.
+
+    ## Lenses that failed
+    - Round, lens: a round file says that this lens failed, so it did not review the change.
+
+    ## Testing
+    What the evidence shows was tested, and what it does not show.
+
+The first line is `Verdict: approve` or `Verdict: changes needed`. Write "None." in an empty section.
+
+Then write `{approver_folder / verification.APPROVAL_NAME}` with the same verdict:
+
+{APPROVAL_EXAMPLE}
+
+- Give one outcome for each criterion of the contract: satisfied or unsatisfied.
+- Add an exception only for a check whose status is blocked or not_applicable, and only when you accept its
+  reason. Name the check, the reason and the risk that remains. A failed check cannot have an exception.
+  An exception does not make an unsatisfied criterion satisfied. Write `[]` when there is none.
+Finish writing both files before you end your turn. Do not wait for another prompt.
+"""
 
 
 def approver_request(card, record, folder: Path, approver_folder: Path, plan: Path | None, rounds: int) -> str:
@@ -588,14 +697,107 @@ def verdict_of(text: str) -> str:
     return found.group(1).strip().rstrip(".") if found else "unknown"
 
 
+def _plan_changed(config, ref, state: dict) -> list[str]:
+    try:
+        text = attachments.plan_text(config, ref)
+    except HerdboardError as error:
+        return [f"herdboard cannot read the plan, so it cannot check that the plan is the agreed one: {error}"]
+    if text is None or verification.digest(text) != state["plan_digest"]:
+        return [
+            "The plan changed after the factory started, so its contract no longer matches the run. "
+            f"Restart the factory of {ref} with the updated plan."
+        ]
+    return []
+
+
+def validation_text(report: verification.Report, head: str) -> str:
+    lines = ["# herdboard's checks of the evidence", "", f"Commit checked: `{head}`", ""]
+    if report.problems:
+        lines += ["These problems make the verdict changes needed:", ""]
+        lines += [f"- {problem}" for problem in report.problems]
+    else:
+        lines.append("The report is complete and current. Check that its evidence shows each expected result.")
+    lines += ["", "## Results", ""]
+    lines += [f"- {check}: {status}" for check, status in report.statuses.items()] or ["- (none)"]
+    return "\n".join(lines) + "\n"
+
+
+def _capture_evidence(store, ref, state: dict, worktree: Path, approver_folder: Path):
+    """Check the builder's report and copy it for the approver. Returns the contract, the report and HEAD."""
+    contract = verification.Contract.from_dict(state["contract"])
+    head, dirty = verification.tree_state(worktree)
+    report = verification.validate_report(
+        evidence_dir(state), run_id=Path(state["folder"]).name, contract=contract, head=head, dirty=dirty
+    )
+    report.problems += _plan_changed(store.config, ref, state)
+    target = approver_folder / "evidence"
+    shutil.rmtree(target, ignore_errors=True)
+    target.mkdir(parents=True)
+    verification.snapshot(report, evidence_dir(state), target)
+    (approver_folder / "contract.json").write_text(json.dumps(contract.to_dict(), indent=2), encoding="utf-8")
+    (approver_folder / "validation.md").write_text(validation_text(report, head), encoding="utf-8")
+    (approver_folder / verification.APPROVAL_NAME).unlink(missing_ok=True)
+    return contract, report, head
+
+
+def _late_problems(store, ref, state: dict, worktree: Path, report: verification.Report, head: str) -> list[str]:
+    """Changes during the approval: a new commit, a changed tree, changed evidence or a changed plan."""
+    now, dirty = verification.tree_state(worktree)
+    problems = []
+    if now != head:
+        problems.append(f"A commit landed during the approval: HEAD is now {now}. Check the final commit again.")
+    if dirty and not any(problem.startswith("The worktree has uncommitted") for problem in report.problems):
+        problems.append("The worktree changed during the approval: " + ", ".join(line[3:] for line in dirty) + ".")
+    problems += verification.changed_since(report, evidence_dir(state))
+    return [problem for problem in problems + _plan_changed(store.config, ref, state) if problem not in report.problems]
+
+
+def effective_verdict_text(approver_text: str, effective: str, reasons: list[str], exceptions: list[dict]) -> str:
+    """The verdict that the card gets: the evidence gate's result, then the approver's own verdict."""
+    first, _, rest = approver_text.strip().partition("\n")
+    lines = [f"Verdict: {effective}", "", "## Evidence gate", ""]
+    if reasons:
+        if verdict_of(approver_text) == "approve":
+            lines.append(f"herdboard changed the approver's verdict from approve to {effective}:")
+        else:
+            lines.append("herdboard found these problems with the evidence:")
+        lines += [f"- {reason}" for reason in reasons]
+    else:
+        lines.append("Each required check has current evidence, or an exception that the approver gave.")
+    if exceptions:
+        lines += ["", "Exceptions that the approver gave:"]
+        lines += [f"- {entry['check']}: {entry['reason']} Remaining risk: {entry['risk']}" for entry in exceptions]
+    lines += ["", "## The approver's verdict", "", f"The approver wrote `{first.strip()}`.", "", rest.strip()]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _capture_change(worktree: Path, base: str, folder: Path) -> None:
+    """The change for the approver. A run under the evidence policy reaches the approver without one too."""
+    try:
+        capture_change(worktree, base, folder)
+    except ReviewError as error:
+        if error.code != "nothing_to_review":
+            raise
+        folder.mkdir(parents=True, exist_ok=True)
+        write_change(folder, "", "")
+
+
 def run_approver(store, ref, record, card, writer=None) -> dict:
-    """Start the approver, wait for its verdict, and attach it to the card. Returns the verdict."""
+    """Start the approver, wait for its verdict, and attach it to the card. Returns the verdict.
+
+    Under the evidence policy, herdboard checks the evidence before and after the approver, and the verdict
+    that the card gets is the gate's: missing, stale or failed evidence makes it changes needed."""
     state = record["factory"]
     folder = Path(state["folder"])
     approver_folder = folder / "approver"
     worktree = Path(record["worktree_path"])
     base = record.get("base") or "@{upstream}"
-    capture_change(worktree, base, approver_folder)
+    policy = under_policy(state)
+    if policy:
+        _capture_change(worktree, base, approver_folder)
+        contract, report, head = _capture_evidence(store, ref, state, worktree, approver_folder)
+    else:
+        capture_change(worktree, base, approver_folder)
     log = activity.read(store.config, ref)
     (approver_folder / "log.md").write_text(
         "".join(f"- {entry['time']} · {entry['author']} · {entry['message']}\n" for entry in log), encoding="utf-8"
@@ -606,9 +808,12 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
     if kind == "pi":
         model = start_module.agent_model(store.config, model)
         thinking = start_module.thinking_level(store.config, model, thinking)
-    request = approver_request(
-        card, record, folder, approver_folder, plan if plan.exists() else None, state.get("round", 0)
-    )
+    if policy:
+        request = policy_request(card, record, folder, approver_folder, state.get("round", 0))
+    else:
+        request = approver_request(
+            card, record, folder, approver_folder, plan if plan.exists() else None, state.get("round", 0)
+        )
     stopped = _cancelled(store, ref, folder)
     if stopped is not None:
         return stopped
@@ -623,6 +828,7 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
         "right",
         f"hb-{ref.lower()}-approver",
         output="verdict.md",
+        also=(verification.APPROVAL_NAME,) if policy else (),
     )
     update(ref, folder, status="approving", panes=[pane])
     verdict_file = approver_folder / "verdict.md"
@@ -648,8 +854,18 @@ def run_approver(store, ref, record, card, writer=None) -> dict:
     update(ref, folder, panes=[])
     if error is not None:
         return {"stopped": False, "error": error}
-    attachments.add(store, ref, verdict_file, name=VERDICT_NAME)
-    return {"stopped": False, "verdict": verdict_of(verdict_file.read_text(encoding="utf-8"))}
+    text = verdict_file.read_text(encoding="utf-8")
+    if not policy:
+        attachments.add(store, ref, verdict_file, name=VERDICT_NAME)
+        return {"stopped": False, "verdict": verdict_of(text)}
+    report.problems += _late_problems(store, ref, state, worktree, report, head)
+    effective, reasons, exceptions = verification.gate(
+        contract, report, approver_folder / verification.APPROVAL_NAME, verdict_of(text)
+    )
+    published = approver_folder / VERDICT_NAME
+    published.write_text(effective_verdict_text(text, effective, reasons, exceptions), encoding="utf-8")
+    attachments.add(store, ref, published, name=VERDICT_NAME)
+    return {"stopped": False, "verdict": effective, "reasons": reasons}
 
 
 # The worker.
@@ -810,6 +1026,10 @@ def _step(store, ref, folder: Path, record, card, config_file, writer) -> int | 
     except ReviewError as error:
         if error.code != "nothing_to_review":
             raise
+        if under_policy(state):
+            # No code to review, but the plan's checks still need evidence and a verdict.
+            activity.append(store, ref, "Factory: no change to review, approver next.", "herdboard")
+            return _approve(store, ref, folder, record, card, writer)
         return _end(store, ref, folder, "done", "Factory: no change to review.", f"Factory of {ref} done", writer)
     if number:
         last = folder / f"round-{number}" / "findings.md"
@@ -892,7 +1112,14 @@ def _approve(store, ref, folder: Path, record, card, writer) -> int:
         return _end(
             store, ref, folder, "stopped", f"Factory approver failed: {result['error']}", f"Factory of {ref} failed"
         )
-    return _end(store, ref, folder, "done", f"Factory done: {result['verdict']}.", f"Factory of {ref} done", writer)
+    message = f"Factory done: {result['verdict']}."
+    if result.get("reasons"):
+        count = len(result["reasons"])
+        message = (
+            f"Factory done: {result['verdict']}. The evidence gate found {count} problem{'' if count == 1 else 's'}: "
+            f"see {VERDICT_NAME}."
+        )
+    return _end(store, ref, folder, "done", message, f"Factory of {ref} done", writer)
 
 
 def summary(state: dict | None) -> dict | None:

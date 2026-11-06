@@ -106,9 +106,10 @@ def launch_reviewer(
     direction: str,
     name: str,
     output: str = "findings.md",
+    also: tuple[str, ...] = (),
 ) -> str:
     """Write `request` to `folder/request.md`, split a pane from `split_from` and start a sandboxed reviewer
-    in it. The reviewer writes only `folder/<output>`. Returns the new pane's ID.
+    in it. The reviewer writes only `folder/<output>` and the files named in `also`. Returns the new pane's ID.
     Writes nothing to the start record."""
     try:
         (folder / "request.md").write_text(request, encoding="utf-8")
@@ -119,8 +120,9 @@ def launch_reviewer(
     ]
     prompt = (
         f"Read {folder / 'request.md'} and do the review it asks for. "
-        f"Write your {'findings' if output == 'findings.md' else 'result'} to {folder / output} "
-        "and nowhere else."
+        f"Write your {'findings' if output == 'findings.md' else 'result'} to {folder / output}"
+        + "".join(f" and {folder / name}" for name in also)
+        + " and nowhere else."
     )
     # A startup prompt (such as Claude's folder trust check) waits for the user,
     # and a reviewer busy with its first message never looks ready: the worker watches it.
@@ -224,6 +226,11 @@ Card {record["ref"]}: {card.title if card is not None else record["ref"]}
 {card_files}{focus or DEFAULT_FOCUS}
 Check that it does what the card asks.
 Read the surrounding code in the repository when you need context.
+A confirmed problem cites path:line and the observable failure or the concrete code path that shows it.
+You do not need to run the code to confirm a defect that the code itself shows.
+Put a concern that you cannot prove under Risks and questions.
+When you cannot run a test or inspect a screen, say exactly what you could not check under Verification limits.
+A limit is not a finding, and it is not a successful check.
 Do not change any file in the repository.
 {REVIEW_COMMAND_RULES}{BROWSER_INSTRUCTIONS if browser else ""}{history_block}
 Write your findings to `{folder / "findings.md"}` in this format:
@@ -234,11 +241,13 @@ Write your findings to `{folder / "findings.md"}` in this format:
     ## Risks and questions
     - path:line: concern.
 
+    ## Verification limits
+    - What you could not check, and why.
+
 If you find nothing, write "No findings."
 Finish writing the complete findings file before you end your turn.
 Herdboard automatically delivers the findings path to the card's requesting agent after your turn ends.
 You do not need to run a command or send a notification to deliver the findings. Do not wait for another prompt.
-Do not report that you cannot run tests or inspect live screens.
 """
 
 
@@ -425,7 +434,14 @@ def _wait_for_findings(findings: Path, pane: str, kind: str) -> None:
 
 
 def _count_findings(findings: Path) -> int:
-    return sum(1 for line in findings.read_text(encoding="utf-8").splitlines() if line.startswith("- "))
+    """The `- ` lines of the findings. The lines under Verification limits are not findings."""
+    count, limits = 0, False
+    for line in findings.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            limits = line[3:].strip().casefold() == "verification limits"
+        elif line.startswith("- ") and not limits:
+            count += 1
+    return count
 
 
 def _forget(ref: str, folder: Path, reviewed: dict | None = None) -> dict | None:

@@ -266,9 +266,31 @@ class RequestTests(AgentReviewTestCase):
         request = (folder / "request.md").read_text()
         self.assertIn("Herdboard automatically delivers", request)
         self.assertIn("You do not need to run a command or send a notification", request)
-        self.assertIn("Do not report that you cannot run tests", request)
-        self.assertNotIn("state those limits", request)
         self.assertIn("terminal-browser open", request)
+
+    def test_a_verification_limit_is_not_counted_as_a_finding(self):
+        findings = self.root / "findings.md"
+        findings.write_text(
+            "## Confirmed problems\n- [high] a.py:1: bug.\n\n## Risks and questions\n- a.py:2: why?\n\n"
+            "## Verification limits\n- The tests could not run.\n- No display.\n"
+        )
+        self.assertEqual(agent_review._count_findings(findings), 2)
+
+    def test_the_request_separates_proof_concerns_and_limits(self):
+        record = {"ref": self.card.ref, "worktree_path": str(self.repo), "branch": "test"}
+        text = agent_review.request_text(self.card, record, "main", self.root, [])
+        for part in (
+            "A confirmed problem cites path:line and the observable failure or the concrete code path that shows it.",
+            "You do not need to run the code to confirm a defect that the code itself shows.",
+            "Put a concern that you cannot prove under Risks and questions.",
+            "say exactly what you could not check under Verification limits",
+            "A limit is not a finding, and it is not a successful check.",
+            "    ## Confirmed problems\n",
+            "    ## Risks and questions\n",
+            "    ## Verification limits\n",
+        ):
+            self.assertIn(part, text)
+        self.assertNotIn("Do not report that you cannot run tests", text)
 
     def test_claude_reviewer_keeps_browser_support(self):
         self.started()

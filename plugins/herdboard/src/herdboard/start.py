@@ -1205,6 +1205,15 @@ class Starter:
                 attachments_dir=str(attachments.folder(self.config, card.ref)),
                 may_merge_prs=bool(record.get("may_merge_prs")),
                 factory=factory_folder is not None,
+                evidence=(
+                    {
+                        "folder": str(Path(factory_folder) / verification.EVIDENCE_DIR),
+                        "run": Path(factory_folder).name,
+                        "contract_digest": verification.Contract.from_dict(running["contract"]).digest,
+                    }
+                    if factory_folder is not None and running.get("verification")
+                    else None
+                ),
             ),
         )
         message = agent_message(card, brief)

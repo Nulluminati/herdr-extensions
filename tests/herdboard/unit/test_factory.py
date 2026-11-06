@@ -15,7 +15,7 @@ from herdboard.linear_states import refuse
 from herdboard.model import HerdboardError
 from support.herdboard_cli import CliTestCase
 from support.herdboard_merge import GitHerdr, MergeTestCase
-from support.herdboard_verification import CONTRACT, contract
+from support.herdboard_verification import CONTRACT, approval, contract, result, write_report
 from support.herdboard_verification import plan as verified_plan
 
 REQUEST = re.compile(r"Read (\S+)/request\.md")
@@ -30,6 +30,10 @@ class FactoryHerdr(GitHerdr):
         self.reviewers = {}
         self.findings = {}
         self.verdict = "Verdict: approve\n\n## Plan steps not done\nNone.\n"
+        # The approver's approval.json; None writes none.
+        self.approval = approval()
+        # Called when the approver writes its files, to play changes during the approval.
+        self.on_approve = None
         self.builder_status = "idle"
         self.reviewer_states = {}
         self.on_prompt = None
@@ -89,6 +93,10 @@ class FactoryHerdr(GitHerdr):
             if state == "idle":
                 if reviewer["lens"] == "approver":
                     (reviewer["folder"] / "verdict.md").write_text(self.verdict)
+                    if self.approval is not None:
+                        (reviewer["folder"] / "approval.json").write_text(json.dumps(self.approval))
+                    if self.on_approve:
+                        self.on_approve()
                 else:
                     (reviewer["folder"] / "findings.md").write_text(
                         self.findings.get(reviewer["lens"], "No findings.\n")
@@ -146,14 +154,21 @@ class FactoryTestCase(MergeTestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
 
+    def write_evidence(self, results=None, **changes):
+        """The builder's evidence for the current commit, by default a pass for each check of CONTRACT."""
+        head = self.git(self.worktree, "rev-parse", "HEAD")
+        digest = verification.Contract.from_dict(CONTRACT).digest
+        return write_report(self.folder / "evidence", self.folder.name, digest, head, results, **changes)
+
     def builder_fixes(self, commit=True):
-        """The builder answers a round: it commits a fix and moves the card to Review."""
+        """The builder answers a round: it commits a fix, checks it again and moves the card to Review."""
         self.columns = []
 
         def answer(message):
             self.columns.append(self.store.show(self.card.ref).column)
             if commit:
                 self.commit(self.worktree, f"fix{len(self.fake.prompts)}.txt", "x\n", "fix: a finding")
+                self.write_evidence()
             self.ready()
 
         self.fake.on_prompt = answer
@@ -162,6 +177,14 @@ class FactoryTestCase(MergeTestCase):
         self.errors = io.StringIO()
         with contextlib.redirect_stderr(self.errors):
             return factory.wait(self.store, self.card.ref, self.folder)
+
+    def drop_policy(self, run=False):
+        """Make the record look like one written before the evidence policy (and, with `run`, before snapshots)."""
+        records = json.loads((start.state_dir() / "starts.json").read_text())
+        state = records[self.card.ref]["factory"]
+        for key in ("verification", "contract", "plan_digest", *(["run"] if run else [])):
+            state.pop(key, None)
+        start._write(start.state_dir() / "starts.json", records)
 
     def lens_starts(self):
         return [c for c in self.calls("agent", "start") if re.search(r"-(security|ux|ui|code)$", c[2])]
@@ -214,6 +237,9 @@ class LensTests(FactoryTestCase):
         noted = "## Confirmed problems\n- [high] a.py:1: bug.\n# Note: see below\n- [low] a.py:2: style.\n"
         self.assertEqual(factory.count_confirmed(noted), 2)
         self.assertEqual(factory.count_confirmed("## Confirmed problems\n- a\n### Detail\n- b\n"), 2)
+        # A verification limit is not a finding: the builder gets no round for it.
+        limits = text + "\n## Verification limits\n- The tests could not run in the sandbox.\n"
+        self.assertEqual((factory.count_confirmed(limits), factory.count_questions(limits)), (2, 1))
 
     def test_count_confirmed_accepts_other_heading_styles(self):
         for confirmed, risks in [
@@ -469,6 +495,7 @@ class RoundTests(FactoryTestCase):
         self.assertIn("## Earlier rounds", request)
         self.assertIn(str(self.folder / "round-1" / "responses.md"), request)
         self.assertIn("unless you have new evidence", request)
+        self.assertIn("Check the evidence that an answer cites", request)
 
     def test_wait_round_merges_findings_and_a_failed_lens_does_not_stop_it(self):
         self.write_plan(verified_plan(lenses="security, code"))
@@ -550,6 +577,7 @@ class WorkerTests(FactoryTestCase):
         self.write_plan(verified_plan(lenses="code"))
         self.start_factory(rounds=3)
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.write_evidence()
         self.ready()
 
     def test_no_confirmed_problems_after_a_fix_goes_to_the_approver(self):
@@ -631,11 +659,33 @@ class WorkerTests(FactoryTestCase):
         self.assertEqual(len(self.fake.prompts), 3)
         self.assertEqual(len(self.lens_starts()), 3)
 
-    def test_a_branch_without_change_ends_without_reviews(self):
+    def test_a_branch_without_change_still_gets_an_evidence_verdict(self):
+        self.git(self.worktree, "reset", "-q", "--hard", "HEAD~1")
+        self.write_evidence()
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        log = self.log()
+        self.assertIn("Factory: no change to review, approver next.", log)
+        self.assertIn("Factory done: approve.", log)
+        self.assertEqual(self.lens_starts(), [])
+        self.assertTrue(any(c[2].endswith("-approver") for c in self.calls("agent", "start")))
+        self.assertEqual((self.folder / "approver" / "branch.patch").read_text(), "")
+        self.assertEqual(self.state()["status"], "done")
+        self.assertEqual(self.store.show(self.card.ref).column, "Review")
+
+    def test_a_branch_without_change_and_without_evidence_needs_changes(self):
+        self.git(self.worktree, "reset", "-q", "--hard", "HEAD~1")
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn(
+            "Factory done: changes needed. The evidence gate found 1 problem: see factory-verdict.md.", self.log()
+        )
+        self.assertEqual(self.store.show(self.card.ref).column, "Review")
+
+    def test_an_old_run_without_change_ends_without_reviews(self):
+        # A run started before the evidence policy keeps the old shortcut.
+        self.drop_policy()
         self.git(self.worktree, "reset", "-q", "--hard", "HEAD~1")
         self.assertEqual(self.wait(), 0, self.errors.getvalue())
         self.assertIn("Factory: no change to review.", self.log())
-        self.assertEqual(self.lens_starts(), [])
         self.assertFalse(any(c[2].endswith("-approver") for c in self.calls("agent", "start")))
         self.assertEqual(self.state()["status"], "done")
         self.assertEqual(self.store.show(self.card.ref).column, "Review")
@@ -790,9 +840,192 @@ class WorkerTests(FactoryTestCase):
         self.assertIn(str(self.folder / "approver" / "verdict.md"), prompt)
         self.assertNotIn("findings.md", prompt)
         request = (self.folder / "approver" / "request.md").read_text()
-        self.assertIn(str(attachments.plan_path(self.config, self.card.ref)), request)
+        # The approver reads the plan as it was when the run started.
+        self.assertIn(str(self.folder / "plan.md"), request)
         self.assertIn(str(self.folder / "round-1" / "findings.md"), request)
         self.assertIn("Verdict: approve", request)
+        self.assertIn(str(self.folder / "approver" / "approval.json"), prompt)
+
+
+class GateTests(FactoryTestCase):
+    """A run under the evidence policy approves only with current, complete evidence."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_plan(verified_plan(lenses="code"))
+        self.start_factory(rounds=3)
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.main = self.git(self.repo, "rev-parse", "HEAD")
+        self.ready()
+
+    def published(self):
+        return (attachments.folder(self.config, self.card.ref) / factory.VERDICT_NAME).read_text()
+
+    def finish(self):
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        # Every assessment ends in Review for the user, and nothing merges.
+        self.assertEqual(self.store.show(self.card.ref).column, "Review")
+        self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.main)
+        self.assertEqual(self.state()["status"], "done")
+        return self.log()[-1], self.published()
+
+    def test_valid_current_evidence_keeps_the_approval(self):
+        self.write_evidence()
+        message, text = self.finish()
+        self.assertEqual(message, "Factory done: approve.")
+        self.assertTrue(text.startswith("Verdict: approve\n"))
+        self.assertIn("Each required check has current evidence", text)
+        self.assertIn("The approver wrote `Verdict: approve`.", text)
+        approver = self.folder / "approver"
+        self.assertEqual((approver / "evidence" / "unit.txt").read_text(), "output of unit\n")
+        self.assertIn("The report is complete and current.", (approver / "validation.md").read_text())
+        self.assertEqual(json.loads((approver / "contract.json").read_text()), CONTRACT)
+
+    def assert_changes_needed(self, *words):
+        message, text = self.finish()
+        self.assertTrue(message.startswith("Factory done: changes needed. The evidence gate found"), message)
+        self.assertTrue(text.startswith("Verdict: changes needed\n"), text)
+        self.assertIn("herdboard changed the approver's verdict from approve to changes needed:", text)
+        for word in words:
+            self.assertIn(word, text)
+        return text
+
+    def test_missing_evidence(self):
+        self.assert_changes_needed("The builder wrote no verification.json")
+
+    def test_malformed_evidence(self):
+        (self.folder / "evidence" / "verification.json").write_text("{ nope")
+        self.assert_changes_needed("verification.json is not valid JSON")
+
+    def test_stale_evidence(self):
+        self.write_evidence()
+        self.commit(self.worktree, "b.txt", "b\n", "feat: b")
+        self.assert_changes_needed("not the current commit")
+
+    def test_a_dirty_tree(self):
+        self.write_evidence()
+        (self.worktree / "a.txt").write_text("dirty\n")
+        (self.worktree / "new.txt").write_text("new\n")
+        self.assert_changes_needed("uncommitted or untracked changes: a.txt, new.txt")
+
+    def test_incomplete_evidence(self):
+        self.write_evidence([result("unit")])
+        self.assert_changes_needed("The report has no result for check live.")
+
+    def test_a_failed_check_with_a_false_approval(self):
+        self.write_evidence([result("unit", "failed"), result("live", evidence=["live.txt"])])
+        self.assert_changes_needed("Required check unit failed.")
+
+    def test_a_changed_plan(self):
+        self.write_evidence()
+        self.write_plan(verified_plan(lenses="code, ux"))
+        self.assert_changes_needed(
+            "The plan changed after the factory started", f"Restart the factory of {self.card.ref}"
+        )
+
+    def test_evidence_changed_during_the_approval(self):
+        self.write_evidence()
+        self.fake.on_approve = lambda: (self.folder / "evidence" / "unit.txt").write_text("edited\n")
+        self.assert_changes_needed("The evidence changed after herdboard captured it: unit.txt.")
+
+    def test_a_commit_during_the_approval(self):
+        self.write_evidence()
+        self.fake.on_approve = lambda: self.commit(self.worktree, "late.txt", "late\n", "feat: late")
+        self.assert_changes_needed("A commit landed during the approval")
+
+    def test_a_missing_structured_approval(self):
+        self.write_evidence()
+        self.fake.approval = None
+        self.assert_changes_needed("The approver wrote no approval.json.")
+
+    def test_an_unsatisfied_criterion(self):
+        self.write_evidence()
+        criteria = approval()["criteria"]
+        criteria[0]["outcome"] = "unsatisfied"
+        self.fake.approval = approval(criteria=criteria)
+        self.assert_changes_needed("The approver found criterion AC1 unsatisfied.")
+
+    def test_a_blocked_check_with_a_named_exception(self):
+        self.write_evidence([result("unit"), result("live", "blocked", evidence=[], observed="No display here.")])
+        exception = {"check": "live", "reason": "No display.", "risk": "The board is not checked live."}
+        self.fake.approval = approval(exceptions=[exception])
+        message, text = self.finish()
+        self.assertEqual(message, "Factory done: approve.")
+        self.assertIn("- live: No display. Remaining risk: The board is not checked live.", text)
+
+    def test_a_blocked_check_without_an_exception(self):
+        self.write_evidence([result("unit"), result("live", "blocked", evidence=[])])
+        self.assert_changes_needed("Required check live is blocked and has no exception.")
+
+    def test_the_approvers_changes_needed_stays(self):
+        self.write_evidence()
+        self.fake.verdict = "Verdict: changes needed\n\n## Requirements not met\n- AC2.\n"
+        self.fake.approval = approval("changes needed")
+        message, text = self.finish()
+        self.assertEqual(message, "Factory done: changes needed.")
+        self.assertTrue(text.startswith("Verdict: changes needed\n"))
+        self.assertIn("- AC2.", text)
+
+    def test_the_builder_prompt_asks_for_fresh_evidence(self):
+        self.fake.findings["code"] = "## Confirmed problems\n- [high] a.txt:1: bug.\n"
+        self.builder_fixes()
+        self.wait()
+        prompt = self.fake.prompts[0]
+        self.assertIn("run every check of the plan's verification contract again on your final commit", prompt)
+        self.assertIn(str(self.folder / "evidence" / "verification.json"), prompt)
+        self.assertIn("cite the code path, test or evidence file", prompt)
+        self.assertNotIn("\n", prompt)
+
+    def test_the_builder_brief_explains_the_evidence(self):
+        call = next(c for c in self.calls("agent", "start") if c[2] == f"hb-{self.card.ref.lower()}")
+        brief = Path(re.search(r"(/\S+\.md)", " ".join(call)).group(1)).read_text()
+        self.assertIn("## Verification evidence", brief)
+        self.assertIn(f"`{self.folder / 'evidence'}/verification.json`", brief)
+        self.assertIn(f'"run": "{self.folder.name}"', brief)
+        self.assertIn(verification.Contract.from_dict(CONTRACT).digest, brief)
+        self.assertIn("It does not prove that you ran a command", brief)
+
+
+class PresetGateTests(FactoryTestCase):
+    def test_a_run_without_the_code_lens_still_needs_evidence(self):
+        run = dataclasses.replace(factory.default_run(self.config), name="secure", lenses_on=("security",))
+        self.start_factory(factory_run=run)
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.ready()
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn("Factory round 1 of 3 started: security (codex).", self.log())
+        self.assertTrue(self.log()[-1].startswith("Factory done: changes needed. The evidence gate found"))
+
+
+class OldRunTests(FactoryTestCase):
+    """Runs started before the evidence policy keep the old approval."""
+
+    def setUp(self):
+        super().setUp()
+        self.start_factory(rounds=1)
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+
+    def test_a_record_with_settings_but_no_policy(self):
+        self.drop_policy()
+        self.ready()
+        self.fake.approval = None
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn("Factory done: approve.", self.log())
+        request = (self.folder / "approver" / "request.md").read_text()
+        self.assertIn(str(attachments.plan_path(self.config, self.card.ref)), request)
+        self.assertNotIn("approval.json", request)
+        text = (attachments.folder(self.config, self.card.ref) / factory.VERDICT_NAME).read_text()
+        self.assertNotIn("Evidence gate", text)
+
+    def test_a_record_without_settings(self):
+        self.drop_policy(run=True)
+        self.ready()
+        self.fake.approval = None
+        self.assertEqual(self.wait(), 0, self.errors.getvalue())
+        self.assertIn("Factory done: approve.", self.log())
+
+    def test_the_old_builder_prompt_asks_for_no_evidence(self):
+        self.assertNotIn("verification", factory.builder_message("t1", Path("/r"), "herdboard"))
 
 
 class RefusalTests(FactoryTestCase):
@@ -938,6 +1171,7 @@ class LinearFactoryTests(FactoryTestCase):
         self.write_plan(verified_plan(lenses="code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        self.write_evidence()
         records = json.loads((start.state_dir() / "starts.json").read_text())
         record = records.pop(self.card.ref)
         records["issue-uuid"] = {**record, "ref": "ENG-7"}

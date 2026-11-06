@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unicodedata
 from fnmatch import fnmatch
 from pathlib import Path
@@ -33,6 +34,66 @@ FACTORY_RULE = (
 )
 
 
+def evidence_text(evidence: dict, command: str, ref: str) -> list[str]:
+    """How a factory builder records the evidence for the plan's verification contract.
+
+    `evidence` has the run's `folder` (the evidence folder), `run` (its identifier) and `contract_digest`."""
+    folder = evidence["folder"]
+    example = json.dumps(
+        {
+            "version": 1,
+            "run": evidence["run"],
+            "contract_digest": evidence["contract_digest"],
+            "commit": "<the full output of git rev-parse HEAD>",
+            "results": [
+                {
+                    "check": "<check id from the contract>",
+                    "status": "passed",
+                    "action": "<what you ran or did>",
+                    "observed": "<what you saw, against the check's expected result>",
+                    "started": "2026-01-01T10:00:00+00:00",
+                    "finished": "2026-01-01T10:01:00+00:00",
+                    "exit_code": 0,
+                    "evidence": ["<check id>.txt"],
+                }
+            ],
+        },
+        indent=2,
+    )
+    return [
+        "## Verification evidence",
+        "",
+        "This factory run follows the `herdboard-verification` contract in the plan. The approver cannot approve "
+        "the work without current evidence for each check of the contract.",
+        "",
+        "Before each move to Review:",
+        "",
+        "1. Commit all your work. The worktree must be clean: no uncommitted changes and no untracked files.",
+        "2. Run every check of the contract on the final commit, as its `action` says, on its `surface`. Follow "
+        "its `isolation` and `cleanup`. Clean up only what you created.",
+        f"3. Save the real output of each check as a file in `{folder}`, such as `unit.txt`. Remove secrets, "
+        "such as tokens, before you save output. Do not put evidence in the repository.",
+        f"4. Write `{folder}/verification.json`, with one result for each check:",
+        "",
+        *(f"    {line}" for line in example.splitlines()),
+        "",
+        "- `status` is passed, failed, blocked or not_applicable. `started` and `finished` are ISO 8601 times "
+        "with a time zone.",
+        "- For a command, record its exit code in `exit_code`. An exit code of 0 alone does not prove the check: "
+        "`observed` must show the check's `expected` result.",
+        "- `evidence` names files in the evidence folder. A passed check needs at least one.",
+        "- A passing result describes the final commit. Keep earlier output, such as a failing test before the "
+        "fix or a reproduction of a defect, as more evidence files, but not as the final result.",
+        "- You cannot change the contract or exempt a check. For a check that cannot run here, write status "
+        "blocked and say why in `observed`. The approver decides.",
+        "- herdboard checks that the report is complete, current and consistent. It does not prove that you ran "
+        "a command, so record exactly what happened.",
+        f'- When the plan must change, stop and log why: `{command} --json log {ref} "..."`. A changed plan '
+        "stops approval: the user restarts the factory with the new plan.",
+        "",
+    ]
+
+
 def brief_text(
     card: CardView,
     *,
@@ -49,6 +110,7 @@ def brief_text(
     attachments_dir: str | None = None,
     may_merge_prs: bool = False,
     factory: bool = False,
+    evidence: dict | None = None,
 ) -> str:
     """A Markdown brief: the task, where to work, and how to keep the card current.
 
@@ -145,6 +207,8 @@ def brief_text(
             lines.append(f"- {entry['time']} · {entry['author']} · {first}")
             lines += [f"\t{line}" for line in rest]
         lines.append("")
+    if factory and evidence:
+        lines += evidence_text(evidence, command, ref)
     if may_merge_prs:
         lines += [
             "## GitHub pull requests",
