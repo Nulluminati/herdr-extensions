@@ -210,6 +210,28 @@ class LensTests(FactoryTestCase):
         self.assertEqual(factory.count_confirmed(noted), 2)
         self.assertEqual(factory.count_confirmed("## Confirmed problems\n- a\n### Detail\n- b\n"), 2)
 
+    def test_count_confirmed_accepts_other_heading_styles(self):
+        for confirmed, risks in [
+            ("## Confirmed problems:", "## Risks and questions:"),
+            ("# Confirmed problems", "# Risks and questions"),
+            ("**Confirmed problems**", "**Risks and questions**"),
+            ("**Confirmed problems:**", "**Risks and questions:**"),
+            ("##Confirmed problems", "##Risks and questions"),
+            ("### Confirmed Problems", "### Risks and Questions"),
+            ("## __Confirmed problems__", "## __Risks and questions__"),
+        ]:
+            with self.subTest(heading=confirmed):
+                text = f"{confirmed}\n- [high] src/app.py:12: injection\n\n{risks}\n- src/app.py:20: unclear\n"
+                self.assertEqual(factory.count_confirmed(text), 1)
+                self.assertEqual(factory.count_questions(text), 1)
+
+    def test_a_lens_heading_ends_a_section_in_another_style(self):
+        merged = (
+            "# security (codex)\n\n**Confirmed problems:**\n- [high] a.py:1: bug.\n\n"
+            "# code (pi)\n\n- [low] b.py:1: x.\n"
+        )
+        self.assertEqual(factory.count_confirmed(merged), 1)
+
 
 class StartFactoryTests(FactoryTestCase):
     def test_default_run_and_unknown_preset(self):
