@@ -41,7 +41,7 @@ Each `[[projects]]` table is one workspace:
 | Key | Meaning |
 |---|---|
 | `label` | The workspace name. Required. Unique in the file. |
-| `path` | The project directory. Required. `~` is expanded. |
+| `path` | The project directory. Required. Absolute, or starts with `~`, which is expanded. A relative path is a problem. |
 
 Each `[[projects.tabs]]` table is one tab, in file order. The first tab is the active tab.
 

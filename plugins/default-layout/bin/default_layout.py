@@ -373,6 +373,12 @@ def validate(spec: dict) -> list[str]:
             problems.append(f"{where}: label is required")
         if not is_text(project.get("path")):
             problems.append(f"{where}: path is required")
+        # Herdr does not refuse a relative cwd: it opens the pane in its own
+        # working directory, which is not the project. Each use would also
+        # read a relative path from a different base. The check reads the text
+        # and does not expand ~, which raises for an unknown user.
+        elif not (project["path"].startswith("~") or Path(project["path"]).is_absolute()):
+            problems.append(f"{where}: path must be absolute or start with ~, not {project['path']}")
         tabs = project.get("tabs")
         if not isinstance(tabs, list) or not tabs:
             problems.append(f"{where}: needs at least one [[projects.tabs]] table")

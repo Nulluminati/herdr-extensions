@@ -433,6 +433,28 @@ class SpecTests(DefaultLayoutTestCase):
             """)
         self.assertEqual(problems, ["work: label must not start or end with a space"])
 
+    def test_a_relative_path_is_an_error(self):
+        # Herdr opens a pane with a relative cwd in its own directory, not
+        # the project, so the plugin refuses the path before it builds.
+        problems = self.problems("""
+            [[projects]]
+            label = "work"
+            path = "../.."
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.assertEqual(problems, ["work: path must be absolute or start with ~, not ../.."])
+
+    def test_a_path_that_starts_with_a_tilde_is_valid(self):
+        problems = self.problems("""
+            [[projects]]
+            label = "work"
+            path = "~/Projects/work"
+            [[projects.tabs]]
+            name = "shell"
+            """)
+        self.assertEqual(problems, [])
+
     def test_labels_that_differ_only_by_a_space_are_a_duplicate(self):
         problems = self.problems("""
             [[projects]]
