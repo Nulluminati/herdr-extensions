@@ -4,6 +4,7 @@ import io
 import json
 import os
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1869,6 +1870,57 @@ class ClaimTests(DefaultLayoutTestCase):
             marker = default_layout.claim_path("alpha")
         self.assertEqual(marker.parent, self.dir / "tmp" / f"default-layout-{os.getuid()}")
         self.assertEqual(marker.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_a_planted_symlink_at_the_fallback_path_is_refused(self):
+        # Another user plants a link at the predictable fallback path first, and
+        # it names a directory this user owns, such as a shared web root.
+        shared = self.dir / "shared"
+        shared.mkdir(mode=0o755)
+        link = self.dir / f"default-layout-{os.getuid()}"
+        link.symlink_to(shared, target_is_directory=True)
+        out = io.StringIO()
+        with (
+            patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": ""}),
+            patch.object(tempfile, "tempdir", str(self.dir)),
+            contextlib.redirect_stdout(out),
+        ):
+            token = default_layout.claim("alpha")
+        self.assertRegex(token, r"^[0-9a-f]{32}$")
+        self.assertEqual(stat.S_IMODE(shared.stat().st_mode), 0o755, "a claim must not chmod the link target")
+        self.assertEqual(list(shared.iterdir()), [], "a claim must not write markers through the link")
+        self.assertEqual(default_layout.HELD_CLAIMS, {}, "a refused claim directory must hold no markers")
+        self.assertIn("it is a symbolic link", out.getvalue())
+
+    def test_a_foreign_directory_at_the_fallback_path_is_refused(self):
+        # The shared temporary directory lets another user make this directory first.
+        foreign = self.dir / f"default-layout-{os.getuid() + 1}"
+        foreign.mkdir(mode=0o755)
+        out = io.StringIO()
+        with (
+            patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": ""}),
+            patch.object(tempfile, "tempdir", str(self.dir)),
+            patch.object(os, "getuid", return_value=os.getuid() + 1),
+            contextlib.redirect_stdout(out),
+        ):
+            token = default_layout.claim("alpha")
+        self.assertRegex(token, r"^[0-9a-f]{32}$")
+        self.assertEqual(default_layout.HELD_CLAIMS, {}, "a refused claim directory must hold no markers")
+        self.assertIn("it is not a directory that this user owns", out.getvalue())
+
+    def test_a_claim_directory_that_cannot_be_made_private_is_refused(self):
+        # A chmod that fails must not drop the guard in silence; the run says so once.
+        out = io.StringIO()
+        forbidden = PermissionError(1, "Operation not permitted")
+        with (
+            patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": ""}),
+            patch.object(tempfile, "tempdir", str(self.dir / "tmp")),
+            patch.object(os, "fchmod", side_effect=forbidden),
+            contextlib.redirect_stdout(out),
+        ):
+            token = default_layout.claim("alpha")
+        self.assertRegex(token, r"^[0-9a-f]{32}$")
+        self.assertEqual(default_layout.HELD_CLAIMS, {}, "a refused claim directory must hold no markers")
+        self.assertIn("cannot use the claim directory", out.getvalue())
 
     def test_the_claim_key_holds_the_project_position(self):
         first = default_layout.claim_key(1, {"path": "/tmp/one"})

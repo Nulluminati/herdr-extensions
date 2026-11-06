@@ -687,12 +687,19 @@ def claim_key(number: int, project: dict) -> str:
     return hashlib.sha256(f"{number}:{project_dir(project)}".encode()).hexdigest()
 
 
-def claim_dir() -> Path:
-    """Make and return the directory that holds the claim markers, and nothing else.
+def claim_dir() -> Path | None:
+    """Make and return the directory that holds the claim markers, or None when none is safe.
 
     Herdr names the state directory. A run with no state directory falls back to
     one private directory per user, because the shared temporary directory lets
     another user plant a marker at a path that this plugin can predict.
+
+    The fallback path is predictable too, so another user can put a directory, a
+    file or a symbolic link there first: `os.mkdir` never follows a link, and the
+    open below refuses one. Use the path only when it is a directory that this
+    user owns, seen through the open file, and make it private through that same
+    file. None means the run skips its claims with one log line, as it does for a
+    marker it cannot read: a guard must never block the work.
     """
     configured = os.environ.get("HERDR_PLUGIN_STATE_DIR")
     if configured:
@@ -700,18 +707,54 @@ def claim_dir() -> Path:
         state_dir.mkdir(parents=True, exist_ok=True)
         return state_dir
     state_dir = Path(tempfile.gettempdir()) / f"default-layout-{os.getuid()}"
-    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # mkdir leaves the mode of a directory that an earlier run made alone, and
-    # another user may have made this one first. Only this user may write a marker.
-    state_dir.chmod(0o700)
+    try:
+        state_dir.parent.mkdir(parents=True, exist_ok=True)
+        os.mkdir(state_dir, 0o700)
+    except FileExistsError:
+        pass  # A run made it earlier, or another user put something at the path.
+    except OSError as error:
+        print(f"default-layout: cannot use the claim directory {state_dir}: {error}")
+        return None
+    try:
+        fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as error:
+        reason = str(error)
+        try:
+            if stat.S_ISLNK(os.lstat(state_dir).st_mode):
+                reason = "it is a symbolic link"  # The open above never followed it.
+        except OSError:
+            pass  # The path went away; the error above says what this run saw.
+        print(f"default-layout: cannot use the claim directory {state_dir}: {reason}")
+        return None
+    try:
+        found = os.fstat(fd)
+        if not stat.S_ISDIR(found.st_mode) or found.st_uid != os.getuid():
+            print(
+                f"default-layout: cannot use the claim directory {state_dir}: it is not a directory that this user owns"
+            )
+            return None
+        # mkdir leaves the mode of a directory that an earlier run made alone, and
+        # another user may have made this one first. Only this user may write a marker.
+        os.fchmod(fd, 0o700)
+    except OSError as error:
+        print(f"default-layout: cannot use the claim directory {state_dir}: {error}")
+        return None
+    finally:
+        os.close(fd)
     return state_dir
 
 
-def claim_path(key: str) -> Path:
-    """The marker file for one claim, or ValueError when the key is not a plain file name."""
+def claim_path(key: str) -> Path | None:
+    """The marker file for one claim, ValueError when the key is not a plain file name.
+
+    None means no claim directory is safe to use, so no claim holds.
+    """
     if not CLAIM_KEY.fullmatch(key):
         raise ValueError(f"claim key must match {CLAIM_KEY.pattern}: {key!r}")
-    return claim_dir() / f"building-{key}"
+    state_dir = claim_dir()
+    if state_dir is None:
+        return None
+    return state_dir / f"building-{key}"
 
 
 # The claims this run holds: the marker path and the open file that locks it.
@@ -833,6 +876,8 @@ def claim(key: str) -> str | None:
         marker = claim_path(key)
     except OSError:
         return new_token()  # No usable state directory; do not let the guard block the work.
+    if marker is None:
+        return new_token()  # No safe claim directory; do not let the guard block the work.
     token = new_token()
     for _ in range(2):
         try:
@@ -882,6 +927,8 @@ def release(key: str) -> None:
     try:
         marker = claim_path(key)
     except OSError:
+        return
+    if marker is None:
         return
     found = HELD_CLAIMS.pop(marker, None)
     if found is None:

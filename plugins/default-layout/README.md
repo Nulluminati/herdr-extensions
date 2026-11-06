@@ -187,6 +187,7 @@ description = "default layout: apply to this workspace"
 - A project whose directory does not exist is skipped, with one line in the plugin log.
 - A request to Herdr gives up after 30 seconds, from the connect to the reply. A server that stalls fails that project with one line, and the run moves to the next project.
 - Two runs do not build one project at once: a run holds a lock on the claim marker until it ends. A file system that cannot lock falls back to the marker's age, so on such a file system a run past 60 seconds can still lose its claim. `flock` on some CIFS and FUSE mounts reports success without excluding anyone, and this plugin cannot tell.
+- A run with no `HERDR_PLUGIN_STATE_DIR`, such as a manual run, claims through `default-layout-<uid>` in the temporary directory. If that path holds a symbolic link, a file, or a directory that another user made, the run refuses it with one line in the plugin log and builds without claims, so two such runs can build one project at once until the path is clean.
 - A run that hangs keeps its project locked until it exits. The marker is `building-<key>` in the plugin state directory; remove it by hand only when no run holds that project.
 - `herdr plugin log list --plugin nulluminati.default-layout` shows what each run did.
 
