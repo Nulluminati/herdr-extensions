@@ -74,15 +74,15 @@ def result(check: str, status: str = "passed", evidence=("unit.txt",), **changes
 
 
 def write_report(evidence_dir: Path, run_id: str, digest: str, commit: str, results=None, **changes) -> Path:
-    """A builder's `verification.json` with one passing result per check of CONTRACT, and its files."""
+    """A builder's `verification.json`, by default with one passing result per check of CONTRACT.
+    Writes `unit.txt` and `live.txt` in the evidence folder when they are missing."""
     evidence_dir.mkdir(parents=True, exist_ok=True)
     if results is None:
         results = [result("unit"), result("live", evidence=["live.txt"])]
-    for entry in results:
-        for name in entry.get("evidence") or ():
-            path = evidence_dir / name
-            if not path.exists() and "/" not in name and not name.startswith("."):
-                path.write_text(f"output of {entry['check']}\n")
+    for name in ("unit", "live"):
+        path = evidence_dir / f"{name}.txt"
+        if not path.exists():
+            path.write_text(f"output of {name}\n")
     report = {"version": 1, "run": run_id, "contract_digest": digest, "commit": commit, "results": results}
     report.update(changes)
     path = evidence_dir / "verification.json"
@@ -102,7 +102,7 @@ def approval(verdict="approve", criteria=None, exceptions=(), **changes) -> dict
                 {"id": "AC2", "outcome": "satisfied", "checks": ["unit"], "evidence": "unit.txt"},
             ]
         ),
-        "exceptions": list(exceptions),
+        "exceptions": exceptions if isinstance(exceptions, str) else list(exceptions),
     }
     value.update(changes)
     return value

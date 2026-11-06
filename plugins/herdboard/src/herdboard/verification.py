@@ -16,7 +16,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from . import attachments
@@ -252,3 +255,327 @@ def freeze(folder: Path, contract: Contract, plan_text: str) -> dict:
     except OSError as error:
         raise VerificationError(f"{folder}: cannot keep a copy of the plan: {error}", "io") from error
     return {"verification": VERSION, "contract": contract.to_dict(), "plan_digest": digest(plan_text)}
+
+
+# The builder's evidence.
+
+REPORT_NAME = "verification.json"
+APPROVAL_NAME = "approval.json"
+EVIDENCE_DIR = "evidence"
+STATUSES = ("passed", "failed", "blocked", "not_applicable")
+OUTCOMES = ("satisfied", "unsatisfied")
+MAX_REPORT_BYTES = 256 * 1024
+MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
+MAX_TOTAL_EVIDENCE_BYTES = 32 * 1024 * 1024
+MAX_EVIDENCE_FILES = 200
+COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+@dataclass
+class Report:
+    """A checked `verification.json`. `problems` is empty when it can support an approval."""
+
+    problems: list[str]
+    statuses: dict[str, str]
+    # The digest of the report and of each evidence file, by its path in the evidence folder.
+    files: dict[str, str]
+    data: dict | None = None
+
+
+def _read_bounded(path: Path, limit: int) -> bytes:
+    """At most `limit` bytes; raises ValueError for a larger file."""
+    with path.open("rb") as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"{path.name} is larger than {limit // 1024} KB")
+    return data
+
+
+def _read_json(path: Path, limit: int, problems: list[str]):
+    try:
+        data = _read_bounded(path, limit)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        problems.append(f"{path.name}: {error}")
+        return None
+    try:
+        value = load_json(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        problems.append(f"{path.name} is not valid JSON: {error}")
+        return None
+    if not isinstance(value, dict):
+        problems.append(f"{path.name} must be one JSON object")
+        return None
+    return value
+
+
+def _time(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def tree_state(worktree: Path) -> tuple[str, list[str]]:
+    """The full HEAD commit and `git status` lines for every tracked change and untracked file.
+
+    The same HEAD does not mean the same tree, so the evidence check needs both."""
+
+    def git(*args):
+        result = subprocess.run(["git", "-C", str(worktree), *args], capture_output=True, text=True)
+        if result.returncode:
+            raise VerificationError(f"git {' '.join(args)} failed in {worktree}: {result.stderr.strip()}", "git_failed")
+        return result.stdout
+
+    head = git("rev-parse", "HEAD").strip()
+    dirty = git("status", "--porcelain", "--untracked-files=all").splitlines()
+    return head, dirty
+
+
+def _evidence_file(evidence_dir: Path, name, problems: list[str]) -> Path | None:
+    if not isinstance(name, str) or not name.strip():
+        problems.append("An evidence path must be text.")
+        return None
+    if Path(name).is_absolute():
+        problems.append(f"Evidence path {name} is absolute; name a file in the evidence folder.")
+        return None
+    root = evidence_dir.resolve()
+    path = (evidence_dir / name).resolve()
+    if not path.is_relative_to(root):
+        problems.append(f"Evidence path {name} is outside the evidence folder.")
+        return None
+    if path == root / REPORT_NAME:
+        problems.append(f"Evidence path {name} is the report itself; name the output of the check.")
+        return None
+    if not path.exists():
+        problems.append(f"Evidence file {name} does not exist.")
+        return None
+    if not path.is_file():
+        problems.append(f"Evidence path {name} is not a file.")
+        return None
+    return path
+
+
+def validate_report(evidence_dir: Path, *, run_id: str, contract: Contract, head: str, dirty: list[str]) -> Report:
+    """Check the builder's report against the frozen contract and the current tree. Reads only bounded files
+    in `evidence_dir`. Collects every problem, so the approver and the user see them all."""
+    problems: list[str] = []
+    statuses: dict[str, str] = {}
+    files: dict[str, str] = {}
+    if dirty:
+        names = ", ".join(line[3:] for line in dirty)
+        problems.append(f"The worktree has uncommitted or untracked changes: {names}. Commit them, then check again.")
+    path = evidence_dir / REPORT_NAME
+    report = _read_json(path, MAX_REPORT_BYTES, problems)
+    if report is None:
+        if not problems or not any(REPORT_NAME in problem for problem in problems):
+            problems.append(f"The builder wrote no {REPORT_NAME} in {evidence_dir}.")
+        return Report(problems, statuses, files)
+    files[REPORT_NAME] = digest(path.read_bytes())
+    if isinstance(report.get("version"), bool) or report.get("version") != VERSION:
+        problems.append(f"{REPORT_NAME} version must be {VERSION}.")
+    if report.get("run") != run_id:
+        problems.append(f"{REPORT_NAME} is for another factory run, not {run_id}.")
+    if report.get("contract_digest") != contract.digest:
+        problems.append(f"{REPORT_NAME} is for another contract, not {contract.digest}.")
+    commit = report.get("commit")
+    if not isinstance(commit, str) or not COMMIT.fullmatch(commit):
+        problems.append(f"{REPORT_NAME} commit must be the full commit identifier of the checked tree.")
+    elif commit != head:
+        problems.append(
+            f"The report is for commit {commit}, not the current commit {head}. Check the final commit again."
+        )
+    results = report.get("results")
+    if not isinstance(results, list):
+        problems.append(f"{REPORT_NAME} results must be a list.")
+        results = []
+    total = 0
+    for index, entry in enumerate(results):
+        where = f"results[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{where} must be a JSON object.")
+            continue
+        check_id = entry.get("check")
+        if check_id not in contract.check_ids:
+            problems.append(f"{where} names unknown check {check_id}; report only the contract's checks.")
+            continue
+        if check_id in statuses:
+            problems.append(f"The report has two results for check {check_id}.")
+            continue
+        status = entry.get("status")
+        if status not in STATUSES:
+            problems.append(f"{where}.status must be one of {', '.join(STATUSES)}.")
+            continue
+        statuses[check_id] = status
+        for name in ("action", "observed"):
+            if not isinstance(entry.get(name), str) or not entry[name].strip():
+                problems.append(f"{where}.{name} must describe what was done and seen.")
+        started, finished = _time(entry.get("started")), _time(entry.get("finished"))
+        if started is None:
+            problems.append(f"{where}.started must be an ISO 8601 time with a time zone.")
+        if finished is None:
+            problems.append(f"{where}.finished must be an ISO 8601 time with a time zone.")
+        if started and finished and finished < started:
+            problems.append(f"Check {check_id} finishes before it starts.")
+        if contract.check(check_id)["evidence_kind"] == "command_output" and status in ("passed", "failed"):
+            code = entry.get("exit_code")
+            if isinstance(code, bool) or not isinstance(code, int):
+                problems.append(f"{where}.exit_code must be the command's exit code.")
+            elif status == "passed" and code != 0:
+                problems.append(f"Check {check_id} passed with exit code {code}.")
+        evidence = entry.get("evidence", [])
+        if not isinstance(evidence, list):
+            problems.append(f"{where}.evidence must list files in the evidence folder.")
+            continue
+        if status == "passed" and not evidence:
+            problems.append(f"Check {check_id} passed without evidence.")
+        for name in evidence:
+            if len(files) > MAX_EVIDENCE_FILES:
+                problems.append(f"The report names more than {MAX_EVIDENCE_FILES} evidence files.")
+                break
+            found = _evidence_file(evidence_dir, name, problems)
+            if found is None or name in files:
+                continue
+            size = found.stat().st_size
+            if size > MAX_EVIDENCE_BYTES:
+                problems.append(f"Evidence file {name} is larger than {MAX_EVIDENCE_BYTES // 1024} KB.")
+                continue
+            if size == 0:
+                problems.append(f"Evidence file {name} is empty.")
+                continue
+            total += size
+            if total > MAX_TOTAL_EVIDENCE_BYTES:
+                problems.append(f"The evidence is larger than {MAX_TOTAL_EVIDENCE_BYTES // (1024 * 1024)} MB in all.")
+                break
+            files[name] = digest(_read_bounded(found, MAX_EVIDENCE_BYTES))
+    for check_id in contract.check_ids:
+        if check_id not in statuses and not any(f"check {check_id}" in problem for problem in problems):
+            problems.append(f"The report has no result for check {check_id}.")
+    return Report(problems, statuses, files, report)
+
+
+def snapshot(report: Report, evidence_dir: Path, target: Path) -> None:
+    """Copy the report and its evidence files for the approver, who reads the copy."""
+    for name in report.files:
+        destination = target / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile((evidence_dir / name).resolve(), destination)
+
+
+def changed_since(report: Report, evidence_dir: Path) -> list[str]:
+    """A problem when any captured file differs now, so evidence changed during the approval does not count."""
+    changed = []
+    for name, expected in report.files.items():
+        try:
+            data = _read_bounded((evidence_dir / name).resolve(), max(MAX_REPORT_BYTES, MAX_EVIDENCE_BYTES))
+        except (OSError, ValueError):
+            data = None
+        if data is None or digest(data) != expected:
+            changed.append(name)
+    if not changed:
+        return []
+    return [f"The evidence changed after herdboard captured it: {', '.join(changed)}."]
+
+
+# The approver's structured approval.
+
+
+def _approval_problems(contract: Contract, report: Report, approval, verdict: str):
+    """The problems of `approval.json`, the exceptions that it grants, and the criteria found unsatisfied."""
+    problems, exceptions, unsatisfied = [], {}, []
+    if isinstance(approval.get("version"), bool) or approval.get("version") != VERSION:
+        problems.append(f"{APPROVAL_NAME} version must be {VERSION}.")
+    stated = approval.get("verdict")
+    if stated not in ("approve", "changes needed"):
+        problems.append(f'{APPROVAL_NAME} verdict must be "approve" or "changes needed".')
+    elif verdict == "approve" and stated != "approve":
+        problems.append(f"{APPROVAL_NAME} says {stated}, but verdict.md says approve.")
+    criteria = approval.get("criteria")
+    if not isinstance(criteria, list):
+        problems.append(f"{APPROVAL_NAME} criteria must list one outcome per criterion.")
+        criteria = []
+    outcomes = {}
+    for index, entry in enumerate(criteria):
+        where = f"{APPROVAL_NAME} criteria[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{where} must be a JSON object.")
+            continue
+        name = entry.get("id")
+        if name not in contract.criterion_ids:
+            problems.append(f"{where} names unknown criterion {name}.")
+        elif name in outcomes:
+            problems.append(f"{APPROVAL_NAME} has two outcomes for criterion {name}.")
+        elif entry.get("outcome") not in OUTCOMES:
+            problems.append(f"{where}.outcome must be satisfied or unsatisfied.")
+        else:
+            outcomes[name] = entry["outcome"]
+    for name in contract.criterion_ids:
+        if name not in outcomes and not any(f"criterion {name}" in problem for problem in problems):
+            problems.append(f"{APPROVAL_NAME} has no outcome for criterion {name}.")
+        elif outcomes.get(name) == "unsatisfied":
+            unsatisfied.append(name)
+    granted = approval.get("exceptions", [])
+    if not isinstance(granted, list):
+        problems.append(f"{APPROVAL_NAME} exceptions must be a list, one entry per exempted check.")
+        granted = []
+    for index, entry in enumerate(granted):
+        where = f"{APPROVAL_NAME} exceptions[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{where} must be a JSON object.")
+            continue
+        check_id = entry.get("check")
+        if check_id not in contract.check_ids:
+            problems.append(f"{where} names unknown check {check_id}; name one blocked or inapplicable check.")
+            continue
+        if check_id in exceptions:
+            problems.append(f"{APPROVAL_NAME} has two exceptions for check {check_id}.")
+            continue
+        missing = [
+            name for name in ("reason", "risk") if not isinstance(entry.get(name), str) or not entry[name].strip()
+        ]
+        if missing:
+            problems += [f"{where}.{name} must say why the check is exempt and what risk remains." for name in missing]
+            continue
+        status = report.statuses.get(check_id)
+        if status == "failed":
+            problems.append(f"Check {check_id} failed, and a failed check cannot have an exception.")
+            continue
+        if status == "passed":
+            problems.append(f"Check {check_id} passed, so it needs no exception.")
+            continue
+        exceptions[check_id] = {"check": check_id, "reason": entry["reason"], "risk": entry["risk"]}
+    return problems, exceptions, unsatisfied
+
+
+def gate(contract: Contract, report: Report, approval_path: Path, verdict: str) -> tuple[str, list[str], list[dict]]:
+    """The effective verdict, the reasons that it is not the approver's, and the exceptions that stand.
+
+    Software can only lower an approval: a verdict other than approve stays changes needed."""
+    reasons = list(report.problems)
+    exceptions = {}
+    approval = _read_json(approval_path, MAX_REPORT_BYTES, reasons)
+    if approval is None:
+        if not any(APPROVAL_NAME in reason for reason in reasons):
+            reasons.append(f"The approver wrote no {APPROVAL_NAME}.")
+        unsatisfied = []
+    else:
+        problems, exceptions, unsatisfied = _approval_problems(contract, report, approval, verdict)
+        reasons += problems
+    for check_id in contract.check_ids:
+        status = report.statuses.get(check_id)
+        if status == "failed":
+            reasons.append(f"Required check {check_id} failed.")
+        elif status in ("blocked", "not_applicable") and check_id not in exceptions:
+            label = "blocked" if status == "blocked" else "not applicable"
+            reasons.append(f"Required check {check_id} is {label} and has no exception.")
+    reasons += [f"The approver found criterion {name} unsatisfied." for name in unsatisfied]
+    if verdict != "approve":
+        if verdict != "changes needed":
+            reasons.insert(0, "The verdict's first line is not `Verdict: approve` or `Verdict: changes needed`.")
+        # The approver's own changes needed stands; the reasons only explain the evidence.
+        return "changes needed", reasons, list(exceptions.values())
+    return ("changes needed" if reasons else "approve"), reasons, list(exceptions.values())
