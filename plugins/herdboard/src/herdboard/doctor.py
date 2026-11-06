@@ -568,7 +568,7 @@ def check_automations(store):
             findings.append(finding("error", "automation_schedule_invalid", f"{item.id}: {error}", path))
         if item.board != "inbox":
             try:
-                store.resolve_board(item.board)
+                board = store.resolve_board(item.board)
             except HerdboardError:
                 findings.append(
                     finding(
@@ -579,6 +579,17 @@ def check_automations(store):
                         fix=f"herdboard automation edit {item.id} --board BOARD",
                     )
                 )
+            else:
+                if not store.board_meta(board).repo:
+                    findings.append(
+                        finding(
+                            "error",
+                            "automation_board_no_repo",
+                            f"{item.id}: board {item.board!r} has no repository; its runs fail.",
+                            path,
+                            fix=f"herdboard automation edit {item.id} --board BOARD",
+                        )
+                    )
     if any(item.enabled for item in items):
         problem = automations.timer_problem()
         if problem is not None:

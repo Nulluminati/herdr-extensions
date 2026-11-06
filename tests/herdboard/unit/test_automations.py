@@ -151,6 +151,17 @@ class AutomationTestCase(LocalTime):
         fields.setdefault("created", local(2026, 10, 20, 8, 0))
         return automations.add(self.store, **fields)
 
+    def plain_board(self, name="plain"):
+        """Make a board that names no repository."""
+        path = self.config.todos_dir / "boards" / name
+        (path / "cards").mkdir(parents=True)
+        (path / "board.toml").write_text(
+            'format = 1\n\n[[column]]\nname = "Backlog"\ncards = []\n\n'
+            '[[column]]\nname = "Done"\ndone = true\ncards = []\n',
+            encoding="utf-8",
+        )
+        return name
+
     def cards(self, board="inbox"):
         return self.store.list_cards([self.store.resolve_board(board)])
 
@@ -188,6 +199,20 @@ class StorageTests(AutomationTestCase):
             self.add(schedule="sometimes")
         self.assertEqual(raised.exception.code, "bad_schedule")
         self.assertEqual(automations.load(self.config), [])
+
+    def test_a_board_without_a_repository_is_refused(self):
+        board = self.plain_board()
+        for factory in (False, True):
+            with self.subTest(factory=factory):
+                with self.assertRaises(HerdboardError) as raised:
+                    self.add(board=board, factory=factory)
+                self.assertEqual(raised.exception.code, "usage")
+                self.assertIn("Board plain has no repository", str(raised.exception))
+        plain = self.add()
+        with self.assertRaises(HerdboardError) as raised:
+            automations.edit(self.store, plain.id, board=board)
+        self.assertEqual(raised.exception.code, "usage")
+        self.assertEqual([item.board for item in automations.load(self.config)], ["inbox"])
 
     def test_claude_takes_its_own_thinking_levels(self):
         added = self.add(agent="claude", thinking="max")
@@ -1251,6 +1276,13 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(
             sorted(self.codes()), ["automation_board_missing", "automation_duplicate_id", "automation_schedule_invalid"]
         )
+
+    def test_a_board_without_a_repository_is_an_error(self):
+        board = self.store.config.todos_dir / "boards" / "plain"
+        (board / "cards").mkdir(parents=True)
+        (board / "board.toml").write_text('format = 1\n\n[[column]]\nname = "Backlog"\ncards = []\n', encoding="utf-8")
+        self.write('[[automation]]\nid = "a001"\ntitle = "x"\nschedule = "every day"\nboard = "plain"\n')
+        self.assertEqual(self.codes(), ["automation_board_no_repo"])
 
 
 if __name__ == "__main__":

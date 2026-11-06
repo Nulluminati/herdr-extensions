@@ -363,9 +363,15 @@ def _check(store, item: Automation, *, check_preset: bool = True) -> Automation:
         raise AutomationError("A factory automation needs a repository board.", "usage")
     if item.board != "inbox":
         try:
-            store.resolve_board(item.board)
+            path = store.resolve_board(item.board)
         except NotFoundError as error:
             raise AutomationError(f"No board named {item.board!r}", "unknown_board") from error
+        # Only an inbox card starts without a repository, so a run on any other board needs one.
+        if not store.board_meta(path).repo:
+            raise AutomationError(
+                f"Board {item.board} has no repository. Use a repository board, or inbox for a run without one.",
+                "usage",
+            )
     parse_schedule(item.schedule)
     if item.agent is not None and item.agent not in AGENTS:
         raise AutomationError("The agent must be claude, pi or codex")
