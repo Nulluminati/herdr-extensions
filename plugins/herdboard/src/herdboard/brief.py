@@ -19,6 +19,13 @@ def _one_line(text: str) -> str:
     return "".join(" " if unicodedata.category(ch) == "Cc" else ch for ch in text)
 
 
+def width(text: str) -> int:
+    """The text's size on screen in cells: 2 for wide characters, 0 for combining ones."""
+    return sum(
+        0 if unicodedata.combining(ch) else 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text
+    )
+
+
 FACTORY_RULE = (
     "- This card runs as a factory. When you move it to Review, the card stays in In progress: reviewers "
     "check your work and send you their findings. herdboard moves the card to Review when every round "
@@ -220,14 +227,22 @@ def card_token(card: CardView) -> str:
     separator = " · "
     title = " ".join(_one_line(card.title).split())
     # The title keeps up to half the token, so a long column name cannot push it out.
-    column_room = TOKEN_WIDTH - len(mark) - len(separator) - min(len(title), TOKEN_WIDTH // 2)
+    column_room = TOKEN_WIDTH - width(mark) - width(separator) - min(width(title), TOKEN_WIDTH // 2)
     ending = separator + _cut(card.column, column_room)
-    title = _cut(title, TOKEN_WIDTH - len(mark) - len(ending))
+    title = _cut(title, TOKEN_WIDTH - width(mark) - width(ending))
     return f"{mark}{title}{ending}"
 
 
 def _cut(text: str, room: int) -> str:
     """`text`, cut to `room` cells with an `…` when it is longer."""
-    if len(text) <= room:
+    if width(text) <= room:
         return text
-    return text[: room - 1].rstrip() + "…"
+    kept = ""
+    filled = 0
+    for ch in text:
+        cells = width(ch)
+        if filled + cells > room - 1:
+            break
+        kept += ch
+        filled += cells
+    return kept.rstrip() + "…"

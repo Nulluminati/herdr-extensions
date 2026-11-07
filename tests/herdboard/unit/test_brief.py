@@ -1,9 +1,17 @@
+import unicodedata
 import unittest
 from pathlib import Path
 
 from herdboard.brief import agent_message, brief_text, card_token
 from herdboard.store import CardView
 from support.herdboard_brief import todo
+
+
+def cells(text):
+    """The text's size on screen: wide characters take 2 cells, combining none."""
+    return sum(
+        0 if unicodedata.combining(ch) else 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text
+    )
 
 
 def issue(**changes):
@@ -266,6 +274,17 @@ class TokenTests(unittest.TestCase):
         token = card_token(todo(title="Fix it", column="C" * 80))
         self.assertLessEqual(len(token), 60)
         self.assertTrue(token.startswith("▶ Fix it · C"))
+
+    def test_a_wide_title_stays_within_60_cells(self):
+        token = card_token(todo(title="ログイン画面のタイムアウト処理を修正して再試行できるようにする"))
+        self.assertLessEqual(cells(token), 60)
+        self.assertTrue(token.startswith("▶ ログイン画面の"))
+        self.assertTrue(token.endswith("… · In progress"))
+
+    def test_a_wide_column_name_is_cut_to_cells_and_keeps_the_title(self):
+        token = card_token(todo(title="Fix it", column="進捗" * 15))
+        self.assertLessEqual(cells(token), 60)
+        self.assertTrue(token.startswith("▶ Fix it · 進捗"))
 
     def test_a_done_card(self):
         self.assertEqual(card_token(todo(column="Done", checked=True)), "✓ Move to shared [[Stow notes]] · Done")
