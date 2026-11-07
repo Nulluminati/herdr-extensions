@@ -1,0 +1,12 @@
+{
+  "network": {
+    "allowedDomains": ["pypi.org", "files.pythonhosted.org"],
+    "deniedDomains": []
+  },
+  "filesystem": {
+    "denyRead": ["~", "/tmp", "/run"],
+    "allowRead": ["."],
+    "allowWrite": ["."],
+    "denyWrite": [".env"]
+  }
+}
