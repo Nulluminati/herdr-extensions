@@ -284,7 +284,10 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(header.styles.content_align_horizontal, "center")
             label = form.query_one("#factory-thinking-builder #label")
             self.assertGreaterEqual(label.content_size.width, len("default"))
-            self.assertIn("enter in text fields: start", str(form.query_one("#factory-custom-hint", Label).render()))
+            subtitle = form.query_one(".dialog").border_subtitle
+            self.assertIn("ctrl+s/enter: start", subtitle)
+            self.assertIn("tab: next field", subtitle)
+            self.assertFalse(form.query("#factory-custom-hint"))
 
     async def test_factory_custom_layout_and_error_stay_visible_in_small_pane(self):
         from textual.widgets import Checkbox, Label, Select, Static
@@ -318,8 +321,8 @@ class StartBoardTests(unittest.IsolatedAsyncioTestCase):
             error = form.query_one("#factory-error", Static)
             self.assertIn("Rounds", str(error.render()))
             self.assertTrue(form.query_one(".dialog").content_region.contains_region(error.region))
-            hint = form.query_one("#factory-custom-hint", Label)
-            self.assertTrue(form.query_one(".dialog").content_region.contains_region(hint.region))
+            self.assertIn("esc: back", form.query_one(".dialog").border_subtitle)
+            self.assertFalse(form.query("#factory-custom-hint"))
             self.callback.assert_not_called()
 
     async def test_factory_custom_lens_checkbox_has_visible_focus(self):

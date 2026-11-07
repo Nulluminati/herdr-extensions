@@ -51,7 +51,7 @@ class AttachmentDetailTests(BoardTestCase):
             block = app.screen.query_one("#detail-files")
             self.assertEqual(block.border_title, "Attachments")
             self.assertEqual(block.plain.splitlines(), ["plan.md   7 B", "shot.png  2.0 KB"])
-            self.assertIn("o: open attachment", app.screen.query_one(".dialog").border_subtitle)
+            self.assertIn("o: open", app.screen.query_one(".dialog").border_subtitle)
 
     async def test_a_card_without_attachments_has_no_block_and_o_says_so(self):
         self.store.add(self.repo_path, "Ship it", "Todo")

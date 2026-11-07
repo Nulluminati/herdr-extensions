@@ -977,7 +977,8 @@ class ModalBase(ModalScreen):
         """Keep shortcuts in the border, outside the dialog's scrolling content."""
         container = VerticalScroll if scroll else Vertical
         dialog = container(**kwargs)
-        dialog.border_subtitle = subtitle
+        # Use the key bar's compact label for the Escape key.
+        dialog.border_subtitle = subtitle.replace("escape:", "esc:")
         return dialog
 
     def on_mount(self) -> None:
@@ -1312,9 +1313,9 @@ class DetailScreen(ModalBase):
                 chips.append("  ")
             chips.append_text(due_label(due, icon_style=self.icon_style))
         body = self.body
-        hint = "j/k: select item · space: check · " if self.items else ""
+        hint = "j/k: select · space: check · " if self.items else ""
         if self.card.pr_url or self.files or self.links:
-            hint += "o: open attachment · "
+            hint += "o: open · "
         with self.dialog(hint + "e: edit · escape: close", scroll=True, classes="dialog detail", can_focus=False):
             yield RichStatic(Text(title or self.card.title, style="bold"), id="detail-title")
             if chips:
@@ -1546,7 +1547,7 @@ class CardFormScreen(ModalBase):
         target.plain = self.heading
         error = Static("", id="card-error", classes="error")
         error.plain = ""
-        with self.dialog("ctrl+s or enter: save · tab: next field · escape: cancel", classes="dialog card-form"):
+        with self.dialog("ctrl+s/enter: save · tab: next field · escape: cancel", classes="dialog card-form"):
             yield target
             yield from self.destination()
             yield self._titled(
@@ -1796,16 +1797,14 @@ class FactoryCustomScreen(ModalBase):
         return [("default", ""), *((level, level) for level in thinking_levels(agent))]
 
     def compose(self) -> ComposeResult:
-        with self.dialog("ctrl+s: start · escape: back", classes="dialog factory-dialog factory-custom-dialog"):
+        with self.dialog(
+            "ctrl+s/enter: start · tab: next field · escape: back",
+            classes="dialog factory-dialog factory-custom-dialog",
+        ):
             yield Label(f"Custom factory run for {self.ref}")
             with VerticalScroll(id="factory-fields", can_focus=False):
                 yield from self.compose_fields()
             yield Static("", id="factory-error", classes="error", markup=False)
-            yield Label(
-                "enter in text fields: start · tab: next",
-                id="factory-custom-hint",
-                classes="dim",
-            )
 
     def compose_fields(self) -> ComposeResult:
         with Horizontal(classes="factory-role-row factory-role-header"):
@@ -2023,10 +2022,13 @@ class TargetScreen(ModalBase):
         with self.dialog("enter: choose a repository · escape: cancel", classes="dialog"):
             yield Label(self.title_text)
             yield OptionList(*self.labels, id="target-choice")
-            if not self.linear and self.default_path is not None:
-                yield Label("New repository path")
-                yield Input(value=str(self.default_path), placeholder="path of the new repository", id="target-path")
             if not self.linear:
+                yield Label("New repository path")
+                yield Input(
+                    value=str(self.default_path) if self.default_path is not None else "",
+                    placeholder="path of the new repository",
+                    id="target-path",
+                )
                 yield Label("Type a path and press enter for a new repository.", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -2041,6 +2043,9 @@ class TargetScreen(ModalBase):
         event.stop()
         typed = event.value.strip()
         path = Path(typed).expanduser() if typed else self.default_path
+        if path is None:
+            self.notify("Enter a repository path", severity="warning")
+            return
         self.dismiss(("new_repo", path))
 
 
@@ -2522,7 +2527,7 @@ class ModelScreen(ModalBase):
 
     def compose(self) -> ComposeResult:
         levels = [("default", "default"), *((level, level) for level in thinking_levels(self.agent))]
-        with self.dialog("enter: start · tab: thinking level · escape: cancel", classes="dialog"):
+        with self.dialog("enter: start · tab: next field · escape: cancel", classes="dialog"):
             yield Label(f"Choose {self.agent}'s model")
             yield OptionList(*self.labels, id="models")
             thinking = Select(levels, value=self.remembered_level(0), allow_blank=False, id="thinking")
@@ -3695,7 +3700,7 @@ class PullRequestDetailScreen(ModalBase):
             meta.append_text(Text(" ").join(label_chip(label) for label in pr.labels))
         # In the border, so the keys stay in view when the description scrolls.
         dialog = self.dialog(
-            "R review · g go · u new commits · f finish · o browser · esc close",
+            "R: review · g: go · u: sync · f: finish · o: open · escape: close",
             scroll=True,
             classes="dialog detail pr-detail",
         )
@@ -4811,7 +4816,7 @@ class AutomationDetailScreen(ModalBase):
                 meta.append("\n")
             meta.append(f"{name}: ", style="bold")
             meta.append(value)
-        hint = ("o: open attachment · " if self.files else "") + "e: edit · escape: close"
+        hint = ("o: open · " if self.files else "") + "e: edit · escape: close"
         with self.dialog(hint, scroll=True, classes="dialog detail", can_focus=False):
             yield RichStatic(Text(entry["title"], style="bold"), id="detail-title")
             yield RichStatic(meta, id="detail-meta")
@@ -5345,9 +5350,10 @@ class HerdboardApp(App):
     /* A Label is as wide as its text by default, so a long line runs past the dialog edge. */
     .dialog Label { width: 100%; }
     .dialog > Label:first-child, .dialog > Static:first-child { text-style: bold; margin-bottom: 1; }
-    .dialog Input, .dialog TextArea, .dialog OptionList, .dialog Select { border: round $surface-lighten-2; }
+    /* Direct child lists use section borders; SelectOverlay keeps its native menu border. */
+    .dialog Input, .dialog TextArea, .dialog > OptionList, .dialog Select { border: round $surface-lighten-2; }
     .dialog Select > SelectCurrent { border: none; }
-    .dialog Input:focus, .dialog TextArea:focus, .dialog OptionList:focus,
+    .dialog Input:focus, .dialog TextArea:focus, .dialog > OptionList:focus,
     .dialog Select:focus-within { border: round $primary; }
     .factory-dialog { width: 90; max-width: 95%; max-height: 95%; }
     .factory-role-row { height: 3; }
@@ -5493,9 +5499,9 @@ class HerdboardApp(App):
     .column .card.compact.selected { border: none; background: $accent; color: $text; }
     App:ansi .column .card.selected { background: ansi_default; border: heavy ansi_default; text-style: bold; }
     App:ansi .dialog { border: round $primary; }
-    App:ansi .dialog Input, App:ansi .dialog TextArea, App:ansi .dialog OptionList,
+    App:ansi .dialog Input, App:ansi .dialog TextArea, App:ansi .dialog > OptionList,
     App:ansi .dialog Select { border: round ansi_bright_black; }
-    App:ansi .dialog Input:focus, App:ansi .dialog TextArea:focus, App:ansi .dialog OptionList:focus,
+    App:ansi .dialog Input:focus, App:ansi .dialog TextArea:focus, App:ansi .dialog > OptionList:focus,
     App:ansi .dialog Select:focus-within { border: round $primary; }
     App:ansi .detail-block, App:ansi #factory-summary { border: round ansi_bright_black; }
     App:ansi .factory-dialog Select, App:ansi .factory-dialog Input { border: round ansi_bright_black; }
