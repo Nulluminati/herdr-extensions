@@ -43,7 +43,7 @@ class PullRequestLinkTests(BoardTestCase):
             block = app.screen.query_one("#detail-pr")
             self.assertEqual(block.border_title, "Pull request")
             self.assertEqual(block.plain, PR)
-            self.assertIn("o: open attachment", app.screen.query(".dim").last().render().plain)
+            self.assertIn("o: open attachment", app.screen.query_one(".dialog").border_subtitle)
 
     async def test_a_card_without_a_pull_request_has_no_block(self):
         self.store.add(self.repo_path, "Ship it", "Todo")

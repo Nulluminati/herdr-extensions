@@ -972,6 +972,14 @@ class ModalBase(ModalScreen):
     # True when the dialog's save ended while another dialog was on top of it.
     saved = False
 
+    @staticmethod
+    def dialog(subtitle: str, *, scroll: bool = False, **kwargs):
+        """Keep shortcuts in the border, outside the dialog's scrolling content."""
+        container = VerticalScroll if scroll else Vertical
+        dialog = container(**kwargs)
+        dialog.border_subtitle = subtitle
+        return dialog
+
     def on_mount(self) -> None:
         # The dialog's keys at the bottom, over the key bar of the screen below.
         self.mount(KeyBar())
@@ -1304,7 +1312,10 @@ class DetailScreen(ModalBase):
                 chips.append("  ")
             chips.append_text(due_label(due, icon_style=self.icon_style))
         body = self.body
-        with VerticalScroll(classes="dialog detail", can_focus=False):
+        hint = "j/k: select item · space: check · " if self.items else ""
+        if self.card.pr_url or self.files or self.links:
+            hint += "o: open attachment · "
+        with self.dialog(hint + "e: edit · escape: close", scroll=True, classes="dialog detail", can_focus=False):
             yield RichStatic(Text(title or self.card.title, style="bold"), id="detail-title")
             if chips:
                 yield RichStatic(chips, id="detail-chips")
@@ -1342,10 +1353,6 @@ class DetailScreen(ModalBase):
                 block = RichStatic(log_lines(self.entries), id="detail-log", classes="detail-block")
                 block.border_title = "Log"
                 yield block
-            hint = "j/k: select item · space: check · " if self.items else ""
-            if self.card.pr_url or self.files or self.links:
-                hint += "o: open attachment · "
-            yield Label(f"{hint}e: edit · escape: close", classes="dim")
 
     def action_edit(self) -> None:
         self.dismiss("edit")
@@ -1440,11 +1447,10 @@ class AttachmentChoiceScreen(ModalBase):
         self.files = files
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: open · escape: cancel", classes="dialog"):
             yield Label("Open an attachment")
             # Text, so a name with square brackets, such as a Linear attachment title, is not markup.
             yield OptionList(*(Text(entry["name"]) for entry in self.files))
-            yield Label("enter: open, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1465,14 +1471,15 @@ class AttachmentScreen(ModalBase):
         self.text = text
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(classes="dialog detail attachment", can_focus=False):
+        with self.dialog(
+            "j/k: scroll · escape: close", scroll=True, classes="dialog detail attachment", can_focus=False
+        ):
             yield RichStatic(Text(self.name_text, style="bold"), id="attachment-title")
             if self.name_text.lower().endswith(".md"):
                 with Vertical(classes="detail-block detail-note"):
                     yield Markdown(self.text)
             else:
                 yield RichStatic(Text(self.text), id="attachment-text", classes="detail-block")
-            yield Label("j/k: scroll · escape: close", classes="dim")
 
     def action_scroll(self, step: int) -> None:
         self.query_one(".attachment", VerticalScroll).scroll_relative(y=step, animate=False)
@@ -1482,7 +1489,7 @@ class HelpScreen(ModalBase):
     """The key list in sections. Each description wraps inside its own column, so a long entry stays aligned."""
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(classes="dialog help"):
+        with self.dialog("escape: close", scroll=True, classes="dialog help"):
             with Container(id="help", classes="help-grid"):
                 for title, entries in HELP_SECTIONS:
                     section = Static(Text(title, style="bold"), classes="help-section")
@@ -1495,7 +1502,6 @@ class HelpScreen(ModalBase):
                         what_label = Static(Text(what), classes="help-what")
                         what_label.plain = what
                         yield what_label
-            yield Label("escape: close", classes="dim")
 
 
 @dataclass
@@ -1540,7 +1546,7 @@ class CardFormScreen(ModalBase):
         target.plain = self.heading
         error = Static("", id="card-error", classes="error")
         error.plain = ""
-        with Vertical(classes="dialog card-form"):
+        with self.dialog("ctrl+s or enter: save · tab: next field · escape: cancel", classes="dialog card-form"):
             yield target
             yield from self.destination()
             yield self._titled(
@@ -1567,7 +1573,6 @@ class CardFormScreen(ModalBase):
                 "Details",
             )
             yield error
-            yield Label("ctrl+s or enter: save · tab: next field · escape: cancel", classes="dim")
 
     @staticmethod
     def _titled(widget, title: str):
@@ -1674,10 +1679,9 @@ class StateScreen(ModalBase):
         text = f"Which state of team {self.team_key} for column {self.column!r}?"
         prompt = Static(Text(text), id="state-prompt")
         prompt.plain = text
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: choose · escape: cancel", classes="dialog"):
             yield prompt
             yield OptionList(*[state["name"] for state in self.found], id="state-options")
-            yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1692,10 +1696,9 @@ class AgentScreen(ModalBase):
         self.title_text = title
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: choose · escape: cancel", classes="dialog"):
             yield Label(self.title_text)
             yield OptionList(*AGENTS)
-            yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1716,11 +1719,10 @@ class FactoryPresetScreen(ModalBase):
         ]
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog factory-dialog"):
+        with self.dialog("enter: start · c: custom (prefilled) · escape: cancel", classes="dialog factory-dialog"):
             yield Label(f"Start {self.ref} as a factory")
             yield OptionList("Default", *(run.name for run in self.runs[1:]), "Custom…", id="factory-presets")
             yield Static(self.run_summary(self.runs[0]), id="factory-summary", markup=False)
-            yield Label("enter: start · c: custom (prefilled) · escape: cancel", classes="dim")
 
     @staticmethod
     def run_summary(run: FactoryRun) -> str:
@@ -1794,13 +1796,13 @@ class FactoryCustomScreen(ModalBase):
         return [("default", ""), *((level, level) for level in thinking_levels(agent))]
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog factory-dialog factory-custom-dialog"):
+        with self.dialog("ctrl+s: start · escape: back", classes="dialog factory-dialog factory-custom-dialog"):
             yield Label(f"Custom factory run for {self.ref}")
             with VerticalScroll(id="factory-fields", can_focus=False):
                 yield from self.compose_fields()
             yield Static("", id="factory-error", classes="error", markup=False)
             yield Label(
-                "ctrl+s or enter in text fields: start · tab: next · escape: back",
+                "enter in text fields: start · tab: next",
                 id="factory-custom-hint",
                 classes="dim",
             )
@@ -1956,14 +1958,13 @@ class ReviewKindScreen(ModalBase):
     KINDS = ("human", "agent", "both")
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: choose · escape: cancel", classes="dialog"):
             yield Label("Review")
             yield OptionList(
                 "Human: open Hunk next to the card's agent",
                 "Agent: another agent reviews, the card's agent answers",
                 "Both: an agent review first, then Hunk",
             )
-            yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -1980,10 +1981,9 @@ class ClaudeModelScreen(ModalBase):
         self.labels = ["claude default", *self.MODELS[1:]]
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: start · escape: cancel", classes="dialog"):
             yield Label("Choose Claude's model")
             yield OptionList(*self.labels)
-            yield Label("enter: start, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -2020,18 +2020,14 @@ class TargetScreen(ModalBase):
         self.labels.append("No repository: a plain folder, output as attachments")
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: choose a repository · escape: cancel", classes="dialog"):
             yield Label(self.title_text)
             yield OptionList(*self.labels, id="target-choice")
             if not self.linear and self.default_path is not None:
                 yield Label("New repository path")
                 yield Input(value=str(self.default_path), placeholder="path of the new repository", id="target-path")
-            yield Label(
-                "enter: choose a repository"
-                + (" · type a path and press enter for a new repository" if not self.linear else "")
-                + " · escape: cancel",
-                classes="dim",
-            )
+            if not self.linear:
+                yield Label("Type a path and press enter for a new repository.", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -2059,12 +2055,10 @@ class BoardChoiceScreen(ModalBase):
         self.prompt = prompt
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        hint = "enter: choose · escape: cancel" if self.prompt else "enter: move · escape: cancel"
+        with self.dialog(hint, classes="dialog"):
             yield Label(self.prompt or f"Move {self.card.title} to")
             yield OptionList(*self.board_labels, id="board-choice")
-            yield Label(
-                "enter: choose, escape: cancel" if self.prompt else "enter: move, escape: cancel", classes="dim"
-            )
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -2086,7 +2080,7 @@ class IssueSearchScreen(ModalBase):
         self.searching = False
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: search or pin · tab: results · escape: cancel", classes="dialog"):
             yield Label(f"Pin a Linear issue to {self.board_name}")
             yield Input(placeholder="words, or an identifier such as ENG-123", id="issue-search")
             yield RichStatic(
@@ -2095,7 +2089,6 @@ class IssueSearchScreen(ModalBase):
                 classes="dim",
             )
             yield OptionList(id="issue-results")
-            yield Label("enter: search, or pin the issue · tab: results · escape: cancel", classes="dim")
 
     @staticmethod
     def _label(issue: dict) -> Text:
@@ -2194,7 +2187,7 @@ class PromoteScreen(ModalBase):
             f"This creates Linear issues for {self.title_text}, its checklist and its sub-cards, "
             "then moves the todo to Done."
         )
-        with Vertical(classes="dialog"):
+        with self.dialog("enter or click: choose · ctrl+s: promote · escape: cancel", classes="dialog"):
             yield Label(f"Promote {self.title_text} to Linear")
             yield RichStatic(Text(note), id="promote-note", classes="dim")
             yield Label("Team")
@@ -2202,7 +2195,6 @@ class PromoteScreen(ModalBase):
             yield Label("Project")
             yield OptionList(id="promote-projects", disabled=True)
             yield RichStatic(Text("Loading teams…"), id="promote-status", classes="dim")
-            yield Label("enter or click: choose · ctrl+s: promote · escape: cancel", classes="dim")
 
     def on_mount(self) -> None:
         # Textual also runs ModalBase.on_mount, which adds the key bar.
@@ -2330,10 +2322,9 @@ class ParentScreen(ModalBase):
         self.labels = ["No parent", *(option.title for option in options)]
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: choose · escape: cancel", classes="dialog"):
             yield Label(f"Parent of {self.card.title}")
             yield OptionList(*self.labels, id="parent-choice")
-            yield Label("enter: choose, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -2436,10 +2427,9 @@ class CardMenuScreen(ModalBase):
         self.actions = actions
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("enter or click: run · escape: cancel", classes="dialog"):
             yield RichStatic(Text(self.title_text), id="card-menu-title")
             yield OptionList(*(label for label, _ in self.actions), id="card-menu")
-            yield Label("enter or click: run, escape: cancel", classes="dim")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -2462,9 +2452,8 @@ class DeleteScreen(ModalBase):
         text = f"Delete {self.card.ref}: {self.card.title}?"
         prompt = Static(Text(text), id="delete-prompt")
         prompt.plain = text
-        with Vertical(classes="dialog"):
+        with self.dialog("y: delete · n or escape: keep", classes="dialog"):
             yield prompt
-            yield Label("y: delete, n or escape: keep", classes="dim")
 
     def action_answer(self, delete: bool) -> None:
         self.dismiss(delete)
@@ -2486,10 +2475,9 @@ class ConfirmScreen(ModalBase):
     def compose(self) -> ComposeResult:
         prompt = Static(Text(self.question), id="confirm-prompt")
         prompt.plain = self.question
-        with Vertical(classes="dialog"):
+        with self.dialog("y: yes · n or escape: no", classes="dialog"):
             yield prompt
             yield Label(self.detail, classes="dim")
-            yield Label("y: yes, n or escape: no", classes="dim")
 
     def action_answer(self, answer: bool) -> None:
         self.dismiss(answer)
@@ -2534,13 +2522,12 @@ class ModelScreen(ModalBase):
 
     def compose(self) -> ComposeResult:
         levels = [("default", "default"), *((level, level) for level in thinking_levels(self.agent))]
-        with Vertical(classes="dialog"):
+        with self.dialog("enter: start · tab: thinking level · escape: cancel", classes="dialog"):
             yield Label(f"Choose {self.agent}'s model")
             yield OptionList(*self.labels, id="models")
             thinking = Select(levels, value=self.remembered_level(0), allow_blank=False, id="thinking")
             thinking.border_title = "Thinking"
             yield thinking
-            yield Label("enter: start · tab: thinking level · escape: cancel", classes="dim")
 
     def _show_level(self, level: str) -> None:
         """Set the field here, and remember the value, so its `Changed` does not read as a user choice."""
@@ -2702,7 +2689,9 @@ class ConfigScreen(ModalBase):
         settings = self.settings
         levels = thinking_levels(self.agent) or THINKING_LEVELS
         thinking = [("Agent default", "default"), *((level, level) for level in levels)]
-        with Vertical(classes="dialog card-form config"):
+        with self.dialog(
+            "ctrl+s: save both tabs · tab: next field · escape: cancel", classes="dialog card-form config"
+        ):
             yield RichStatic(Text("Herdboard config", style="bold"), id="config-heading")
             with TabbedContent(initial="config-global", id="config-tabs"):
                 with TabPane("Global (all boards)", id="config-global"):
@@ -2817,7 +2806,6 @@ class ConfigScreen(ModalBase):
                     with VerticalScroll(classes="config-pane", can_focus=False):
                         yield from self._compose_board()
             yield RichStatic(Text(""), id="config-error", classes="error")
-            yield Label("ctrl+s: save both tabs · tab: next field · escape: cancel", classes="dim")
 
     def _compose_board(self) -> ComposeResult:
         if not self.path:
@@ -3705,9 +3693,12 @@ class PullRequestDetailScreen(ModalBase):
         if pr.labels:
             meta.append("\n")
             meta.append_text(Text(" ").join(label_chip(label) for label in pr.labels))
-        dialog = VerticalScroll(classes="dialog detail pr-detail")
         # In the border, so the keys stay in view when the description scrolls.
-        dialog.border_subtitle = "R review · g go · u new commits · f finish · o browser · esc close"
+        dialog = self.dialog(
+            "R review · g go · u new commits · f finish · o browser · esc close",
+            scroll=True,
+            classes="dialog detail pr-detail",
+        )
         with dialog:
             yield self._static(title, id="pr-detail-title")
             yield self._static(meta, id="pr-detail-meta")
@@ -4254,11 +4245,11 @@ class NoteChangedScreen(ModalBase):
         self.path = path
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with self.dialog("o: overwrite · r: reload · escape: keep editing", classes="dialog"):
             yield Label("The note changed on disk while you edited it.")
             yield Label(str(self.path), classes="dim")
             yield Label(
-                "o: overwrite the file with your edit · r: reload the file and drop your edit · escape: keep editing",
+                "Overwrite saves your edit. Reload discards your edit and reads the file from disk.",
                 classes="dim",
             )
 
@@ -4573,7 +4564,12 @@ class AutomationFormScreen(ModalBase):
         agents = [("default", "default"), *((agent, agent) for agent in AGENTS)]
         levels = self._thinking_options(self.agent)
         thinking = item.thinking if item and item.thinking else "default"
-        with VerticalScroll(classes="dialog card-form automation-form", can_focus=False):
+        with self.dialog(
+            "ctrl+s: save · tab: next field · escape: cancel",
+            scroll=True,
+            classes="dialog card-form automation-form",
+            can_focus=False,
+        ):
             yield Static(Text(self.heading), id="automation-heading")
             yield titled(
                 Input(
@@ -4683,7 +4679,7 @@ class AutomationFormScreen(ModalBase):
             )
             yield error
             yield Label(
-                "ctrl+s: save · tab: next field · escape: cancel · schedules: every day, every weekday, "
+                "Schedules: every day, every weekday, "
                 "every week on monday, every month on the 1st, every N days, with at HH:MM",
                 classes="dim",
             )
@@ -4815,7 +4811,8 @@ class AutomationDetailScreen(ModalBase):
                 meta.append("\n")
             meta.append(f"{name}: ", style="bold")
             meta.append(value)
-        with VerticalScroll(classes="dialog detail", can_focus=False):
+        hint = ("o: open attachment · " if self.files else "") + "e: edit · escape: close"
+        with self.dialog(hint, scroll=True, classes="dialog detail", can_focus=False):
             yield RichStatic(Text(entry["title"], style="bold"), id="detail-title")
             yield RichStatic(meta, id="detail-meta")
             if entry["body"].strip():
@@ -4827,7 +4824,6 @@ class AutomationDetailScreen(ModalBase):
                 block.border_title = icon_label("attachment", "Attachments", self.icon_style)
                 block.ALLOW_SELECT = False
                 yield block
-            yield Label(("o: open attachment · " if self.files else "") + "e: edit · escape: close", classes="dim")
 
     def action_edit(self) -> None:
         self.dismiss("edit")
@@ -5348,6 +5344,11 @@ class HerdboardApp(App):
               border: round $accent; background: $surface; }
     /* A Label is as wide as its text by default, so a long line runs past the dialog edge. */
     .dialog Label { width: 100%; }
+    .dialog > Label:first-child, .dialog > Static:first-child { text-style: bold; margin-bottom: 1; }
+    .dialog Input, .dialog TextArea, .dialog OptionList, .dialog Select { border: round $surface-lighten-2; }
+    .dialog Select > SelectCurrent { border: none; }
+    .dialog Input:focus, .dialog TextArea:focus, .dialog OptionList:focus,
+    .dialog Select:focus-within { border: round $primary; }
     .factory-dialog { width: 90; max-width: 95%; max-height: 95%; }
     .factory-role-row { height: 3; }
     .factory-custom-dialog { height: 36; }
@@ -5391,7 +5392,7 @@ class HerdboardApp(App):
     .error { color: $error; }
     ModalBase { align: center middle; }
     #card-body { height: 7; }
-    .detail { width: 90; scrollbar-size-vertical: 1; }
+    .detail { width: 100; scrollbar-size-vertical: 1; }
     .detail-note MarkdownH1, .detail-note MarkdownH2, .detail-note MarkdownH3 {
         margin: 0; padding: 0; content-align: left middle; text-align: left;
     }
@@ -5401,7 +5402,7 @@ class HerdboardApp(App):
     #attachment-title { margin-bottom: 1; }
     .detail-block { height: auto; border: round $surface-lighten-2; padding: 0 1; margin-bottom: 1; }
     .detail-note Markdown { margin: 0; padding: 0; }
-    .card-form { max-height: 95%; }
+    .card-form { width: 100; max-height: 95%; }
     .card-form Input, .card-form TextArea { border: round $surface-lighten-2; }
     .card-form Input:focus, .card-form TextArea:focus { border: round $primary; }
     .form-row { height: auto; }
@@ -5465,7 +5466,6 @@ class HerdboardApp(App):
     App:ansi .pr-row { color: ansi_bright_black; }
     App:ansi .pr-row.selected { background: ansi_default; color: ansi_default; text-style: bold; }
     #pr-search { border: round $primary; }
-    .pr-detail { width: 100; }
     #pr-detail-title, #pr-detail-meta, #pr-detail-marks { margin-bottom: 1; }
     #pr-detail-body { height: auto; margin: 0; }
     #pr-detail-body MarkdownH1, #pr-detail-body MarkdownH2, #pr-detail-body MarkdownH3 {
@@ -5493,6 +5493,10 @@ class HerdboardApp(App):
     .column .card.compact.selected { border: none; background: $accent; color: $text; }
     App:ansi .column .card.selected { background: ansi_default; border: heavy ansi_default; text-style: bold; }
     App:ansi .dialog { border: round $primary; }
+    App:ansi .dialog Input, App:ansi .dialog TextArea, App:ansi .dialog OptionList,
+    App:ansi .dialog Select { border: round ansi_bright_black; }
+    App:ansi .dialog Input:focus, App:ansi .dialog TextArea:focus, App:ansi .dialog OptionList:focus,
+    App:ansi .dialog Select:focus-within { border: round $primary; }
     App:ansi .detail-block, App:ansi #factory-summary { border: round ansi_bright_black; }
     App:ansi .factory-dialog Select, App:ansi .factory-dialog Input { border: round ansi_bright_black; }
     App:ansi .factory-dialog Select:focus-within, App:ansi .factory-dialog Input:focus { border: round $primary; }

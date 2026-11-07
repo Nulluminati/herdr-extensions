@@ -223,14 +223,14 @@ class LinearBoardTests(LinearBoardCase):
             block = app.screen.query_one("#detail-links")
             self.assertEqual(block.border_title, "Linear attachments")
             self.assertEqual(block.plain.splitlines(), ["Fix login · Open", f"  {PR_URL}", "https://example.com/spec"])
-            self.assertIn("o: open attachment", app.screen.query(".dim").last().render().plain)
+            self.assertIn("o: open attachment", app.screen.query_one(".dialog").border_subtitle)
 
     async def test_an_issue_without_attachments_has_no_block(self):
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:
             await self.open_issue(pilot, "ENG-2")
             self.assertEqual(list(app.screen.query("#detail-links")), [])
-            self.assertNotIn("o: open attachment", app.screen.query(".dim").last().render().plain)
+            self.assertNotIn("o: open attachment", app.screen.query_one(".dialog").border_subtitle)
 
     async def test_o_opens_the_only_linear_attachment_in_the_browser(self):
         app = self.make_linear_app()
