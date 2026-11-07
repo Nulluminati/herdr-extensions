@@ -5,7 +5,7 @@
   },
   "filesystem": {
     "denyRead": ["~", "/tmp", "/run"],
-    "allowRead": ["."],
+    "allowRead": [".", "~/.local/share/uv/python", "~/.local/bin/uv"],
     "allowWrite": ["."],
     "denyWrite": [".env"]
   }

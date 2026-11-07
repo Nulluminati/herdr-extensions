@@ -34,6 +34,12 @@ class PiSandboxPolicyTests(unittest.TestCase):
     def test_reads_and_writes_only_the_worktree(self):
         filesystem = self.policy["filesystem"]
         self.assertIn("~", filesystem["denyRead"])
-        self.assertEqual(filesystem["allowRead"], ["."])
         self.assertEqual(filesystem["allowWrite"], ["."])
         self.assertIn(".env", filesystem["denyWrite"])
+
+    def test_reads_uv_and_its_python_so_workers_can_run_tests(self):
+        # .venv/bin/python links to a uv-managed interpreter under the home directory.
+        self.assertEqual(
+            self.policy["filesystem"]["allowRead"],
+            [".", "~/.local/share/uv/python", "~/.local/bin/uv"],
+        )
