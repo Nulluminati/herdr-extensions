@@ -54,6 +54,9 @@ class FakeHerdr:
         self.failing_session_list = False
         self.session_name = "default"
         self.session_dir = None
+        self.session_socket = "/nowhere/herdr.sock"
+        self.session_running = False
+        self.other_sessions = []
         self.counter = 0
 
     def next_id(self, prefix):
@@ -113,11 +116,13 @@ class FakeHerdr:
                 return subprocess.CompletedProcess(argv, 1, "", "session list failed")
             sessions = {
                 "sessions": [
+                    *self.other_sessions,
                     {
                         "name": self.session_name,
+                        "running": self.session_running,
                         "session_dir": str(self.session_dir),
-                        "socket_path": "/nowhere/herdr.sock",
-                    }
+                        "socket_path": self.session_socket,
+                    },
                 ]
             }
             return subprocess.CompletedProcess(argv, 0, json.dumps(sessions), "")
@@ -1173,6 +1178,50 @@ class MatchTests(DefaultLayoutTestCase):
 
 
 class SessionDirTests(DefaultLayoutTestCase):
+    def default_session(self, running=True):
+        """List the default session, which has its own directory and socket."""
+        default_dir = self.dir / "default-session"
+        default_dir.mkdir(exist_ok=True)
+        self.herdr.other_sessions.append(
+            {
+                "name": "default",
+                "running": running,
+                "session_dir": str(default_dir),
+                "socket_path": str(default_dir / "herdr.sock"),
+            }
+        )
+        return default_dir
+
+    def test_a_named_session_is_found_by_its_socket(self):
+        self.default_session()
+        self.herdr.session_name = "work"
+        self.herdr.session_running = True
+        self.herdr.session_socket = os.environ["HERDR_SOCKET_PATH"]
+        self.assertEqual(default_layout.session_file(), self.session_file)
+
+    def test_the_only_running_session_wins_when_no_socket_matches(self):
+        self.default_session(running=False)
+        self.herdr.session_name = "work"
+        self.herdr.session_running = True
+        self.assertEqual(default_layout.session_file(), self.session_file)
+
+    def test_the_session_name_wins_over_a_running_session(self):
+        self.default_session(running=True)
+        self.herdr.session_name = "work"
+        os.environ["HERDR_SESSION"] = "work"
+        self.assertEqual(default_layout.session_file(), self.session_file)
+
+    def test_a_fresh_named_session_ignores_the_default_sessions_file(self):
+        default_dir = self.default_session()
+        (default_dir / "session.json").write_text("{}")
+        self.herdr.session_name = "work"
+        self.herdr.session_running = True
+        self.herdr.session_socket = os.environ["HERDR_SOCKET_PATH"]
+        self.two_projects()
+        self.fresh_home()
+        self.run_main("default_layout.py", "startup")
+        self.assertEqual([argv[6] for argv in self.created()], ["alpha", "beta"])
+
     def test_the_session_directory_comes_from_herdr(self):
         self.herdr.session_name = "work"
         os.environ["HERDR_SESSION"] = "work"

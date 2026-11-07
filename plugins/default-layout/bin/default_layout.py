@@ -142,12 +142,26 @@ def session_dir() -> Path:
     A named session has its own directory below the config directory; the
     default session uses the config directory itself. `HERDR_SOCKET_PATH` can
     move the socket without moving these files, so ask Herdr for the directory.
+
+    Herdr gives a plugin command no `HERDR_SESSION`, so the session is found
+    by the socket the plugin talks to, then by name when one is set, then as
+    the only running session, and only then as the default session.
     """
     name = os.environ.get("HERDR_SESSION") or "default"
     try:
-        for session in sessions():
-            if session.get("name") == name:
-                return Path(session["session_dir"])
+        found = sessions()
+        socket = Path(socket_path()).resolve()
+        by_socket = [s for s in found if s.get("socket_path") and Path(s["socket_path"]).resolve() == socket]
+        by_name = [s for s in found if s.get("name") == name]
+        running = [s for s in found if s.get("running") is True]
+        if by_socket:
+            return Path(by_socket[0]["session_dir"])
+        if by_name and os.environ.get("HERDR_SESSION"):
+            return Path(by_name[0]["session_dir"])
+        if len(running) == 1:
+            return Path(running[0]["session_dir"])
+        if by_name:
+            return Path(by_name[0]["session_dir"])
     except (HerdrError, KeyError, TypeError):
         pass
     base = herdr_config_dir()
