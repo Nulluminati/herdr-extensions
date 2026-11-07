@@ -438,9 +438,11 @@ def wait_round(ref, state_folder: Path, review: dict, store=None) -> dict:
                 del pending[lens]
         if pending and time.monotonic() >= deadline:
             for lens, entry in pending.items():
-                failures[lens] = (
-                    f"The {entry['kind']} reviewer did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes."
-                )
+                # A lens that wrote its findings is used, as it is when its pane vanished before the deadline.
+                if not (round_folder / lens / "findings.md").exists():
+                    failures[lens] = (
+                        f"The {entry['kind']} reviewer did not finish in {REVIEW_TIMEOUT_SECONDS // 60} minutes."
+                    )
             pending = {}
         if pending:
             time.sleep(POLL_SECONDS)

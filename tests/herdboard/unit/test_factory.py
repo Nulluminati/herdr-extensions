@@ -430,6 +430,26 @@ class RoundTests(FactoryTestCase):
         self.assertTrue({entry["pane_id"] for entry in review["reviewers"]} <= closed)
         self.assertEqual(self.state()["panes"], [])
 
+    def test_a_lens_that_wrote_its_findings_keeps_them_when_the_round_times_out(self):
+        self.write_plan("Review lenses: security, code\n")
+        self.start_factory()
+        self.commit(self.worktree, "a.txt", "a\n", "feat: a")
+        # The code reviewer wrote its findings and then stayed busy; the security reviewer wrote nothing.
+        self.fake.reviewer_states["code"] = ["working"] * 5
+        self.fake.reviewer_states["security"] = ["working"] * 5
+        review = factory.run_round(self.store, self.card.ref, self.record(), self.card, 1)
+        (self.folder / "round-1" / "code" / "findings.md").write_text("## Confirmed problems\n- [high] a.txt:1: bug.\n")
+        with patch.object(factory, "REVIEW_TIMEOUT_SECONDS", 0):
+            result = factory.wait_round(self.card.ref, self.folder, review)
+        self.assertEqual(result["confirmed"], 1)
+        self.assertEqual(list(result["failures"]), ["security"])
+        self.assertIn("did not finish", result["failures"]["security"])
+        merged = (self.folder / "round-1" / "findings.md").read_text()
+        self.assertIn("# code (pi)", merged)
+        self.assertIn("- [high] a.txt:1: bug.", merged)
+        self.assertNotIn("This lens failed: The pi reviewer", merged)
+        self.assertIn("This lens failed: The codex reviewer", merged)
+
     def test_a_lens_that_does_not_launch_fails_alone(self):
         self.write_plan("Review lenses: security, code\n")
         self.start_factory()
