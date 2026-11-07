@@ -1678,20 +1678,31 @@ class StartupTests(DefaultLayoutTestCase):
         )
         self.assertIn("default-layout: built alpha (1 tabs)", self.stdout.getvalue())
 
-    def test_a_home_directory_that_does_not_resolve_is_a_message(self):
+    def test_a_home_directory_that_does_not_resolve_skips_one_project(self):
         # Path.expanduser raises RuntimeError for an unknown ~user, and the
         # startup hook has no one to show a traceback to.
-        self.write_layout("""
+        self.write_layout(f"""
             [[projects]]
-            label = "alpha"
+            label = "typo"
             path = "~nosuchuser/alpha"
+            [[projects.tabs]]
+            name = "shell"
+
+            [[projects]]
+            label = "beta"
+            path = "{self.project_b}"
             [[projects.tabs]]
             name = "shell"
             """)
         self.fresh_home()
-        self.assertEqual(self.run_main("default_layout.py", "startup"), 1)
-        self.assertEqual(self.stderr.getvalue().splitlines(), ["default-layout: Could not determine home directory."])
-        self.assertEqual(self.created(), [])
+        self.assertEqual(self.run_main("default_layout.py", "startup"), 0)
+        self.assertEqual(self.stderr.getvalue(), "")
+        self.assertEqual([argv[6] for argv in self.created()], ["beta"])
+        self.assertIn(
+            "default-layout: skip typo: cannot expand ~nosuchuser/alpha: Could not determine home directory.",
+            self.stdout.getvalue(),
+        )
+        self.assertIn("default-layout: built beta (1 tabs)", self.stdout.getvalue())
 
     def test_missing_directory_skips_one_project(self):
         self.two_projects()

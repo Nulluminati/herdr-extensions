@@ -1140,8 +1140,15 @@ def each_project(spec: dict, work) -> None:
     """Run `work` on every project whose directory exists, one failure at a time."""
     for number, project in enumerate(spec["projects"], 1):
         label = project["label"]
-        if not project_dir(project).is_dir():
-            print(f"default-layout: skip {label}: no such directory {project_dir(project)}")
+        # expanduser raises RuntimeError for an unknown ~user. That is one
+        # project's mistake, so it must not end the pass.
+        try:
+            root = project_dir(project)
+        except RuntimeError as error:
+            print(f"default-layout: skip {label}: cannot expand {project['path']}: {error}")
+            continue
+        if not root.is_dir():
+            print(f"default-layout: skip {label}: no such directory {root}")
             continue
         key = claim_key(number, project)
         # The claim itself can fail, and a lost claim must not end the pass.
