@@ -30,6 +30,17 @@ class LinearBoardTests(LinearBoardCase):
             self.assertRegex(self.title(app), r"Linear: \d\d:\d\d$")
             self.assertEqual(app.query_one("#header-bar").view, "repo")
 
+    async def test_closing_while_a_linear_fetch_runs(self):
+        self.gate = threading.Event()
+        app = self.make_linear_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            self.assertTrue(app.linear_fetching)
+            await app.screen.remove_children()  # what a closing app does
+            self.gate.set()  # the Linear read ends now
+            await pilot.pause()
+            await pilot.pause()
+
     async def test_linear_cards_are_marked_and_show_pr(self):
         app = self.make_linear_app()
         async with app.run_test(size=SIZE) as pilot:

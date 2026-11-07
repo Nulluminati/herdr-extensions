@@ -5893,6 +5893,10 @@ class HerdboardApp(App):
         return f"Linear: stale since {stamp}" if result.stale else f"Linear: {stamp}"
 
     async def _rebuild(self) -> None:
+        # A fetch, write or timer that ends while the board closes still lands here.
+        # Without the widgets there is nothing to rebuild, and query_one would raise.
+        if not self.is_running or not self.base.query(HeaderBar):
+            return
         names = ", ".join(self.store.board_name(path) for path in self.paths) or "no boards"
         place = f"{names} · {self.linear_label()}"
         if self.filter_text:
