@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from rich.cells import cell_len
 from rich.text import Text
 
 from . import activity, attachments
@@ -116,21 +117,21 @@ def _card_line(card, width: int) -> Text:
     kind = card.type or ""
     title = " ".join(card.title.split())
     for right in ((kind,) if kind else ()) + ("",):
-        fixed = len(card.ref) + len(" │ ") + 1 + len(pill) + (1 + len(right) if right else 0)
+        fixed = cell_len(card.ref) + cell_len(" │ ") + 1 + cell_len(pill) + (1 + cell_len(right) if right else 0)
         room = width - fixed
-        if room >= min(len(title), 8) or not right:
+        if room >= min(cell_len(title), 8) or not right:
             break
     line = Text()
     line.append(card.ref, style="bold cyan")
     line.append(" │ ", style="dim")
     shown = Text(title)
-    if room < len(title):
+    if room < shown.cell_len:
         _cut(shown, max(room, 1))
     line.append_text(shown)
     line.append(" ")
     line.append(pill, style="bold black on yellow")
     if right:
-        line.append(" " * max(width - len(line) - len(right), 1))
+        line.append(" " * max(width - line.cell_len - cell_len(right), 1))
         line.append(right, style="dim")
     return _cut(line, width)
 

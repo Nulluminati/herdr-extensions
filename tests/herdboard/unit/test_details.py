@@ -118,6 +118,23 @@ class DetailsLinesTests(unittest.TestCase):
         self.assertTrue(lines[1].endswith("…"))
         self.assertTrue(lines[-1].endswith("…"))
 
+    def test_a_wide_title_is_cut_to_the_width_in_cells(self):
+        # 31 characters, 62 cells.
+        wide = card(title="ログイン画面のタイムアウト処理を修正して再試行できるようにする")
+        data = {"ref": "t123", "card": wide, "record": None, "attachments": [], "log": []}
+        first = details.details_lines(data, 60, 5)[0]
+        self.assertEqual(first.cell_len, 60)
+        self.assertIn("…", first.plain)
+        self.assertTrue(first.plain.endswith(" In progress  feature"), first.plain)
+
+    def test_a_wide_title_that_fits_pads_the_type_to_the_right_edge(self):
+        wide = card(title="ログイン修正")
+        data = {"ref": "t123", "card": wide, "record": None, "attachments": [], "log": []}
+        first = details.details_lines(data, 60, 5)[0]
+        self.assertEqual(first.cell_len, 60)
+        self.assertTrue(first.plain.startswith("t123 │ ログイン修正  In progress "), first.plain)
+        self.assertTrue(first.plain.endswith("feature"), first.plain)
+
     def test_a_linear_card_shows_its_state_as_the_column(self):
         issue = card(
             ref="ENG-12", title="Speed up search", source="linear", state="In Review", column="Review", type=None
