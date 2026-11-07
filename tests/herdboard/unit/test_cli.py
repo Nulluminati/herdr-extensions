@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -91,6 +92,15 @@ class CommandTests(CliTestCase):
     def test_add_unreadable_body_file_creates_no_card(self):
         data = self.run_json("add", "notes", "--body-file", "missing.txt", expect=1)
         self.assertEqual(data["error"]["code"], "not_found")
+        self.assertEqual(self.run_json("list")["cards"], [])
+
+    def test_add_body_from_dev_null_is_empty(self):
+        card = self.run_json("add", "notes", "--body-file", os.devnull)["card"]
+        self.assertEqual(card["body"], [])
+
+    def test_add_body_file_that_is_a_directory_creates_no_card(self):
+        data = self.run_json("add", "notes", "--body-file", str(self.plain), expect=1)
+        self.assertEqual(data["error"]["code"], "io")
         self.assertEqual(self.run_json("list")["cards"], [])
 
     def test_add_subcard_with_body(self):
@@ -226,6 +236,23 @@ class CommandTests(CliTestCase):
         body.write_text("line one\nline two\n")
         data = self.run_json("edit", card["ref"], "--body-file", str(body), directory=self.plain)
         self.assertEqual(data["card"]["body"], ["line one", "line two"])
+
+    def test_edit_body_from_dev_null_clears_it(self):
+        card = self.run_json("add", "notes", "--body", "old", directory=self.plain)["card"]
+        data = self.run_json("edit", card["ref"], "--body-file", os.devnull, directory=self.plain)
+        self.assertEqual(data["card"]["body"], [])
+
+    def test_edit_body_from_a_named_pipe(self):
+        card = self.run_json("add", "notes", directory=self.plain)["card"]
+        fifo = self.plain / "body.fifo"
+        os.mkfifo(fifo)
+        writer = threading.Thread(target=fifo.write_text, args=("from a pipe\n",), daemon=True)
+        writer.start()
+        try:
+            data = self.run_json("edit", card["ref"], "--body-file", str(fifo), directory=self.plain)
+        finally:
+            writer.join(timeout=5)
+        self.assertEqual(data["card"]["body"], ["from a pipe"])
 
     def test_edit_tags_and_due_date(self):
         card = self.run_json("add", "notes", "--tag", "a", "--due", "2026-01-02", directory=self.plain)["card"]

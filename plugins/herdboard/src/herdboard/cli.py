@@ -1533,10 +1533,11 @@ def _ensure_repo_board(ctx: _Context) -> None:
 
 
 def _read_todo_file(path: Path) -> str:
-    if not path.is_file():
-        raise NotFoundError(f"No file: {path}")
+    # Read any readable path, not only a regular file: /dev/null, a pipe or a process substitution.
     try:
         return path.read_bytes().decode("utf-8")
+    except FileNotFoundError as error:
+        raise NotFoundError(f"No file: {path}") from error
     except (OSError, UnicodeDecodeError) as error:
         raise IoError(f"{path}: cannot read file: {error}") from error
 
