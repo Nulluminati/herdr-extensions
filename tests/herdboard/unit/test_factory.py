@@ -517,7 +517,7 @@ class RoundTests(FactoryTestCase):
         self.assertEqual(self.state()["panes"], [])
 
     def test_a_lens_that_wrote_its_findings_keeps_them_when_the_round_times_out(self):
-        self.write_plan("Review lenses: security, code\n")
+        self.write_plan(verified_plan(lenses="security, code"))
         self.start_factory()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")
         # The code reviewer wrote its findings and then stayed busy; the security reviewer wrote nothing.
