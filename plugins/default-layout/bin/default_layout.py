@@ -269,7 +269,7 @@ def layout_path() -> Path:
     config_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
     if config_dir:
         return Path(config_dir) / "layout.toml"
-    return Path.home() / ".config/herdr/plugins/config" / PLUGIN_ID / "layout.toml"
+    return herdr_config_dir() / "plugins/config" / PLUGIN_ID / "layout.toml"
 
 
 def load_layout() -> dict | None:

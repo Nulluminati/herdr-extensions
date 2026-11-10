@@ -806,6 +806,14 @@ class SpecTests(DefaultLayoutTestCase):
             Path.home() / ".config/herdr/plugins/config/nulluminati.default-layout/layout.toml",
         )
 
+    def test_layout_path_falls_back_to_the_xdg_config_dir(self):
+        os.environ.pop("HERDR_PLUGIN_CONFIG_DIR")
+        os.environ["XDG_CONFIG_HOME"] = str(self.dir / "xdg")
+        self.assertEqual(
+            default_layout.layout_path(),
+            self.dir / "xdg/herdr/plugins/config/nulluminati.default-layout/layout.toml",
+        )
+
 
 class TreeTests(unittest.TestCase):
     def test_single_pane_tab_is_a_bare_pane_node(self):
