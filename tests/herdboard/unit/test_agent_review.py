@@ -214,6 +214,16 @@ class RequestTests(AgentReviewTestCase):
         ):
             self.assertIn(part, text)
 
+    def test_a_change_to_a_file_that_is_not_utf8_is_reviewed_byte_for_byte(self):
+        self.started()
+        (self.worktree / "legacy.c").write_bytes(b"/* caf\xe9 */\n")
+        self.git(self.worktree, "add", "legacy.c")
+        self.git(self.worktree, "commit", "-qm", "feat: legacy")
+        (self.worktree / "legacy.c").write_bytes(b"/* na\xefve */\n")
+        folder = Path(self.request()["folder"])
+        self.assertIn(b"+/* caf\xe9 */", (folder / "branch.patch").read_bytes())
+        self.assertIn(b"+/* na\xefve */", (folder / "uncommitted.patch").read_bytes())
+
     def test_the_request_names_the_plan_and_the_other_attachments(self):
         self.started()
         self.commit(self.worktree, "a.txt", "a\n", "feat: a")

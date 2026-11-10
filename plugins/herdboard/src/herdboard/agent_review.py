@@ -60,7 +60,10 @@ def start_worker(arguments: list[str], log: Path) -> int:
 
 
 def _git(worktree: Path, *args: str) -> str:
-    result = subprocess.run(["git", "-C", str(worktree), *args], capture_output=True, text=True)
+    # A diff can hold bytes that are not UTF-8. surrogateescape keeps them, so the patch is written back unchanged.
+    result = subprocess.run(
+        ["git", "-C", str(worktree), *args], capture_output=True, text=True, errors="surrogateescape"
+    )
     if result.returncode:
         raise ReviewError(f"git {' '.join(args)} failed in {worktree}: {result.stderr.strip()}", "git_failed")
     return result.stdout
@@ -80,8 +83,8 @@ def read_change(worktree: Path, base: str) -> tuple[str, str, list[str], str]:
 
 
 def write_change(folder: Path, branch_diff: str, uncommitted: str) -> None:
-    (folder / "branch.patch").write_text(branch_diff, encoding="utf-8")
-    (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8")
+    (folder / "branch.patch").write_text(branch_diff, encoding="utf-8", errors="surrogateescape")
+    (folder / "uncommitted.patch").write_text(uncommitted, encoding="utf-8", errors="surrogateescape")
 
 
 def capture_change(worktree: Path, base: str, folder: Path) -> tuple[list[str], str]:
