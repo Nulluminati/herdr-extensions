@@ -821,5 +821,37 @@ class ModuleTests(unittest.TestCase):
         self.assertIn("usage: herdboard", result.stdout)
 
 
+class ClosedPipeTests(CliTestCase):
+    """A reader that stops early, such as `head`, closes the pipe before herdboard writes."""
+
+    def run_into_closed_pipe(self, *args):
+        reader, writer = os.pipe()
+        os.close(reader)
+        try:
+            return subprocess.run(
+                [sys.executable, "-m", "herdboard", "--config", str(self.config), "-C", str(self.plain), *args],
+                stdout=writer,
+                stderr=subprocess.PIPE,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(SRC)},
+            )
+        finally:
+            os.close(writer)
+
+    def test_small_output_exits_quietly(self):
+        self.run_cli("add", "buy milk")
+        for args in (("list",), ("--json", "list")):
+            with self.subTest(args=args):
+                result = self.run_into_closed_pipe(*args)
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+
+    def test_output_larger_than_the_buffer_exits_quietly(self):
+        self.run_cli("add", "x" * 20000)
+        for args in (("list",), ("--json", "list")):
+            with self.subTest(args=args):
+                result = self.run_into_closed_pipe(*args)
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+
+
 if __name__ == "__main__":
     unittest.main()

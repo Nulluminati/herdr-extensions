@@ -2287,6 +2287,21 @@ def _render(command: str, result: dict, as_json: bool, action: str | None = None
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        code = _main(argv)
+        # Flush here, so a closed pipe raises now and not at interpreter shutdown.
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The reader stopped early, as `head` does. Send the rest of the output to
+        # /dev/null, so the flush at shutdown does not fail again.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+        return 0
+    return code
+
+
+def _main(argv: list[str] | None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     as_json = "--json" in argv
     try:
