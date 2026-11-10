@@ -12,6 +12,7 @@ from herdboard import sandbox
 from support.scripts import load_script
 
 peer_review = load_script("peer-review", "peer_review")
+real_command = peer_review.command
 
 
 def git(repository, *arguments):
@@ -80,10 +81,7 @@ class PeerReviewTests(unittest.TestCase):
         if argv[:3] == ["herdr", "notification", "show"]:
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[0] == "git":
-            try:
-                return subprocess.run(argv, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as error:
-                raise peer_review.ReviewError(error.stderr.strip()) from error
+            return real_command(argv, timeout)
         self.fail(f"Unexpected command: {argv}")
 
     def run_request(self, *arguments):
@@ -358,6 +356,19 @@ class PeerReviewTests(unittest.TestCase):
         review = self.only_review()
         self.assertIn("+x = 1", (review / "diff.patch").read_text())
         self.assertIn("changed the repository", (review / "request.md").read_text())
+
+    def test_a_change_to_a_file_that_is_not_utf8_is_reviewed_byte_for_byte(self):
+        (self.repository / "legacy.c").write_bytes(b"/* caf\xe9 */\nint one(void) { return 1; }\n")
+        git(self.repository, "add", "legacy.c")
+        git(self.repository, "commit", "--quiet", "-m", "legacy")
+        (self.repository / "legacy.c").write_bytes(b"/* caf\xe9 */\nint one(void) { return 2; }\n")
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0, self.errors.getvalue())
+        patch_bytes = (self.only_review() / "diff.patch").read_bytes()
+        self.assertIn(b" /* caf\xe9 */\n", patch_bytes)
+        self.assertIn(b"+int one(void) { return 2; }\n", patch_bytes)
 
     def test_untracked_files_in_a_repository_with_no_commit_are_reviewed(self):
         self.repository_with_no_commit()

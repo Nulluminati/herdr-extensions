@@ -59,7 +59,10 @@ class ReviewError(RuntimeError):
 
 def command(argv: list[str], timeout: int = 120):
     try:
-        return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=timeout)
+        # A diff can hold bytes that are not UTF-8. surrogateescape keeps them, so the patch is written back unchanged.
+        return subprocess.run(
+            argv, check=True, capture_output=True, text=True, errors="surrogateescape", timeout=timeout
+        )
     except FileNotFoundError as error:
         raise ReviewError(f"Required program not found: {argv[0]}") from error
     except subprocess.CalledProcessError as error:
@@ -293,7 +296,7 @@ def write_request(repository: Path, requester: str) -> Path:
     diff, untracked, summary = changes(repository, requester)
 
     review = create_review()
-    (review / "diff.patch").write_text(diff)
+    (review / "diff.patch").write_text(diff, errors="surrogateescape")
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
     (review / "request.md").write_text(f"""# Peer review request
 
