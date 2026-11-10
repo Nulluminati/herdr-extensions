@@ -44,6 +44,7 @@ Do one of these:
 - Ask the agent for a review, for example "get a peer review from pi". The skill runs the request.
 
 The request returns at once. A background worker waits for the findings and then prompts your agent.
+When the worker cannot prompt your agent, for example because its pane closed, Herdr shows a notification with the path to `findings.md`.
 
 Each review has a folder, `~/.local/state/peer-review/<timestamp>/`. A second request in the same second adds a counter, as in `<timestamp>-2`:
 

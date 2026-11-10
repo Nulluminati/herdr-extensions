@@ -100,10 +100,11 @@ class PeerReviewTests(unittest.TestCase):
 
     def run_deliver(self, review):
         self.review = review
+        self.errors = io.StringIO()
         with (
             patch.object(peer_review, "command", self.fake_command),
             patch.object(peer_review.time, "sleep", lambda seconds: None),
-            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.redirect_stderr(self.errors),
         ):
             return peer_review.main(
                 [
@@ -511,6 +512,76 @@ class PeerReviewTests(unittest.TestCase):
 
         self.assertEqual(status, 1)
         self.assertIn("did not finish", self.calls[-1][4])
+
+    def fail_requester(self, step, error='{"error":{"code":"agent_not_found"}}'):
+        original = self.fake_command
+
+        def failing(argv, timeout=120):
+            if argv[:4] == ["herdr", "agent", step, "w1:p1"]:
+                self.calls.append(argv)
+                raise peer_review.ReviewError(error)
+            return original(argv, timeout)
+
+        self.fake_command = failing
+
+    def notifications(self):
+        return [argv[3:] for argv in self.calls if argv[:3] == ["herdr", "notification", "show"]]
+
+    def test_deliver_shows_the_findings_when_the_requester_is_gone(self):
+        review = self.make_review()
+        self.fail_requester("wait")
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        self.assertFalse(any(argv[:4] == ["herdr", "agent", "prompt", "w1:p1"] for argv in self.calls))
+        [notification] = self.notifications()
+        self.assertEqual(notification[:2], ["Peer review ready", "--body"])
+        self.assertIn(str(review / "findings.md"), notification[2])
+        self.assertIn("agent_not_found", self.errors.getvalue())
+
+    def test_deliver_shows_the_findings_when_the_prompt_fails(self):
+        review = self.make_review()
+        self.fail_requester("prompt", '{"error":{"code":"agent_blocked"}}')
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        [notification] = self.notifications()
+        self.assertEqual(notification[0], "Peer review ready")
+        self.assertIn(str(review / "findings.md"), notification[2])
+        self.assertIn("agent_blocked", self.errors.getvalue())
+
+    def test_deliver_shows_a_failed_review_when_the_requester_is_gone(self):
+        review = self.make_review()
+        self.write_findings = False
+        self.reviewer_states = ["working", None]
+        self.fail_requester("wait")
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        [notification] = self.notifications()
+        self.assertEqual(notification[0], "Peer review failed")
+        self.assertIn("stopped before it wrote", notification[2])
+
+    def test_deliver_logs_the_findings_when_the_notification_fails_too(self):
+        review = self.make_review()
+        self.fail_requester("wait")
+        self.fail_requester("prompt")
+        original = self.fake_command
+
+        def failing(argv, timeout=120):
+            if argv[:3] == ["herdr", "notification", "show"]:
+                raise peer_review.ReviewError("no server")
+            return original(argv, timeout)
+
+        self.fake_command = failing
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        self.assertIn("cannot show a notification: no server", self.errors.getvalue())
+        self.assertIn(str(review / "findings.md"), self.errors.getvalue())
 
 
 if __name__ == "__main__":

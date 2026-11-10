@@ -422,6 +422,7 @@ def deliver(review: Path, requester: str, reviewer_pane: str, reviewer: str) -> 
             "For each finding, say if you agree or disagree, and why. "
             "Do not change any code. Wait for the user to decide what to fix."
         )
+        title, body = "Peer review ready", f"The {reviewer} review is in {findings}"
         status = 0
     except ReviewError as error:
         print(f"peer-review: {error}", file=sys.stderr)
@@ -429,9 +430,16 @@ def deliver(review: Path, requester: str, reviewer_pane: str, reviewer: str) -> 
             f"Peer review failed: {error}. Tell the user. "
             f"The reviewer pane is {reviewer_pane} and the log is {review / 'worker.log'}."
         )
+        title, body = "Peer review failed", f"{error}. The log is {review / 'worker.log'}"
         status = 1
-    herdr("agent", "wait", requester, "--until", "idle", timeout=REVIEW_TIMEOUT_MS // 1000)
-    herdr("agent", "prompt", requester, message)
+    try:
+        herdr("agent", "wait", requester, "--until", "idle", timeout=REVIEW_TIMEOUT_MS // 1000)
+        herdr("agent", "prompt", requester, message)
+    except ReviewError as error:
+        # The requester pane closed, stayed busy or is blocked: tell the user in Herdr instead.
+        print(f"peer-review: cannot prompt the agent in {requester}: {error}. {body}", file=sys.stderr)
+        notify_failure(body, title)
+        return 1
     return status
 
 
@@ -460,10 +468,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-def notify_failure(message: str) -> None:
-    """Show a failed request in Herdr: a plugin action's error output goes only to the plugin log."""
+def notify_failure(message: str, title: str = "Peer review failed") -> None:
+    """Show a failure in Herdr: a plugin action's or worker's error output goes only to a log file."""
     try:
-        herdr("notification", "show", "Peer review failed", "--body", message)
+        herdr("notification", "show", title, "--body", message)
     except ReviewError as error:
         print(f"peer-review: cannot show a notification: {error}", file=sys.stderr)
 
