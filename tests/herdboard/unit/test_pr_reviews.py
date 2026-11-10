@@ -548,6 +548,14 @@ class ReviewerTests(PrReviewTestCase):
             self.assertIn(part, text)
         self.assertNotIn("terminal-browser", text)
 
+    def test_the_prompt_asks_for_each_hunk_command_alone(self):
+        # Claude's sandbox runs only a plain `hunk session ...` outside, where it reaches the Hunk daemon.
+        text = pr_reviews.prompt_text(self.record(), self.pr())
+        rules = text[text.index("## Rules") : text.index("## Security")]
+        self.assertIn("Run each `hunk session` command alone in its own shell call", rules)
+        for part in ("`cd`", "`&&`", "pipe", "environment variable"):
+            self.assertIn(part, rules)
+
     def test_the_prompt_warns_about_prompt_injection(self):
         text = pr_reviews.prompt_text(self.record(), self.pr())
         security = text[text.index("## Security") :]
