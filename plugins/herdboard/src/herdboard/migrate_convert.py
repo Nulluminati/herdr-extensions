@@ -104,6 +104,14 @@ def _is_list_line(line: str) -> bool:
     return bool(LIST_ITEM.match(line) or EMPTY_ITEM.match(line))
 
 
+def _fence_open(line: str) -> re.Match | None:
+    """The opening line of a code fence. A backtick run with a backtick after it is inline code."""
+    match = FENCE_OPEN.match(line)
+    if match and match.group("fence")[0] == "`" and "`" in match.group("info"):
+        return None
+    return match
+
+
 def _heading_name(text: str) -> str:
     text = re.sub(r"\s+#+$", "", text.strip())
     return text.rstrip(":").strip()
@@ -150,11 +158,17 @@ class _Converter:
         self.titles = []
         self.card = None
 
-    def next_nonblank(self, index: int) -> str | None:
+    def opens_section(self, index: int) -> bool:
+        """Whether a line that ends with `:` heads a section. It does when a list item or a code
+        fence comes after it, past blank lines and paragraph text, before the next heading."""
         for line in self.lines[index + 1 :]:
-            if line.strip():
-                return line
-        return None
+            if not line.strip():
+                continue
+            if _is_list_line(line) or _fence_open(line):
+                return True
+            if ATX_HEADING.match(line) or UNDERLINE.match(line) or line.rstrip().endswith(":"):
+                return False
+        return False
 
     def add_card(self, title: str, checked: bool) -> Item:
         dropped = BLOCK_ID.search(title)
@@ -231,8 +245,8 @@ class _Converter:
             if self.fence:
                 self.fence_line(number, line)
                 continue
-            fence = FENCE_OPEN.match(line)
-            if fence and not (fence.group("fence")[0] == "`" and "`" in fence.group("info")):
+            fence = _fence_open(line)
+            if fence:
                 self.open_fence(number, line, fence)
                 continue
             if not line.strip() or EMPTY_ITEM.match(line):
@@ -245,14 +259,13 @@ class _Converter:
             if item:
                 self.add_item(number, item)
                 continue
-            following = self.next_nonblank(index)
             unindented = line == line.lstrip()
             lead = len(line) - len(line.lstrip(" "))
             heading_text = lead <= 3 and not line[lead:].startswith("\t")
             if heading_text and index + 1 < len(self.lines) and UNDERLINE.match(self.lines[index + 1]):
                 self.start_section(_heading_name(line))
                 skip = True
-            elif unindented and line.rstrip().endswith(":") and following and _is_list_line(following):
+            elif unindented and line.rstrip().endswith(":") and self.opens_section(index):
                 self.start_section(_heading_name(line))
             elif UNDERLINE.match(line):
                 continue

@@ -59,6 +59,32 @@ class HeadingStyleTests(unittest.TestCase):
         self.assertEqual([s.name for s in result.sections], [None])
         self.assertEqual(result.items[0].body, ["\tSee below:", "\tNothing here"])
 
+    def test_colon_heading_before_a_fence(self):
+        result = convert("Follow Ups:\n\n```bash\nuv sync\n```\n\n- [ ] Call the plumber\n")
+        self.assertEqual([s.name for s in result.sections], ["Follow Ups"])
+        self.assertEqual([(i.title, i.tag, i.body) for i in result.items], [("Call the plumber", "follow-ups", [])])
+        self.assertEqual([n.action for n in result.non_list], ["skipped"] * 3)
+
+    def test_colon_heading_before_a_paragraph(self):
+        result = convert("- a\n\nNotes:\nSome note about this week.\n- [ ] Book the movers\n")
+        self.assertEqual([s.name for s in result.sections], [None, "Notes"])
+        self.assertEqual(
+            [(i.title, i.tag) for i in result.items],
+            [("a", None), ("Some note about this week.", "notes"), ("Book the movers", "notes")],
+        )
+        self.assertEqual(result.items[0].body, [])
+        self.assertEqual([(n.number, n.action, n.section) for n in result.non_list], [(4, "card", "Notes")])
+
+    def test_colon_line_before_a_fence_with_no_card_after_is_a_section(self):
+        result = convert("Setup:\n```\nmake\n```\n")
+        self.assertEqual(result.items, [])
+        self.assertEqual([n.action for n in result.non_list], ["skipped"] * 3)
+
+    def test_colon_line_before_another_heading_is_text(self):
+        for following in ("Errands:\n- a\n", "# Errands\n- a\n", "Errands\n===\n- a\n"):
+            result = convert(f"Plain:\n{following}")
+            self.assertEqual(result.items[0].title, "Plain:")
+
 
 class BulletTests(unittest.TestCase):
     def test_every_bullet_and_checkbox_style(self):

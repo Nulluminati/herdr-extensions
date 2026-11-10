@@ -969,6 +969,8 @@ With `--linear`, the body becomes the issue description. Started agents can crea
 
 - Each top-level item of a section becomes a card. Its deeper items become the card details.
 - The section name becomes a tag: `Follow Ups:` becomes the tag `follow-ups`.
+- A line that ends with `:` is a heading when a list item or a code fence comes after it before the next heading. Paragraph text between them does not change this. Otherwise the line is text.
+- Text before the first card of a section becomes a card, as it does under a `#` heading.
 - Open items go into the first column. Checked items go into the done column.
 - A code fence stays in the details of the card above it. A fence before the first card of a section makes no card: the preview lists its lines as `skipped`.
 
