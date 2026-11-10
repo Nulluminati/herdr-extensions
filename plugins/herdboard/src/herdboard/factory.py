@@ -308,7 +308,13 @@ def stop(store, ref) -> dict:
     update(ref, Path(state["folder"]), status="stopped")
     _close(state.get("panes") or [])
     activity.append(store, ref, "Factory stopped by the user.", "herdboard")
-    return {"ref": ref, "status": "stopped", "round": state.get("round"), "rounds": state.get("rounds")}
+    return {
+        "ref": ref,
+        "status": "stopped",
+        "round": state.get("round"),
+        "rounds": state.get("rounds"),
+        "preset": state.get("run", {}).get("name", "default"),
+    }
 
 
 def _close(panes) -> None:

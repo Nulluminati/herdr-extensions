@@ -1157,6 +1157,16 @@ class FactoryCliTests(CliTestCase):
         )
         self.run_json("factory", self.ref, "--stop", directory=self.repo, expect=1)
 
+    def test_factory_stop_prints_the_stopped_run(self):
+        self.write_state()
+        out, _ = self.run_cli("factory", self.ref, "--stop", directory=self.repo)
+        self.assertEqual(out, f"{self.ref}: factory stopped, round 1 of 3, preset default\n")
+
+    def test_factory_stop_json_has_the_preset(self):
+        self.write_state()
+        result = self.run_json("factory", self.ref, "--stop", directory=self.repo)
+        self.assertEqual(result, {"ref": self.ref, "status": "stopped", "round": 1, "rounds": 3, "preset": "default"})
+
 
 class ReadySignalTests(FactoryTestCase):
     def test_a_signal_needs_a_building_or_fixing_run(self):
