@@ -247,7 +247,11 @@ def git_output(repository: Path, *arguments: str) -> str | None:
 
 def changes(repository: Path, requester: str) -> tuple[str, list[str], str]:
     """The diff to review, the untracked files, and a sentence that says what the diff holds."""
-    diff = command(["git", "-C", str(repository), "diff", "HEAD"]).stdout
+    base = "HEAD"
+    if git_output(repository, "rev-parse", "--verify", "--quiet", "HEAD") is None:
+        # A repository with no commit yet has no HEAD, so compare with the empty tree.
+        base = command(["git", "-C", str(repository), "hash-object", "-t", "tree", "/dev/null"]).stdout.strip()
+    diff = command(["git", "-C", str(repository), "diff", base]).stdout
     untracked = command(
         ["git", "-C", str(repository), "ls-files", "--others", "--exclude-standard"]
     ).stdout.splitlines()

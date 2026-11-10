@@ -339,6 +339,43 @@ class PeerReviewTests(unittest.TestCase):
         self.assertFalse(any(argv[:3] == ["herdr", "pane", "split"] for argv in self.calls))
         self.assertEqual(self.workers, [])
 
+    def repository_with_no_commit(self):
+        """Point the requester at a new repository that has no commit yet."""
+        self.repository = self.base / "no commit"
+        self.repository.mkdir()
+        git(self.repository, "init", "--quiet")
+        self.agents["w1:p1"]["cwd"] = str(self.repository)
+
+    def test_staged_work_in_a_repository_with_no_commit_is_reviewed(self):
+        self.repository_with_no_commit()
+        (self.repository / "app.py").write_text("x = 1\n")
+        git(self.repository, "add", "app.py")
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0, self.errors.getvalue())
+        review = self.only_review()
+        self.assertIn("+x = 1", (review / "diff.patch").read_text())
+        self.assertIn("changed the repository", (review / "request.md").read_text())
+
+    def test_untracked_files_in_a_repository_with_no_commit_are_reviewed(self):
+        self.repository_with_no_commit()
+        (self.repository / "new.py").write_text("print('new')\n")
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0, self.errors.getvalue())
+        self.assertIn("new.py", (self.only_review() / "request.md").read_text())
+
+    def test_an_empty_repository_with_no_commit_has_nothing_to_review(self):
+        self.repository_with_no_commit()
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        self.assertIn("No uncommitted changes", self.errors.getvalue())
+        self.assertNotIn("fatal", self.errors.getvalue())
+
     def branch_with_upstream(self):
         """A `feature` branch whose upstream is the first branch, with one commit on it."""
         first = subprocess.run(
