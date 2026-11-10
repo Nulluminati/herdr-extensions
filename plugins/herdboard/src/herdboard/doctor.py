@@ -539,8 +539,8 @@ def check_promotions(path, store):
 
 
 def check_automations(store):
-    """The automations file parses, each schedule parses, each board exists, the IDs are unique, and the
-    timer that runs them is active."""
+    """The automations file parses, each schedule parses, each board exists, the IDs are unique, each factory
+    automation has a plan with a herdboard-verification block, and the timer that runs them is active."""
     from . import automations
 
     path = automations.definitions_path(store.config)
@@ -590,6 +590,18 @@ def check_automations(store):
                             fix=f"herdboard automation edit {item.id} --board BOARD",
                         )
                     )
+        # An ID that is not valid names no plan folder.
+        problem = automations.plan_problem(store.config, item) if automations.AUTOMATION_ID.match(item.id) else None
+        if problem is not None:
+            findings.append(
+                finding(
+                    "error",
+                    "automation_plan_invalid",
+                    f"Runs of automation {item.id} fail. {problem}",
+                    path,
+                    fix=f"herdboard automation plan {item.id}",
+                )
+            )
     if any(item.enabled for item in items):
         problem = automations.timer_problem()
         if problem is not None:

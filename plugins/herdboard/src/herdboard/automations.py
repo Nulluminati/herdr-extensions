@@ -384,6 +384,21 @@ def _check(store, item: Automation, *, check_preset: bool = True) -> Automation:
     return replace(item, title=title, type=kind, tags=list(item.tags))
 
 
+def plan_problem(config: Config, item: Automation) -> str | None:
+    """Why a factory run of the automation cannot start: its plan has no valid herdboard-verification block.
+    None for a plan that has one, and for an automation that is not a factory."""
+    if not item.factory:
+        return None
+    try:
+        verification.check_plan(config, item.id)
+    except HerdboardError as error:
+        card_fix = verification.FIX.replace("<ref>", item.id)
+        return str(error).replace(
+            card_fix, f"Update the plan with `herdboard automation plan {item.id}`, then run the automation again."
+        )
+    return None
+
+
 def add(
     store,
     *,
@@ -540,6 +555,13 @@ def spawn(store, automation: Automation, due: datetime) -> CardView:
 def run(store, automation: Automation, due: datetime, *, skipped: int = 0, config_file: Path | None = None) -> dict:
     """Spawn one card and start its agent. Failures are logged, recorded and notified, never retried."""
     now = datetime.now().astimezone().isoformat(timespec="seconds")
+    # A run that cannot start adds no card to the board.
+    problem = plan_problem(store.config, automation)
+    if problem is not None:
+        result = f"plan_invalid: {problem}"
+        _update_state(automation.id, last_run=now, last_card=None, last_result=result)
+        notify(f"herdboard: automation {automation.id} did not run", f"{automation.title}: {problem}")
+        return {"id": automation.id, "card": None, "result": result, "skipped": skipped}
     try:
         card = spawn(store, automation, due)
     except HerdboardError as error:

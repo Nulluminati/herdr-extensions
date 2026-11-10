@@ -4961,7 +4961,7 @@ class AutomationsScreen(Screen):
             )
             or "-"
         )
-        failed = (entry["last_result"] or "").startswith(("start_failed", "spawn_failed"))
+        failed = (entry["last_result"] or "").startswith(("start_failed", "spawn_failed", "plan_invalid"))
         next_run = entry["schedule_error"] or _short_time(entry["next_due"])
         return [
             state,

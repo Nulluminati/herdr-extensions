@@ -460,8 +460,9 @@ class FactoryAutomationTests(AutomationTestCase):
         self.assertIn("start_failed:", result["result"])
         self.assertIn("cheap", result["result"])
 
-    def test_a_factory_automation_without_a_contract_fails_its_start(self):
-        added = self.add(board=self.repo_board(), factory=True)
+    def test_a_factory_automation_without_a_contract_spawns_no_card(self):
+        board = self.repo_board()
+        added = self.add(board=board, factory=True)
         for text in (None, "# Plan\n"):
             with self.subTest(text=text):
                 if text is None:
@@ -471,13 +472,36 @@ class FactoryAutomationTests(AutomationTestCase):
                 with patch.object(start.Starter, "start") as started:
                     result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
                 started.assert_not_called()
-                self.assertTrue(result["result"].startswith("start_failed: "))
+                self.assertIsNone(result["card"])
+                self.assertTrue(result["result"].startswith("plan_invalid: "))
                 self.assertIn("herdboard-verification", result["result"])
-                self.assertIn("Update the plan", result["result"])
-                log = [entry["message"] for entry in activity.read(self.config, result["card"])]
-                self.assertTrue(any(line.startswith("Auto start failed: ") for line in log))
-                # The card stays in the first column, where it was spawned.
-                self.assertEqual(self.store.show(result["card"]).column, self.config.columns[0])
+                self.assertIn(f"herdboard automation plan {added.id}", result["result"])
+                self.assertNotIn("herdboard plan ", result["result"])
+                self.assertEqual(self.cards(board), [])
+                self.assertEqual(automations.read_state()[added.id]["last_result"], result["result"])
+
+    def test_a_spawned_card_without_a_contract_fails_its_start(self):
+        added = self.add(board=self.repo_board(), factory=True)
+        self.give_plan(added)
+        spawn = automations.spawn
+
+        def spawn_and_drop_the_plan(*args):
+            card = spawn(*args)
+            attachments.plan_path(self.config, card.ref).unlink()
+            return card
+
+        with (
+            patch.object(automations, "spawn", spawn_and_drop_the_plan),
+            patch.object(start.Starter, "start") as started,
+        ):
+            result = automations.run(self.store, added, local(2026, 10, 23, 9, 0))
+        started.assert_not_called()
+        self.assertTrue(result["result"].startswith("start_failed: "))
+        self.assertIn("herdboard-verification", result["result"])
+        log = [entry["message"] for entry in activity.read(self.config, result["card"])]
+        self.assertTrue(any(line.startswith("Auto start failed: ") for line in log))
+        # The card stays in the first column, where it was spawned.
+        self.assertEqual(self.store.show(result["card"]).column, self.config.columns[0])
 
     def test_factory_round_trips_with_may_merge_prs(self):
         added = self.add(board=self.repo_board(), factory=True, may_merge_prs=True)
@@ -1321,6 +1345,22 @@ class DoctorTests(unittest.TestCase):
         (board / "board.toml").write_text('format = 1\n\n[[column]]\nname = "Backlog"\ncards = []\n', encoding="utf-8")
         self.write('[[automation]]\nid = "a001"\ntitle = "x"\nschedule = "every day"\nboard = "plain"\n')
         self.assertEqual(self.codes(), ["automation_board_no_repo"])
+
+    def test_a_factory_automation_without_a_contract_is_an_error(self):
+        board = self.store.config.todos_dir / "boards" / "repo"
+        (board / "cards").mkdir(parents=True)
+        (board / "board.toml").write_text(
+            'format = 1\nrepo = "github.com/example/repo"\n\n[[column]]\nname = "Backlog"\ncards = []\n',
+            encoding="utf-8",
+        )
+        self.write('[[automation]]\nid = "a001"\ntitle = "x"\nschedule = "every day"\nboard = "repo"\nfactory = true\n')
+        self.assertEqual(self.codes(), ["automation_plan_invalid"])
+        plan = attachments.plan_path(self.store.config, "a001")
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.write_text("# Plan\n", encoding="utf-8")
+        self.assertEqual(self.codes(), ["automation_plan_invalid"])
+        plan.write_text(verified_plan(), encoding="utf-8")
+        self.assertEqual(self.codes(), [])
 
 
 if __name__ == "__main__":

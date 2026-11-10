@@ -150,6 +150,22 @@ class ListTests(AutomationsBoardTestCase):
             self.assertEqual(rows[1][0], "paused")
             self.assertEqual(rows[1][5], "-")
 
+    async def test_a_failed_run_shows_its_result_in_red(self):
+        self.add()
+        app = self.app()
+        async with app.run_test(size=(160, 30)) as pilot:
+            screen = await self.open_tab(app, pilot)
+            entry = screen.entries[0]
+            for result, style in (
+                ("started", ""),
+                ("plan_invalid: a001 has no plan", "red"),
+                ("start_failed: no agent", "red"),
+                ("spawn_failed: no board", "red"),
+            ):
+                with self.subTest(result=result):
+                    row = screen._row({**entry, "last_result": result})
+                    self.assertEqual(row[6].style, style)
+
     async def test_an_empty_list_says_how_to_add_one(self):
         app = self.app()
         async with app.run_test(size=(160, 30)) as pilot:

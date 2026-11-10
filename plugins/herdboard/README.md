@@ -508,7 +508,7 @@ The contract errors:
 - `verification_plan_required`: the card has no plan, or the plan has no `herdboard-verification` block.
 - `verification_plan_invalid`: the block is malformed. The message names the field.
 
-Nothing starts after either error. On the board, the `F` popup and the Custom form show the error and stay open: press escape, then `P` to update the plan. A factory automation logs `Auto start failed: ...` on its card, and its last result is `start_failed`.
+Nothing starts after either error. On the board, the `F` popup and the Custom form show the error and stay open: press escape, then `P` to update the plan. A factory automation whose plan has no valid contract adds no card: its last result is `plan_invalid`, and `doctor` reports `automation_plan_invalid`. When the copy on a spawned card fails the check, the card logs `Auto start failed: ...`, and the last result is `start_failed`.
 
 A run started before this policy keeps its old approval and the old no-change shortcut. Plan the card again to add a contract. A plan that changes during a run makes the approval `changes needed`: start the factory again with the new plan.
 
@@ -732,7 +732,7 @@ This is an instruction in the brief only. herdboard does not change the agent's 
 
 ### Factory runs
 
-With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line and its verification contract apply. The planner of a factory automation writes both. A run whose plan has no valid contract logs `start_failed` and starts nothing. Default runs use `factory_max_rounds`. Add `--factory-preset cheap`, or choose a preset in the form, to use a named run. The definition stores `factory_preset = "cheap"`. A preset needs `factory = true` and cannot combine with `agent`, `model` or `thinking`. If the preset no longer exists, the run logs `start_failed`. `--no-factory` turns factory mode off and clears the automation's preset. Use `--factory-preset ''` to clear only the preset.
+With `--factory`, or the form's "Run as a factory" checkbox, each spawned card starts as a [factory run](#factory-runs): lens reviewers, builder fixes and an approver's verdict. The automation's `plan.md` is copied to each card, so its `Review lenses:` line and its verification contract apply. The planner of a factory automation writes both. herdboard saves a factory automation without a plan, so that its planner can write one. A run whose plan has no valid contract adds no card, and its last result is `plan_invalid`. `doctor` reports such an automation as `automation_plan_invalid`. Default runs use `factory_max_rounds`. Add `--factory-preset cheap`, or choose a preset in the form, to use a named run. The definition stores `factory_preset = "cheap"`. A preset needs `factory = true` and cannot combine with `agent`, `model` or `thinking`. If the preset no longer exists, the run logs `start_failed`. `--no-factory` turns factory mode off and clears the automation's preset. Use `--factory-preset ''` to clear only the preset.
 
 A factory automation needs a repository board: herdboard refuses it on `inbox`. Each run can start up to four reviewers in each round, and an approver, so it costs more than a plain run. `--factory` and `--may-merge-prs` work together.
 
@@ -985,6 +985,7 @@ herdboard shows the result and asks before it writes. The original file does not
 - Old Markdown boards that `convert-store` did not convert yet, and config keys that herdboard no longer reads
 - The config file, and Linear links, labels, pinned issues and the API key
 - Sub-cards whose parent is missing
+- Automations whose runs fail: a bad schedule, a missing board, a board without a repository, or a factory automation without a valid `herdboard-verification` block
 - Unfinished `promote` records, old start records and old checkout paths
 - Whether `herdr` and `gh` are on the path
 - Whether `hunk` is on the path and has the `hunk-gh-review` extension. These are warnings: the board works without them
