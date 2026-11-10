@@ -16,7 +16,7 @@ from herdboard.model import (
     OldFormatError,
 )
 from herdboard.store import BoardSnapshot, Store
-from support.herdboard_store import StoreTestCase, write_card
+from support.herdboard_store import CREATED, StoreTestCase, write_card
 
 IDENTITY = RepoIdentity("github.com/acme/api", "github.com", ("acme", "api"))
 
@@ -422,6 +422,31 @@ class DeleteTest(StoreTestCase):
         self.assertEqual(str(caught.exception), "Cannot delete tabc: its agent runs")
         self.assertTrue((path / "cards" / "tabc").exists())
         self.assertEqual(self.columns(path)["Doing"], ["tabc"])
+
+    def test_parent_with_sub_cards_on_the_board_is_refused(self):
+        path = self.put("p", [("Todo", [{"id": "t111", "title": "p"}, {"id": "t222", "title": "c", "parent": "t111"}])])
+        with self.assertRaises(HerdboardError) as caught:
+            self.store.delete("t111")
+        self.assertEqual(caught.exception.code, "has_sub_cards")
+        self.assertEqual(str(caught.exception), "Cannot delete t111: it has sub-cards. Delete them first")
+        self.assertTrue((path / "cards" / "t111").exists())
+        self.assertEqual(self.columns(path)["Todo"], ["t111", "t222"])
+
+    def test_parent_with_archived_sub_cards_is_refused(self):
+        path = self.put(
+            "p",
+            [("Todo", [{"id": "t111", "title": "p"}])],
+            archive=[{"id": "t222", "title": "c", "parent": "t111", "archived": CREATED}],
+        )
+        with self.assertRaises(HerdboardError) as caught:
+            self.store.delete("t111")
+        self.assertEqual(caught.exception.code, "has_sub_cards")
+        self.assertTrue((path / "cards" / "t111").exists())
+
+    def test_sub_card_is_deleted(self):
+        path = self.put("p", [("Todo", [{"id": "t111", "title": "p"}, {"id": "t222", "title": "c", "parent": "t111"}])])
+        self.store.delete("t222")
+        self.assertEqual(self.columns(path)["Todo"], ["t111"])
 
     def test_delete_unknown_card(self):
         self.put("p")

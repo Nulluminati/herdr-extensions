@@ -975,8 +975,9 @@ class Store:
         """Remove a card with its folder: its log and attachments too. Returns the card as it was.
 
         `blocked` names why the card must stay, such as a running agent that writes to the
-        folder, or returns None. The ID leaves `board.toml` first, then the folder goes: a
-        crash between them leaves an orphan, which shows again.
+        folder, or returns None. A parent with sub-cards, on the board or archived, stays.
+        The ID leaves `board.toml` first, then the folder goes: a crash between them leaves
+        an orphan, which shows again.
         """
         located = self._resolve(ref)
         reason = blocked(ref) if blocked is not None else None
@@ -986,6 +987,9 @@ class Store:
             board = self._read(located.path)
             card = self._find(board, located)
             self._check_unique(card.id)
+            # Archived sub-cards count too: unarchive would bring them back with a missing parent.
+            if board.children(card.id) or any(c.file.parent == card.id for c in self._read_archive(board.path)):
+                raise ParentError(f"Cannot delete {card.id}: it has sub-cards. Delete them first", "has_sub_cards")
             view = self._board_view(board, card.id)
             board.column_of(card.id).cards.remove(card.id)
             self._write_board(board)

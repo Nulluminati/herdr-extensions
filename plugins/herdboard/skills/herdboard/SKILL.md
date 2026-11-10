@@ -222,7 +222,7 @@ Errors are JSON on stdout: `{"error": {"code": "...", "message": "..."}}`. Exit 
 | `convert` | `convert-store` could not convert the old boards and changed nothing. Tell the user the message. |
 | `archived` | The todo is archived. Ask the user before you run `unarchive <id>`. |
 | `card_active` | The card's worktree still exists, or its agent or planner still runs. `move --board` and `delete` refuse a started card too. Tell the user the message. |
-| `has_sub_cards` | A parent with sub-cards on the board stays. Archive the sub-cards first, after you ask the user. |
+| `has_sub_cards` | A parent with sub-cards stays. For `archive` and `move --board`, archive or move the sub-cards first. For `delete`, delete the sub-cards first, archived ones too. Ask the user first. |
 | `linear_archive` | herdboard archives only todos. Tell the user. |
 | `duplicate_id` | Two card folders have the same todo ID. Tell the user to run `herdboard doctor`. |
 | `not_found` | Run `list` to get the correct reference, or ask the user for the column. |
