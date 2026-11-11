@@ -27,17 +27,16 @@ class DependabotTests(unittest.TestCase):
     def test_holds_no_entry_beyond_the_expected_ones(self):
         self.assertEqual(
             sorted((entry["package-ecosystem"], entry["directory"]) for entry in self.updates),
-            [("github-actions", "/"), ("uv", "/"), ("uv", "/plugins/herdboard")],
+            [("github-actions", "/"), ("uv", "/")],
         )
 
     def test_updates_pinned_github_actions_in_the_root(self):
         entry = self.update("github-actions", "/")
         self.assertEqual(entry["schedule"]["interval"], "weekly")
 
-    def test_updates_both_uv_projects_weekly(self):
-        for directory in ("/", "/plugins/herdboard"):
-            entry = self.update("uv", directory)
-            self.assertEqual(entry["schedule"]["interval"], "weekly")
+    def test_updates_the_uv_project_weekly(self):
+        entry = self.update("uv", "/")
+        self.assertEqual(entry["schedule"]["interval"], "weekly")
 
     def test_each_uv_directory_holds_the_files_the_update_needs(self):
         directories = [entry["directory"] for entry in self.updates if entry["package-ecosystem"] == "uv"]

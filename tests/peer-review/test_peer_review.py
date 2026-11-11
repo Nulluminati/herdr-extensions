@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from herdboard import sandbox
 from support.scripts import load_script
 
 peer_review = load_script("peer-review", "peer_review")
@@ -128,7 +127,7 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(peer_review.reviewer_for("pi"), "codex")
         self.assertEqual(peer_review.reviewer_for("codex"), "claude")
 
-    def test_a_linked_worktree_reviewer_matches_herdboard(self):
+    def test_a_linked_worktree_reviewer_names_the_main_git_folder(self):
         linked = self.base / "linked"
         subprocess.run(
             ["git", "-C", str(self.repository), "worktree", "add", "-q", str(linked), "-b", "card"],
@@ -139,39 +138,12 @@ class PeerReviewTests(unittest.TestCase):
         for kind in ("claude", "pi"):
             with self.subTest(kind=kind):
                 args = peer_review.reviewer_arguments(kind, review, linked)
-                prompt = args[0] if kind == "claude" else args[-1]
-                expected = (
-                    [
-                        prompt,
-                        *sandbox.claude_reviewer_options(review, linked, browser=False, hunk=False),
-                        *sandbox.claude_reviewer_tools(review),
-                    ]
-                    if kind == "claude"
-                    else [*sandbox.pi_reviewer_options(review, linked, browser=False, hunk=False), "--", prompt]
-                )
-                self.assertEqual(args, expected)
                 self.assertIn(str((self.repository / ".git").resolve()), " ".join(args))
 
-    def test_reviewers_get_the_herdboard_sandbox_without_a_browser(self):
+    def test_reviewer_prompt_names_the_request(self):
         folder, repo = Path('/reviews/a"b\\c'), Path("/repo")
         prompt = peer_review.reviewer_arguments("codex", folder, repo)[-1]
         self.assertIn(str(folder / "request.md"), prompt)
-        self.assertEqual(
-            peer_review.reviewer_arguments("codex", folder, repo),
-            [*sandbox.codex_reviewer_options("hb-review", folder, hunk=False), prompt],
-        )
-        self.assertEqual(
-            peer_review.reviewer_arguments("pi", folder, repo),
-            [*sandbox.pi_reviewer_options(folder, repo, browser=False, hunk=False), "--", prompt],
-        )
-        self.assertEqual(
-            peer_review.reviewer_arguments("claude", folder, repo),
-            [
-                prompt,
-                *sandbox.claude_reviewer_options(folder, repo, browser=False, hunk=False),
-                *sandbox.claude_reviewer_tools(folder),
-            ],
-        )
 
     def test_other_agents_are_rejected(self):
         with self.assertRaisesRegex(peer_review.ReviewError, "unsupported"):
@@ -256,7 +228,7 @@ class PeerReviewTests(unittest.TestCase):
         settings = json.loads(start[start.index("--settings") + 1])["sandbox"]
         self.assertEqual(
             settings["filesystem"],
-            {"allowWrite": [str(review)], "denyWrite": [str(self.repository)], "denyRead": sandbox.secret_paths()},
+            {"allowWrite": [str(review)], "denyWrite": [str(self.repository)], "denyRead": peer_review.secret_paths()},
         )
         self.assertIn(f"Edit(/{review}/**)", start)
 

@@ -46,15 +46,6 @@ class CiTests(unittest.TestCase):
         self.assertLess(commands.index("uv run --locked ruff check ."), tests)
         self.assertLess(commands.index("uv run --locked ruff format --check ."), tests)
 
-    def test_checks_the_herdboard_lock_that_the_root_run_never_resolves(self):
-        commands = [step.get("run") for step in self.workflow["jobs"]["test"]["steps"]]
-        self.assertIn("uv lock --check --project plugins/herdboard", commands)
-        self.assertIn(
-            "uv run --locked --project plugins/herdboard python -c"
-            ' "import textual, yaml, tomlkit, herdboard.board, herdboard.cli"',
-            commands,
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

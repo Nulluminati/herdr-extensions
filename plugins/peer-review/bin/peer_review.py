@@ -148,7 +148,8 @@ def shared_git_folder(path: Path) -> list[Path]:
 def sandbox_policy(review: Path, repository: Path) -> dict:
     """The sandbox-runtime policy for Claude's `sandbox` settings and pi's `--sandbox`.
 
-    The same shape as herdboard's reviewer sandbox (herdboard/sandbox.py), without the browser.
+    The same shape as herdboard's reviewer sandbox (src/herdboard/sandbox.py in Nulluminati/herdboard),
+    without the browser.
     The sandbox writes the working directory unless denyWrite names it."""
     return {
         "network": {"allowedDomains": list(GITHUB_DOMAINS)},

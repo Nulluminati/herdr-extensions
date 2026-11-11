@@ -29,17 +29,3 @@ updates:
         update-types:
           - "minor"
           - "patch"
-
-  - package-ecosystem: "uv"
-    directory: "/plugins/herdboard"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      uv-herdboard:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"

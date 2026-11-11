@@ -8,9 +8,10 @@ Plugins for [Herdr](https://herdr.dev), the terminal multiplexer for coding agen
 | [auto-title](plugins/auto-title/) | Gives each tab a title from its agent's session name, its herdboard card or its program. Labels you set by hand stay. |
 | [codex-usage](plugins/codex-usage/) | Shows each Codex agent's context use and estimated cost in the sidebar Agents list, in the same form as Claude and pi. |
 | [default-layout](plugins/default-layout/) | Opens the projects, tabs and panes listed in a TOML file when the Herdr server starts, and relaunches their programs after a restore. |
-| [herdboard](plugins/herdboard/) | A kanban board for Markdown todos and Linear issues. A card can start work in its own worktree with an agent, then go through review and merge, locally or as a draft GitHub pull request. |
 | [peer-review](plugins/peer-review/) | Has a second agent review your agent's work: Claude to pi, pi to Codex, Codex to Claude. It reviews uncommitted changes, else the branch commits since the upstream. |
 | [resource-usage](plugins/resource-usage/) | Shows each workspace's processor and memory use in the sidebar Spaces list. A main checkout's workspace also shows the total of its open worktrees. |
+
+herdboard, a kanban board for Markdown todos and Linear issues that starts card work with an agent, lives in its own private repository: [Nulluminati/herdboard](https://github.com/Nulluminati/herdboard).
 
 ## Install
 
@@ -27,7 +28,7 @@ git clone git@github.com:Nulluminati/herdr-extensions.git ~/Projects/herdr-exten
 herdr plugin link ~/Projects/herdr-extensions/plugins/<plugin>
 ```
 
-Each plugin's README gives the other steps: its agent skill, its key binding and, for herdboard, the `herdboard` command.
+Each plugin's README gives the other steps: its agent skill and its key binding.
 
 ## Development
 
@@ -51,6 +52,6 @@ Make `git blame` skip the commit that formatted all code:
 git config blame.ignoreRevsFile .git-blame-ignore-revs
 ```
 
-Dependabot keeps the GitHub Actions pins and the two uv lock files current. It checks weekly and groups the minor and patch updates per ecosystem. See [.github/dependabot.yml](.github/dependabot.yml). `tests/repo/test_dependabot.py` holds the settings that matter.
+Dependabot keeps the GitHub Actions pins and the uv lock file current. It checks weekly and groups the minor and patch updates per ecosystem. See [.github/dependabot.yml](.github/dependabot.yml). `tests/repo/test_dependabot.py` holds the settings that matter.
 
 [AGENTS.md](AGENTS.md) describes the layout and the rules for plugin code.

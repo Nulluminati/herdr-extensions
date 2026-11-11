@@ -29,9 +29,3 @@ jobs:
         run: uv run --locked ruff format --check .
       - name: Run tests
         run: uv run --locked pytest -n auto --cov=plugins --cov-report=term-missing
-      # The root run never resolves plugins/herdboard/uv.lock. Check that its
-      # lock file matches its manifest and that its own packages import.
-      - name: Check the herdboard lock file
-        run: uv lock --check --project plugins/herdboard
-      - name: Import herdboard from its own lock file
-        run: uv run --locked --project plugins/herdboard python -c "import textual, yaml, tomlkit, herdboard.board, herdboard.cli"
