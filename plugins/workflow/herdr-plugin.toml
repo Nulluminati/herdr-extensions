@@ -1,0 +1,19 @@
+id = "nulluminati.workflow"
+name = "Workflow"
+version = "0.1.0"
+# Needs startup commands.
+min_herdr_version = "0.9.0"
+description = "Open herdr-plus workflow workspaces for a repository, and show each one's project and profile in the $workflow_project and $workflow_profile sidebar tokens."
+platforms = ["linux", "macos"]
+
+# Herdr runs these from the plugin root. Herdr keeps sidebar tokens in memory
+# only, so restored workflow workspaces lose them. Startup reports them again.
+# The herdr-plus projects and quick actions call bin/herdr_workflow.py for the
+# rest: they open workflows and start the agents in them.
+[[startup]]
+command = ["python3", "bin/herdr_workflow.py", "refresh-sidebar"]
+
+[[actions]]
+id = "refresh"
+title = "Workflow: refresh the sidebar"
+command = ["python3", "bin/herdr_workflow.py", "refresh-sidebar"]

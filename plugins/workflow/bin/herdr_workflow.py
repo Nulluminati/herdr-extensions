@@ -16,7 +16,6 @@ import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent
 PLUGIN_ID = "cloudmanic.herdr-plus"
 DIRECTORY_VARIABLE = "HERDR_WORKFLOW_DIRECTORY"
 DIRECTORY_PROMPT = "Enter another directory..."
@@ -221,6 +220,15 @@ def herdr_result(arguments: list[str]) -> dict:
         raise WorkflowError("Herdr returned an invalid response") from error
 
 
+def herdr_plus_config_dir() -> Path:
+    # The templates and prompts are herdr-plus config. Ask Herdr rather than read
+    # HERDR_PLUGIN_CONFIG_DIR: when this plugin runs the launcher, that names its own directory.
+    value = herdr_command(["plugin", "config-dir", PLUGIN_ID]).stdout.strip()
+    if not value or not Path(value).is_absolute():
+        raise WorkflowError("Herdr did not return the Herdr Plus config directory")
+    return Path(value)
+
+
 def herdr_workspaces() -> list[dict]:
     workspaces = herdr_result(["workspace", "list"]).get("workspaces")
     if not isinstance(workspaces, list):
@@ -279,7 +287,7 @@ def workflow_template(profile: str) -> str:
         raise WorkflowError("Run workflow actions inside Herdr")
     if not re.fullmatch(r"[a-z][a-z0-9_-]*", profile):
         raise WorkflowError("Invalid workflow profile name")
-    path = CONFIG_DIR / "projects" / f"{profile}.toml"
+    path = herdr_plus_config_dir() / "projects" / f"{profile}.toml"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
@@ -400,7 +408,7 @@ def parse_pr_reference(value: str) -> tuple[str, str]:
 def launch_review_agent(profile: str, agent: str) -> int:
     if profile not in ("local-review", "pr-review") or agent not in ("pi", "claude"):
         raise WorkflowError("Unknown review profile or agent")
-    prompts = CONFIG_DIR / "prompts"
+    prompts = herdr_plus_config_dir() / "prompts"
     text = "\n\n".join((prompts / filename).read_text(encoding="utf-8") for filename in ("review.md", f"{profile}.md"))
     os.execvp(agent, [agent, "--append-system-prompt", text])
     return 0
