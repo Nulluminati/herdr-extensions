@@ -46,6 +46,27 @@ class CiTests(unittest.TestCase):
         self.assertLess(commands.index("uv run --locked ruff check ."), tests)
         self.assertLess(commands.index("uv run --locked ruff format --check ."), tests)
 
+    def test_names_each_job_for_the_required_status_checks(self):
+        names = {job_id: job.get("name") for job_id, job in self.workflow["jobs"].items()}
+        self.assertEqual(names, {"test": "Lint, format, test", "secrets": "Secret scan (gitleaks)"})
+
+    def test_scans_the_full_history_for_secrets_with_a_checksum_checked_gitleaks(self):
+        job = self.workflow["jobs"]["secrets"]
+        self.assertEqual(job["runs-on"], "ubuntu-latest")
+        self.assertEqual(job["timeout-minutes"], 5)
+        self.assertEqual(job["env"]["GITLEAKS_VERSION"], "8.30.1")
+        self.assertRegex(job["env"]["GITLEAKS_SHA256"], r"^[0-9a-f]{64}$")
+        checkout = job["steps"][0]
+        self.assertEqual(checkout["uses"], self.workflow["jobs"]["test"]["steps"][0]["uses"])
+        self.assertEqual(checkout["with"], {"fetch-depth": 0, "persist-credentials": False})
+        install = job["steps"][1]["run"]
+        self.assertIn("set -euo pipefail", install)
+        self.assertIn('echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -', install)
+        self.assertEqual(
+            job["steps"][2]["run"],
+            '"$RUNNER_TEMP/gitleaks" git --redact --no-banner --log-opts="--all" .',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
