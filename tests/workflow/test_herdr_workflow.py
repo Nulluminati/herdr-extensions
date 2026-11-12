@@ -94,6 +94,35 @@ class WorkflowTests(unittest.TestCase):
             ],
         )
 
+    def test_refresh_sidebar_clears_tokens_from_a_renamed_workspace(self):
+        self.workspaces = [
+            {
+                "workspace_id": "w5",
+                "label": "renamed workspace",
+                "tokens": {"workflow_profile": "implementation", "workflow_project": "project", "other": "x"},
+            },
+            {"workspace_id": "w6", "label": "notes", "tokens": {"other": "x"}},
+        ]
+        self.assertEqual(herdr_workflow.refresh_sidebar(), 1)
+        reports = [argv for argv in self.calls if argv[1:3] == ["workspace", "report-metadata"]]
+        self.assertEqual(
+            reports,
+            [
+                [
+                    "herdr",
+                    "workspace",
+                    "report-metadata",
+                    "w5",
+                    "--source",
+                    "herdr-workflow",
+                    "--clear-token",
+                    "workflow_project",
+                    "--clear-token",
+                    "workflow_profile",
+                ]
+            ],
+        )
+
 
 class ManifestTests(unittest.TestCase):
     def setUp(self):

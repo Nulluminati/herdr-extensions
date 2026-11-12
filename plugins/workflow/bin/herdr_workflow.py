@@ -254,6 +254,41 @@ def report_sidebar(workspace_id: str, profile: str, directory: Path) -> None:
     )
 
 
+def clear_sidebar(workspace_id: str) -> None:
+    herdr_command(
+        [
+            "workspace",
+            "report-metadata",
+            workspace_id,
+            "--source",
+            "herdr-workflow",
+            "--clear-token",
+            "workflow_project",
+            "--clear-token",
+            "workflow_profile",
+        ]
+    )
+
+
+def workflow_directory(label: str) -> tuple[str, Path] | None:
+    """Return the profile and directory of a workflow label, or None for another label."""
+    profile, separator, value = label.partition(" · ")
+    if not separator or profile not in WORKFLOW_PROFILES:
+        return None
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        return None
+    try:
+        directory = Path(value).expanduser()
+        if not directory.is_absolute():
+            return None
+        directory = directory.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if workspace_label(profile, directory) != label:
+        return None
+    return profile, directory
+
+
 def refresh_sidebar() -> int:
     if os.environ.get("HERDR_ENV") != "1":
         raise WorkflowError("Run workflow actions inside Herdr")
@@ -263,22 +298,16 @@ def refresh_sidebar() -> int:
         workspace_id = workspace.get("workspace_id")
         if not isinstance(label, str) or not workspace_id:
             continue
-        profile, separator, value = label.partition(" · ")
-        if not separator or profile not in WORKFLOW_PROFILES:
+        workflow = workflow_directory(label)
+        if workflow is not None:
+            report_sidebar(workspace_id, *workflow)
+            count += 1
             continue
-        if any(ord(character) < 32 or ord(character) == 127 for character in value):
-            continue
-        try:
-            directory = Path(value).expanduser()
-            if not directory.is_absolute():
-                continue
-            directory = directory.resolve()
-        except (OSError, RuntimeError):
-            continue
-        if workspace_label(profile, directory) != label:
-            continue
-        report_sidebar(workspace_id, profile, directory)
-        count += 1
+        # A renamed workflow workspace keeps the tokens the launcher gave it until they are cleared.
+        tokens = workspace.get("tokens")
+        if isinstance(tokens, dict) and ("workflow_project" in tokens or "workflow_profile" in tokens):
+            clear_sidebar(workspace_id)
+            count += 1
     return count
 
 
