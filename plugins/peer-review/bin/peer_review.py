@@ -437,7 +437,8 @@ def deliver(review: Path, requester: str, reviewer_pane: str, reviewer: str) -> 
         title, body = "Peer review failed", f"{error}. The log is {review / 'worker.log'}"
         status = 1
     try:
-        herdr("agent", "wait", requester, "--until", "idle", timeout=REVIEW_TIMEOUT_MS // 1000)
+        # An agent that finished its turn reports done instead of idle when its pane is not focused.
+        herdr("agent", "wait", requester, "--until", "idle", "--until", "done", timeout=REVIEW_TIMEOUT_MS // 1000)
         herdr("agent", "prompt", requester, message)
     except ReviewError as error:
         # The requester pane closed, stayed busy or is blocked: tell the user in Herdr instead.

@@ -50,6 +50,7 @@ class PeerReviewTests(unittest.TestCase):
         self.start_error = None
         self.reviewer_states = ["working", "idle"]
         self.reviewer_kind = "claude"
+        self.requester_status = "idle"
         self.review = None
 
     def fake_command(self, argv, timeout=120):
@@ -76,6 +77,10 @@ class PeerReviewTests(unittest.TestCase):
         if argv[:3] == ["herdr", "agent", "prompt"]:
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[:3] == ["herdr", "agent", "wait"]:
+            # Herdr's rule: match any --until state; without --until, match idle, done or blocked.
+            wanted = [argv[i + 1] for i, value in enumerate(argv) if value == "--until"] or ["idle", "done", "blocked"]
+            if self.requester_status not in wanted:
+                raise peer_review.ReviewError('{"error":{"code":"timeout"}}')
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[:3] == ["herdr", "notification", "show"]:
             return subprocess.CompletedProcess(argv, 0, "{}", "")
@@ -457,12 +462,24 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(self.reviewer_states, [])
         self.assertFalse(any(argv[:4] == ["herdr", "agent", "prompt", "w1:p9"] for argv in self.calls))
-        self.assertEqual(self.calls[-2], ["herdr", "agent", "wait", "w1:p1", "--until", "idle"])
+        self.assertEqual(self.calls[-2], ["herdr", "agent", "wait", "w1:p1", "--until", "idle", "--until", "done"])
         notify = self.calls[-1]
         self.assertEqual(notify[:4], ["herdr", "agent", "prompt", "w1:p1"])
         self.assertIn(str(review / "findings.md"), notify[4])
         self.assertIn("Do not change any code", notify[4])
         self.assertIn("Wait for the user", notify[4])
+
+    def test_deliver_tells_a_requester_in_the_done_state(self):
+        review = self.make_review()
+        self.requester_status = "done"
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(self.notifications(), [])
+        prompt = self.calls[-1]
+        self.assertEqual(prompt[:4], ["herdr", "agent", "prompt", "w1:p1"])
+        self.assertIn(str(review / "findings.md"), prompt[4])
 
     def test_deliver_reports_a_reviewer_that_stopped(self):
         review = self.make_review()
