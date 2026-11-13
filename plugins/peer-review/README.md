@@ -6,7 +6,7 @@ The reviewer opens in a split next to your agent. It writes its findings to a fi
 
 ## What gets reviewed
 
-1. The uncommitted changes: tracked changes against `HEAD`, and new untracked files.
+1. The uncommitted changes: tracked changes against `HEAD`, and new untracked files. In a repository with no commit yet, the staged files are the tracked changes.
 2. When there are none, the commits on the branch since its upstream (`git diff @{u}...HEAD`).
 
 When there is nothing to review, or the branch has no upstream, the request fails and Herdr shows a notification.
@@ -44,7 +44,7 @@ Do one of these:
 - Ask the agent for a review, for example "get a peer review from pi". The skill runs the request.
 
 The request returns at once. A background worker waits for the findings and then prompts your agent.
-When the worker cannot prompt your agent, for example because its pane closed, Herdr shows a notification with the path to `findings.md`.
+When the worker cannot prompt your agent, for example because its pane closed, Herdr shows a notification with the path to `findings.md`. When the review failed, the notification gives the reason and the path to `worker.log`.
 
 Each review has a folder, `~/.local/state/peer-review/<timestamp>/`. A second request in the same second adds a counter, as in `<timestamp>-2`:
 
