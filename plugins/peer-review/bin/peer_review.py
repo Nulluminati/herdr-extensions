@@ -256,9 +256,10 @@ def changes(repository: Path, requester: str) -> tuple[str, list[str], str]:
         # A repository with no commit yet has no HEAD, so compare with the empty tree.
         base = command(["git", "-C", str(repository), "hash-object", "-t", "tree", "/dev/null"]).stdout.strip()
     diff = command(["git", "-C", str(repository), "diff", base]).stdout
+    # Git quotes a name with unusual bytes unless core.quotePath is false. -z keeps names with newlines whole.
     untracked = command(
-        ["git", "-C", str(repository), "ls-files", "--others", "--exclude-standard"]
-    ).stdout.splitlines()
+        ["git", "-C", str(repository), "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "-z"]
+    ).stdout.split("\0")[:-1]
     if diff or untracked:
         return diff, untracked, f"{requester} changed the repository at `{repository}`."
     upstream = (git_output(repository, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}") or "").strip()
@@ -299,7 +300,8 @@ def write_request(repository: Path, requester: str) -> Path:
     review = create_review()
     (review / "diff.patch").write_text(diff, errors="surrogateescape")
     untracked_list = "\n".join(f"- {path}" for path in untracked) or "- (none)"
-    (review / "request.md").write_text(f"""# Peer review request
+    (review / "request.md").write_text(
+        f"""# Peer review request
 
 {summary}
 
@@ -324,7 +326,9 @@ Write your findings to `{review / "findings.md"}` in this format:
     - path:line: concern.
 
 If you find nothing, write "No findings."
-""")
+""",
+        errors="surrogateescape",
+    )
     return review
 
 

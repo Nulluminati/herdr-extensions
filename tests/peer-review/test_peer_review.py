@@ -173,6 +173,25 @@ class PeerReviewTests(unittest.TestCase):
         self.assertIn("Do not change Git state", request)
         self.assertIn("Do not use `terminal-browser`", request)
 
+    def test_request_lists_an_untracked_file_with_a_non_ascii_name_as_its_path(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+        (self.repository / "café.txt").write_text("nouveau\n")
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0, self.errors.getvalue())
+        self.assertIn("\n- café.txt\n", (self.only_review() / "request.md").read_text())
+
+    def test_request_lists_an_untracked_file_whose_name_is_not_utf8_as_its_bytes(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+        with open(os.path.join(os.fsencode(self.repository), b"caf\xe9.txt"), "wb") as untracked:
+            untracked.write(b"nouveau\n")
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0, self.errors.getvalue())
+        self.assertIn(b"\n- caf\xe9.txt\n", (self.only_review() / "request.md").read_bytes())
+
     def test_request_starts_a_sandboxed_pi_next_to_claude(self):
         (self.repository / "app.py").write_text("print('two')\n")
 
