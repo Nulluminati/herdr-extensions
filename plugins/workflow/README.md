@@ -50,7 +50,7 @@ The commands of the launcher:
 | `open <profile> [directory]` | Open or focus the workflow for the repository that holds the directory. Without a directory, it uses the directory the quick action ran from. |
 | `list-repositories` | List the current repository and the repositories in zoxide's history, for a select quick action. |
 | `create-project` | Ask for a new directory, run `git init` in it, and open the `implementation` workflow. |
-| `refresh-sidebar` | Report the sidebar tokens of every open workflow workspace again. |
+| `refresh-sidebar` | Report the sidebar tokens of every open workflow workspace again. Clear the tokens of a workflow workspace that you renamed. |
 | `review-agent <profile> <agent>` | Start `pi` or `claude` with the review prompts. For a template pane. |
 | `review-hunk <profile> [reference]` | Start `hunk` on the working tree, or on a GitHub pull request. For a template pane. |
 | `layout-claude <profile>` | Stack the Claude pane below the first pane, then start Claude. For a template pane. |
