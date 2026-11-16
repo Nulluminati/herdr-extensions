@@ -21,6 +21,8 @@ REVIEWERS = {"claude": "pi", "pi": "codex", "codex": "claude"}
 # A review of a large diff can take a long time; the worker runs in the background.
 REVIEW_TIMEOUT_MS = 30 * 60 * 1000
 POLL_SECONDS = 5
+# How long the worker waits for Herdr to detect the reviewer. `herdr agent start` waits before the worker starts.
+START_GRACE_SECONDS = 30
 # Claude's and pi's sandbox reject "*", so the shell reaches GitHub only. Codex matches them.
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
 CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
@@ -407,14 +409,17 @@ def reviewer_status(pane: str) -> str | None:
 
 def wait_for_findings(review: Path, reviewer_pane: str, reviewer: str) -> Path:
     findings = review / "findings.md"
-    deadline = time.monotonic() + REVIEW_TIMEOUT_MS / 1000
+    started = time.monotonic()
+    deadline = started + REVIEW_TIMEOUT_MS / 1000
     seen = False
     while True:
         status = reviewer_status(reviewer_pane)
-        # Herdr can take a moment to detect a new agent, so only a reviewer that was seen can stop.
         seen = seen or status is not None
-        if seen and status is None and not findings.exists():
-            raise ReviewError(f"The {reviewer} reviewer stopped before it wrote {findings}")
+        if status is None and not findings.exists():
+            # Herdr can take a moment to detect a new agent, so a reviewer that was never seen gets a grace period.
+            # A reviewer that exits at startup is never seen at all.
+            if seen or time.monotonic() - started >= START_GRACE_SECONDS:
+                raise ReviewError(f"The {reviewer} reviewer stopped before it wrote {findings}")
         if findings.exists() and status in (None, "idle", "done"):
             return findings
         if time.monotonic() >= deadline:

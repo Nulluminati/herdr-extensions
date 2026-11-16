@@ -1,5 +1,6 @@
 import contextlib
 import io
+import itertools
 import json
 import os
 import subprocess
@@ -537,6 +538,35 @@ class PeerReviewTests(unittest.TestCase):
         self.reviewer_states = [None, "working", "idle"]
 
         status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertIn("is ready", self.calls[-1][4])
+
+    def test_deliver_reports_a_reviewer_that_never_started(self):
+        review = self.make_review()
+        self.write_findings = False
+        self.reviewer_states = [None] * 20
+        clock = itertools.count(0, 4)
+
+        with patch.object(peer_review.time, "monotonic", lambda: next(clock)):
+            status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        # Herdr can take a moment to detect a new agent, so one poll with no agent is not enough.
+        self.assertGreater(len(self.reviewer_states), 0)
+        self.assertLess(len(self.reviewer_states), 19)
+        notify = self.calls[-1]
+        self.assertEqual(notify[:4], ["herdr", "agent", "prompt", "w1:p1"])
+        self.assertIn("stopped before it wrote", notify[4])
+        self.assertIn("w1:p9", notify[4])
+
+    def test_deliver_takes_findings_from_a_reviewer_that_was_never_detected(self):
+        review = self.make_review()
+        (review / "findings.md").write_text("No findings.\n")
+        self.reviewer_states = [None]
+
+        with patch.object(peer_review, "START_GRACE_SECONDS", 0):
+            status = self.run_deliver(review)
 
         self.assertEqual(status, 0)
         self.assertIn("is ready", self.calls[-1][4])

@@ -45,6 +45,7 @@ Do one of these:
 
 The request returns at once. A background worker waits for the findings and then prompts your agent.
 When the worker cannot prompt your agent, for example because its pane closed or it waits for your answer at a prompt, Herdr shows a notification with the path to `findings.md`. When the review failed, the notification gives the reason and the path to `worker.log`.
+A reviewer that exits at startup, for example pi without the pi-extensions flags, fails the review after about 30 seconds. The reviewer pane shows its error.
 
 Each review has a folder, `~/.local/state/peer-review/<timestamp>/`. A second request in the same second adds a counter, as in `<timestamp>-2`:
 
