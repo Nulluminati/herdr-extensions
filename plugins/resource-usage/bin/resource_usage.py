@@ -44,6 +44,7 @@ LOG_LIMIT_BYTES = 256 * 1024
 RELATIONSHIP_RETRY_SECONDS = 30.0
 # Herdr errors that mean a workspace or pane is gone or has no Git checkout, not a passing failure.
 PANE_GONE = {"pane_not_found"}
+WORKSPACE_GONE = {"workspace_not_found"}
 NOT_A_WORKTREE = {"not_git_worktree", "workspace_not_found"}
 MIB = 1024 * 1024
 GIB = 1024 * MIB
@@ -653,11 +654,18 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
                     if cycles % REGISTRATION_EVERY == 0 and not plugin_registered():
                         break
                     texts = collector.cycle()
+                    closed = set()
                     for workspace_id, text in texts.items():
-                        report_usage(workspace_id, text)
+                        try:
+                            report_usage(workspace_id, text)
+                        except subprocess.CalledProcessError as error:
+                            # The workspace can close between the snapshot and its report.
+                            if error_code(error) not in WORKSPACE_GONE:
+                                raise
+                            closed.add(workspace_id)
                     for workspace_id in reported - texts.keys():
                         clear_closed(workspace_id)
-                    reported = set(texts)
+                    reported = texts.keys() - closed
                     failures = 0
                 except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
                     failures += 1

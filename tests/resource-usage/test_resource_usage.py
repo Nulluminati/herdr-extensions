@@ -730,6 +730,32 @@ class WorkerTests(HerdrTestCase):
             self.run_worker([{"w1": "a", "w2": "b"}, {"w1": "a"}], cycles=2)
         self.assertEqual(self.stderr.getvalue(), "")
 
+    def failing_reports(self, workspace_id, stdout, stderr=""):
+        real = self.fake_command
+
+        def failing(argv, env=None):
+            if argv[1:4] == ["workspace", "report-metadata", workspace_id]:
+                self.calls.append(argv)
+                raise subprocess.CalledProcessError(1, argv, stdout, stderr)
+            return real(argv, env)
+
+        return patch.object(resource_usage, "command", failing)
+
+    def test_workspace_closed_before_its_report_is_skipped(self):
+        error = '{"error":{"code":"workspace_not_found","message":"workspace w2 not found"}}'
+        with self.failing_reports("w2", error):
+            self.run_worker([{"w1": "a", "w2": "b", "w3": "c"}] * 2, cycles=2)
+        self.assertEqual(self.stderr.getvalue(), "")
+        reported = [argv[3] for argv in self.reports() if "--token" in argv]
+        self.assertEqual(reported, ["w1", "w2", "w3", "w1", "w2", "w3"])
+        cleared = [argv[3] for argv in self.reports() if "--clear-token" in argv]
+        self.assertEqual(sorted(cleared), ["w1", "w3"])
+
+    def test_other_report_failure_is_logged(self):
+        with self.failing_reports("w2", "", "server busy"):
+            self.run_worker([{"w1": "a", "w2": "b", "w3": "c"}], cycles=1)
+        self.assertEqual(self.stderr.getvalue().count("server busy"), 1)
+
     def test_failures_are_logged_once_and_retried(self):
         error = subprocess.CalledProcessError(1, ["herdr"], "", "server busy")
         sleeps = self.run_worker([error, error, {"w1": "a"}], cycles=3)
