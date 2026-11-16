@@ -75,6 +75,9 @@ class PeerReviewTests(unittest.TestCase):
                 raise peer_review.ReviewError(self.start_error)
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[:3] == ["herdr", "agent", "prompt"]:
+            # Herdr rejects a prompt to a blocked agent before it sends any input.
+            if argv[3] == "w1:p1" and self.requester_status == "blocked":
+                raise peer_review.ReviewError('{"error":{"code":"agent_blocked"}}')
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[:3] == ["herdr", "agent", "wait"]:
             # Herdr's rule: match any --until state; without --until, match idle, done or blocked.
@@ -481,7 +484,10 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(self.reviewer_states, [])
         self.assertFalse(any(argv[:4] == ["herdr", "agent", "prompt", "w1:p9"] for argv in self.calls))
-        self.assertEqual(self.calls[-2], ["herdr", "agent", "wait", "w1:p1", "--until", "idle", "--until", "done"])
+        self.assertEqual(
+            self.calls[-2],
+            ["herdr", "agent", "wait", "w1:p1", "--until", "idle", "--until", "done", "--until", "blocked"],
+        )
         notify = self.calls[-1]
         self.assertEqual(notify[:4], ["herdr", "agent", "prompt", "w1:p1"])
         self.assertIn(str(review / "findings.md"), notify[4])
@@ -499,6 +505,19 @@ class PeerReviewTests(unittest.TestCase):
         prompt = self.calls[-1]
         self.assertEqual(prompt[:4], ["herdr", "agent", "prompt", "w1:p1"])
         self.assertIn(str(review / "findings.md"), prompt[4])
+
+    def test_deliver_shows_the_findings_at_once_when_the_requester_is_blocked(self):
+        review = self.make_review()
+        self.requester_status = "blocked"
+
+        status = self.run_deliver(review)
+
+        self.assertEqual(status, 1)
+        self.assertIn(["herdr", "agent", "prompt", "w1:p1"], [argv[:4] for argv in self.calls])
+        [notification] = self.notifications()
+        self.assertEqual(notification[0], "Peer review ready")
+        self.assertIn(str(review / "findings.md"), notification[2])
+        self.assertIn("agent_blocked", self.errors.getvalue())
 
     def test_deliver_reports_a_reviewer_that_stopped(self):
         review = self.make_review()

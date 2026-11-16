@@ -442,7 +442,19 @@ def deliver(review: Path, requester: str, reviewer_pane: str, reviewer: str) -> 
         status = 1
     try:
         # An agent that finished its turn reports done instead of idle when its pane is not focused.
-        herdr("agent", "wait", requester, "--until", "idle", "--until", "done", timeout=REVIEW_TIMEOUT_MS // 1000)
+        # A blocked agent waits for the user, so stop waiting: Herdr then rejects the prompt with agent_blocked.
+        herdr(
+            "agent",
+            "wait",
+            requester,
+            "--until",
+            "idle",
+            "--until",
+            "done",
+            "--until",
+            "blocked",
+            timeout=REVIEW_TIMEOUT_MS // 1000,
+        )
         herdr("agent", "prompt", requester, message)
     except ReviewError as error:
         # The requester pane closed, stayed busy or is blocked: tell the user in Herdr instead.
