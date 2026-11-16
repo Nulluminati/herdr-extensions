@@ -425,8 +425,10 @@ def parse_pr_reference(value: str) -> tuple[str, str]:
     number = r"[1-9][0-9]{0,9}"
     match = re.fullmatch(rf"({repository})#({number})", value)
     if match is None:
+        # GitHub puts the tabs of a pull request in a path below the number,
+        # such as /files or /commits/<sha>.
         match = re.fullmatch(
-            rf"https://github\.com/({repository})/pull/({number})/?(?:[?#][^\r\n]*)?",
+            rf"https://github\.com/({repository})/pull/({number})(?:/[^\s?#]*)?(?:[?#][^\r\n]*)?",
             value,
         )
     if match is None or match[1].split("/", 1)[1] in (".", ".."):

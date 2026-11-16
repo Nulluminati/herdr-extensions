@@ -124,6 +124,52 @@ class WorkflowTests(unittest.TestCase):
         )
 
 
+class PullRequestReferenceTests(unittest.TestCase):
+    def test_reference_names_the_repository_and_the_number(self):
+        for value in (
+            "owner/repo#12",
+            " owner/repo#12\n",
+            "https://github.com/owner/repo/pull/12",
+            "https://github.com/owner/repo/pull/12/",
+            "https://github.com/owner/repo/pull/12?diff=split&tab=files",
+            "https://github.com/owner/repo/pull/12#issue-1",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(herdr_workflow.parse_pr_reference(value), ("owner/repo", "12"))
+
+    def test_url_of_a_pull_request_tab_names_the_pull_request(self):
+        for value in (
+            "https://github.com/owner/repo/pull/12/files",
+            "https://github.com/owner/repo/pull/12/commits",
+            "https://github.com/owner/repo/pull/12/checks",
+            "https://github.com/owner/repo/pull/12/changes",
+            "https://github.com/owner/repo/pull/12/files/",
+            "https://github.com/owner/repo/pull/12/files?diff=split",
+            "https://github.com/owner/repo/pull/12/files#diff-0123abcd",
+            "https://github.com/owner/repo/pull/12/commits/0123abcd",
+            "https://github.com/owner/repo/pull/12/files/0123abcd..4567ef01",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(herdr_workflow.parse_pr_reference(value), ("owner/repo", "12"))
+
+    def test_other_text_is_not_a_pull_request_reference(self):
+        for value in (
+            "",
+            "owner/repo",
+            "owner/repo#0",
+            "owner/..#12",
+            "https://github.com/owner/repo/issues/12",
+            "https://github.com/owner/repo/pull/12files",
+            "https://github.com/owner/repo/pull/123abc",
+            "https://github.com/owner/repo/pull/12/files and more",
+            "https://github.com/owner/repo/pull/12/files\nowner/repo#13",
+            "https://github.example.com/owner/repo/pull/12",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(herdr_workflow.WorkflowError, "pull request URL"):
+                    herdr_workflow.parse_pr_reference(value)
+
+
 class ManifestTests(unittest.TestCase):
     def setUp(self):
         with open(PLUGINS / "workflow" / "herdr-plugin.toml", "rb") as manifest:
