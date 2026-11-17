@@ -34,7 +34,8 @@ SOURCE = "nulluminati.resource-usage"
 PLUGIN_ID = "nulluminati.resource-usage"
 SCRIPT = Path(__file__).resolve()
 INTERVAL_SECONDS = 2.0
-TTL_MS = 8000
+# A row must outlive one slow herdr call, so a stalled cycle does not blank every row.
+TTL_MS = 30000
 # The worker checks that Herdr still has the plugin enabled every this many cycles.
 REGISTRATION_EVERY = 15
 # The worker exits after this many failed cycles in a row, about one minute.
@@ -52,8 +53,14 @@ GIB = 1024 * MIB
 LABELS = {"plain": ("CPU", "MEM"), "nerd": ("\uf4bc", "\U000f035b")}
 
 
-def command(argv: list[str], env: dict | None = None):
-    return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=10, env=env)
+# A herdr call that does not answer within this many seconds is a failed cycle.
+COMMAND_TIMEOUT = 10
+# A stalled report costs one workspace one cycle, not the whole cycle.
+REPORT_TIMEOUT_SECONDS = 2.0
+
+
+def command(argv: list[str], env: dict | None = None, timeout: float = COMMAND_TIMEOUT):
+    return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=timeout, env=env)
 
 
 def herdr_bin() -> str:
@@ -421,7 +428,8 @@ def report_usage(workspace_id: str, text: str) -> None:
             str(time.time_ns()),
             "--ttl-ms",
             str(TTL_MS),
-        ]
+        ],
+        timeout=REPORT_TIMEOUT_SECONDS,
     )
 
 
@@ -438,7 +446,8 @@ def clear_usage(workspace_id: str) -> None:
             TOKEN,
             "--seq",
             str(time.time_ns()),
-        ]
+        ],
+        timeout=REPORT_TIMEOUT_SECONDS,
     )
 
 
@@ -661,6 +670,7 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
             return
         reported: set[str] = set()
         last_key = None
+        report_error = None
         failures = 0
         cycles = 0
         try:
@@ -680,6 +690,13 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
                             if error_code(error) not in WORKSPACE_GONE:
                                 raise
                             closed.add(workspace_id)
+                        except subprocess.TimeoutExpired:
+                            # One stalled report costs this workspace, and the token
+                            # outlives the gap, so the rest of the cycle goes on.
+                            message = f"report for {workspace_id} timed out after {REPORT_TIMEOUT_SECONDS:g} seconds"
+                            if message != report_error:
+                                log(message)
+                                report_error = message
                     for workspace_id in reported - texts.keys():
                         clear_closed(workspace_id)
                     reported = texts.keys() - closed

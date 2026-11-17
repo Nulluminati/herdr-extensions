@@ -405,7 +405,7 @@ class HerdrTestCase(unittest.TestCase):
         replacement.start()
         self.addCleanup(replacement.stop)
 
-    def fake_command(self, argv, env=None):
+    def fake_command(self, argv, env=None, timeout=None):
         self.calls.append(argv)
         if argv[1:3] == ["api", "snapshot"]:
             if self.snapshot_fails:
@@ -598,7 +598,7 @@ class ReportTests(HerdrTestCase):
         options = dict(zip(first[4::2], first[5::2], strict=True))
         self.assertEqual(options["--source"], "nulluminati.resource-usage")
         self.assertEqual(options["--token"], "resource_usage=CPU 1%  MEM 2 MiB")
-        self.assertEqual(options["--ttl-ms"], "8000")
+        self.assertEqual(options["--ttl-ms"], "30000")
         self.assertLess(int(options["--seq"]), int(dict(zip(second[4::2], second[5::2], strict=True))["--seq"]))
 
     def test_clear_touches_only_this_token(self):
@@ -612,6 +612,21 @@ class ReportTests(HerdrTestCase):
         os.environ["HERDR_BIN_PATH"] = "/opt/herdr"
         resource_usage.report_usage("w1", "x")
         self.assertEqual(self.calls[0][0], "/opt/herdr")
+
+    def test_report_and_clear_use_a_short_timeout(self):
+        # A stalled report must cost one workspace one cycle, not every row.
+        self.assertLess(resource_usage.REPORT_TIMEOUT_SECONDS, resource_usage.COMMAND_TIMEOUT)
+        recorded = []
+        real = self.fake_command
+
+        def recording(argv, env=None, timeout=None):
+            recorded.append((argv[1:3], timeout))
+            return real(argv, env, timeout)
+
+        with patch.object(resource_usage, "command", recording):
+            resource_usage.report_usage("w1", "x")
+            resource_usage.clear_usage("w1")
+        self.assertEqual(recorded, [(["workspace", "report-metadata"], resource_usage.REPORT_TIMEOUT_SECONDS)] * 2)
 
 
 class WorkerTests(HerdrTestCase):
@@ -720,11 +735,11 @@ class WorkerTests(HerdrTestCase):
     def test_clearing_a_closed_workspace_is_not_a_failure(self):
         real = self.fake_command
 
-        def closed_w2(argv, env=None):
+        def closed_w2(argv, env=None, timeout=None):
             if argv[1:4] == ["workspace", "report-metadata", "w2"] and "--clear-token" in argv:
                 self.calls.append(argv)
                 raise subprocess.CalledProcessError(1, argv, "", '{"error":{"code":"workspace_not_found"}}')
-            return real(argv, env)
+            return real(argv, env, timeout)
 
         with patch.object(resource_usage, "command", closed_w2):
             self.run_worker([{"w1": "a", "w2": "b"}, {"w1": "a"}], cycles=2)
@@ -733,11 +748,11 @@ class WorkerTests(HerdrTestCase):
     def failing_reports(self, workspace_id, stdout, stderr=""):
         real = self.fake_command
 
-        def failing(argv, env=None):
+        def failing(argv, env=None, timeout=None):
             if argv[1:4] == ["workspace", "report-metadata", workspace_id]:
                 self.calls.append(argv)
                 raise subprocess.CalledProcessError(1, argv, stdout, stderr)
-            return real(argv, env)
+            return real(argv, env, timeout)
 
         return patch.object(resource_usage, "command", failing)
 
@@ -750,6 +765,21 @@ class WorkerTests(HerdrTestCase):
         self.assertEqual(reported, ["w1", "w2", "w3", "w1", "w2", "w3"])
         cleared = [argv[3] for argv in self.reports() if "--clear-token" in argv]
         self.assertEqual(sorted(cleared), ["w1", "w3"])
+
+    def test_timed_out_report_costs_one_workspace_and_is_logged_once(self):
+        real = self.fake_command
+
+        def stalling(argv, env=None, timeout=None):
+            if argv[1:4] == ["workspace", "report-metadata", "w2"] and "--token" in argv:
+                self.calls.append(argv)
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return real(argv, env, timeout)
+
+        with patch.object(resource_usage, "command", stalling):
+            self.run_worker([{"w1": "a", "w2": "b", "w3": "c"}] * 3, cycles=3)
+        reported = [argv[3] for argv in self.reports() if "--token" in argv]
+        self.assertEqual(reported, ["w1", "w2", "w3"] * 3)
+        self.assertEqual(self.stderr.getvalue().count("timed out"), 1)
 
     def test_other_report_failure_is_logged(self):
         with self.failing_reports("w2", "", "server busy"):
@@ -773,11 +803,11 @@ class WorkerTests(HerdrTestCase):
         # a fresh --seq in it on every cycle. The failure is still the same one.
         real = self.fake_command
 
-        def timing_out(argv, env=None):
+        def timing_out(argv, env=None, timeout=None):
             if argv[1:3] == ["workspace", "report-metadata"]:
                 self.calls.append(argv)
                 raise subprocess.TimeoutExpired(argv, 10)
-            return real(argv, env)
+            return real(argv, env, timeout)
 
         with patch.object(resource_usage, "command", timing_out):
             self.run_worker([{"w1": "a"}] * 4, cycles=4)
@@ -787,11 +817,11 @@ class WorkerTests(HerdrTestCase):
         # The command line also carries the usage text, which changes with memory use.
         real = self.fake_command
 
-        def failing(argv, env=None):
+        def failing(argv, env=None, timeout=None):
             if argv[1:3] == ["workspace", "report-metadata"]:
                 self.calls.append(argv)
                 raise subprocess.CalledProcessError(1, argv, "", "")
-            return real(argv, env)
+            return real(argv, env, timeout)
 
         with patch.object(resource_usage, "command", failing):
             self.run_worker([{"w1": "CPU 1%  MEM 6 MiB"}, {"w1": "CPU 2%  MEM 13 MiB"}], cycles=2)
@@ -800,11 +830,11 @@ class WorkerTests(HerdrTestCase):
     def test_a_changed_failure_is_logged_again(self):
         stderrs = iter(["server busy", "disk full"])
 
-        def failing(argv, env=None):
+        def failing(argv, env=None, timeout=None):
             if argv[1:4] == ["workspace", "report-metadata", "w2"]:
                 self.calls.append(argv)
                 raise subprocess.CalledProcessError(1, argv, "", next(stderrs))
-            return self.fake_command(argv, env)
+            return self.fake_command(argv, env, timeout)
 
         with patch.object(resource_usage, "command", failing):
             self.run_worker([{"w2": "b"}] * 2, cycles=2)
