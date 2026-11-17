@@ -91,6 +91,18 @@ def failure(error: Exception) -> str:
     return str(error)
 
 
+def failure_key(error: Exception) -> str:
+    # A failure message can carry the command line, and the worker puts a fresh
+    # --seq and the current usage text in it on every cycle, so the message for
+    # one failure never repeats. Key on the error's stable parts instead.
+    if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+        stderr = error.stderr or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", "replace")
+        return f"{type(error).__name__} {error_code(error)} {stderr.strip()}"
+    return f"{type(error).__name__} {error}"
+
+
 # Process sampling
 
 
@@ -643,7 +655,7 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
         if not held:
             return
         reported: set[str] = set()
-        last_error = None
+        last_key = None
         failures = 0
         cycles = 0
         try:
@@ -669,11 +681,11 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
                     failures = 0
                 except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
                     failures += 1
-                    message = failure(error)
                     # Log a failure once, also when it comes back after a success.
-                    if message != last_error:
-                        log(message)
-                        last_error = message
+                    key = failure_key(error)
+                    if key != last_key:
+                        log(failure(error))
+                        last_key = key
                     if failures >= MAX_FAILURES:
                         log(f"giving up after {failures} failed cycles")
                         break

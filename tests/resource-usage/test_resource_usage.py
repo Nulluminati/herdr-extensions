@@ -768,6 +768,49 @@ class WorkerTests(HerdrTestCase):
         self.run_worker([error, {"w1": "a"}, error], cycles=3)
         self.assertEqual(self.stderr.getvalue().count("server busy"), 1)
 
+    def test_repeated_report_timeout_is_logged_once(self):
+        # A report failure's message carries the command line, and the worker puts
+        # a fresh --seq in it on every cycle. The failure is still the same one.
+        real = self.fake_command
+
+        def timing_out(argv, env=None):
+            if argv[1:3] == ["workspace", "report-metadata"]:
+                self.calls.append(argv)
+                raise subprocess.TimeoutExpired(argv, 10)
+            return real(argv, env)
+
+        with patch.object(resource_usage, "command", timing_out):
+            self.run_worker([{"w1": "a"}] * 4, cycles=4)
+        self.assertEqual(self.stderr.getvalue().count("timed out"), 1)
+
+    def test_usage_text_change_is_not_a_new_failure(self):
+        # The command line also carries the usage text, which changes with memory use.
+        real = self.fake_command
+
+        def failing(argv, env=None):
+            if argv[1:3] == ["workspace", "report-metadata"]:
+                self.calls.append(argv)
+                raise subprocess.CalledProcessError(1, argv, "", "")
+            return real(argv, env)
+
+        with patch.object(resource_usage, "command", failing):
+            self.run_worker([{"w1": "CPU 1%  MEM 6 MiB"}, {"w1": "CPU 2%  MEM 13 MiB"}], cycles=2)
+        self.assertEqual(len(self.stderr.getvalue().splitlines()), 1)
+
+    def test_a_changed_failure_is_logged_again(self):
+        stderrs = iter(["server busy", "disk full"])
+
+        def failing(argv, env=None):
+            if argv[1:4] == ["workspace", "report-metadata", "w2"]:
+                self.calls.append(argv)
+                raise subprocess.CalledProcessError(1, argv, "", next(stderrs))
+            return self.fake_command(argv, env)
+
+        with patch.object(resource_usage, "command", failing):
+            self.run_worker([{"w2": "b"}] * 2, cycles=2)
+        self.assertEqual(self.stderr.getvalue().count("server busy"), 1)
+        self.assertEqual(self.stderr.getvalue().count("disk full"), 1)
+
     def test_log_is_emptied_when_it_passes_the_limit(self):
         path = self.state / "worker.log"
         with patch.object(resource_usage, "LOG_LIMIT_BYTES", 100):
