@@ -416,7 +416,7 @@ class HerdrTestCase(unittest.TestCase):
             pane_id = argv[4]
             if pane_id in self.closed_panes:
                 error = json.dumps({"error": {"code": "pane_not_found", "message": "pane not found"}})
-                raise subprocess.CalledProcessError(1, argv, error, "")
+                raise subprocess.CalledProcessError(1, argv, "", error)
             if pane_id in self.failing_panes:
                 raise subprocess.TimeoutExpired(argv, 10)
             info = {"pane_id": pane_id, "shell_pid": self.shells[pane_id]}
@@ -428,7 +428,7 @@ class HerdrTestCase(unittest.TestCase):
             if result is not None:
                 return subprocess.CompletedProcess(argv, 0, json.dumps({"result": result}), "")
             error = json.dumps({"error": {"code": "not_git_worktree"}})
-            raise subprocess.CalledProcessError(1, argv, error, "")
+            raise subprocess.CalledProcessError(1, argv, "", error)
         if argv[1:3] == ["workspace", "report-metadata"]:
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if argv[1:3] == ["plugin", "list"]:
@@ -723,7 +723,7 @@ class WorkerTests(HerdrTestCase):
         def closed_w2(argv, env=None):
             if argv[1:4] == ["workspace", "report-metadata", "w2"] and "--clear-token" in argv:
                 self.calls.append(argv)
-                raise subprocess.CalledProcessError(1, argv, '{"error":{"code":"workspace_not_found"}}', "")
+                raise subprocess.CalledProcessError(1, argv, "", '{"error":{"code":"workspace_not_found"}}')
             return real(argv, env)
 
         with patch.object(resource_usage, "command", closed_w2):
@@ -743,7 +743,7 @@ class WorkerTests(HerdrTestCase):
 
     def test_workspace_closed_before_its_report_is_skipped(self):
         error = '{"error":{"code":"workspace_not_found","message":"workspace w2 not found"}}'
-        with self.failing_reports("w2", error):
+        with self.failing_reports("w2", "", error):
             self.run_worker([{"w1": "a", "w2": "b", "w3": "c"}] * 2, cycles=2)
         self.assertEqual(self.stderr.getvalue(), "")
         reported = [argv[3] for argv in self.reports() if "--token" in argv]

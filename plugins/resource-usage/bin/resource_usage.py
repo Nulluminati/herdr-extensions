@@ -65,13 +65,18 @@ def herdr_json(*arguments: str) -> dict:
 
 
 def error_code(error: Exception) -> str | None:
-    # Herdr writes a failed request's error as JSON to standard output.
+    # Herdr writes a failed request's error as JSON to standard error. Older
+    # versions wrote it to standard output, so accept that as a fallback.
     if not isinstance(error, subprocess.CalledProcessError):
         return None
-    try:
-        return (json.loads(error.stdout or "{}").get("error") or {}).get("code")
-    except (json.JSONDecodeError, AttributeError):
-        return None
+    for stream in (error.stderr, error.stdout):
+        try:
+            code = (json.loads(stream or "{}").get("error") or {}).get("code")
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if code:
+            return code
+    return None
 
 
 def log(message: str) -> None:
