@@ -413,6 +413,7 @@ def wait_for_findings(review: Path, reviewer_pane: str, reviewer: str) -> Path:
     started = time.monotonic()
     deadline = started + REVIEW_TIMEOUT_MS / 1000
     seen = False
+    size = -1
     while True:
         status = reviewer_status(reviewer_pane)
         seen = seen or status is not None
@@ -423,7 +424,18 @@ def wait_for_findings(review: Path, reviewer_pane: str, reviewer: str) -> Path:
                 raise ReviewError(f"The {reviewer} reviewer stopped before it wrote {findings}")
         if findings.exists() and status in (None, "idle", "done"):
             return findings
+        if findings.exists():
+            # A reviewer can stay working or blocked after it wrote a complete file, so the status alone does not
+            # say when the findings are written. The file is taken when its size stops changing, so a partial
+            # write is not read as complete.
+            current = findings.stat().st_size
+            if current == size:
+                return findings
+            size = current
         if time.monotonic() >= deadline:
+            # The findings are also taken at the deadline, as they are when the reviewer pane is gone.
+            if findings.exists():
+                return findings
             raise ReviewError(f"The {reviewer} review did not finish in {REVIEW_TIMEOUT_MS // 60000} minutes")
         time.sleep(POLL_SECONDS)
 

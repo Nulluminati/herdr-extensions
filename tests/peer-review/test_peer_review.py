@@ -619,6 +619,41 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("did not finish", self.calls[-1][4])
 
+    def test_deliver_takes_findings_from_a_reviewer_that_stays_working(self):
+        review = self.make_review()
+        (review / "findings.md").write_text("No findings.\n")
+        self.reviewer_states = ["working"] * 100
+        clock = itertools.count(0, 100)
+
+        with patch.object(peer_review.time, "monotonic", lambda: next(clock)):
+            status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertIn("is ready", self.calls[-1][4])
+
+    def test_deliver_takes_findings_from_a_reviewer_that_ends_up_blocked(self):
+        review = self.make_review()
+        (review / "findings.md").write_text("No findings.\n")
+        self.reviewer_states = ["blocked"] * 100
+        clock = itertools.count(0, 100)
+
+        with patch.object(peer_review.time, "monotonic", lambda: next(clock)):
+            status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertIn("is ready", self.calls[-1][4])
+
+    def test_deliver_takes_findings_at_the_deadline(self):
+        review = self.make_review()
+        (review / "findings.md").write_text("No findings.\n")
+        self.reviewer_states = ["working"]
+
+        with patch.object(peer_review, "REVIEW_TIMEOUT_MS", 0):
+            status = self.run_deliver(review)
+
+        self.assertEqual(status, 0)
+        self.assertIn("is ready", self.calls[-1][4])
+
     def fail_requester(self, step, error='{"error":{"code":"agent_not_found"}}'):
         original = self.fake_command
 
