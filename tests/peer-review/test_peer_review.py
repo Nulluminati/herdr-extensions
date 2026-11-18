@@ -149,6 +149,44 @@ class PeerReviewTests(unittest.TestCase):
                 args = peer_review.reviewer_arguments(kind, review, linked)
                 self.assertIn(str((self.repository / ".git").resolve()), " ".join(args))
 
+    def test_a_linked_worktree_under_a_non_utf8_main_checkout_is_reviewed(self):
+        main = Path(os.fsdecode(os.path.join(os.fsencode(self.base), b"caf\xe9")))
+        main.mkdir()
+        git(main, "init", "--quiet")
+        git(main, "config", "user.email", "test@example.com")
+        git(main, "config", "user.name", "Test")
+        (main / "app.py").write_text("print('one')\n")
+        git(main, "add", "app.py")
+        git(main, "commit", "--quiet", "-m", "initial")
+        linked = self.base / "linked"
+        git(main, "worktree", "add", "-q", str(linked), "-b", "card")
+        (linked / "app.py").write_text("print('two')\n")
+        self.agents["w1:p1"]["cwd"] = str(linked)
+
+        status, _ = self.run_request()
+
+        self.assertEqual(status, 0, self.errors.getvalue())
+        start = next(argv for argv in self.calls if argv[:3] == ["herdr", "agent", "start"])
+        self.assertEqual(start[start.index("--kind") + 1], "pi")
+        # The sandbox names the main checkout's shared Git folder, non-UTF-8 byte intact.
+        policy = json.loads(start[start.index("--sandbox") + 1])
+        deny_write = policy["filesystem"]["denyWrite"]
+        self.assertEqual(len(deny_write), 2)
+        self.assertEqual(os.fsdecode(os.fsencode(str(main / ".git"))), deny_write[1])
+
+    def test_a_failure_in_the_reviewer_arguments_leaves_no_reviewer_pane(self):
+        (self.repository / "app.py").write_text("print('two')\n")
+
+        with patch.object(peer_review, "reviewer_arguments", side_effect=peer_review.ReviewError("no sandbox policy")):
+            status, _ = self.run_request()
+
+        self.assertEqual(status, 1)
+        self.assertIn("no sandbox policy", self.errors.getvalue())
+        self.assertFalse(any(argv[:3] == ["herdr", "pane", "split"] for argv in self.calls))
+        [notification] = self.notifications()
+        self.assertIn("no sandbox policy", notification[2])
+        self.assertEqual(self.workers, [])
+
     def test_reviewer_prompt_names_the_request(self):
         folder, repo = Path('/reviews/a"b\\c'), Path("/repo")
         prompt = peer_review.reviewer_arguments("codex", folder, repo)[-1]

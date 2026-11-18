@@ -134,14 +134,13 @@ def secret_env_names() -> list[str]:
 def shared_git_folder(path: Path) -> list[Path]:
     """The Git folder that a linked worktree shares with its main checkout, when it lies outside `path`."""
     try:
-        result = subprocess.run(
+        # The path carries the main checkout's directory names, which need not be valid UTF-8.
+        result = command(
             ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            capture_output=True,
-            text=True,
         )
-    except OSError:
+    except (OSError, ReviewError):
         return []
-    if result.returncode or not result.stdout.strip():
+    if not result.stdout.strip():
         return []
     common = Path(result.stdout.strip()).resolve()
     return [] if common.is_relative_to(Path(path).resolve()) else [common]
@@ -342,6 +341,8 @@ def request(pane_option: str | None) -> int:
     repository = Path(command(["git", "-C", agent["cwd"], "rev-parse", "--show-toplevel"]).stdout.rstrip("\n"))
 
     review = write_request(repository, requester)
+    # Build the reviewer arguments before the split: a failure here must not leave an empty reviewer pane behind.
+    reviewer_start_arguments = reviewer_arguments(reviewer, review, repository)
 
     split = herdr("pane", "split", pane, "--direction", "right", "--cwd", str(repository), "--no-focus")
     reviewer_pane = json.loads(split.stdout)["result"]["pane"]["pane_id"]
@@ -355,7 +356,7 @@ def request(pane_option: str | None) -> int:
             "--pane",
             reviewer_pane,
             "--",
-            *reviewer_arguments(reviewer, review, repository),
+            *reviewer_start_arguments,
         )
     except ReviewError as error:
         # A startup prompt (such as Claude's folder trust check) is for the user to answer,
