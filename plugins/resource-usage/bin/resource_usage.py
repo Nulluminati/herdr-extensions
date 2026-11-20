@@ -412,8 +412,29 @@ def worktree_list(workspace_id: str) -> dict | None:
         raise
 
 
+def next_sequence() -> int:
+    """A --seq above every one sent before, from any worker that shares the state folder.
+
+    Herdr ignores a report whose --seq is not above the last one it took, and the
+    `herdr` call still succeeds. The clock can step back, so the sequence follows
+    the clock but never falls. The state folder keeps it across a worker restart."""
+    path = state_dir() / "sequence.json"
+    with os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o644), "r+") as handle:
+        # Workers for other sessions share the file, so read and write it under a lock.
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            last = int(json.loads(handle.read() or "{}").get("last", 0))
+        except (ValueError, TypeError, AttributeError):
+            # A damaged file falls back to the clock.
+            last = 0
+        sequence = max(time.time_ns(), last + 1)
+        handle.seek(0)
+        handle.truncate()
+        json.dump({"last": sequence}, handle)
+    return sequence
+
+
 def report_usage(workspace_id: str, text: str) -> None:
-    # The sequence is a timestamp, so it keeps rising after a worker restart.
     command(
         [
             herdr_bin(),
@@ -425,7 +446,7 @@ def report_usage(workspace_id: str, text: str) -> None:
             "--token",
             f"{TOKEN}={text}",
             "--seq",
-            str(time.time_ns()),
+            str(next_sequence()),
             "--ttl-ms",
             str(TTL_MS),
         ],
@@ -445,7 +466,7 @@ def clear_usage(workspace_id: str) -> None:
             "--clear-token",
             TOKEN,
             "--seq",
-            str(time.time_ns()),
+            str(next_sequence()),
         ],
         timeout=REPORT_TIMEOUT_SECONDS,
     )

@@ -388,6 +388,10 @@ class HerdrTestCase(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
         os.environ.pop("HERDR_BIN_PATH", None)
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.state = Path(self.directory.name)
+        os.environ["HERDR_PLUGIN_STATE_DIR"] = str(self.state)
         self.calls = []
         self.workspaces = [workspace("w1", "/r/.git"), workspace("w2", "/r/.git", True), workspace("w3")]
         self.panes = [
@@ -601,6 +605,43 @@ class ReportTests(HerdrTestCase):
         self.assertEqual(options["--ttl-ms"], "30000")
         self.assertLess(int(options["--seq"]), int(dict(zip(second[4::2], second[5::2], strict=True))["--seq"]))
 
+    def sequences(self):
+        return [int(argv[argv.index("--seq") + 1]) for argv in self.reports()]
+
+    def test_sequence_rises_after_the_clock_steps_back(self):
+        # Herdr ignores a report whose --seq is not above the last one it took.
+        now = 2_000_000_000_000_000_000
+        with patch.object(resource_usage.time, "time_ns", return_value=now):
+            resource_usage.report_usage("w1", "x")
+        with patch.object(resource_usage.time, "time_ns", return_value=now - 3600 * 10**9):
+            resource_usage.report_usage("w1", "x")
+            resource_usage.clear_usage("w1")
+        first, second, third = self.sequences()
+        self.assertLess(first, second)
+        self.assertLess(second, third)
+
+    def test_sequence_follows_the_clock_when_it_is_ahead(self):
+        with patch.object(resource_usage.time, "time_ns", return_value=1000):
+            resource_usage.report_usage("w1", "x")
+        with patch.object(resource_usage.time, "time_ns", return_value=5000):
+            resource_usage.report_usage("w1", "x")
+        self.assertEqual(self.sequences(), [1000, 5000])
+
+    def test_sequence_rises_across_a_worker_restart(self):
+        # A restarted worker reads the last sequence from the state folder.
+        (self.state / "sequence.json").write_text(json.dumps({"last": 9000}))
+        with patch.object(resource_usage.time, "time_ns", return_value=1000):
+            resource_usage.report_usage("w1", "x")
+        self.assertEqual(self.sequences(), [9001])
+        self.assertEqual(json.loads((self.state / "sequence.json").read_text()), {"last": 9001})
+
+    def test_unreadable_sequence_file_falls_back_to_the_clock(self):
+        for content in ("not json", "[]", '{"last": "x"}'):
+            (self.state / "sequence.json").write_text(content)
+            with patch.object(resource_usage.time, "time_ns", return_value=1000):
+                resource_usage.report_usage("w1", "x")
+        self.assertEqual(self.sequences(), [1000, 1000, 1000])
+
     def test_clear_touches_only_this_token(self):
         resource_usage.clear_usage("w1")
         (argv,) = self.reports()
@@ -632,12 +673,8 @@ class ReportTests(HerdrTestCase):
 class WorkerTests(HerdrTestCase):
     def setUp(self):
         super().setUp()
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.state = Path(self.directory.name)
         self.socket = self.state / "herdr.sock"
         self.socket.write_text("")
-        os.environ["HERDR_PLUGIN_STATE_DIR"] = str(self.state)
         os.environ["HERDR_SOCKET_PATH"] = str(self.socket)
         self.spawned = []
         replacement = patch.object(resource_usage, "spawn_worker", lambda: self.spawned.append(True))
