@@ -52,7 +52,7 @@ The commands of the launcher:
 | `create-project` | Ask for a new directory, run `git init` in it, and open the `implementation` workflow. |
 | `refresh-sidebar` | Report the sidebar tokens of every open workflow workspace again. Clear the tokens of a workflow workspace that you renamed. |
 | `review-agent <profile> <agent>` | Start `pi` or `claude` with the review prompts. For a template pane. |
-| `review-hunk <profile> [reference]` | Start `hunk` on the working tree, or on a GitHub pull request. For a template pane. |
+| `review-hunk <profile> [reference]` | Start `hunk` on the working tree, or on a GitHub pull request. The reference is `owner/repo#number` or a pull request URL. A URL of a pull request tab, such as `/files`, also works. For a template pane. |
 | `layout-claude <profile>` | Stack the Claude pane below the first pane, then start Claude. For a template pane. |
 
 To show the tokens, add them to a sidebar row in `~/.config/herdr/config.toml`. Then run `herdr server reload-config`.
