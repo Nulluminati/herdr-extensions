@@ -813,6 +813,38 @@ class WorkerTests(HerdrTestCase):
             self.run_worker([{"w1": "a"}] * 4, cycles=4)
         self.assertEqual(self.stderr.getvalue().count("timed out"), 1)
 
+    def test_timeouts_in_two_workspaces_are_logged_once_each(self):
+        real = self.fake_command
+
+        def timing_out(argv, env=None, timeout=None):
+            if argv[1:3] == ["workspace", "report-metadata"]:
+                self.calls.append(argv)
+                raise subprocess.TimeoutExpired(argv, 10)
+            return real(argv, env, timeout)
+
+        with patch.object(resource_usage, "command", timing_out):
+            self.run_worker([{"w1": "a", "w2": "b"}] * 4, cycles=4)
+        lines = self.stderr.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("w1", lines[0])
+        self.assertIn("w2", lines[1])
+
+    def test_timeout_after_a_report_goes_through_is_logged_again(self):
+        real = self.fake_command
+        stalls = iter([True, False, True])
+
+        def stalling(argv, env=None, timeout=None):
+            if argv[1:3] == ["workspace", "report-metadata"] and "--token" in argv:
+                if next(stalls):
+                    self.calls.append(argv)
+                    raise subprocess.TimeoutExpired(argv, 10)
+                return real(argv, env, timeout)
+            return real(argv, env, timeout)
+
+        with patch.object(resource_usage, "command", stalling):
+            self.run_worker([{"w1": "a"}] * 3, cycles=3)
+        self.assertEqual(self.stderr.getvalue().count("timed out"), 2)
+
     def test_usage_text_change_is_not_a_new_failure(self):
         # The command line also carries the usage text, which changes with memory use.
         real = self.fake_command

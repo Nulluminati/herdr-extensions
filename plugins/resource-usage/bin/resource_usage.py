@@ -670,7 +670,7 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
             return
         reported: set[str] = set()
         last_key = None
-        report_error = None
+        stalled: set[str] = set()
         failures = 0
         cycles = 0
         try:
@@ -685,6 +685,7 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
                     for workspace_id, text in texts.items():
                         try:
                             report_usage(workspace_id, text)
+                            stalled.discard(workspace_id)
                         except subprocess.CalledProcessError as error:
                             # The workspace can close between the snapshot and its report.
                             if error_code(error) not in WORKSPACE_GONE:
@@ -693,10 +694,11 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
                         except subprocess.TimeoutExpired:
                             # One stalled report costs this workspace, and the token
                             # outlives the gap, so the rest of the cycle goes on.
-                            message = f"report for {workspace_id} timed out after {REPORT_TIMEOUT_SECONDS:g} seconds"
-                            if message != report_error:
-                                log(message)
-                                report_error = message
+                            # Log a workspace once per run of stalls; its next good
+                            # report ends the run.
+                            if workspace_id not in stalled:
+                                log(f"report for {workspace_id} timed out after {REPORT_TIMEOUT_SECONDS:g} seconds")
+                                stalled.add(workspace_id)
                     for workspace_id in reported - texts.keys():
                         clear_closed(workspace_id)
                     reported = texts.keys() - closed
