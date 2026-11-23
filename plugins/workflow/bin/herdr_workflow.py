@@ -20,21 +20,24 @@ PLUGIN_ID = "cloudmanic.herdr-plus"
 DIRECTORY_VARIABLE = "HERDR_WORKFLOW_DIRECTORY"
 DIRECTORY_PROMPT = "Enter another directory..."
 WORKFLOW_PROFILES = ("implementation", "top-level", "local-review", "pr-review")
+COMMAND_TIMEOUT_SECONDS = 120
+# A sidebar report is a small call to the local Herdr server. One that stalls must not hold the startup refresh.
+REPORT_TIMEOUT_SECONDS = 5
 
 
 class WorkflowError(RuntimeError):
     """A failure that the launcher can explain without a traceback."""
 
 
-def command(argv: list[str], env: dict[str, str] | None = None):
+def command(argv: list[str], env: dict[str, str] | None = None, timeout: float = COMMAND_TIMEOUT_SECONDS):
     try:
-        return subprocess.run(argv, env=env, check=True, capture_output=True, text=True, timeout=120)
+        return subprocess.run(argv, env=env, check=True, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as error:
         raise WorkflowError(f"Required program not found: {argv[0]}") from error
     except subprocess.CalledProcessError as error:
         raise WorkflowError(error.stderr.strip() or f"{argv[0]} failed") from error
     except subprocess.TimeoutExpired as error:
-        raise WorkflowError(f"{argv[0]} did not finish within 120 seconds") from error
+        raise WorkflowError(f"{argv[0]} did not finish within {timeout:g} seconds") from error
 
 
 def current_directory() -> Path:
@@ -204,9 +207,9 @@ def render_template(text: str, label: str) -> str:
     return rendered
 
 
-def herdr_command(arguments: list[str]):
+def herdr_command(arguments: list[str], timeout: float = COMMAND_TIMEOUT_SECONDS):
     executable = os.environ.get("HERDR_BIN_PATH") or "herdr"
-    return command([executable, *arguments])
+    return command([executable, *arguments], timeout=timeout)
 
 
 def herdr_result(arguments: list[str]) -> dict:
@@ -250,7 +253,8 @@ def report_sidebar(workspace_id: str, profile: str, directory: Path) -> None:
             f"workflow_project={directory.name or display_path(directory)}",
             "--token",
             f"workflow_profile={profile}",
-        ]
+        ],
+        timeout=REPORT_TIMEOUT_SECONDS,
     )
 
 
@@ -266,7 +270,8 @@ def clear_sidebar(workspace_id: str) -> None:
             "workflow_project",
             "--clear-token",
             "workflow_profile",
-        ]
+        ],
+        timeout=REPORT_TIMEOUT_SECONDS,
     )
 
 
@@ -298,16 +303,21 @@ def refresh_sidebar() -> int:
         workspace_id = workspace.get("workspace_id")
         if not isinstance(label, str) or not workspace_id:
             continue
-        workflow = workflow_directory(label)
-        if workflow is not None:
-            report_sidebar(workspace_id, *workflow)
-            count += 1
-            continue
-        # A renamed workflow workspace keeps the tokens the launcher gave it until they are cleared.
-        tokens = workspace.get("tokens")
-        if isinstance(tokens, dict) and ("workflow_project" in tokens or "workflow_profile" in tokens):
-            clear_sidebar(workspace_id)
-            count += 1
+        # The workspace list is a snapshot, so a workspace can close before its report.
+        # Skip a workspace whose report fails, so the others still get their tokens.
+        try:
+            workflow = workflow_directory(label)
+            if workflow is not None:
+                report_sidebar(workspace_id, *workflow)
+                count += 1
+                continue
+            # A renamed workflow workspace keeps the tokens the launcher gave it until they are cleared.
+            tokens = workspace.get("tokens")
+            if isinstance(tokens, dict) and ("workflow_project" in tokens or "workflow_profile" in tokens):
+                clear_sidebar(workspace_id)
+                count += 1
+        except (WorkflowError, OSError) as error:
+            print(f"herdr-workflow: cannot update the sidebar of workspace {workspace_id}: {error}", file=sys.stderr)
     return count
 
 

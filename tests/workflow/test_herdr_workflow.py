@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import subprocess
@@ -39,17 +40,22 @@ class WorkflowTests(unittest.TestCase):
         os.environ["HERDR_PLUGIN_CONFIG_DIR"] = str(self.config / "elsewhere")
         self.workspaces = []
         self.calls = []
+        self.timeouts = {}
+        self.failing_workspaces = {}
         replacement = patch.object(herdr_workflow, "command", self.fake_command)
         replacement.start()
         self.addCleanup(replacement.stop)
 
-    def fake_command(self, argv, env=None):
+    def fake_command(self, argv, env=None, timeout=None):
         self.calls.append(argv)
+        self.timeouts[tuple(argv)] = timeout
         if argv[1:] == ["plugin", "config-dir", "cloudmanic.herdr-plus"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.config}\n", "")
         if argv[1:3] == ["workspace", "list"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps({"result": {"workspaces": self.workspaces}}), "")
         if argv[1:3] == ["workspace", "report-metadata"]:
+            if argv[3] in self.failing_workspaces:
+                raise self.failing_workspaces[argv[3]]
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         raise AssertionError(f"unexpected command {argv}")
 
@@ -122,6 +128,56 @@ class WorkflowTests(unittest.TestCase):
                 ]
             ],
         )
+
+    def test_refresh_sidebar_skips_a_workspace_whose_report_fails(self):
+        # The workspace list is a snapshot, so a workspace can close before its report.
+        self.workspaces = [
+            {"workspace_id": "w1", "label": "implementation · ~"},
+            {"workspace_id": "w2", "label": "implementation · ~"},
+            {"workspace_id": "w3", "label": "renamed workspace", "tokens": {"workflow_profile": "implementation"}},
+            {"workspace_id": "w4", "label": "implementation · ~"},
+        ]
+        self.failing_workspaces = {
+            "w2": herdr_workflow.WorkflowError('{"error":{"code":"workspace_not_found"}}'),
+            "w3": OSError("socket closed"),
+        }
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(herdr_workflow.refresh_sidebar(), 2)
+        reported = [argv[3] for argv in self.calls if argv[1:3] == ["workspace", "report-metadata"]]
+        self.assertEqual(reported, ["w1", "w2", "w3", "w4"])
+        self.assertEqual(
+            stderr.getvalue().splitlines(),
+            [
+                'herdr-workflow: cannot update the sidebar of workspace w2: {"error":{"code":"workspace_not_found"}}',
+                "herdr-workflow: cannot update the sidebar of workspace w3: socket closed",
+            ],
+        )
+
+    def test_sidebar_reports_use_a_short_timeout(self):
+        self.workspaces = [
+            {"workspace_id": "w1", "label": "implementation · ~"},
+            {"workspace_id": "w2", "label": "renamed workspace", "tokens": {"workflow_project": "project"}},
+        ]
+        herdr_workflow.refresh_sidebar()
+        reports = [argv for argv in self.calls if argv[1:3] == ["workspace", "report-metadata"]]
+        self.assertEqual(len(reports), 2)
+        for argv in reports:
+            self.assertEqual(self.timeouts[tuple(argv)], herdr_workflow.REPORT_TIMEOUT_SECONDS)
+        self.assertLess(herdr_workflow.REPORT_TIMEOUT_SECONDS, 120)
+
+
+class CommandTests(unittest.TestCase):
+    def test_timeout_is_passed_to_the_process_and_named_in_the_error(self):
+        error = subprocess.TimeoutExpired(["herdr"], 5)
+        with patch.object(herdr_workflow.subprocess, "run", side_effect=error) as run:
+            with self.assertRaisesRegex(herdr_workflow.WorkflowError, "herdr did not finish within 5 seconds"):
+                herdr_workflow.command(["herdr", "workspace", "list"], timeout=5)
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
+
+    def test_default_timeout_is_120_seconds(self):
+        with patch.object(herdr_workflow.subprocess, "run") as run:
+            herdr_workflow.command(["herdr", "workspace", "list"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 120)
 
 
 class PullRequestReferenceTests(unittest.TestCase):
