@@ -31,7 +31,11 @@ class WorkflowError(RuntimeError):
 
 def command(argv: list[str], env: dict[str, str] | None = None, timeout: float = COMMAND_TIMEOUT_SECONDS):
     try:
-        return subprocess.run(argv, env=env, check=True, capture_output=True, text=True, timeout=timeout)
+        # A path from Git or zoxide can hold bytes that are not UTF-8.
+        # surrogateescape keeps them, so Path names the same directory.
+        return subprocess.run(
+            argv, env=env, check=True, capture_output=True, text=True, errors="surrogateescape", timeout=timeout
+        )
     except FileNotFoundError as error:
         raise WorkflowError(f"Required program not found: {argv[0]}") from error
     except subprocess.CalledProcessError as error:
@@ -56,7 +60,14 @@ def repository_root(directory: Path) -> Path:
     if not directory.is_dir():
         raise WorkflowError(f"Directory does not exist: {directory}")
     result = command(["git", "-C", str(directory), "rev-parse", "--show-toplevel"])
-    return Path(result.stdout.rstrip("\n")).resolve()
+    root = Path(result.stdout.rstrip("\n")).resolve()
+    try:
+        str(root).encode("utf-8")
+    except UnicodeEncodeError as error:
+        # The workspace label and the Herdr Plus template are UTF-8 text, so they cannot hold this path.
+        name = os.fsencode(root).decode("utf-8", "backslashreplace")
+        raise WorkflowError(f"Cannot label a repository whose path is not valid UTF-8: {name}") from error
+    return root
 
 
 def display_path(directory: Path) -> str:

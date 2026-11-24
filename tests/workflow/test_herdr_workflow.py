@@ -179,6 +179,46 @@ class CommandTests(unittest.TestCase):
             herdr_workflow.command(["herdr", "workspace", "list"])
         self.assertEqual(run.call_args.kwargs["timeout"], 120)
 
+    def test_output_that_is_not_utf8_keeps_its_bytes(self):
+        result = herdr_workflow.command(["printf", "/tmp/\\377"])
+        self.assertEqual(os.fsencode(result.stdout), b"/tmp/\xff")
+
+
+class NonUtf8RepositoryTests(unittest.TestCase):
+    """On Linux a directory name is a byte string, so a repository can live under a name that is not UTF-8."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        self.bad = base / os.fsdecode(b"\xff")
+        self.good = base / "good"
+        for directory in (self.bad, self.good):
+            directory.mkdir()
+            subprocess.run(["git", "init", "--quiet", str(directory)], check=True)
+        self.escaped = os.fsencode(self.bad).decode("utf-8", "backslashreplace")
+
+    def test_repository_root_names_the_path_that_cannot_be_a_label(self):
+        with self.assertRaises(herdr_workflow.WorkflowError) as raised:
+            herdr_workflow.repository_root(self.bad)
+        self.assertIn(self.escaped, str(raised.exception))
+        self.assertIn("UTF-8", str(raised.exception))
+
+    def test_list_repositories_skips_the_repository_and_keeps_the_others(self):
+        real_command = herdr_workflow.command
+
+        def fake_command(argv, env=None, timeout=None):
+            if argv[0] == "zoxide":
+                stdout = os.fsencode(self.bad) + b"\n" + os.fsencode(self.good) + b"\n"
+                return subprocess.CompletedProcess(argv, 0, os.fsdecode(stdout), "")
+            return real_command(argv, env)
+
+        with (
+            patch.object(herdr_workflow, "command", fake_command),
+            patch.object(herdr_workflow, "current_directory", return_value=self.bad),
+        ):
+            self.assertEqual(herdr_workflow.list_repositories(), [self.good])
+
 
 class PullRequestReferenceTests(unittest.TestCase):
     def test_reference_names_the_repository_and_the_number(self):
