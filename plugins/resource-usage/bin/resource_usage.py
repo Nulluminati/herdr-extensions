@@ -60,7 +60,11 @@ REPORT_TIMEOUT_SECONDS = 2.0
 
 
 def command(argv: list[str], env: dict | None = None, timeout: float = COMMAND_TIMEOUT):
-    return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=timeout, env=env)
+    # Herdr replies in UTF-8, which a locale that is not UTF-8 cannot decode.
+    # surrogateescape keeps such a byte in the string instead of raising.
+    return subprocess.run(
+        argv, check=True, capture_output=True, text=True, errors="surrogateescape", timeout=timeout, env=env
+    )
 
 
 def herdr_bin() -> str:

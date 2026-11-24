@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -668,6 +669,15 @@ class ReportTests(HerdrTestCase):
             resource_usage.report_usage("w1", "x")
             resource_usage.clear_usage("w1")
         self.assertEqual(recorded, [(["workspace", "report-metadata"], resource_usage.REPORT_TIMEOUT_SECONDS)] * 2)
+
+
+class CommandTests(unittest.TestCase):
+    def test_reply_the_locale_cannot_decode_does_not_raise(self):
+        # A locale that is not UTF-8 cannot decode Herdr's UTF-8 replies. 0xff is
+        # not UTF-8 either, so it stands for such a byte under any locale.
+        script = r"""import sys; sys.stdout.buffer.write(b'{"label": "\xff - build"}')"""
+        reply = json.loads(resource_usage.command([sys.executable, "-c", script]).stdout)
+        self.assertEqual(reply["label"].encode(errors="surrogateescape"), b"\xff - build")
 
 
 class SpawnTests(HerdrTestCase):
