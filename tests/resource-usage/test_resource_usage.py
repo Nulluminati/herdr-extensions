@@ -761,10 +761,32 @@ class WorkerTests(HerdrTestCase):
         tokens = [argv[argv.index("--token") + 1] if "--token" in argv else "clear" for argv in self.reports()]
         self.assertEqual(tokens, ["resource_usage=a", "resource_usage=a", "clear"])
 
+    def test_enable_during_shutdown_starts_a_worker(self):
+        # An enable that runs while the stopping worker clears its tokens finds
+        # the lock taken, so the stopping worker must start the next one.
+        real = self.fake_command
+
+        def enable_while_clearing(argv, env=None, timeout=None):
+            if "--clear-token" in argv:
+                resource_usage.enable()
+            return real(argv, env, timeout)
+
+        def on_sleep(count):
+            resource_usage.disable()
+
+        with patch.object(resource_usage, "command", enable_while_clearing):
+            self.run_worker([{"w1": "a"}], on_sleep=on_sleep)
+        self.assertEqual(self.spawned, [True])
+
+    def test_disable_starts_no_worker(self):
+        self.run_worker([{"w1": "a"}], on_sleep=lambda count: resource_usage.disable())
+        self.assertEqual(self.spawned, [])
+
     def test_worker_exits_when_socket_disappears(self):
         self.socket.unlink()
         self.run_worker([{"w1": "a"}])
         self.assertEqual(self.reports(), [])
+        self.assertEqual(self.spawned, [])
 
     def test_worker_exits_when_plugin_is_unregistered(self):
         self.plugins = []

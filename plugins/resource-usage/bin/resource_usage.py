@@ -701,9 +701,13 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
         stalled: set[str] = set()
         failures = 0
         cycles = 0
+        disabled = False
         try:
             while max_cycles is None or cycles < max_cycles:
-                if not enabled() or not server_present():
+                if not enabled():
+                    disabled = True
+                    break
+                if not server_present():
                     break
                 try:
                     if cycles % REGISTRATION_EVERY == 0 and not plugin_registered():
@@ -747,6 +751,10 @@ def run_worker(collector=None, sleep=time.sleep, max_cycles: int | None = None) 
             if server_present():
                 for workspace_id in reported:
                     clear_closed(workspace_id)
+    # An enable during the token clear found the lock taken and started no
+    # worker, so this worker starts it once the lock is free.
+    if disabled:
+        ensure_running()
 
 
 def main(argv: list[str] | None = None) -> int:
