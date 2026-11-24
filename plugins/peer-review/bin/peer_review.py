@@ -23,6 +23,9 @@ REVIEW_TIMEOUT_MS = 30 * 60 * 1000
 POLL_SECONDS = 5
 # How long the worker waits for Herdr to detect the reviewer. `herdr agent start` waits before the worker starts.
 START_GRACE_SECONDS = 30
+# How long findings.md must stay unchanged before it is taken from a reviewer that stays working or blocked.
+# It is longer than a reviewer's pause between two writes, for example while it verifies the next finding.
+QUIET_SECONDS = 30
 # Claude's and pi's sandbox reject "*", so the shell reaches GitHub only. Codex matches them.
 GITHUB_DOMAINS = ("github.com", "*.github.com", "*.githubusercontent.com")
 CODEX_GITHUB_DOMAINS = ("**.github.com", "**.githubusercontent.com")
@@ -413,26 +416,30 @@ def wait_for_findings(review: Path, reviewer_pane: str, reviewer: str) -> Path:
     started = time.monotonic()
     deadline = started + REVIEW_TIMEOUT_MS / 1000
     seen = False
-    size = -1
+    stamp = None
+    changed = started
     while True:
         status = reviewer_status(reviewer_pane)
+        now = time.monotonic()
         seen = seen or status is not None
         if status is None and not findings.exists():
             # Herdr can take a moment to detect a new agent, so a reviewer that was never seen gets a grace period.
             # A reviewer that exits at startup is never seen at all.
-            if seen or time.monotonic() - started >= START_GRACE_SECONDS:
+            if seen or now - started >= START_GRACE_SECONDS:
                 raise ReviewError(f"The {reviewer} reviewer stopped before it wrote {findings}")
         if findings.exists() and status in (None, "idle", "done"):
             return findings
         if findings.exists():
             # A reviewer can stay working or blocked after it wrote a complete file, so the status alone does not
-            # say when the findings are written. The file is taken when its size stops changing, so a partial
-            # write is not read as complete.
-            current = findings.stat().st_size
-            if current == size:
+            # say when the findings are written. The file is taken when it has content and stayed unchanged for
+            # QUIET_SECONDS, so a partial write or a pause between two writes is not read as complete.
+            stat = findings.stat()
+            current = (stat.st_size, stat.st_mtime_ns)
+            if current != stamp:
+                stamp, changed = current, now
+            elif stat.st_size > 0 and now - changed >= QUIET_SECONDS:
                 return findings
-            size = current
-        if time.monotonic() >= deadline:
+        if now >= deadline:
             # The findings are also taken at the deadline, as they are when the reviewer pane is gone.
             if findings.exists():
                 return findings

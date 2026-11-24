@@ -643,6 +643,53 @@ class PeerReviewTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("is ready", self.calls[-1][4])
 
+    def run_deliver_with_writes(self, review, writes, seconds_per_poll=5):
+        """Run deliver while the reviewer stays working and writes findings.md at the given polls.
+
+        Returns the content of findings.md when the requester got the prompt.
+        """
+        findings = review / "findings.md"
+        self.reviewer_states = ["working"] * 1000
+        polls = itertools.count(1)
+        delivered = []
+        original = self.fake_command
+
+        def writing(argv, timeout=120):
+            if argv[:4] == ["herdr", "agent", "get", "w1:p9"]:
+                poll = next(polls)
+                if poll in writes:
+                    with findings.open("a") as output:
+                        output.write(writes[poll])
+            if argv[:4] == ["herdr", "agent", "prompt", "w1:p1"]:
+                delivered.append(findings.read_text())
+            return original(argv, timeout)
+
+        self.fake_command = writing
+        clock = itertools.count(0, seconds_per_poll)
+        with patch.object(peer_review.time, "monotonic", lambda: next(clock)):
+            status = self.run_deliver(review)
+        self.assertEqual(status, 0)
+        self.assertIn("is ready", self.calls[-1][4])
+        return delivered[0]
+
+    def test_deliver_waits_for_a_working_reviewer_that_pauses_between_writes(self):
+        review = self.make_review()
+        first = "## Confirmed problems\n- [high] plugins/x.py:12: first finding.\n"
+        second = "- [medium] plugins/y.py:3: second finding.\n"
+
+        # The reviewer pauses for longer than one poll between the two writes.
+        content = self.run_deliver_with_writes(review, {1: first, 4: second})
+
+        self.assertEqual(content, first + second)
+
+    def test_deliver_does_not_take_an_empty_findings_file_from_a_working_reviewer(self):
+        review = self.make_review()
+        (review / "findings.md").write_text("")
+
+        content = self.run_deliver_with_writes(review, {10: "No findings.\n"})
+
+        self.assertEqual(content, "No findings.\n")
+
     def test_deliver_takes_findings_at_the_deadline(self):
         review = self.make_review()
         (review / "findings.md").write_text("No findings.\n")
