@@ -670,6 +670,18 @@ class ReportTests(HerdrTestCase):
         self.assertEqual(recorded, [(["workspace", "report-metadata"], resource_usage.REPORT_TIMEOUT_SECONDS)] * 2)
 
 
+class SpawnTests(HerdrTestCase):
+    def test_worker_runs_in_utf8_mode(self):
+        # Herdr writes raw UTF-8 and the nerd labels are not ASCII, so the
+        # worker must not take its encoding from an ASCII locale.
+        started = []
+        os.environ["LC_ALL"] = "C"
+        with patch.object(resource_usage.subprocess, "Popen", lambda argv, **options: started.append(options)):
+            resource_usage.spawn_worker()
+        self.assertEqual(started[0]["env"]["PYTHONUTF8"], "1")
+        self.assertEqual(started[0]["env"]["LC_ALL"], "C")
+
+
 class WorkerTests(HerdrTestCase):
     def setUp(self):
         super().setUp()

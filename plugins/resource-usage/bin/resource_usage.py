@@ -648,9 +648,12 @@ def spawn_worker() -> None:
         log.write_text("")
     with open(log, "a") as stderr:
         # A new session detaches the worker from the hook that started it.
+        # UTF-8 mode: Herdr writes raw UTF-8, the nerd labels and /proc names
+        # need not be ASCII, and an ASCII locale would make the worker fail on them.
         subprocess.Popen(
             [sys.executable, str(SCRIPT), "--run"],
             cwd=SCRIPT.parent.parent,
+            env={**os.environ, "PYTHONUTF8": "1"},
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=stderr,
