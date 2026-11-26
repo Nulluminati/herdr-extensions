@@ -633,4 +633,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Git, Herdr and Herdr Plus write and read UTF-8 whatever the locale is. In UTF-8 mode,
+    # paths, arguments, pipes and stdio are UTF-8 too, so a UTF-8 path keeps its name in the
+    # label and the template. A locale that is not UTF-8 would garble or reject it.
+    if not sys.flags.utf8_mode:
+        os.execv(sys.executable, [sys.executable, "-X", "utf8", *sys.orig_argv[1:]])
     raise SystemExit(main())

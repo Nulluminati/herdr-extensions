@@ -2,6 +2,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -218,6 +219,112 @@ class NonUtf8RepositoryTests(unittest.TestCase):
             patch.object(herdr_workflow, "current_directory", return_value=self.bad),
         ):
             self.assertEqual(herdr_workflow.list_repositories(), [self.good])
+
+
+# Fake programs for a launcher run as its own process. Each one records the raw
+# bytes it receives, so a test sees what a real Herdr or Herdr Plus would get.
+FAKE_HERDR = """#!{python}
+import os, sys
+from pathlib import Path
+record = Path(os.environ["FAKE_RECORD"])
+arguments = [os.fsencode(argument) for argument in sys.argv[1:]]
+if arguments[:2] == [b"plugin", b"config-dir"]:
+    sys.stdout.buffer.write(os.environ["FAKE_CONFIG"].encode() + b"\\n")
+elif arguments[:2] == [b"plugin", b"list"]:
+    root = os.environ["FAKE_PLUS_ROOT"]
+    sys.stdout.write('{{"result": {{"plugins": [{{"enabled": true, "plugin_root": "%s"}}]}}}}' % root)
+elif arguments[:2] == [b"workspace", b"list"]:
+    workspaces = record / "workspaces.json"
+    sys.stdout.write(workspaces.read_text() if workspaces.exists() else '{{"result": {{"workspaces": []}}}}')
+elif arguments[:2] == [b"workspace", b"report-metadata"]:
+    (record / "report").write_bytes(b"\\0".join(arguments))
+    sys.stdout.write("{{}}")
+else:
+    sys.exit("unexpected herdr command")
+"""
+
+FAKE_HERDR_PLUS = """#!{python}
+import json, os, sys
+from pathlib import Path
+record = Path(os.environ["FAKE_RECORD"])
+label = os.fsencode(sys.argv[2])
+(record / "label").write_bytes(label)
+template = Path(os.environ["HERDR_PLUGIN_CONFIG_DIR"]) / "projects" / "implementation.toml"
+(record / "template").write_bytes(template.read_bytes())
+# Herdr keeps labels as UTF-8 text.
+workspace = {{"workspace_id": "w1", "label": label.decode("utf-8", "replace")}}
+(record / "workspaces.json").write_text(json.dumps({{"result": {{"workspaces": [workspace]}}}}))
+"""
+
+
+class LocaleTests(unittest.TestCase):
+    """A repository path that is valid UTF-8 opens the same workflow whatever the locale is."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        self.record = base / "record"
+        self.record.mkdir()
+        config = base / "config"
+        (config / "projects").mkdir(parents=True)
+        (config / "projects" / "implementation.toml").write_text(TEMPLATE, encoding="utf-8")
+        bin_directory = base / "bin"
+        plus_root = base / "plus"
+        (plus_root / "bin").mkdir(parents=True)
+        bin_directory.mkdir()
+        for path, source in (
+            (bin_directory / "herdr", FAKE_HERDR),
+            (plus_root / "bin" / "herdr-plus", FAKE_HERDR_PLUS),
+            (bin_directory / "zoxide", "#!/bin/sh\n"),
+        ):
+            path.write_text(source.format(python=sys.executable))
+            path.chmod(0o755)
+        # A name that is valid UTF-8 but not ASCII, as Git prints it.
+        self.repository_bytes = os.fsencode(base) + "/café-repo".encode()
+        os.mkdir(self.repository_bytes)
+        subprocess.run([b"git", b"init", b"--quiet", self.repository_bytes], check=True)
+        self.label = b"implementation \xc2\xb7 " + self.repository_bytes
+        self.environment = {
+            "PATH": f"{bin_directory}:{os.environ['PATH']}",
+            "HOME": str(base / "home"),
+            "HERDR_ENV": "1",
+            "FAKE_RECORD": str(self.record),
+            "FAKE_CONFIG": str(config),
+            "FAKE_PLUS_ROOT": str(plus_root),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+
+    def run_open(self, locale: dict[str, str]) -> subprocess.CompletedProcess:
+        environment = {**self.environment, **locale}
+        script = PLUGINS / "workflow" / "bin" / "herdr_workflow.py"
+        return subprocess.run(
+            [os.fsencode(sys.executable), os.fsencode(script), b"open", b"implementation", self.repository_bytes],
+            env={key.encode(): value.encode() for key, value in environment.items()},
+            capture_output=True,
+        )
+
+    def assert_opens(self, locale: dict[str, str]) -> None:
+        result = self.run_open(locale)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b"Workflow: " + self.label + b"\n")
+        self.assertEqual((self.record / "label").read_bytes(), self.label)
+        template = tomllib.loads((self.record / "template").read_bytes().decode("utf-8"))
+        self.assertEqual(template["name"].encode("utf-8"), self.label)
+        report = (self.record / "report").read_bytes().split(b"\0")
+        self.assertIn("workflow_project=café-repo".encode(), report)
+
+    def test_utf8_locale(self):
+        self.assert_opens({"LC_ALL": "C.UTF-8"})
+
+    def test_ascii_locale(self):
+        self.assert_opens({"LC_ALL": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"})
+
+    def test_latin1_locale(self):
+        if "de_DE.iso88591" not in subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split():
+            self.skipTest("No Latin-1 locale is installed")
+        self.assert_opens({"LC_ALL": "de_DE.iso88591"})
 
 
 class PullRequestReferenceTests(unittest.TestCase):
