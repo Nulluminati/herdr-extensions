@@ -44,6 +44,7 @@ Do one of these:
 - Ask the agent for a review, for example "get a peer review from pi". The skill runs the request.
 
 The request returns at once. A background worker waits for the findings and then prompts your agent.
+The worker takes `findings.md` when the reviewer is idle or done. When the reviewer stays working or blocked, the worker takes the file after it has content and stays unchanged for 30 seconds.
 When the worker cannot prompt your agent, for example because its pane closed or it waits for your answer at a prompt, Herdr shows a notification with the path to `findings.md`. When the review failed, the notification gives the reason and the path to `worker.log`.
 A reviewer that exits at startup, for example pi without the pi-extensions flags, fails the review after about 30 seconds. The reviewer pane shows its error.
 
