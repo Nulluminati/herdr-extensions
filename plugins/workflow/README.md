@@ -67,3 +67,5 @@ To show the tokens, add them to a sidebar row in `~/.config/herdr/config.toml`. 
 
 - The launcher finds workflow workspaces by their label. If you rename a workspace, it loses its tokens at the next refresh.
 - Pull request review supports github.com only, not GitHub Enterprise.
+- The launcher cannot open a repository whose path is not valid UTF-8. It shows an error with the path.
+- A refresh skips a workspace whose report fails or takes more than 5 seconds. It writes the error to standard error and continues with the next workspace.
