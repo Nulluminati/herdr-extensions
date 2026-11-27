@@ -107,7 +107,7 @@ Every two seconds the worker:
 4. asks `herdr worktree list` for a workspace whose worktree the snapshot does not give, when the open workspaces change, and again after 30 seconds when the question failed;
 5. writes each workspace's text with `herdr workspace report-metadata --ttl-ms 30000`, and waits at most two seconds for the answer.
 
-Each row expires thirty seconds after its last update, so the rows go away when the worker stops. A stalled `report-metadata` call costs one workspace one cycle, not every row; the worker logs it and moves on. The worker exits when you disable collection, when Herdr disables or removes the plugin (checked every 30 seconds), when the Herdr server stops, or after one minute of failed cycles.
+Each row expires thirty seconds after its last update, so the rows go away when the worker stops. A stalled `report-metadata` call costs one workspace one cycle, not every row; the worker logs it once until that workspace reports again, and moves on. The worker exits when you disable collection, when Herdr disables or removes the plugin (checked every 30 seconds), when the Herdr server stops, or after one minute of failed cycles.
 
 ## State
 
@@ -118,6 +118,7 @@ The plugin keeps its state in the plugin state folder, `~/.local/state/herdr/plu
 | `preference` | `enabled` or `disabled` |
 | `worker-<session>.lock` | Held by the session's running worker |
 | `worker-<session>.log` | Errors from the worker; emptied when it is larger than 256 KiB |
+| `sequence.json` | The last `--seq` value sent to Herdr. Each report uses a higher value, also after the clock steps back. All workers share it. |
 
 ## Known limits
 
